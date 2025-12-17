@@ -5,3 +5,5 @@ export {
   useTVShow,
   useSeason,
 } from './useTMDB';
+
+export { useDebounce } from './useDebounce';
