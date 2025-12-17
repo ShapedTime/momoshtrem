@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import { LOGIN_ROUTE } from '@/config/auth';
+import { Header } from '@/components/layout';
+import { ToastProvider } from '@/components/ui';
 
 export default async function ProtectedLayout({
   children,
@@ -15,9 +17,11 @@ export default async function ProtectedLayout({
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950">
-      {/* Header will be added in Task 5 */}
-      <main>{children}</main>
-    </div>
+    <ToastProvider>
+      <div className="min-h-screen bg-bg-primary">
+        <Header />
+        <main>{children}</main>
+      </div>
+    </ToastProvider>
   );
 }
