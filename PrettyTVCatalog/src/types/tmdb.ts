@@ -71,6 +71,7 @@ export interface MovieDetails extends Movie {
 
 export interface TVShowDetails extends TVShow {
   credits: Credits;
+  seasons: Season[];
 }
 
 // ============================================

@@ -7,6 +7,7 @@ import type {
   MovieDetails,
   TVShow,
   TVShowDetails,
+  Season,
   SeasonDetails,
   SearchResult,
   MovieSearchResult,
@@ -266,6 +267,28 @@ class TMDBClient {
     }
   }
 
+  private transformSeasons(
+    raw: Array<{
+      id?: number;
+      name?: string;
+      season_number?: number;
+      episode_count?: number;
+      air_date?: string | null;
+      overview?: string;
+      poster_path?: string | null;
+    }>
+  ): Season[] {
+    return raw.map((season) => ({
+      id: season.id ?? 0,
+      name: season.name ?? '',
+      seasonNumber: season.season_number ?? 0,
+      episodeCount: season.episode_count ?? 0,
+      airDate: season.air_date ?? null,
+      overview: season.overview ?? '',
+      posterPath: season.poster_path ?? null,
+    }));
+  }
+
   /**
    * Get TV show details with credits.
    */
@@ -276,6 +299,7 @@ class TMDBClient {
         append_to_response: 'credits',
       })) as ShowResponse & {
         credits?: { cast?: Array<Record<string, unknown>>; crew?: Array<Record<string, unknown>> };
+        seasons?: Array<Record<string, unknown>>;
       };
 
       return {
@@ -284,6 +308,7 @@ class TMDBClient {
           cast: this.transformCast(response.credits?.cast ?? []),
           crew: this.transformCrew(response.credits?.crew ?? []),
         },
+        seasons: this.transformSeasons(response.seasons ?? []),
       };
     } catch (error) {
       throw this.handleError(error, 'TV show');

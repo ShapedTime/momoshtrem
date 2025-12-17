@@ -12,4 +12,5 @@ export {
   AlertCircleIcon,
   XIcon,
   SpinnerIcon,
+  ChevronDownIcon,
 } from './Icons';
