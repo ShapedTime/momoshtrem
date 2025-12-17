@@ -1,0 +1,58 @@
+version: '3'
+
+services:
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    ports:
+      - 9117:9117
+    volumes:
+      - ${HOME}/.config/jackett:/config
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    restart: unless-stopped
+
+  distribyted:
+    container_name: distribyted
+    build:
+      context: ./distribyted
+      dockerfile: Dockerfile
+    ports:
+      - 4444:4444
+      - 36911:36911
+    volumes:
+      - ${HOME}/.config/distribyted/mount:/distribyted-data/mount:shared
+      - ${HOME}/.config/distribyted/metadata:/distribyted-data/metadata
+      - ${HOME}/.config/distribyted/config:/distribyted-data/config
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    restart: unless-stopped
+
+  prettytvcatalog:
+    container_name: prettytvcatalog
+    build:
+      context: ./PrettyTVCatalog
+      dockerfile: Dockerfile
+    ports:
+      - 3000:3000
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - JACKETT_URL=http://jackett:9117
+      - JACKETT_API_KEY=${JACKETT_API_KEY}
+      - DISTRIBYTED_URL=http://distribyted:4444
+      - DISTRIBYTED_ROUTE=media
+      - SESSION_SECRET=${SESSION_SECRET}
+    depends_on:
+      - jackett
+      - distribyted
+    restart: unless-stopped
+
+volumes:
+  assetsVolume: null
