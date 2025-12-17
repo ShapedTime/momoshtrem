@@ -3,29 +3,10 @@ import Link from 'next/link';
 import type { SearchResult } from '@/types/tmdb';
 import { isMovie, getMediaTitle, getMediaReleaseYear } from '@/types/tmdb';
 import { buildImageUrl } from '@/config/tmdb';
-import { Button } from '@/components/ui';
+import { Button, RatingBadge } from '@/components/ui';
 
 interface HeroBannerProps {
   media: SearchResult;
-}
-
-function RatingBadge({ rating }: { rating: number }) {
-  const displayRating = rating.toFixed(1);
-  return (
-    <div className="flex items-center gap-1 text-accent-yellow">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        aria-hidden="true"
-      >
-        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-      </svg>
-      <span className="font-semibold">{displayRating}</span>
-    </div>
-  );
 }
 
 export function HeroBanner({ media }: HeroBannerProps) {
@@ -81,7 +62,7 @@ export function HeroBanner({ media }: HeroBannerProps) {
 
         {/* Meta info */}
         <div className="flex items-center gap-4 mb-4">
-          {media.voteAverage > 0 && <RatingBadge rating={media.voteAverage} />}
+          {media.voteAverage > 0 && <RatingBadge rating={media.voteAverage} variant="hero" />}
           {year && <span className="text-text-secondary">{year}</span>}
         </div>
 
@@ -114,7 +95,7 @@ export function HeroBanner({ media }: HeroBannerProps) {
 export function HeroBannerSkeleton() {
   return (
     <section className="relative h-[40vh] sm:h-[50vh] lg:h-[60vh] lg:max-h-[700px] w-full mb-8 sm:mb-10 lg:mb-12">
-      <div className="absolute inset-0 bg-bg-elevated animate-pulse" />
+      <div className="absolute inset-0 bg-bg-elevated animate-pulse motion-reduce:animate-none" />
       <div className="absolute inset-0 bg-gradient-to-t from-bg-primary via-bg-primary/50 to-transparent" />
 
       <div
@@ -123,12 +104,12 @@ export function HeroBannerSkeleton() {
           px-4 sm:px-6 lg:px-12 pb-8 sm:pb-12 lg:pb-16
         "
       >
-        <div className="h-4 w-16 bg-bg-hover rounded mb-3 animate-pulse" />
-        <div className="h-10 sm:h-12 lg:h-14 w-64 sm:w-80 bg-bg-hover rounded mb-4 animate-pulse" />
-        <div className="h-5 w-32 bg-bg-hover rounded mb-4 animate-pulse" />
-        <div className="h-4 w-full max-w-xl bg-bg-hover rounded mb-2 animate-pulse" />
-        <div className="h-4 w-3/4 max-w-xl bg-bg-hover rounded mb-6 animate-pulse" />
-        <div className="h-12 w-36 bg-bg-hover rounded animate-pulse" />
+        <div className="h-4 w-16 bg-bg-hover rounded mb-3 animate-pulse motion-reduce:animate-none" />
+        <div className="h-10 sm:h-12 lg:h-14 w-64 sm:w-80 bg-bg-hover rounded mb-4 animate-pulse motion-reduce:animate-none" />
+        <div className="h-5 w-32 bg-bg-hover rounded mb-4 animate-pulse motion-reduce:animate-none" />
+        <div className="h-4 w-full max-w-xl bg-bg-hover rounded mb-2 animate-pulse motion-reduce:animate-none" />
+        <div className="h-4 w-3/4 max-w-xl bg-bg-hover rounded mb-6 animate-pulse motion-reduce:animate-none" />
+        <div className="h-12 w-36 bg-bg-hover rounded animate-pulse motion-reduce:animate-none" />
       </div>
     </section>
   );

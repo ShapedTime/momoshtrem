@@ -16,7 +16,7 @@ export function Skeleton({
   style,
   ...props
 }: SkeletonProps) {
-  const baseStyles = 'bg-bg-hover animate-pulse';
+  const baseStyles = 'bg-bg-hover animate-pulse motion-reduce:animate-none';
   const variantStyles = variant === 'circle' ? 'rounded-full' : 'rounded-md';
 
   const dimensions: React.CSSProperties = {

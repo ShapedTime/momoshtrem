@@ -1,0 +1,1 @@
+export { getRandomItem } from './array';

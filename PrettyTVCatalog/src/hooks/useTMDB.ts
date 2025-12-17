@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   TrendingResults,
   SearchResult,
@@ -19,12 +19,16 @@ interface FetchState<T> {
   error: string | null;
 }
 
+interface FetchStateWithRefetch<T> extends FetchState<T> {
+  refetch: () => void;
+}
+
 // ============================================
-// Fetch Helper
+// Fetch Helper with AbortController
 // ============================================
 
-async function fetchAPI<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+async function fetchAPI<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -37,45 +41,117 @@ async function fetchAPI<T>(url: string): Promise<T> {
 }
 
 // ============================================
+// Generic Hook for ID-based fetching
+// ============================================
+
+/**
+ * Generic hook for fetching data based on an ID.
+ * Handles loading state, errors, and request cancellation.
+ */
+function useFetchOnId<T>(
+  id: number | null,
+  urlBuilder: (id: number) => string,
+  resourceName: string
+): FetchState<T> {
+  const [state, setState] = useState<FetchState<T>>({
+    data: null,
+    isLoading: !!id,
+    error: null,
+  });
+
+  useEffect(() => {
+    if (!id) {
+      setState({ data: null, isLoading: false, error: null });
+      return;
+    }
+
+    // Capture non-null id for the closure
+    const currentId = id;
+    const abortController = new AbortController();
+
+    async function fetchData() {
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+
+      try {
+        const data = await fetchAPI<T>(urlBuilder(currentId), abortController.signal);
+        setState({ data, isLoading: false, error: null });
+      } catch (error) {
+        // Don't update state if request was aborted
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
+        setState({
+          data: null,
+          isLoading: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : `Failed to fetch ${resourceName}`,
+        });
+      }
+    }
+
+    fetchData();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [id, urlBuilder, resourceName]);
+
+  return state;
+}
+
+// ============================================
 // useTrending
 // ============================================
 
-export function useTrending(): FetchState<TrendingResults> {
+export function useTrending(): FetchStateWithRefetch<TrendingResults> {
   const [state, setState] = useState<FetchState<TrendingResults>>({
     data: null,
     isLoading: true,
     error: null,
   });
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchTrending() {
-      try {
-        const data = await fetchAPI<TrendingResults>('/api/tmdb/trending');
-        if (!cancelled) {
-          setState({ data, isLoading: false, error: null });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setState({
-            data: null,
-            isLoading: false,
-            error:
-              error instanceof Error ? error.message : 'Failed to fetch trending',
-          });
-        }
-      }
+  const fetchTrending = useCallback(async () => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
 
+    abortControllerRef.current = new AbortController();
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const data = await fetchAPI<TrendingResults>(
+        '/api/tmdb/trending',
+        abortControllerRef.current.signal
+      );
+      setState({ data, isLoading: false, error: null });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return;
+      }
+      setState({
+        data: null,
+        isLoading: false,
+        error:
+          error instanceof Error ? error.message : 'Failed to fetch trending',
+      });
+    }
+  }, []);
+
+  useEffect(() => {
     fetchTrending();
 
     return () => {
-      cancelled = true;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
-  }, []);
+  }, [fetchTrending]);
 
-  return state;
+  return { ...state, refetch: fetchTrending };
 }
 
 // ============================================
@@ -93,6 +169,7 @@ export function useSearch(): UseSearchResult {
     isLoading: false,
     error: null,
   });
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const search = useCallback(async (query: string) => {
     if (!query.trim()) {
@@ -100,14 +177,24 @@ export function useSearch(): UseSearchResult {
       return;
     }
 
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    abortControllerRef.current = new AbortController();
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
       const data = await fetchAPI<SearchResult[]>(
-        `/api/tmdb/search?q=${encodeURIComponent(query)}`
+        `/api/tmdb/search?q=${encodeURIComponent(query)}`,
+        abortControllerRef.current.signal
       );
       setState({ data, isLoading: false, error: null });
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return;
+      }
       setState({
         data: null,
         isLoading: false,
@@ -117,7 +204,19 @@ export function useSearch(): UseSearchResult {
   }, []);
 
   const clearResults = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setState({ data: null, isLoading: false, error: null });
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   return { ...state, search, clearResults };
@@ -127,98 +226,20 @@ export function useSearch(): UseSearchResult {
 // useMovie
 // ============================================
 
+const buildMovieUrl = (id: number) => `/api/tmdb/movie/${id}`;
+
 export function useMovie(id: number | null): FetchState<MovieDetails> {
-  const [state, setState] = useState<FetchState<MovieDetails>>({
-    data: null,
-    isLoading: !!id,
-    error: null,
-  });
-
-  useEffect(() => {
-    if (!id) {
-      setState({ data: null, isLoading: false, error: null });
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchMovie() {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-      try {
-        const data = await fetchAPI<MovieDetails>(`/api/tmdb/movie/${id}`);
-        if (!cancelled) {
-          setState({ data, isLoading: false, error: null });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setState({
-            data: null,
-            isLoading: false,
-            error:
-              error instanceof Error ? error.message : 'Failed to fetch movie',
-          });
-        }
-      }
-    }
-
-    fetchMovie();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  return state;
+  return useFetchOnId<MovieDetails>(id, buildMovieUrl, 'movie');
 }
 
 // ============================================
 // useTVShow
 // ============================================
 
+const buildTVShowUrl = (id: number) => `/api/tmdb/tv/${id}`;
+
 export function useTVShow(id: number | null): FetchState<TVShowDetails> {
-  const [state, setState] = useState<FetchState<TVShowDetails>>({
-    data: null,
-    isLoading: !!id,
-    error: null,
-  });
-
-  useEffect(() => {
-    if (!id) {
-      setState({ data: null, isLoading: false, error: null });
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchTVShow() {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-      try {
-        const data = await fetchAPI<TVShowDetails>(`/api/tmdb/tv/${id}`);
-        if (!cancelled) {
-          setState({ data, isLoading: false, error: null });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setState({
-            data: null,
-            isLoading: false,
-            error:
-              error instanceof Error ? error.message : 'Failed to fetch TV show',
-          });
-        }
-      }
-    }
-
-    fetchTVShow();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  return state;
+  return useFetchOnId<TVShowDetails>(id, buildTVShowUrl, 'TV show');
 }
 
 // ============================================
@@ -241,34 +262,34 @@ export function useSeason(
       return;
     }
 
-    let cancelled = false;
+    const abortController = new AbortController();
 
     async function fetchSeason() {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       try {
         const data = await fetchAPI<SeasonDetails>(
-          `/api/tmdb/tv/${showId}/season/${seasonNumber}`
+          `/api/tmdb/tv/${showId}/season/${seasonNumber}`,
+          abortController.signal
         );
-        if (!cancelled) {
-          setState({ data, isLoading: false, error: null });
-        }
+        setState({ data, isLoading: false, error: null });
       } catch (error) {
-        if (!cancelled) {
-          setState({
-            data: null,
-            isLoading: false,
-            error:
-              error instanceof Error ? error.message : 'Failed to fetch season',
-          });
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
         }
+        setState({
+          data: null,
+          isLoading: false,
+          error:
+            error instanceof Error ? error.message : 'Failed to fetch season',
+        });
       }
     }
 
     fetchSeason();
 
     return () => {
-      cancelled = true;
+      abortController.abort();
     };
   }, [showId, seasonNumber]);
 

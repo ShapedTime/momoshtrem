@@ -27,7 +27,7 @@ const sizeStyles: Record<ButtonSize, string> = {
 function Spinner({ className = '' }: { className?: string }) {
   return (
     <svg
-      className={`animate-spin h-5 w-5 ${className}`}
+      className={`animate-spin motion-reduce:animate-none h-5 w-5 ${className}`}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
@@ -72,7 +72,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         className={`
           inline-flex items-center justify-center gap-2
           rounded-md
-          transition-colors duration-200
+          transition-colors duration-200 motion-reduce:transition-none
           focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
           focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
           disabled:opacity-50 disabled:cursor-not-allowed

@@ -5,29 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSearch } from '@/hooks/useTMDB';
 import { useDebounce } from '@/hooks/useDebounce';
 import { SearchBar, SearchResults, SearchResultsSkeleton } from '@/components/search';
-
-const DEBOUNCE_DELAY = 300;
-
-function SearchIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="64"
-      height="64"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="text-text-muted"
-    >
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  );
-}
+import { SearchIcon } from '@/components/ui';
+import { DEBOUNCE_DELAY } from '@/config/ui';
 
 function SearchPageContent() {
   const router = useRouter();
@@ -94,7 +73,7 @@ function SearchPageContent() {
       {/* Empty query state */}
       {showEmptyQueryMessage && (
         <div className="flex flex-col items-center justify-center py-16">
-          <SearchIcon />
+          <SearchIcon size={64} className="text-text-muted" strokeWidth={1} />
           <p className="text-text-secondary text-lg mt-4">
             Start typing to search for movies and TV shows
           </p>
@@ -130,7 +109,7 @@ function SearchPageLoading() {
   return (
     <div className="px-4 sm:px-6 lg:px-12 py-6 sm:py-8">
       <div className="w-full max-w-2xl mx-auto mb-8 sm:mb-12">
-        <div className="h-14 bg-bg-elevated rounded-lg animate-pulse" />
+        <div className="h-14 bg-bg-elevated rounded-lg animate-pulse motion-reduce:animate-none" />
       </div>
       <SearchResultsSkeleton />
     </div>

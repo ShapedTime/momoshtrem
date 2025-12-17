@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { LOGIN_ROUTE } from '@/config/auth';
 import { Header } from '@/components/layout';
 import { ToastProvider } from '@/components/ui';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export default async function ProtectedLayout({
   children,
@@ -20,7 +21,9 @@ export default async function ProtectedLayout({
     <ToastProvider>
       <div className="min-h-screen bg-bg-primary">
         <Header />
-        <main>{children}</main>
+        <main>
+          <ErrorBoundary>{children}</ErrorBoundary>
+        </main>
       </div>
     </ToastProvider>
   );
