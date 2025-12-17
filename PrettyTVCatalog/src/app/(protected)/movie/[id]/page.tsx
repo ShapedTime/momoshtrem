@@ -1,8 +1,10 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useMovie } from '@/hooks/useTMDB';
+import { TorrentSearchModal } from '@/components/torrent';
+import type { TorrentSearchContext } from '@/types/jackett';
 import { formatRuntime, extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -44,11 +46,33 @@ export default function MoviePage() {
 
   const { data: movie, isLoading, error } = useMovie(movieId);
 
-  // Handler for "Search Torrents" button - Task 9 will implement functionality
+  // Torrent search modal state
+  const [isTorrentModalOpen, setIsTorrentModalOpen] = useState(false);
+  const [torrentContext, setTorrentContext] = useState<TorrentSearchContext | null>(null);
+
+  // Handler for "Search Torrents" button
   const handleSearchTorrents = useCallback(() => {
-    // Placeholder for Task 9 implementation
-    console.log('Search torrents for:', movie?.title);
-  }, [movie?.title]);
+    if (!movie) return;
+
+    const releaseYear = movie.releaseDate
+      ? parseInt(movie.releaseDate.substring(0, 4), 10)
+      : undefined;
+    const query = releaseYear ? `${movie.title} ${releaseYear}` : movie.title;
+
+    setTorrentContext({
+      mediaType: 'movie',
+      query,
+      title: movie.title,
+      year: releaseYear,
+    });
+    setIsTorrentModalOpen(true);
+  }, [movie]);
+
+  // Handler for adding torrent (placeholder for Task 10)
+  const handleAddTorrent = useCallback((magnetUri: string) => {
+    console.log('Add torrent:', magnetUri);
+    // Task 10 will implement distribyted integration
+  }, []);
 
   // Invalid ID state
   if (!movieId || isNaN(movieId)) {
@@ -96,6 +120,16 @@ export default function MoviePage() {
       {/* Cast Carousel */}
       {movie.credits.cast.length > 0 && (
         <CastCarousel cast={movie.credits.cast} maxItems={10} />
+      )}
+
+      {/* Torrent Search Modal */}
+      {torrentContext && (
+        <TorrentSearchModal
+          isOpen={isTorrentModalOpen}
+          onClose={() => setIsTorrentModalOpen(false)}
+          context={torrentContext}
+          onAddTorrent={handleAddTorrent}
+        />
       )}
     </>
   );

@@ -3,12 +3,23 @@
 import { ReactNode, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
+type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  size?: ModalSize;
 }
+
+const SIZE_CLASSES: Record<ModalSize, string> = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+  xl: 'max-w-xl',
+  '2xl': 'max-w-2xl',
+};
 
 function CloseIcon() {
   return (
@@ -30,7 +41,7 @@ function CloseIcon() {
   );
 }
 
-export function Modal({ isOpen, onClose, title, children }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, size = 'lg' }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -102,7 +113,7 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
       {/* Panel */}
       <div
         ref={modalRef}
-        className="relative bg-bg-elevated rounded-lg shadow-modal w-full max-w-lg max-h-[90vh] overflow-auto animate-fade-in"
+        className={`relative bg-bg-elevated rounded-lg shadow-modal w-full ${SIZE_CLASSES[size]} max-h-[90vh] overflow-auto animate-fade-in`}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border">

@@ -7,3 +7,5 @@ export {
 } from './useTMDB';
 
 export { useDebounce } from './useDebounce';
+
+export { useTorrentSearch, sortTorrents, filterByQuality } from './useJackett';

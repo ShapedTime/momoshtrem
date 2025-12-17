@@ -3,6 +3,8 @@
 import { useParams } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import { useTVShow, useSeason } from '@/hooks/useTMDB';
+import { TorrentSearchModal } from '@/components/torrent';
+import type { TorrentSearchContext } from '@/types/jackett';
 import { extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -56,6 +58,10 @@ export default function TVShowPage() {
   // Selected season state (null until show loads)
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
 
+  // Torrent search modal state
+  const [isTorrentModalOpen, setIsTorrentModalOpen] = useState(false);
+  const [torrentContext, setTorrentContext] = useState<TorrentSearchContext | null>(null);
+
   // Fetch season details when selectedSeason is set
   const {
     data: seasonData,
@@ -74,14 +80,40 @@ export default function TVShowPage() {
 
   // Handler for "Search Torrents" button on show
   const handleSearchTorrents = useCallback(() => {
-    if (show?.name) {
-      window.location.href = `/search?q=${encodeURIComponent(show.name)}`;
-    }
-  }, [show?.name]);
+    if (!show) return;
+
+    setTorrentContext({
+      mediaType: 'tv',
+      query: show.name,
+      title: show.name,
+    });
+    setIsTorrentModalOpen(true);
+  }, [show]);
 
   // Handler for episode torrent search
-  const handleEpisodeTorrentSearch = useCallback((query: string) => {
-    window.location.href = `/search?q=${encodeURIComponent(query)}`;
+  const handleEpisodeTorrentSearch = useCallback(
+    (query: string) => {
+      if (!show) return;
+
+      // Parse season and episode from query format "ShowName S01E05"
+      const match = query.match(/S(\d+)E(\d+)/i);
+
+      setTorrentContext({
+        mediaType: 'episode',
+        query,
+        title: show.name,
+        season: match ? parseInt(match[1], 10) : undefined,
+        episode: match ? parseInt(match[2], 10) : undefined,
+      });
+      setIsTorrentModalOpen(true);
+    },
+    [show]
+  );
+
+  // Handler for adding torrent (placeholder for Task 10)
+  const handleAddTorrent = useCallback((magnetUri: string) => {
+    console.log('Add torrent:', magnetUri);
+    // Task 10 will implement distribyted integration
   }, []);
 
   // Invalid ID state
@@ -159,6 +191,16 @@ export default function TVShowPage() {
       {/* Cast Carousel */}
       {show.credits.cast.length > 0 && (
         <CastCarousel cast={show.credits.cast} maxItems={10} />
+      )}
+
+      {/* Torrent Search Modal */}
+      {torrentContext && (
+        <TorrentSearchModal
+          isOpen={isTorrentModalOpen}
+          onClose={() => setIsTorrentModalOpen(false)}
+          context={torrentContext}
+          onAddTorrent={handleAddTorrent}
+        />
       )}
     </>
   );
