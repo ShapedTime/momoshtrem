@@ -47,6 +47,7 @@ services:
       - DISTRIBYTED_URL=http://distribyted:4444
       - DISTRIBYTED_ROUTE=media
       - SESSION_SECRET=${SESSION_SECRET}
+      - SECURE_COOKIES=false
     depends_on:
       - jackett
       - distribyted
