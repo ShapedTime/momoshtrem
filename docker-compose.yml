@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   jackett:
     image: lscr.io/linuxserver/jackett:latest
@@ -53,6 +51,12 @@ services:
       - jackett
       - distribyted
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   assetsVolume: null

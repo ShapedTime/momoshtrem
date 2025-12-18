@@ -22,14 +22,17 @@ import type {
 // ============================================
 
 class TMDBClient {
-  private client: MovieDb;
+  private client: MovieDb | null = null;
 
-  constructor() {
-    const apiKey = process.env.TMDB_API_KEY;
-    if (!apiKey) {
-      throw new Error('TMDB_API_KEY environment variable is not set');
+  private getClient(): MovieDb {
+    if (!this.client) {
+      const apiKey = process.env.TMDB_API_KEY;
+      if (!apiKey) {
+        throw new Error('TMDB_API_KEY environment variable is not set');
+      }
+      this.client = new MovieDb(apiKey);
     }
-    this.client = new MovieDb(apiKey);
+    return this.client;
   }
 
   // ----------------------------------------
@@ -177,12 +180,13 @@ class TMDBClient {
    */
   async getTrending(): Promise<TrendingResults> {
     try {
+      const client = this.getClient();
       const [moviesResponse, tvResponse] = await Promise.all([
-        this.client.trending({
+        client.trending({
           media_type: 'movie',
           time_window: TRENDING_TIME_WINDOW,
         }),
-        this.client.trending({
+        client.trending({
           media_type: 'tv',
           time_window: TRENDING_TIME_WINDOW,
         }),
@@ -231,7 +235,7 @@ class TMDBClient {
     }
 
     try {
-      const response = await this.client.searchMulti({ query: query.trim() });
+      const response = await this.getClient().searchMulti({ query: query.trim() });
 
       return (response.results ?? [])
         .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
@@ -248,7 +252,7 @@ class TMDBClient {
    */
   async getMovie(id: number): Promise<MovieDetails> {
     try {
-      const response = (await this.client.movieInfo({
+      const response = (await this.getClient().movieInfo({
         id,
         append_to_response: 'credits',
       })) as MovieResponse & {
@@ -294,7 +298,7 @@ class TMDBClient {
    */
   async getTVShow(id: number): Promise<TVShowDetails> {
     try {
-      const response = (await this.client.tvInfo({
+      const response = (await this.getClient().tvInfo({
         id,
         append_to_response: 'credits',
       })) as ShowResponse & {
@@ -320,7 +324,7 @@ class TMDBClient {
    */
   async getSeason(showId: number, seasonNumber: number): Promise<SeasonDetails> {
     try {
-      const response = await this.client.seasonInfo({
+      const response = await this.getClient().seasonInfo({
         id: showId,
         season_number: seasonNumber,
       });

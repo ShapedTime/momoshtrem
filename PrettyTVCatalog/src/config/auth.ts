@@ -8,7 +8,7 @@ export const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 export const SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
 
 // Routes that don't require authentication
-export const PUBLIC_ROUTES = ['/login', '/api/auth'];
+export const PUBLIC_ROUTES = ['/login', '/api/auth', '/api/health'];
 
 // Route to redirect to after login
 export const DEFAULT_REDIRECT = '/';
