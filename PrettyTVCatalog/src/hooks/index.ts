@@ -9,3 +9,5 @@ export {
 export { useDebounce } from './useDebounce';
 
 export { useTorrentSearch, sortTorrents, filterByQuality } from './useJackett';
+
+export { useAddTorrent } from './useDistribyted';

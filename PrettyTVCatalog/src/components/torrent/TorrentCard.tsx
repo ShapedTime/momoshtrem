@@ -5,6 +5,10 @@ import type { TorrentResult, VideoQuality } from '@/types/jackett';
 interface TorrentCardProps {
   result: TorrentResult;
   onAdd?: (magnetUri: string) => void;
+  /** Whether a torrent add operation is currently in progress */
+  isAdding?: boolean;
+  /** Whether this specific torrent has already been added */
+  isAdded?: boolean;
 }
 
 const QUALITY_COLORS: Record<VideoQuality, string> = {
@@ -15,10 +19,20 @@ const QUALITY_COLORS: Record<VideoQuality, string> = {
   Unknown: 'bg-gray-600',
 };
 
-export function TorrentCard({ result, onAdd }: TorrentCardProps) {
+export function TorrentCard({
+  result,
+  onAdd,
+  isAdding = false,
+  isAdded = false,
+}: TorrentCardProps) {
   const handleAdd = () => {
-    onAdd?.(result.magnetUri);
+    if (!isAdded && !isAdding) {
+      onAdd?.(result.magnetUri);
+    }
   };
+
+  const isDisabled = !onAdd || isAdded || isAdding;
+  const buttonText = isAdded ? 'Added' : 'Add';
 
   return (
     <article
@@ -74,13 +88,31 @@ export function TorrentCard({ result, onAdd }: TorrentCardProps) {
 
         {/* Add Button */}
         <Button
-          variant="secondary"
+          variant={isAdded ? 'ghost' : 'secondary'}
           size="sm"
           onClick={handleAdd}
-          aria-label={`Add ${result.title}`}
-          disabled={!onAdd}
+          aria-label={isAdded ? `${result.title} already added` : `Add ${result.title}`}
+          disabled={isDisabled}
+          isLoading={isAdding && !isAdded}
         >
-          Add
+          {isAdded && (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              className="mr-1"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          )}
+          {buttonText}
         </Button>
       </div>
     </article>

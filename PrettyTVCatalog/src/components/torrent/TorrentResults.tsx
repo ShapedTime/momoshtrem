@@ -10,6 +10,10 @@ interface TorrentResultsProps {
   sortDirection: SortDirection;
   onSortChange: (field: TorrentSortField, direction: SortDirection) => void;
   onAddTorrent?: (magnetUri: string) => void;
+  /** Function to check if a specific magnet URI is currently being added */
+  isAdding?: (magnetUri: string) => boolean;
+  /** Function to check if a specific magnet URI has already been added */
+  isAdded?: (magnetUri: string) => boolean;
 }
 
 const SORT_OPTIONS: Array<{ field: TorrentSortField; label: string }> = [
@@ -25,6 +29,8 @@ export function TorrentResults({
   sortDirection,
   onSortChange,
   onAddTorrent,
+  isAdding,
+  isAdded,
 }: TorrentResultsProps) {
   // Loading state
   if (isLoading) {
@@ -107,7 +113,13 @@ export function TorrentResults({
       {/* Results List */}
       <div className="space-y-2 max-h-[50vh] overflow-y-auto">
         {results.map((result) => (
-          <TorrentCard key={result.guid} result={result} onAdd={onAddTorrent} />
+          <TorrentCard
+            key={result.guid}
+            result={result}
+            onAdd={onAddTorrent}
+            isAdding={isAdding?.(result.magnetUri)}
+            isAdded={isAdded?.(result.magnetUri)}
+          />
         ))}
       </div>
     </div>

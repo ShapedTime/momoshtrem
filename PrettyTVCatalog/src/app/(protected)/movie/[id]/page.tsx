@@ -68,12 +68,6 @@ export default function MoviePage() {
     setIsTorrentModalOpen(true);
   }, [movie]);
 
-  // Handler for adding torrent (placeholder for Task 10)
-  const handleAddTorrent = useCallback((magnetUri: string) => {
-    console.log('Add torrent:', magnetUri);
-    // Task 10 will implement distribyted integration
-  }, []);
-
   // Invalid ID state
   if (!movieId || isNaN(movieId)) {
     return <ErrorState message="Invalid movie ID" />;
@@ -128,7 +122,6 @@ export default function MoviePage() {
           isOpen={isTorrentModalOpen}
           onClose={() => setIsTorrentModalOpen(false)}
           context={torrentContext}
-          onAddTorrent={handleAddTorrent}
         />
       )}
     </>

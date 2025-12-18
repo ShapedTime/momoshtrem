@@ -110,12 +110,6 @@ export default function TVShowPage() {
     [show]
   );
 
-  // Handler for adding torrent (placeholder for Task 10)
-  const handleAddTorrent = useCallback((magnetUri: string) => {
-    console.log('Add torrent:', magnetUri);
-    // Task 10 will implement distribyted integration
-  }, []);
-
   // Invalid ID state
   if (!showId || isNaN(showId)) {
     return <ErrorState message="Invalid TV show ID" />;
@@ -199,7 +193,6 @@ export default function TVShowPage() {
           isOpen={isTorrentModalOpen}
           onClose={() => setIsTorrentModalOpen(false)}
           context={torrentContext}
-          onAddTorrent={handleAddTorrent}
         />
       )}
     </>

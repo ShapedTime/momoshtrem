@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Modal, Input, Button } from '@/components/ui';
+import { Modal, Input, Button, useToast } from '@/components/ui';
 import { TorrentResults } from './TorrentResults';
 import { QualityFilter } from './QualityFilter';
-import { useTorrentSearch, sortTorrents, filterByQuality } from '@/hooks';
+import { useTorrentSearch, sortTorrents, filterByQuality, useAddTorrent } from '@/hooks';
 import type {
   TorrentSearchContext,
   VideoQuality,
@@ -16,17 +16,21 @@ interface TorrentSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   context: TorrentSearchContext;
-  onAddTorrent?: (magnetUri: string) => void;
 }
 
 export function TorrentSearchModal({
   isOpen,
   onClose,
   context,
-  onAddTorrent,
 }: TorrentSearchModalProps) {
   // Search state
   const { results, isLoading, error, search, clearResults } = useTorrentSearch();
+
+  // Add torrent state
+  const { addTorrent, isAdding, isAdded, error: addError } = useAddTorrent();
+
+  // Toast notifications
+  const { showToast } = useToast();
 
   // Local UI state
   const [searchQuery, setSearchQuery] = useState(context.query);
@@ -92,6 +96,20 @@ export function TorrentSearchModal({
     []
   );
 
+  // Handle adding torrent
+  const handleAddTorrent = useCallback(
+    async (magnetUri: string) => {
+      const success = await addTorrent(magnetUri);
+
+      if (success) {
+        showToast('success', 'Torrent added to streaming queue');
+      } else {
+        showToast('error', addError || 'Failed to add torrent');
+      }
+    },
+    [addTorrent, addError, showToast]
+  );
+
   // Build modal title based on context
   const modalTitle = useMemo(() => {
     switch (context.mediaType) {
@@ -139,7 +157,9 @@ export function TorrentSearchModal({
           sortField={sortField}
           sortDirection={sortDirection}
           onSortChange={handleSortChange}
-          onAddTorrent={onAddTorrent}
+          onAddTorrent={handleAddTorrent}
+          isAdding={isAdding}
+          isAdded={isAdded}
         />
       </div>
     </Modal>
