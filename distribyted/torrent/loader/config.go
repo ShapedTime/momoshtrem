@@ -14,15 +14,19 @@ func NewConfig(r []*config.Route) *Config {
 	}
 }
 
-func (l *Config) ListMagnets() (map[string][]string, error) {
-	out := make(map[string][]string)
+func (l *Config) ListMagnets() (map[string][]TorrentWithMetadata, error) {
+	out := make(map[string][]TorrentWithMetadata)
 	for _, r := range l.c {
 		for _, t := range r.Torrents {
 			if t.MagnetURI == "" {
 				continue
 			}
 
-			out[r.Name] = append(out[r.Name], t.MagnetURI)
+			twm := TorrentWithMetadata{
+				MagnetURI: t.MagnetURI,
+				Metadata:  nil,
+			}
+			out[r.Name] = append(out[r.Name], twm)
 		}
 	}
 

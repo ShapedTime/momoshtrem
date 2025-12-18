@@ -1,6 +1,6 @@
 import { DISTRIBYTED_CONFIG, DISTRIBYTED_ENDPOINTS } from '@/config/distribyted';
 import { APIError, ValidationError } from '@/lib/errors';
-import type { AddTorrentRequest, DistribytedError } from '@/types/distribyted';
+import type { AddTorrentRequest, DistribytedError, TMDBMetadata, TorrentInfo } from '@/types/distribyted';
 
 /**
  * Distribyted API client.
@@ -49,12 +49,14 @@ class DistribytedClient {
   /**
    * Add a torrent to distribyted via magnet URI.
    * @param magnetUri - Valid magnet URI starting with "magnet:?"
+   * @param metadata - Optional TMDB metadata for media identification
    * @param route - Route name (defaults to config value)
    * @throws ValidationError if magnet URI is invalid
    * @throws APIError if request fails
    */
   async addTorrent(
     magnetUri: string,
+    metadata?: TMDBMetadata,
     route: string = DISTRIBYTED_CONFIG.defaultRoute
   ): Promise<void> {
     // Validate magnet URI
@@ -63,7 +65,7 @@ class DistribytedClient {
     }
 
     const url = this.buildUrl(DISTRIBYTED_ENDPOINTS.addTorrent(route));
-    const body: AddTorrentRequest = { magnet: magnetUri };
+    const body: AddTorrentRequest = { magnet: magnetUri, metadata };
 
     try {
       const response = await this.fetchWithTimeout(url, {
@@ -90,6 +92,48 @@ class DistribytedClient {
 
       throw new APIError(
         `Failed to add torrent: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        500
+      );
+    }
+  }
+
+  /**
+   * Get list of torrents in a route with metadata.
+   * @param route - Route name (defaults to config value)
+   * @returns Array of torrent info with metadata
+   * @throws APIError if request fails
+   */
+  async getLibrary(
+    route: string = DISTRIBYTED_CONFIG.defaultRoute
+  ): Promise<TorrentInfo[]> {
+    const url = this.buildUrl(DISTRIBYTED_ENDPOINTS.getTorrents(route));
+
+    try {
+      const response = await this.fetchWithTimeout(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as DistribytedError;
+        throw new APIError(
+          data.error || `Failed to get library: ${response.statusText}`,
+          response.status
+        );
+      }
+
+      const data = await response.json();
+      return data as TorrentInfo[];
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new APIError('Request timed out', 504);
+      }
+      if (error instanceof APIError) throw error;
+
+      throw new APIError(
+        `Failed to get library: ${error instanceof Error ? error.message : 'Unknown error'}`,
         500
       );
     }

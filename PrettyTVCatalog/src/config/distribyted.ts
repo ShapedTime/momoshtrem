@@ -23,4 +23,10 @@ export const DISTRIBYTED_CONFIG = {
 export const DISTRIBYTED_ENDPOINTS = {
   /** Add torrent to route - POST /api/routes/{route}/torrent */
   addTorrent: (route: string) => `/api/routes/${route}/torrent`,
+  /** List torrents in route - GET /api/routes/{route}/torrents */
+  getTorrents: (route: string) => `/api/routes/${route}/torrents`,
+  /** Get single torrent info - GET /api/routes/{route}/torrent/{hash} */
+  getTorrent: (route: string, hash: string) => `/api/routes/${route}/torrent/${hash}`,
+  /** Update torrent metadata - PATCH /api/routes/{route}/torrent/{hash}/metadata */
+  updateMetadata: (route: string, hash: string) => `/api/routes/${route}/torrent/${hash}/metadata`,
 } as const;

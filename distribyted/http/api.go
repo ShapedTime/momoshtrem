@@ -53,7 +53,8 @@ var apiAddTorrentHandler = func(s *torrent.Service) gin.HandlerFunc {
 			return
 		}
 
-		if err := s.AddMagnet(route, json.Magnet); err != nil {
+		// Pass metadata to service (may be nil)
+		if err := s.AddMagnet(route, json.Magnet, json.Metadata); err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -68,6 +69,74 @@ var apiDelTorrentHandler = func(s *torrent.Service) gin.HandlerFunc {
 		hash := ctx.Param("torrent_hash")
 
 		if err := s.RemoveFromHash(route, hash); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, nil)
+	}
+}
+
+var apiGetTorrentsHandler = func(ss *torrent.Stats, s *torrent.Service) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		route := ctx.Param("route")
+
+		routeStats := ss.RoutesStats()
+
+		var torrents []TorrentInfo
+		for _, rs := range routeStats {
+			if rs.Name != route {
+				continue
+			}
+
+			for _, ts := range rs.TorrentStats {
+				// Get metadata from service
+				metadata := s.GetTorrentMetadata(ts.Hash)
+
+				torrents = append(torrents, TorrentInfo{
+					Hash:     ts.Hash,
+					Name:     ts.Name,
+					Metadata: metadata,
+				})
+			}
+		}
+
+		ctx.JSON(http.StatusOK, torrents)
+	}
+}
+
+var apiGetTorrentHandler = func(s *torrent.Service) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		route := ctx.Param("route")
+		hash := ctx.Param("torrent_hash")
+
+		info, err := s.GetTorrentInfo(route, hash)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if info == nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "torrent not found"})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, info)
+	}
+}
+
+var apiUpdateMetadataHandler = func(s *torrent.Service) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		route := ctx.Param("route")
+		hash := ctx.Param("torrent_hash")
+
+		var json MetadataUpdate
+		if err := ctx.ShouldBindJSON(&json); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := s.UpdateMetadata(route, hash, json.Metadata); err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

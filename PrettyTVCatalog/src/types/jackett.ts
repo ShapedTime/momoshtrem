@@ -57,6 +57,8 @@ export interface TorrentSearchContext {
   query: string;
   /** Media title for display in modal header */
   title: string;
+  /** TMDB ID for metadata association */
+  tmdbId: number;
   /** Release year (for movies) */
   year?: number;
   /** Season number (for episodes) */

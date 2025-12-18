@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"encoding/json"
 	"path"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -39,7 +40,7 @@ func NewDB(path string) (*DB, error) {
 	}, nil
 }
 
-func (l *DB) AddMagnet(r, m string) error {
+func (l *DB) AddMagnet(r, m string, metadata *TMDBMetadata) error {
 	err := l.db.Update(func(txn *badger.Txn) error {
 		spec, err := metainfo.ParseMagnetUri(m)
 		if err != nil {
@@ -49,7 +50,18 @@ func (l *DB) AddMagnet(r, m string) error {
 		ih := spec.InfoHash.HexString()
 
 		rp := path.Join(routeRootKey, ih, r)
-		return txn.Set([]byte(rp), []byte(m))
+
+		// Store as JSON with optional metadata
+		data := TorrentWithMetadata{
+			MagnetURI: m,
+			Metadata:  metadata,
+		}
+		jsonBytes, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+
+		return txn.Set([]byte(rp), jsonBytes)
 	})
 
 	if err != nil {
@@ -80,7 +92,7 @@ func (l *DB) RemoveFromHash(r, h string) (bool, error) {
 	return true, tx.Commit()
 }
 
-func (l *DB) ListMagnets() (map[string][]string, error) {
+func (l *DB) ListMagnets() (map[string][]TorrentWithMetadata, error) {
 	tx := l.db.NewTransaction(false)
 	defer tx.Discard()
 
@@ -88,12 +100,23 @@ func (l *DB) ListMagnets() (map[string][]string, error) {
 	defer it.Close()
 
 	prefix := []byte(routeRootKey)
-	out := make(map[string][]string)
+	out := make(map[string][]TorrentWithMetadata)
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		_, r := path.Split(string(it.Item().Key()))
 		i := it.Item()
 		if err := i.Value(func(v []byte) error {
-			out[r] = append(out[r], string(v))
+			var twm TorrentWithMetadata
+
+			// Try JSON unmarshal first (new format)
+			if err := json.Unmarshal(v, &twm); err != nil {
+				// Fallback: treat as plain magnet string (backward compat)
+				twm = TorrentWithMetadata{
+					MagnetURI: string(v),
+					Metadata:  nil,
+				}
+			}
+
+			out[r] = append(out[r], twm)
 			return nil
 		}); err != nil {
 			return nil, err
@@ -101,6 +124,76 @@ func (l *DB) ListMagnets() (map[string][]string, error) {
 	}
 
 	return out, nil
+}
+
+func (l *DB) GetTorrentInfo(route, hash string) (*TorrentWithMetadata, error) {
+	tx := l.db.NewTransaction(false)
+	defer tx.Discard()
+
+	rp := path.Join(routeRootKey, hash, route)
+	item, err := tx.Get([]byte(rp))
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var twm TorrentWithMetadata
+	err = item.Value(func(v []byte) error {
+		if err := json.Unmarshal(v, &twm); err != nil {
+			// Backward compat: plain string
+			twm = TorrentWithMetadata{
+				MagnetURI: string(v),
+				Metadata:  nil,
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &twm, nil
+}
+
+func (l *DB) UpdateMetadata(route, hash string, metadata *TMDBMetadata) error {
+	return l.db.Update(func(txn *badger.Txn) error {
+		rp := path.Join(routeRootKey, hash, route)
+
+		// Get existing entry
+		item, err := txn.Get([]byte(rp))
+		if err != nil {
+			return err
+		}
+
+		var twm TorrentWithMetadata
+		err = item.Value(func(v []byte) error {
+			if err := json.Unmarshal(v, &twm); err != nil {
+				// Backward compat: plain string
+				twm = TorrentWithMetadata{
+					MagnetURI: string(v),
+					Metadata:  nil,
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		// Update metadata
+		twm.Metadata = metadata
+
+		// Save back
+		jsonBytes, err := json.Marshal(twm)
+		if err != nil {
+			return err
+		}
+
+		return txn.Set([]byte(rp), jsonBytes)
+	})
 }
 
 func (l *DB) ListTorrentPaths() (map[string][]string, error) {

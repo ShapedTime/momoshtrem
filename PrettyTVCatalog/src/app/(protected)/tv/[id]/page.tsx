@@ -80,34 +80,46 @@ export default function TVShowPage() {
 
   // Handler for "Search Torrents" button on show
   const handleSearchTorrents = useCallback(() => {
-    if (!show) return;
+    if (!show || !showId) return;
+
+    const year = show.firstAirDate
+      ? parseInt(show.firstAirDate.substring(0, 4), 10)
+      : undefined;
 
     setTorrentContext({
       mediaType: 'tv',
       query: show.name,
       title: show.name,
+      tmdbId: showId,
+      year,
     });
     setIsTorrentModalOpen(true);
-  }, [show]);
+  }, [show, showId]);
 
   // Handler for episode torrent search
   const handleEpisodeTorrentSearch = useCallback(
     (query: string) => {
-      if (!show) return;
+      if (!show || !showId) return;
 
       // Parse season and episode from query format "ShowName S01E05"
       const match = query.match(/S(\d+)E(\d+)/i);
+
+      const year = show.firstAirDate
+        ? parseInt(show.firstAirDate.substring(0, 4), 10)
+        : undefined;
 
       setTorrentContext({
         mediaType: 'episode',
         query,
         title: show.name,
+        tmdbId: showId,
+        year,
         season: match ? parseInt(match[1], 10) : undefined,
         episode: match ? parseInt(match[2], 10) : undefined,
       });
       setIsTorrentModalOpen(true);
     },
-    [show]
+    [show, showId]
   );
 
   // Invalid ID state

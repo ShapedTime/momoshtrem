@@ -11,6 +11,7 @@ import type {
   TorrentSortField,
   SortDirection,
 } from '@/types/jackett';
+import type { TMDBMetadata } from '@/types/distribyted';
 
 interface TorrentSearchModalProps {
   isOpen: boolean;
@@ -96,10 +97,31 @@ export function TorrentSearchModal({
     []
   );
 
+  // Build TMDB metadata from context
+  const buildMetadata = useCallback((): TMDBMetadata | undefined => {
+    // Need tmdbId and year to build valid metadata
+    if (!context.tmdbId || !context.year) {
+      return undefined;
+    }
+
+    // Map mediaType: 'episode' -> 'tv' for the API
+    const type = context.mediaType === 'movie' ? 'movie' : 'tv';
+
+    return {
+      type,
+      tmdb_id: context.tmdbId,
+      title: context.title,
+      year: context.year,
+      season: context.season,
+      episode: context.episode,
+    };
+  }, [context]);
+
   // Handle adding torrent
   const handleAddTorrent = useCallback(
     async (magnetUri: string) => {
-      const success = await addTorrent(magnetUri);
+      const metadata = buildMetadata();
+      const success = await addTorrent(magnetUri, metadata);
 
       if (success) {
         showToast('success', 'Torrent added to streaming queue');
@@ -107,7 +129,7 @@ export function TorrentSearchModal({
         showToast('error', addError || 'Failed to add torrent');
       }
     },
-    [addTorrent, addError, showToast]
+    [addTorrent, addError, showToast, buildMetadata]
   );
 
   // Build modal title based on context

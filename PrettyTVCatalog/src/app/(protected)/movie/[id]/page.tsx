@@ -52,7 +52,7 @@ export default function MoviePage() {
 
   // Handler for "Search Torrents" button
   const handleSearchTorrents = useCallback(() => {
-    if (!movie) return;
+    if (!movie || !movieId) return;
 
     const releaseYear = movie.releaseDate
       ? parseInt(movie.releaseDate.substring(0, 4), 10)
@@ -63,10 +63,11 @@ export default function MoviePage() {
       mediaType: 'movie',
       query,
       title: movie.title,
+      tmdbId: movieId,
       year: releaseYear,
     });
     setIsTorrentModalOpen(true);
-  }, [movie]);
+  }, [movie, movieId]);
 
   // Invalid ID state
   if (!movieId || isNaN(movieId)) {

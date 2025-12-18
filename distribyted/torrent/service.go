@@ -27,6 +27,10 @@ type Service struct {
 	loaders []loader.Loader
 	db      loader.LoaderAdder
 
+	// In-memory metadata cache for fast access
+	metadataMu sync.RWMutex
+	metadata   map[string]*loader.TMDBMetadata // keyed by infohash
+
 	log                     zerolog.Logger
 	addTimeout, readTimeout int
 	continueWhenAddTimeout  bool
@@ -41,6 +45,7 @@ func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c 
 		fss:                    make(map[string]fs.Filesystem),
 		loaders:                loaders,
 		db:                     db,
+		metadata:               make(map[string]*loader.TMDBMetadata),
 		addTimeout:             addTimeout,
 		readTimeout:            readTimeout,
 		continueWhenAddTimeout: continueWhenAddTimeout,
@@ -66,20 +71,29 @@ func (s *Service) load(l loader.Loader) error {
 	if err != nil {
 		return err
 	}
-	for r, ms := range list {
+	for r, twms := range list {
 		s.addRoute(r)
-		for _, m := range ms {
-			if err := s.addMagnet(r, m); err != nil {
+		for _, twm := range twms {
+			if err := s.addMagnet(r, twm.MagnetURI); err != nil {
 				return err
+			}
+			// Cache metadata if present
+			if twm.Metadata != nil {
+				spec, parseErr := metainfo.ParseMagnetUri(twm.MagnetURI)
+				if parseErr == nil && spec.InfoHash.HexString() != "" {
+					s.metadataMu.Lock()
+					s.metadata[spec.InfoHash.HexString()] = twm.Metadata
+					s.metadataMu.Unlock()
+				}
 			}
 		}
 	}
 
-	list, err = l.ListTorrentPaths()
+	list2, err := l.ListTorrentPaths()
 	if err != nil {
 		return err
 	}
-	for r, ms := range list {
+	for r, ms := range list2 {
 		s.addRoute(r)
 		for _, p := range ms {
 			if err := s.addTorrentPath(r, p); err != nil {
@@ -91,13 +105,23 @@ func (s *Service) load(l loader.Loader) error {
 	return nil
 }
 
-func (s *Service) AddMagnet(r, m string) error {
+func (s *Service) AddMagnet(r, m string, metadata *loader.TMDBMetadata) error {
 	if err := s.addMagnet(r, m); err != nil {
 		return err
 	}
 
+	// Cache metadata in memory if provided
+	if metadata != nil {
+		spec, parseErr := metainfo.ParseMagnetUri(m)
+		if parseErr == nil && spec.InfoHash.HexString() != "" {
+			s.metadataMu.Lock()
+			s.metadata[spec.InfoHash.HexString()] = metadata
+			s.metadataMu.Unlock()
+		}
+	}
+
 	// Add to db
-	return s.db.AddMagnet(r, m)
+	return s.db.AddMagnet(r, m, metadata)
 }
 
 func (s *Service) addTorrentPath(r, p string) error {
@@ -206,6 +230,38 @@ func (s *Service) RemoveFromHash(r, h string) error {
 	if ok {
 		t.Drop()
 	}
+
+	// Remove from metadata cache
+	s.metadataMu.Lock()
+	delete(s.metadata, h)
+	s.metadataMu.Unlock()
+
+	return nil
+}
+
+// GetTorrentMetadata returns cached metadata for a torrent hash
+func (s *Service) GetTorrentMetadata(hash string) *loader.TMDBMetadata {
+	s.metadataMu.RLock()
+	defer s.metadataMu.RUnlock()
+	return s.metadata[hash]
+}
+
+// GetTorrentInfo retrieves full torrent info from database
+func (s *Service) GetTorrentInfo(route, hash string) (*loader.TorrentWithMetadata, error) {
+	return s.db.GetTorrentInfo(route, hash)
+}
+
+// UpdateMetadata updates metadata for an existing torrent
+func (s *Service) UpdateMetadata(route, hash string, metadata *loader.TMDBMetadata) error {
+	// Update in database
+	if err := s.db.UpdateMetadata(route, hash, metadata); err != nil {
+		return err
+	}
+
+	// Update in-memory cache
+	s.metadataMu.Lock()
+	s.metadata[hash] = metadata
+	s.metadataMu.Unlock()
 
 	return nil
 }

@@ -20,7 +20,7 @@ func NewFolder(r []*config.Route) *Folder {
 	}
 }
 
-func (f *Folder) ListMagnets() (map[string][]string, error) {
+func (f *Folder) ListMagnets() (map[string][]TorrentWithMetadata, error) {
 	return nil, nil
 }
 

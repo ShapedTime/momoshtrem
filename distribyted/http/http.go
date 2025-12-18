@@ -58,6 +58,10 @@ func New(fc *filecache.Cache, ss *torrent.Stats, s *torrent.Service, ch *config.
 		api.POST("/routes/:route/torrent", apiAddTorrentHandler(s))
 		api.DELETE("/routes/:route/torrent/:torrent_hash", apiDelTorrentHandler(s))
 
+		// New routes for metadata support
+		api.GET("/routes/:route/torrents", apiGetTorrentsHandler(ss, s))
+		api.GET("/routes/:route/torrent/:torrent_hash", apiGetTorrentHandler(s))
+		api.PATCH("/routes/:route/torrent/:torrent_hash/metadata", apiUpdateMetadataHandler(s))
 	}
 
 	log.Info().Str("host", fmt.Sprintf("%s:%d", cfg.IP, cfg.Port)).Msg("starting webserver")

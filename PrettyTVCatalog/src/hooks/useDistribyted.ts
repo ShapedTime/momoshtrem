@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import type { TMDBMetadata } from '@/types/distribyted';
 
 // ============================================
 // Hook State Types
@@ -13,8 +14,8 @@ interface AddTorrentState {
 }
 
 interface UseAddTorrentResult {
-  /** Add a torrent via magnet URI. Returns true on success. */
-  addTorrent: (magnetUri: string) => Promise<boolean>;
+  /** Add a torrent via magnet URI with optional metadata. Returns true on success. */
+  addTorrent: (magnetUri: string, metadata?: TMDBMetadata) => Promise<boolean>;
   /** Check if a specific magnet URI is currently being added. */
   isAdding: (magnetUri: string) => boolean;
   /** Check if a magnet URI has already been added in this session. */
@@ -43,7 +44,7 @@ export function useAddTorrent(): UseAddTorrentResult {
   // Using ref to avoid re-renders when adding to the set
   const addedMagnetsRef = useRef<Set<string>>(new Set());
 
-  const addTorrent = useCallback(async (magnetUri: string): Promise<boolean> => {
+  const addTorrent = useCallback(async (magnetUri: string, metadata?: TMDBMetadata): Promise<boolean> => {
     // Check if already added
     if (addedMagnetsRef.current.has(magnetUri)) {
       return true;
@@ -57,7 +58,7 @@ export function useAddTorrent(): UseAddTorrentResult {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ magnetUri }),
+        body: JSON.stringify({ magnetUri, metadata }),
       });
 
       if (!response.ok) {
