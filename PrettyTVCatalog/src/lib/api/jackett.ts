@@ -23,6 +23,7 @@ interface TorznabItem {
     '@_length'?: string;
   };
   'torznab:attr'?: TorznabAttr | TorznabAttr[];
+  jackettindexer?: string | { '@_id'?: string; '#text'?: string };
 }
 
 /**
@@ -148,6 +149,17 @@ class JackettClient {
   }
 
   /**
+   * Extract indexer name from jackettindexer element.
+   * Jackett returns indexer info in a dedicated element, not in torznab:attr.
+   */
+  private extractIndexer(item: TorznabItem): string | null {
+    const indexer = item.jackettindexer;
+    if (!indexer) return null;
+    if (typeof indexer === 'string') return indexer;
+    return indexer['#text'] || null;
+  }
+
+  /**
    * Build a magnet URI from an info hash and title.
    */
   private buildMagnetUri(infoHash: string, title: string): string {
@@ -217,7 +229,7 @@ class JackettClient {
       leechers: isNaN(leechers) ? 0 : leechers,
       magnetUri,
       torrentUrl,
-      indexer: this.getTorznabAttr(attrs, 'indexer') || 'Unknown',
+      indexer: this.extractIndexer(item) || 'Unknown',
       publishDate: item.pubDate || null,
       quality: parseQualityFromTitle(title),
     };
