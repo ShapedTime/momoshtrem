@@ -1,7 +1,8 @@
 import { XMLParser } from 'fast-xml-parser';
 import { JACKETT_CONFIG, TORZNAB_CATEGORIES, TorznabCategory } from '@/config/jackett';
 import { APIError, ValidationError } from '@/lib/errors';
-import type { TorrentResult } from '@/types/jackett';
+import { batchConvertTorrentUrls } from '@/lib/utils/torrent';
+import type { TorrentResult, VideoQuality } from '@/types/jackett';
 import { parseQualityFromTitle } from '@/types/jackett';
 
 // ============================================
@@ -22,6 +23,23 @@ interface TorznabItem {
     '@_length'?: string;
   };
   'torznab:attr'?: TorznabAttr | TorznabAttr[];
+}
+
+/**
+ * Internal type for items that may need magnet conversion.
+ * Some items have magnetUri directly, others have torrentUrl that needs conversion.
+ */
+interface PendingTorrentResult {
+  guid: string;
+  title: string;
+  size: number;
+  seeders: number;
+  leechers: number;
+  magnetUri: string | null;
+  torrentUrl: string | null;
+  indexer: string;
+  publishDate: string | null;
+  quality: VideoQuality;
 }
 
 // ============================================
@@ -138,9 +156,10 @@ class JackettClient {
   }
 
   /**
-   * Transform raw XML item to TorrentResult.
+   * Transform raw XML item to PendingTorrentResult.
+   * At this stage, some items may have torrentUrl instead of magnetUri.
    */
-  private transformItem(item: TorznabItem): TorrentResult | null {
+  private transformItem(item: TorznabItem): PendingTorrentResult | null {
     const title = item.title;
     if (!title) return null;
 
@@ -150,16 +169,15 @@ class JackettClient {
     // 1. magneturl attribute
     // 2. Construct from infohash attribute
     // 3. Enclosure URL if it's a magnet
-    // 4. Download link as fallback
-    let magnetUri = this.getTorznabAttr(attrs, 'magneturl');
-    let isMagnet = !!magnetUri;
+    // 4. Store torrentUrl for later conversion
+    let magnetUri: string | null = this.getTorznabAttr(attrs, 'magneturl');
+    let torrentUrl: string | null = null;
 
     if (!magnetUri) {
       // Try to construct from infohash
       const infoHash = this.getTorznabAttr(attrs, 'infohash');
       if (infoHash) {
         magnetUri = this.buildMagnetUri(infoHash, title);
-        isMagnet = true;
       }
     }
 
@@ -167,18 +185,14 @@ class JackettClient {
       const enclosureUrl = item.enclosure?.['@_url'];
       if (enclosureUrl?.startsWith('magnet:')) {
         magnetUri = enclosureUrl;
-        isMagnet = true;
+      } else if (enclosureUrl) {
+        // This is a .torrent URL that needs conversion
+        torrentUrl = enclosureUrl;
       }
     }
 
-    // Use download link as fallback (distribyted can handle .torrent URLs)
-    if (!magnetUri) {
-      magnetUri = item.enclosure?.['@_url'] || null;
-      isMagnet = false;
-    }
-
-    // Skip results without any download link
-    if (!magnetUri) return null;
+    // Skip results without any download option
+    if (!magnetUri && !torrentUrl) return null;
 
     // Parse numeric values
     const seedersStr = this.getTorznabAttr(attrs, 'seeders');
@@ -196,17 +210,82 @@ class JackettClient {
     }
 
     return {
-      guid: this.extractGuid(item) || magnetUri,
+      guid: this.extractGuid(item) || magnetUri || torrentUrl || '',
       title,
       size,
       seeders: isNaN(seeders) ? 0 : seeders,
       leechers: isNaN(leechers) ? 0 : leechers,
       magnetUri,
-      linkType: isMagnet ? 'magnet' : 'torrent',
+      torrentUrl,
       indexer: this.getTorznabAttr(attrs, 'indexer') || 'Unknown',
       publishDate: item.pubDate || null,
       quality: parseQualityFromTitle(title),
     };
+  }
+
+  /**
+   * Convert pending results with torrent URLs to final results with magnet URIs.
+   * Items that fail conversion are filtered out.
+   */
+  private async convertPendingResults(
+    pending: PendingTorrentResult[]
+  ): Promise<TorrentResult[]> {
+    // Separate items that already have magnets from those needing conversion
+    const withMagnets: TorrentResult[] = [];
+    const needsConversion: PendingTorrentResult[] = [];
+
+    for (const item of pending) {
+      if (item.magnetUri) {
+        withMagnets.push({
+          guid: item.guid,
+          title: item.title,
+          size: item.size,
+          seeders: item.seeders,
+          leechers: item.leechers,
+          magnetUri: item.magnetUri,
+          indexer: item.indexer,
+          publishDate: item.publishDate,
+          quality: item.quality,
+        });
+      } else if (item.torrentUrl) {
+        needsConversion.push(item);
+      }
+    }
+
+    // If no conversions needed, return early
+    if (needsConversion.length === 0) {
+      return withMagnets;
+    }
+
+    // Batch convert .torrent URLs
+    const urlsToConvert = needsConversion
+      .map((item) => item.torrentUrl)
+      .filter((url): url is string => url !== null);
+
+    const conversionResults = await batchConvertTorrentUrls(urlsToConvert);
+
+    // Add successfully converted items
+    for (const item of needsConversion) {
+      if (!item.torrentUrl) continue;
+
+      const conversion = conversionResults.get(item.torrentUrl);
+      if (conversion?.success && conversion.magnetUri) {
+        withMagnets.push({
+          guid: item.guid,
+          title: item.title,
+          size: item.size,
+          seeders: item.seeders,
+          leechers: item.leechers,
+          magnetUri: conversion.magnetUri,
+          indexer: item.indexer,
+          publishDate: item.publishDate,
+          quality: item.quality,
+        });
+      }
+      // Failed conversions are silently dropped
+    }
+
+    return withMagnets;
   }
 
   // ----------------------------------------
@@ -215,6 +294,7 @@ class JackettClient {
 
   /**
    * Search for torrents using Jackett's Torznab API.
+   * All returned results will have valid magnet URIs.
    */
   async search(query: string, category?: TorznabCategory): Promise<TorrentResult[]> {
     if (!query.trim()) {
@@ -258,11 +338,16 @@ class JackettClient {
       if (!items) return [];
       if (!Array.isArray(items)) items = [items];
 
-      // Transform and filter results
-      const results = items.map((item: TorznabItem) => this.transformItem(item));
-      return results.filter(
-        (result: TorrentResult | null): result is TorrentResult => result !== null
-      );
+      // Transform to pending results
+      const pendingResults = items
+        .map((item: TorznabItem) => this.transformItem(item))
+        .filter(
+          (result: PendingTorrentResult | null): result is PendingTorrentResult =>
+            result !== null
+        );
+
+      // Convert .torrent URLs to magnet URIs
+      return await this.convertPendingResults(pendingResults);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new APIError('Jackett search timed out', 504);

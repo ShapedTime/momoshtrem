@@ -70,14 +70,6 @@ export function TorrentCard({ result, onAdd }: TorrentCardProps) {
           <span className="hidden sm:inline text-text-muted">
             {result.indexer}
           </span>
-
-          {/* Link Type Indicator */}
-          <span
-            className={`${result.linkType === 'magnet' ? 'text-cyan-400' : 'text-orange-400'}`}
-            title={result.linkType === 'magnet' ? 'Magnet link' : 'Torrent file (requires redirect)'}
-          >
-            {result.linkType === 'magnet' ? '🧲' : '📁'}
-          </span>
         </div>
 
         {/* Add Button */}

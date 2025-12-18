@@ -11,9 +11,6 @@ export type VideoQuality = '4K' | '1080p' | '720p' | '480p' | 'Unknown';
 // Torrent Result Types
 // ============================================
 
-/** Link type for torrent results */
-export type TorrentLinkType = 'magnet' | 'torrent';
-
 /**
  * Individual torrent search result from Jackett.
  */
@@ -28,10 +25,8 @@ export interface TorrentResult {
   seeders: number;
   /** Number of leechers */
   leechers: number;
-  /** Magnet URI or download link for torrent */
+  /** Magnet URI (guaranteed to be a valid magnet link) */
   magnetUri: string;
-  /** Type of link: 'magnet' for direct magnet URIs, 'torrent' for .torrent file links */
-  linkType: TorrentLinkType;
   /** Indexer/tracker name */
   indexer: string;
   /** Publication date */
