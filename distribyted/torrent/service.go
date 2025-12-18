@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/distribyted/distribyted/episode"
 	"github.com/distribyted/distribyted/fs"
 	"github.com/distribyted/distribyted/torrent/loader"
 )
@@ -31,6 +32,11 @@ type Service struct {
 	metadataMu sync.RWMutex
 	metadata   map[string]*loader.TMDBMetadata // keyed by infohash
 
+	// Episode identification
+	identifier       *episode.Identifier
+	identificationMu sync.RWMutex
+	identifications  map[string]*episode.IdentificationResult // keyed by infohash
+
 	log                     zerolog.Logger
 	addTimeout, readTimeout int
 	continueWhenAddTimeout  bool
@@ -46,6 +52,8 @@ func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c 
 		loaders:                loaders,
 		db:                     db,
 		metadata:               make(map[string]*loader.TMDBMetadata),
+		identifier:             episode.NewIdentifier(nil), // nil = use NoOpFallback
+		identifications:        make(map[string]*episode.IdentificationResult),
 		addTimeout:             addTimeout,
 		readTimeout:            readTimeout,
 		continueWhenAddTimeout: continueWhenAddTimeout,
@@ -191,6 +199,94 @@ func (s *Service) addTorrent(r string, t *torrent.Torrent) error {
 	}
 
 	tfs.AddTorrent(t)
+
+	// Run episode identification if we have metadata
+	hash := t.InfoHash().HexString()
+	s.metadataMu.RLock()
+	metadata := s.metadata[hash]
+	s.metadataMu.RUnlock()
+
+	if metadata != nil && t.Info() != nil {
+		// Debug: Log identification start with metadata context
+		s.log.Debug().
+			Str("hash", hash).
+			Str("torrent_name", t.Info().Name).
+			Str("media_type", string(metadata.Type)).
+			Int("tmdb_id", metadata.TMDBID).
+			Str("title", metadata.Title).
+			Int("year", metadata.Year).
+			Msg("starting episode identification")
+
+		// Convert torrent files to episode.TorrentFile slice
+		files := make([]episode.TorrentFile, 0, len(t.Files()))
+		for _, f := range t.Files() {
+			files = append(files, episode.TorrentFile{
+				Path: f.Path(),
+				Size: f.Length(),
+			})
+		}
+
+		// Debug: Log file count
+		s.log.Debug().
+			Str("hash", hash).
+			Int("file_count", len(files)).
+			Msg("processing torrent files for identification")
+
+		// Run identification
+		result := s.identifier.Identify(metadata, files, t.Info().Name)
+
+		// Debug: Log each identified file with details
+		for _, identified := range result.IdentifiedFiles {
+			s.log.Debug().
+				Str("hash", hash).
+				Str("file_path", identified.FilePath).
+				Int("season", identified.Season).
+				Ints("episodes", identified.Episodes).
+				Str("confidence", string(identified.Confidence)).
+				Str("pattern_used", identified.PatternUsed).
+				Bool("needs_review", identified.NeedsReview).
+				Str("file_type", string(identified.FileType)).
+				Msg("file identified")
+		}
+
+		// Debug: Log unidentified files for troubleshooting
+		for _, unidentified := range result.UnidentifiedFiles {
+			s.log.Debug().
+				Str("hash", hash).
+				Str("file_path", unidentified).
+				Msg("file NOT identified - no pattern matched")
+		}
+
+		// Cache the result
+		s.identificationMu.Lock()
+		s.identifications[hash] = result
+		s.identificationMu.Unlock()
+
+		// Store in filesystem layer for virtual path access
+		tfs.SetIdentification(hash, result)
+
+		// Info: Summary log
+		s.log.Info().
+			Str("hash", hash).
+			Str("title", metadata.Title).
+			Int("identified", result.IdentifiedCount).
+			Int("unidentified", len(result.UnidentifiedFiles)).
+			Int("total_media", result.TotalFiles).
+			Msg("episode identification complete")
+	} else {
+		// Debug: Log why identification was skipped
+		if metadata == nil {
+			s.log.Debug().
+				Str("hash", hash).
+				Msg("skipping identification - no TMDB metadata")
+		}
+		if t.Info() == nil {
+			s.log.Debug().
+				Str("hash", hash).
+				Msg("skipping identification - no torrent info")
+		}
+	}
+
 	s.log.Info().Str("name", t.Info().Name).Str("route", r).Msg("torrent added")
 
 	return nil
@@ -236,6 +332,16 @@ func (s *Service) RemoveFromHash(r, h string) error {
 	delete(s.metadata, h)
 	s.metadataMu.Unlock()
 
+	// Remove from identification cache
+	s.identificationMu.Lock()
+	if _, exists := s.identifications[h]; exists {
+		s.log.Debug().
+			Str("hash", h).
+			Msg("removing identification results from cache")
+	}
+	delete(s.identifications, h)
+	s.identificationMu.Unlock()
+
 	return nil
 }
 
@@ -264,4 +370,25 @@ func (s *Service) UpdateMetadata(route, hash string, metadata *loader.TMDBMetada
 	s.metadataMu.Unlock()
 
 	return nil
+}
+
+// GetIdentifiedFiles returns cached identification results for a torrent hash
+func (s *Service) GetIdentifiedFiles(hash string) *episode.IdentificationResult {
+	s.identificationMu.RLock()
+	defer s.identificationMu.RUnlock()
+	result := s.identifications[hash]
+
+	// Debug: Log retrieval attempt
+	if result != nil {
+		s.log.Debug().
+			Str("hash", hash).
+			Int("identified_count", result.IdentifiedCount).
+			Msg("identification results retrieved")
+	} else {
+		s.log.Debug().
+			Str("hash", hash).
+			Msg("no identification results found for hash")
+	}
+
+	return result
 }

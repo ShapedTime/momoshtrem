@@ -8,24 +8,29 @@ import (
 
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/anacrolix/torrent"
+	"github.com/rs/zerolog/log"
+
+	"github.com/distribyted/distribyted/episode"
 	"github.com/distribyted/distribyted/iio"
 )
 
 var _ Filesystem = &Torrent{}
 
 type Torrent struct {
-	mu          sync.RWMutex
-	ts          map[string]*torrent.Torrent
-	s           *storage
-	loaded      bool
-	readTimeout int
+	mu              sync.RWMutex
+	ts              map[string]*torrent.Torrent
+	s               *storage
+	loaded          bool
+	readTimeout     int
+	identifications map[string]*episode.IdentificationResult // keyed by infohash
 }
 
 func NewTorrent(readTimeout int) *Torrent {
 	return &Torrent{
-		s:           newStorage(SupportedFactories),
-		ts:          make(map[string]*torrent.Torrent),
-		readTimeout: readTimeout,
+		s:               newStorage(SupportedFactories),
+		ts:              make(map[string]*torrent.Torrent),
+		readTimeout:     readTimeout,
+		identifications: make(map[string]*episode.IdentificationResult),
 	}
 }
 
@@ -44,7 +49,50 @@ func (fs *Torrent) RemoveTorrent(h string) {
 
 	fs.loaded = false
 
+	// Clean up identification results
+	if _, exists := fs.identifications[h]; exists {
+		log.Debug().
+			Str("hash", h).
+			Msg("fs: removing identification results")
+	}
+	delete(fs.identifications, h)
+
 	delete(fs.ts, h)
+}
+
+// SetIdentification stores identification results for a torrent
+func (fs *Torrent) SetIdentification(hash string, result *episode.IdentificationResult) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.identifications[hash] = result
+
+	// Debug: Log when identification is stored in FS layer
+	log.Debug().
+		Str("hash", hash).
+		Int("identified_count", result.IdentifiedCount).
+		Int("unidentified_count", len(result.UnidentifiedFiles)).
+		Msg("fs: stored identification results")
+}
+
+// GetIdentification retrieves identification results for a torrent
+func (fs *Torrent) GetIdentification(hash string) *episode.IdentificationResult {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	result := fs.identifications[hash]
+
+	// Debug: Log retrieval from FS layer
+	if result != nil {
+		log.Debug().
+			Str("hash", hash).
+			Int("identified_count", result.IdentifiedCount).
+			Msg("fs: retrieved identification results")
+	} else {
+		log.Debug().
+			Str("hash", hash).
+			Msg("fs: no identification results for hash")
+	}
+
+	return result
 }
 
 func (fs *Torrent) load() {
