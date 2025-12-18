@@ -12,6 +12,7 @@ import (
 
 	"github.com/distribyted/distribyted/episode"
 	"github.com/distribyted/distribyted/iio"
+	tloader "github.com/distribyted/distribyted/torrent/loader"
 )
 
 var _ Filesystem = &Torrent{}
@@ -23,6 +24,8 @@ type Torrent struct {
 	loaded          bool
 	readTimeout     int
 	identifications map[string]*episode.IdentificationResult // keyed by infohash
+	metadata        map[string]*tloader.TMDBMetadata          // keyed by infohash
+	virtualMapper   *VirtualPathMapper
 }
 
 func NewTorrent(readTimeout int) *Torrent {
@@ -31,6 +34,8 @@ func NewTorrent(readTimeout int) *Torrent {
 		ts:              make(map[string]*torrent.Torrent),
 		readTimeout:     readTimeout,
 		identifications: make(map[string]*episode.IdentificationResult),
+		metadata:        make(map[string]*tloader.TMDBMetadata),
+		virtualMapper:   NewVirtualPathMapper(),
 	}
 }
 
@@ -57,7 +62,19 @@ func (fs *Torrent) RemoveTorrent(h string) {
 	}
 	delete(fs.identifications, h)
 
+	// Clean up metadata
+	if _, exists := fs.metadata[h]; exists {
+		log.Debug().
+			Str("hash", h).
+			Msg("fs: removing metadata")
+	}
+	delete(fs.metadata, h)
+
 	delete(fs.ts, h)
+
+	// Clear and rebuild virtual mappings for remaining torrents
+	fs.virtualMapper.Clear()
+	// Note: virtual mappings will be rebuilt on next load()
 }
 
 // SetIdentification stores identification results for a torrent
@@ -95,6 +112,30 @@ func (fs *Torrent) GetIdentification(hash string) *episode.IdentificationResult 
 	return result
 }
 
+// SetMetadata stores TMDB metadata for a torrent
+func (fs *Torrent) SetMetadata(hash string, metadata *tloader.TMDBMetadata) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.metadata[hash] = metadata
+
+	// Trigger rebuild of virtual mappings on next load
+	fs.loaded = false
+
+	log.Debug().
+		Str("hash", hash).
+		Str("title", metadata.Title).
+		Str("type", string(metadata.Type)).
+		Int("year", metadata.Year).
+		Msg("fs: stored metadata for torrent")
+}
+
+// GetMetadata retrieves TMDB metadata for a torrent
+func (fs *Torrent) GetMetadata(hash string) *tloader.TMDBMetadata {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	return fs.metadata[hash]
+}
+
 func (fs *Torrent) load() {
 	if fs.loaded {
 		return
@@ -113,18 +154,174 @@ func (fs *Torrent) load() {
 		}
 	}
 
+	// Build virtual path mappings after loading all files
+	fs.buildVirtualMappings()
+
 	fs.loaded = true
+}
+
+// buildVirtualMappings creates virtual paths for all identified files
+func (fs *Torrent) buildVirtualMappings() {
+	// Clear existing mappings first
+	fs.virtualMapper.Clear()
+
+	totalMappings := 0
+
+	for hash, t := range fs.ts {
+		metadata := fs.metadata[hash]
+		identification := fs.identifications[hash]
+
+		// Skip if no metadata or identification
+		if metadata == nil {
+			log.Debug().
+				Str("hash", hash).
+				Msg("fs: skipping virtual mapping - no metadata")
+			continue
+		}
+
+		if identification == nil {
+			log.Debug().
+				Str("hash", hash).
+				Msg("fs: skipping virtual mapping - no identification")
+			continue
+		}
+
+		log.Debug().
+			Str("hash", hash).
+			Str("title", metadata.Title).
+			Int("identified_count", identification.IdentifiedCount).
+			Msg("fs: building virtual mappings for torrent")
+
+		// Get torrent name for context
+		torrentName := ""
+		if t.Info() != nil {
+			torrentName = t.Info().Name
+		}
+
+		// Create mappings for each identified file
+		for _, identified := range identification.IdentifiedFiles {
+			virtualPath := GenerateVirtualPath(metadata, &identified)
+			if virtualPath == "" {
+				log.Debug().
+					Str("hash", hash).
+					Str("realPath", identified.FilePath).
+					Msg("fs: failed to generate virtual path")
+				continue
+			}
+
+			// The real path in storage is just the file path from the torrent
+			realPath := "/" + identified.FilePath
+
+			// Add mapping with conflict resolution
+			actualVirtualPath := fs.virtualMapper.AddMappingWithConflictResolution(
+				virtualPath,
+				realPath,
+				identified.Quality,
+				hash,
+			)
+
+			log.Debug().
+				Str("hash", hash).
+				Str("realPath", realPath).
+				Str("virtualPath", actualVirtualPath).
+				Int("season", identified.Season).
+				Ints("episodes", identified.Episodes).
+				Str("torrentName", torrentName).
+				Msg("fs: virtual path generated")
+
+			totalMappings++
+		}
+	}
+
+	log.Info().
+		Int("total_mappings", totalMappings).
+		Int("torrents_with_mappings", len(fs.ts)).
+		Msg("fs: virtual mappings complete")
 }
 
 func (fs *Torrent) Open(filename string) (File, error) {
 	fs.load()
+
+	// Try virtual → real translation first
+	if realPath, found := fs.virtualMapper.ToReal(filename); found {
+		log.Debug().
+			Str("virtual", filename).
+			Str("real", realPath).
+			Msg("fs: opening via virtual path")
+		return fs.s.Get(realPath)
+	}
+
+	// Check if it's a virtual directory
+	if fs.virtualMapper.IsVirtualDir(filename) {
+		log.Debug().
+			Str("path", filename).
+			Msg("fs: opening virtual directory")
+		return &Dir{}, nil
+	}
+
+	// Fall back to real path (backward compatibility)
+	log.Debug().
+		Str("path", filename).
+		Msg("fs: opening via real path")
 	return fs.s.Get(filename)
 }
 
-func (fs *Torrent) ReadDir(path string) (map[string]File, error) {
+func (fs *Torrent) ReadDir(dirPath string) (map[string]File, error) {
 	fs.load()
-	return fs.s.Children(path)
+
+	result := make(map[string]File)
+
+	// Get virtual children at this path
+	virtualChildren := fs.virtualMapper.VirtualChildren(dirPath)
+	for _, childName := range virtualChildren {
+		childPath := cleanPath(dirPath + "/" + childName)
+
+		// Check if it's a virtual directory or file
+		if fs.virtualMapper.IsVirtualDir(childPath) {
+			result[childName] = &Dir{}
+			log.Debug().
+				Str("parent", dirPath).
+				Str("child", childName).
+				Msg("fs: virtual dir listing - directory")
+		} else if realPath, found := fs.virtualMapper.ToReal(childPath); found {
+			// It's a file - get the actual file for size info
+			if file, err := fs.s.Get(realPath); err == nil {
+				result[childName] = file
+				log.Debug().
+					Str("parent", dirPath).
+					Str("child", childName).
+					Str("realPath", realPath).
+					Msg("fs: virtual dir listing - file")
+			}
+		}
+	}
+
+	// Also include real paths that don't have virtual mappings (backward compat)
+	realChildren, err := fs.s.Children(dirPath)
+	if err == nil {
+		for name, file := range realChildren {
+			childPath := cleanPath(dirPath + "/" + name)
+			// Only add if not already in result and doesn't have a virtual mapping
+			if _, exists := result[name]; !exists {
+				if _, hasVirtual := fs.virtualMapper.ToVirtual(childPath); !hasVirtual {
+					result[name] = file
+					log.Debug().
+						Str("parent", dirPath).
+						Str("child", name).
+						Msg("fs: real path without virtual mapping")
+				}
+			}
+		}
+	}
+
+	log.Debug().
+		Str("path", dirPath).
+		Int("children_count", len(result)).
+		Msg("fs: virtual dir listing complete")
+
+	return result, nil
 }
+
 
 type reader interface {
 	iio.Reader

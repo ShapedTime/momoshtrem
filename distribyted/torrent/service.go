@@ -265,6 +265,9 @@ func (s *Service) addTorrent(r string, t *torrent.Torrent) error {
 		// Store in filesystem layer for virtual path access
 		tfs.SetIdentification(hash, result)
 
+		// Pass metadata to filesystem for virtual path generation
+		tfs.SetMetadata(hash, metadata)
+
 		// Info: Summary log
 		s.log.Info().
 			Str("hash", hash).
