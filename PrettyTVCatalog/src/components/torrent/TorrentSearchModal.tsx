@@ -149,7 +149,7 @@ export function TorrentSearchModal({
     <Modal isOpen={isOpen} onClose={handleClose} title={modalTitle} size="2xl">
       <div className="space-y-4">
         {/* Search Form */}
-        <form onSubmit={handleSearch} className="flex gap-2">
+        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
           <div className="flex-1">
             <Input
               type="search"
