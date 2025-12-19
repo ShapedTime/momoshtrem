@@ -7,6 +7,12 @@ import type {
   MovieDetails,
   TVShowDetails,
   SeasonDetails,
+  Genre,
+  MediaType,
+  DiscoverResults,
+  MovieSearchResult,
+  TVSearchResult,
+  SortOption,
 } from '@/types/tmdb';
 
 // ============================================
@@ -294,4 +300,163 @@ export function useSeason(
   }, [showId, seasonNumber]);
 
   return state;
+}
+
+// ============================================
+// useGenres
+// ============================================
+
+export function useGenres(type: MediaType): FetchState<Genre[]> {
+  const [state, setState] = useState<FetchState<Genre[]>>({
+    data: null,
+    isLoading: true,
+    error: null,
+  });
+
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    async function fetchGenres() {
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+
+      try {
+        const data = await fetchAPI<{ genres: Genre[] }>(
+          `/api/tmdb/genres?type=${type}`,
+          abortController.signal
+        );
+        setState({ data: data.genres, isLoading: false, error: null });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
+        setState({
+          data: null,
+          isLoading: false,
+          error:
+            error instanceof Error ? error.message : 'Failed to fetch genres',
+        });
+      }
+    }
+
+    fetchGenres();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [type]);
+
+  return state;
+}
+
+// ============================================
+// useDiscover
+// ============================================
+
+export interface DiscoverOptions {
+  genreId?: number;
+  sortBy?: SortOption;
+  page?: number;
+}
+
+type DiscoverResult = MovieSearchResult | TVSearchResult;
+
+interface UseDiscoverResult extends FetchState<DiscoverResults<DiscoverResult>> {
+  loadMore: () => void;
+  hasMore: boolean;
+}
+
+export function useDiscover(
+  type: MediaType,
+  options: DiscoverOptions = {}
+): UseDiscoverResult {
+  const { genreId, sortBy = 'popularity.desc' } = options;
+  const [state, setState] = useState<FetchState<DiscoverResults<DiscoverResult>>>({
+    data: null,
+    isLoading: true,
+    error: null,
+  });
+  const [page, setPage] = useState(1);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [type, genreId, sortBy]);
+
+  useEffect(() => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    abortControllerRef.current = new AbortController();
+
+    async function fetchDiscover() {
+      setState((prev) => ({
+        ...prev,
+        isLoading: true,
+        error: null,
+      }));
+
+      try {
+        const params = new URLSearchParams({
+          type,
+          sort: sortBy,
+          page: String(page),
+        });
+
+        if (genreId) {
+          params.set('genre', String(genreId));
+        }
+
+        const data = await fetchAPI<DiscoverResults<DiscoverResult>>(
+          `/api/tmdb/discover?${params.toString()}`,
+          abortControllerRef.current?.signal
+        );
+
+        setState((prev) => {
+          // If loading more pages, append results
+          if (page > 1 && prev.data) {
+            return {
+              data: {
+                ...data,
+                results: [...prev.data.results, ...data.results],
+              },
+              isLoading: false,
+              error: null,
+            };
+          }
+          return { data, isLoading: false, error: null };
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
+        setState({
+          data: null,
+          isLoading: false,
+          error:
+            error instanceof Error ? error.message : 'Failed to discover content',
+        });
+      }
+    }
+
+    fetchDiscover();
+
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [type, genreId, sortBy, page]);
+
+  const loadMore = useCallback(() => {
+    if (state.data && page < state.data.totalPages && !state.isLoading) {
+      setPage((p) => p + 1);
+    }
+  }, [state.data, state.isLoading, page]);
+
+  const hasMore = state.data ? page < state.data.totalPages : false;
+
+  return { ...state, loadMore, hasMore };
 }

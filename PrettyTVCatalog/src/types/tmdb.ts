@@ -174,3 +174,58 @@ export function getMediaReleaseYear(item: SearchResult): number | null {
   const year = parseInt(dateStr.substring(0, 4), 10);
   return isNaN(year) ? null : year;
 }
+
+// ============================================
+// Discover & Browse Types
+// ============================================
+
+export type MovieSortOption =
+  | 'popularity.desc'
+  | 'popularity.asc'
+  | 'vote_average.desc'
+  | 'vote_average.asc'
+  | 'primary_release_date.desc'
+  | 'primary_release_date.asc'
+  | 'original_title.asc'
+  | 'original_title.desc'
+  | 'vote_count.desc'
+  | 'vote_count.asc';
+
+export type TVSortOption =
+  | 'popularity.desc'
+  | 'popularity.asc'
+  | 'vote_average.desc'
+  | 'vote_average.asc'
+  | 'first_air_date.desc'
+  | 'first_air_date.asc'
+  | 'name.asc'
+  | 'name.desc'
+  | 'vote_count.desc'
+  | 'vote_count.asc';
+
+export type SortOption = MovieSortOption | TVSortOption;
+
+export interface SortOptionConfig {
+  value: SortOption;
+  label: string;
+  movieValue?: MovieSortOption;
+  tvValue?: TVSortOption;
+}
+
+export interface DiscoverOptions {
+  genreId?: number;
+  sortBy?: SortOption;
+  page?: number;
+  voteCountGte?: number;
+}
+
+export interface DiscoverResults<T> {
+  results: T[];
+  page: number;
+  totalPages: number;
+  totalResults: number;
+}
+
+export interface GenreList {
+  genres: Genre[];
+}

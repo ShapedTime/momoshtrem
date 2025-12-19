@@ -12,7 +12,7 @@ import {
   CastCarousel,
   CastCarouselSkeleton,
 } from '@/components/media';
-import { Button, AlertCircleIcon } from '@/components/ui';
+import { Button, AlertCircleIcon, Breadcrumb } from '@/components/ui';
 
 function ErrorState({ message }: { message: string }) {
   return (
@@ -96,6 +96,15 @@ export default function MoviePage() {
 
   return (
     <>
+      {/* Breadcrumb Navigation */}
+      <Breadcrumb
+        items={[
+          { label: 'Home', href: '/' },
+          { label: 'Movies', href: '/movies' },
+          { label: movie.title },
+        ]}
+      />
+
       {/* Movie Details Hero */}
       <MediaDetails
         title={movie.title}

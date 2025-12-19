@@ -16,7 +16,7 @@ import {
   EpisodeList,
   EpisodeListSkeleton,
 } from '@/components/media';
-import { Button, AlertCircleIcon } from '@/components/ui';
+import { Button, AlertCircleIcon, Breadcrumb } from '@/components/ui';
 
 function ErrorState({ message }: { message: string }) {
   return (
@@ -152,6 +152,15 @@ export default function TVShowPage() {
 
   return (
     <>
+      {/* Breadcrumb Navigation */}
+      <Breadcrumb
+        items={[
+          { label: 'Home', href: '/' },
+          { label: 'TV Shows', href: '/tv-shows' },
+          { label: show.name },
+        ]}
+      />
+
       {/* TV Show Details Hero */}
       <MediaDetails
         title={show.name}

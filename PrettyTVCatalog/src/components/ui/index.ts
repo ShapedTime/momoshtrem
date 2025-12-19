@@ -13,4 +13,9 @@ export {
   XIcon,
   SpinnerIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronLeftIcon,
+  MenuIcon,
+  FilterIcon,
 } from './Icons';
+export { Breadcrumb } from './Breadcrumb';

@@ -15,6 +15,11 @@ import type {
   TrendingResults,
   CastMember,
   CrewMember,
+  Genre,
+  DiscoverOptions,
+  DiscoverResults,
+  MovieSortOption,
+  TVSortOption,
 } from '@/types/tmdb';
 
 // ============================================
@@ -350,6 +355,136 @@ class TMDBClient {
       };
     } catch (error) {
       throw this.handleError(error, 'Season');
+    }
+  }
+
+  // ----------------------------------------
+  // Genre Methods
+  // ----------------------------------------
+
+  /**
+   * Get movie genres list.
+   */
+  async getMovieGenres(): Promise<Genre[]> {
+    try {
+      const response = await this.getClient().genreMovieList();
+      return (response.genres ?? []).map((g) => ({
+        id: g.id ?? 0,
+        name: g.name ?? '',
+      }));
+    } catch (error) {
+      throw this.handleError(error, 'Movie genres');
+    }
+  }
+
+  /**
+   * Get TV genres list.
+   */
+  async getTVGenres(): Promise<Genre[]> {
+    try {
+      const response = await this.getClient().genreTvList();
+      return (response.genres ?? []).map((g) => ({
+        id: g.id ?? 0,
+        name: g.name ?? '',
+      }));
+    } catch (error) {
+      throw this.handleError(error, 'TV genres');
+    }
+  }
+
+  // ----------------------------------------
+  // Discover Methods
+  // ----------------------------------------
+
+  /**
+   * Discover movies with filtering and sorting.
+   */
+  async discoverMovies(
+    options: DiscoverOptions = {}
+  ): Promise<DiscoverResults<MovieSearchResult>> {
+    try {
+      const { genreId, sortBy = 'popularity.desc', page = 1, voteCountGte = 50 } = options;
+
+      const params: Record<string, unknown> = {
+        sort_by: sortBy as MovieSortOption,
+        page,
+        'vote_count.gte': voteCountGte,
+        include_adult: false,
+      };
+
+      if (genreId) {
+        params.with_genres = String(genreId);
+      }
+
+      const response = await this.getClient().discoverMovie(params);
+
+      const results: MovieSearchResult[] = ((response.results ?? []) as MovieResult[]).map(
+        (item) => ({
+          id: item.id ?? 0,
+          mediaType: 'movie' as const,
+          posterPath: item.poster_path ?? null,
+          backdropPath: item.backdrop_path ?? null,
+          voteAverage: item.vote_average ?? 0,
+          overview: item.overview ?? '',
+          title: item.title ?? '',
+          releaseDate: item.release_date ?? '',
+        })
+      );
+
+      return {
+        results,
+        page: response.page ?? 1,
+        totalPages: response.total_pages ?? 1,
+        totalResults: response.total_results ?? 0,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'Movies');
+    }
+  }
+
+  /**
+   * Discover TV shows with filtering and sorting.
+   */
+  async discoverTVShows(
+    options: DiscoverOptions = {}
+  ): Promise<DiscoverResults<TVSearchResult>> {
+    try {
+      const { genreId, sortBy = 'popularity.desc', page = 1, voteCountGte = 50 } = options;
+
+      const params: Record<string, unknown> = {
+        sort_by: sortBy as TVSortOption,
+        page,
+        'vote_count.gte': voteCountGte,
+        include_adult: false,
+      };
+
+      if (genreId) {
+        params.with_genres = String(genreId);
+      }
+
+      const response = await this.getClient().discoverTv(params);
+
+      const results: TVSearchResult[] = ((response.results ?? []) as TvResult[]).map(
+        (item) => ({
+          id: item.id ?? 0,
+          mediaType: 'tv' as const,
+          posterPath: item.poster_path ?? null,
+          backdropPath: item.backdrop_path ?? null,
+          voteAverage: item.vote_average ?? 0,
+          overview: item.overview ?? '',
+          name: item.name ?? '',
+          firstAirDate: item.first_air_date ?? '',
+        })
+      );
+
+      return {
+        results,
+        page: response.page ?? 1,
+        totalPages: response.total_pages ?? 1,
+        totalResults: response.total_results ?? 0,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'TV shows');
     }
   }
 }
