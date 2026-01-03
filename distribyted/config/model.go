@@ -97,6 +97,10 @@ func AddDefaults(r *Root) *Root {
 	if r.Torrent.IdleTimeout == 0 {
 		r.Torrent.IdleTimeout = 300 // 5 minutes
 	}
+	// Default to starting paused when idle mode is active (saves bandwidth on startup)
+	if r.Torrent.IdleTimeout > 0 && !r.Torrent.StartPaused {
+		r.Torrent.StartPaused = true
+	}
 
 	if r.Fuse != nil {
 		if r.Fuse.Path == "" {
