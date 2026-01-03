@@ -1,0 +1,18 @@
+server:
+  http_port: 4444
+  webdav_port: 36911
+
+database:
+  path: ./data/momoshtrem.db
+
+torrent:
+  metadata_folder: ./data/torrents
+  global_cache_size: 4096    # MB
+  add_timeout: 60            # seconds
+  read_timeout: 120
+  idle_enabled: true
+  idle_timeout: 300
+  start_paused: true
+
+tmdb:
+  api_key: ""  # Set your TMDB API key here
