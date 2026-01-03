@@ -20,7 +20,8 @@ import (
 type Service struct {
 	c *torrent.Client
 
-	s *Stats
+	s  *Stats
+	am *ActivityManager // manages idle state for torrents
 
 	mu  sync.Mutex
 	fss map[string]fs.Filesystem
@@ -42,12 +43,13 @@ type Service struct {
 	continueWhenAddTimeout  bool
 }
 
-func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c *torrent.Client, addTimeout, readTimeout int, continueWhenAddTimeout bool) *Service {
+func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c *torrent.Client, am *ActivityManager, addTimeout, readTimeout int, continueWhenAddTimeout bool) *Service {
 	l := log.Logger.With().Str("component", "torrent-service").Logger()
 	return &Service{
 		log:                    l,
 		s:                      stats,
 		c:                      c,
+		am:                     am,
 		fss:                    make(map[string]fs.Filesystem),
 		loaders:                loaders,
 		db:                     db,
@@ -162,7 +164,14 @@ func (s *Service) addRoute(r string) {
 	defer s.mu.Unlock()
 	_, ok := s.fss[folder]
 	if !ok {
-		s.fss[folder] = fs.NewTorrent(s.readTimeout)
+		tfs := fs.NewTorrent(s.readTimeout)
+
+		// Wire up activity callback for idle detection
+		if s.am != nil {
+			tfs.SetActivityCallback(s.am.MarkActive)
+		}
+
+		s.fss[folder] = tfs
 	}
 }
 
@@ -187,6 +196,11 @@ func (s *Service) addTorrent(r string, t *torrent.Torrent) error {
 
 	// Add to stats
 	s.s.Add(r, t)
+
+	// Register with activity manager for idle detection
+	if s.am != nil {
+		s.am.Register(t.InfoHash().HexString(), t)
+	}
 
 	// Add to filesystems
 	folder := path.Join("/", r)
@@ -328,6 +342,11 @@ func (s *Service) RemoveFromHash(r, h string) error {
 	t, ok := s.c.Torrent(metainfo.NewHashFromHex(h))
 	if ok {
 		t.Drop()
+	}
+
+	// Unregister from activity manager
+	if s.am != nil {
+		s.am.Unregister(h)
 	}
 
 	// Remove from metadata cache

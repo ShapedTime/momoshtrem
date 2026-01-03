@@ -154,11 +154,31 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		return fmt.Errorf("error starting magnet database: %w", err)
 	}
 
-	ts := torrent.NewService([]loader.Loader{cl, fl}, dbl, ss, c,
+	// Create activity manager for idle mode (network pauses when not streaming)
+	// Default to enabled if not explicitly disabled in config
+	var am *torrent.ActivityManager
+	idleEnabled := conf.Torrent.IdleEnabled
+	// If IdleTimeout is set but IdleEnabled is false (default), treat as enabled
+	if conf.Torrent.IdleTimeout > 0 && !conf.Torrent.IdleEnabled {
+		idleEnabled = true
+	}
+	if idleEnabled {
+		am = torrent.NewActivityManager(
+			time.Duration(conf.Torrent.IdleTimeout)*time.Second,
+			conf.Torrent.StartPaused,
+		)
+	}
+
+	ts := torrent.NewService([]loader.Loader{cl, fl}, dbl, ss, c, am,
 		conf.Torrent.AddTimeout,
 		conf.Torrent.ReadTimeout,
 		conf.Torrent.ContinueWhenAddTimeout,
 	)
+
+	// Start activity manager background worker
+	if am != nil {
+		am.Start()
+	}
 
 	var mh *fuse.Handler
 	if conf.Fuse != nil {
@@ -171,6 +191,11 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 	go func() {
 
 		<-sigChan
+		// Stop activity manager first to prevent new network activity
+		if am != nil {
+			log.Info().Msg("stopping activity manager...")
+			am.Stop()
+		}
 		if mh != nil {
 			log.Info().Msg("unmounting fuse filesystem...")
 			mh.Unmount()

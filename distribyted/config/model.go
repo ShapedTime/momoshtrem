@@ -30,6 +30,11 @@ type TorrentGlobal struct {
 	DisableTCP             bool   `yaml:"disable_tcp,omitempty"`
 	DisableUTP             bool   `yaml:"disable_utp,omitempty"`
 	IP                     string `yaml:"ip,omitempty"`
+
+	// Idle mode: pause network activity when not streaming
+	IdleEnabled bool `yaml:"idle_enabled,omitempty"` // Enable idle mode (default: true)
+	IdleTimeout int  `yaml:"idle_timeout,omitempty"` // Seconds before going idle (default: 300)
+	StartPaused bool `yaml:"start_paused,omitempty"` // Start torrents in paused state (default: true)
 }
 
 type WebDAVGlobal struct {
@@ -86,6 +91,15 @@ func AddDefaults(r *Root) *Root {
 
 	if r.Torrent.MetadataFolder == "" {
 		r.Torrent.MetadataFolder = metadataFolder
+	}
+
+	// Idle mode defaults: enabled with 5 minute timeout, start paused
+	if r.Torrent.IdleTimeout == 0 {
+		r.Torrent.IdleTimeout = 300 // 5 minutes
+	}
+	// Default to starting paused when idle mode is active (saves bandwidth on startup)
+	if r.Torrent.IdleTimeout > 0 && !r.Torrent.StartPaused {
+		r.Torrent.StartPaused = true
 	}
 
 	if r.Fuse != nil {

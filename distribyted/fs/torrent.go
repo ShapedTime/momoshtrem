@@ -26,6 +26,9 @@ type Torrent struct {
 	identifications map[string]*episode.IdentificationResult // keyed by infohash
 	metadata        map[string]*tloader.TMDBMetadata          // keyed by infohash
 	virtualMapper   *VirtualPathMapper
+
+	// Activity tracking for idle mode
+	onActivity func(hash string) // callback when file is accessed
 }
 
 func NewTorrent(readTimeout int) *Torrent {
@@ -136,6 +139,14 @@ func (fs *Torrent) GetMetadata(hash string) *tloader.TMDBMetadata {
 	return fs.metadata[hash]
 }
 
+// SetActivityCallback sets the callback invoked when any file is read.
+// This is used by the ActivityManager to track file access for idle detection.
+func (fs *Torrent) SetActivityCallback(cb func(hash string)) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.onActivity = cb
+}
+
 func (fs *Torrent) load() {
 	if fs.loaded {
 		return
@@ -145,11 +156,14 @@ func (fs *Torrent) load() {
 
 	for _, t := range fs.ts {
 		<-t.GotInfo()
+		hash := t.InfoHash().HexString()
 		for _, file := range t.Files() {
 			fs.s.Add(&torrentFile{
 				readerFunc: file.NewReader,
 				len:        file.Length(),
 				timeout:    fs.readTimeout,
+				hash:       hash,
+				onActivity: fs.onActivity,
 			}, file.Path())
 		}
 	}
@@ -393,6 +407,10 @@ type torrentFile struct {
 	reader     reader
 	len        int64
 	timeout    int
+
+	// Activity tracking for idle mode
+	hash       string
+	onActivity func(hash string)
 }
 
 func (d *torrentFile) load() {
@@ -423,6 +441,12 @@ func (d *torrentFile) Close() error {
 
 func (d *torrentFile) Read(p []byte) (n int, err error) {
 	d.load()
+
+	// Notify activity manager that this torrent is being accessed
+	if d.onActivity != nil && d.hash != "" {
+		d.onActivity(d.hash)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	timer := time.AfterFunc(
 		time.Duration(d.timeout)*time.Second,
@@ -438,5 +462,11 @@ func (d *torrentFile) Read(p []byte) (n int, err error) {
 
 func (d *torrentFile) ReadAt(p []byte, off int64) (n int, err error) {
 	d.load()
+
+	// Notify activity manager that this torrent is being accessed
+	if d.onActivity != nil && d.hash != "" {
+		d.onActivity(d.hash)
+	}
+
 	return d.reader.ReadAt(p, off)
 }
