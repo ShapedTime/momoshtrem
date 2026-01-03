@@ -70,80 +70,121 @@ Manage torrent lifecycle.
 
 ## Step 2.3: Assignment Repository
 
-Link library items to torrent files.
+**Note**: Already implemented in Stage 1.
 
-**Context**:
-- A movie/episode can have one active torrent assignment
-- Assignment includes: which torrent, which file within torrent
-- Optional quality info for display (resolution, source)
-
-**Table**:
-```sql
-torrent_assignments (
-    item_type,      -- 'movie' or 'episode'
-    item_id,        -- references movies.id or episodes.id
-    info_hash,      -- torrent identifier
-    magnet_uri,     -- for adding torrent
-    file_path,      -- path within torrent
-    file_size,      -- for VFS file size
-    resolution,     -- optional: '1080p', '4K'
-    source,         -- optional: 'BluRay', 'WEB-DL'
-    is_active       -- only one active per item
-)
-```
-
-**Tasks**:
-1. Create AssignmentRepository
-2. CreateAssignment(itemType, itemID, assignment)
-3. GetActiveAssignment(itemType, itemID)
-4. GetAssignmentsByHash(infoHash) → which library items use this torrent
-5. DeactivateAssignment(id)
+The `AssignmentRepository` is already in place with:
+- `Create()` - creates assignment, auto-deactivates previous
+- `GetActiveForItem()` - gets active assignment for movie/episode
+- `GetByInfoHash()` - finds all items using a torrent
+- `DeactivateForItem()` - removes assignment
+- `ListDistinctTorrents()` - lists unique torrent hashes
 
 ---
 
-## Step 2.4: Assignment API
+## Step 2.4: Identification Engine
 
-Endpoints to assign torrents to library items.
+**Note**: Already implemented in Stage 1 at `momoshtrem/internal/identify/`.
 
-**Context**:
-- User finds torrent, gets magnet link
-- User tells momoshtrem: "this movie is in this torrent, at this file path"
-- System stores assignment, VFS now shows the file
+The identification engine automatically parses torrent filenames to extract episode information.
+
+**Patterns supported** (in order of confidence):
+- **High**: `S01E01`, `1x01`, `S01E01-E03` (ranges), `S01E01E02E03` (multi)
+- **Medium**: `Season 1 Episode 1`, `Episode 01` with folder context, anime format
+- **Low**: Concatenated formats (`0101`, `101`) with folder context
+
+**Key files**:
+- `internal/identify/types.go` - Core types (Confidence, QualityInfo, IdentifiedFile)
+- `internal/identify/patterns.go` - Compiled regex patterns
+- `internal/identify/identifier.go` - Main identification logic
+- `internal/identify/matcher.go` - Maps identified files to library episodes
+
+---
+
+## Step 2.5: Assignment API (Auto-Detection)
+
+**Note**: API handlers already implemented in Stage 1. Needs torrent service implementation.
+
+The assignment API uses auto-detection instead of requiring manual file paths.
 
 **Endpoints**:
 ```
-POST   /api/movies/:id/assign
-DELETE /api/movies/:id/assign
+POST   /api/movies/:id/assign-torrent    # Auto-detect movie file
+DELETE /api/movies/:id/assign            # Unassign movie
 
-POST   /api/episodes/:id/assign
-DELETE /api/episodes/:id/assign
+POST   /api/shows/:id/assign-torrent     # Auto-detect episodes
+DELETE /api/episodes/:id/assign          # Unassign episode
 ```
 
-**Request format**:
+**Request format** (just magnet URI):
 ```json
 {
-    "magnet_uri": "magnet:?xt=urn:btih:...",
-    "file_path": "Movie.Name.2024.1080p.BluRay.mkv",
-    "resolution": "1080p",
-    "source": "BluRay"
+    "magnet_uri": "magnet:?xt=urn:btih:..."
 }
 ```
 
-**Tasks**:
-1. Implement assignment handlers
-2. On assign: validate magnet, add torrent, wait for metadata
-3. Verify file_path exists in torrent
-4. Get file size from torrent metadata
-5. Store assignment
-6. On delete: deactivate assignment, optionally remove torrent if no other assignments
+**Movie response**:
+```json
+{
+    "success": true,
+    "assignment": {
+        "id": 1,
+        "info_hash": "abc123...",
+        "file_path": "Movie.2024.1080p.BluRay.mkv",
+        "file_size": 5000000000,
+        "resolution": "1080p",
+        "source": "BluRay"
+    }
+}
+```
 
-**Design considerations**:
-- Auto-detect file if torrent has single video file?
-- List available files in torrent for user to choose?
+**Show response**:
+```json
+{
+    "success": true,
+    "summary": {
+        "total_files": 15,
+        "matched": 12,
+        "unmatched": 3,
+        "skipped": 0
+    },
+    "matched": [
+        {
+            "episode_id": 101,
+            "season": 1,
+            "episode": 1,
+            "file_path": "Show.S01E01.mkv",
+            "file_size": 1000000000,
+            "resolution": "1080p",
+            "confidence": "high"
+        }
+    ],
+    "unmatched": [
+        {
+            "file_path": "Show.S01E13.mkv",
+            "reason": "no_library_episode",
+            "season": 1,
+            "episode": 13
+        }
+    ]
+}
+```
+
+**Flow**:
+1. PrettyTVCatalog sends magnet URI
+2. momoshtrem adds torrent, waits for metadata
+3. Identification engine parses filenames
+4. Matcher maps files to library episodes
+5. Assignments created for matched episodes
+6. Unmatched files logged and returned in response
+
+**Remaining tasks for Stage 2**:
+1. Implement `torrent.Service` using anacrolix/torrent
+2. Wire up service in main.go
+3. Currently returns 503 "Torrent service not available"
 
 ---
 
-## Step 2.5: Torrent Management API
+## Step 2.6: Torrent Management API
 
 Direct torrent operations.
 
@@ -161,7 +202,7 @@ DELETE /api/torrents/:hash    # Remove torrent
 
 ---
 
-## Step 2.6: TorrentFile for VFS
+## Step 2.7: TorrentFile for VFS
 
 Bridge between VFS and torrent streaming.
 
@@ -186,7 +227,7 @@ Bridge between VFS and torrent streaming.
 
 ---
 
-## Step 2.7: Update LibraryVFS
+## Step 2.8: Update LibraryVFS
 
 Connect to torrent backend.
 
@@ -213,7 +254,7 @@ VFS.Open("/Movies/Fight Club (1999)/Fight Club (1999).mkv")
 
 ---
 
-## Step 2.8: Idle Mode (Optional but Recommended)
+## Step 2.9: Idle Mode (Optional but Recommended)
 
 Pause torrents when not streaming.
 
@@ -242,17 +283,24 @@ torrent:
 
 ---
 
-## Step 2.9: Integration Testing
+## Step 2.10: Integration Testing
 
 Verify end-to-end streaming.
 
 **Test flow**:
 1. Start momoshtrem
 2. Add movie: `POST /api/movies {"tmdb_id": 550}`
-3. Assign torrent: `POST /api/movies/1/assign {...}`
+3. Assign torrent: `POST /api/movies/1/assign-torrent {"magnet_uri": "..."}`
 4. Mount WebDAV in Infuse
 5. Navigate to movie
 6. Play → should stream (downloading pieces on demand)
+
+**Show test flow**:
+1. Add show: `POST /api/shows {"tmdb_id": 1396}` (Breaking Bad)
+2. Assign torrent: `POST /api/shows/1/assign-torrent {"magnet_uri": "..."}`
+3. Check response for matched/unmatched episodes
+4. Mount WebDAV, navigate to show
+5. Play episode → should stream
 
 **What to verify**:
 - File appears with correct name and size
@@ -262,21 +310,27 @@ Verify end-to-end streaming.
 
 ---
 
-## Suggested Additions After Stage 2
+## Project Structure After Stage 2
 
 ```
 momoshtrem/
 ├── internal/
+│   ├── identify/           # Already implemented in Stage 1
+│   │   ├── types.go        # Core types
+│   │   ├── patterns.go     # Regex patterns
+│   │   ├── identifier.go   # Episode identification
+│   │   └── matcher.go      # Maps files to library
 │   ├── torrent/
-│   │   ├── client.go      # anacrolix client setup
-│   │   ├── service.go     # torrent lifecycle
-│   │   └── activity.go    # idle mode
+│   │   ├── service.go      # Interface (Stage 1), implementation (Stage 2)
+│   │   ├── client.go       # anacrolix client setup (Stage 2)
+│   │   └── activity.go     # idle mode (Stage 2)
 │   ├── library/
-│   │   └── assignment_repo.go
+│   │   └── assignment_repo.go  # Already implemented in Stage 1
 │   ├── api/
-│   │   └── torrent.go     # assignment & torrent handlers
+│   │   ├── library.go      # Updated with assign-torrent endpoints
+│   │   └── router.go       # Updated routes
 │   └── vfs/
-│       └── torrent_file.go
+│       └── torrent_file.go # Stage 2
 └── ...
 ```
 

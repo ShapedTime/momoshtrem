@@ -1,11 +1,14 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // Movie request/response types
@@ -59,13 +62,49 @@ type EpisodeResponse struct {
 	Assignment    *AssignmentResponse `json:"assignment,omitempty"`
 }
 
-// Assignment request types
+// Assignment request types - auto-detection API
 type AssignTorrentRequest struct {
-	MagnetURI  string `json:"magnet_uri" binding:"required"`
-	FilePath   string `json:"file_path" binding:"required"`
-	FileSize   int64  `json:"file_size" binding:"required"`
+	MagnetURI string `json:"magnet_uri" binding:"required"`
+}
+
+// Movie assignment response
+type MovieAssignmentResponse struct {
+	Success    bool                `json:"success"`
+	Assignment *AssignmentResponse `json:"assignment,omitempty"`
+	Error      string              `json:"error,omitempty"`
+}
+
+// Show assignment response
+type ShowAssignmentResponse struct {
+	Success   bool                   `json:"success"`
+	Summary   AssignmentSummary      `json:"summary"`
+	Matched   []MatchedAssignment    `json:"matched"`
+	Unmatched []UnmatchedAssignment  `json:"unmatched,omitempty"`
+	Error     string                 `json:"error,omitempty"`
+}
+
+type AssignmentSummary struct {
+	TotalFiles int `json:"total_files"`
+	Matched    int `json:"matched"`
+	Unmatched  int `json:"unmatched"`
+	Skipped    int `json:"skipped"`
+}
+
+type MatchedAssignment struct {
+	EpisodeID  int64  `json:"episode_id"`
+	Season     int    `json:"season"`
+	Episode    int    `json:"episode"`
+	FilePath   string `json:"file_path"`
+	FileSize   int64  `json:"file_size"`
 	Resolution string `json:"resolution,omitempty"`
-	Source     string `json:"source,omitempty"`
+	Confidence string `json:"confidence"`
+}
+
+type UnmatchedAssignment struct {
+	FilePath string `json:"file_path"`
+	Reason   string `json:"reason"`
+	Season   int    `json:"season"`
+	Episode  int    `json:"episode"`
 }
 
 // Movie handlers
@@ -190,10 +229,39 @@ func (s *Server) assignMovieTorrent(c *gin.Context) {
 	}
 
 	// Extract info hash from magnet URI
-	infoHash := extractInfoHash(req.MagnetURI)
+	infoHash := torrent.ExtractInfoHash(req.MagnetURI)
 	if infoHash == "" {
 		errorResponse(c, http.StatusBadRequest, "Invalid magnet URI")
 		return
+	}
+
+	// Check if torrent service is available
+	if s.torrentService == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available - Stage 2 required")
+		return
+	}
+
+	// Add torrent and get file list
+	torrentInfo, err := s.torrentService.AddTorrent(req.MagnetURI)
+	if err != nil {
+		errorResponse(c, http.StatusInternalServerError, "Failed to add torrent: "+err.Error())
+		return
+	}
+
+	// Find the best movie file (largest video file)
+	result := identify.FindMovieFile(torrentInfo.Files)
+	if !result.Found {
+		errorResponse(c, http.StatusBadRequest, "No video files found in torrent")
+		return
+	}
+
+	// Log other files if any
+	if len(result.OtherFiles) > 0 {
+		slog.Info("Movie torrent has multiple video files, using largest",
+			"movie_id", id,
+			"selected", result.FilePath,
+			"others", result.OtherFiles,
+		)
 	}
 
 	assignment := &library.TorrentAssignment{
@@ -201,10 +269,10 @@ func (s *Server) assignMovieTorrent(c *gin.Context) {
 		ItemID:     id,
 		InfoHash:   infoHash,
 		MagnetURI:  req.MagnetURI,
-		FilePath:   req.FilePath,
-		FileSize:   req.FileSize,
-		Resolution: req.Resolution,
-		Source:     req.Source,
+		FilePath:   result.FilePath,
+		FileSize:   result.FileSize,
+		Resolution: result.Quality.Resolution,
+		Source:     result.Quality.Source,
 	}
 
 	if err := s.assignmentRepo.Create(assignment); err != nil {
@@ -212,7 +280,10 @@ func (s *Server) assignMovieTorrent(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, toAssignmentResponse(assignment))
+	c.JSON(http.StatusCreated, MovieAssignmentResponse{
+		Success:    true,
+		Assignment: toAssignmentResponse(assignment),
+	})
 }
 
 func (s *Server) unassignMovieTorrent(c *gin.Context) {
@@ -387,9 +458,9 @@ func (s *Server) deleteShow(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// Episode handlers
+// Show assignment handler - auto-detects episodes from torrent
 
-func (s *Server) assignEpisodeTorrent(c *gin.Context) {
+func (s *Server) assignShowTorrent(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		errorResponse(c, http.StatusBadRequest, "Invalid ID")
@@ -402,42 +473,118 @@ func (s *Server) assignEpisodeTorrent(c *gin.Context) {
 		return
 	}
 
-	// Verify episode exists
-	episode, err := s.showRepo.GetEpisodeByID(id)
+	// Verify show exists and load with all seasons/episodes
+	show, err := s.showRepo.GetWithSeasonsAndEpisodes(id)
 	if err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if episode == nil {
-		errorResponse(c, http.StatusNotFound, "Episode not found")
+	if show == nil {
+		errorResponse(c, http.StatusNotFound, "Show not found")
 		return
 	}
 
 	// Extract info hash from magnet URI
-	infoHash := extractInfoHash(req.MagnetURI)
+	infoHash := torrent.ExtractInfoHash(req.MagnetURI)
 	if infoHash == "" {
 		errorResponse(c, http.StatusBadRequest, "Invalid magnet URI")
 		return
 	}
 
-	assignment := &library.TorrentAssignment{
-		ItemType:   library.ItemTypeEpisode,
-		ItemID:     id,
-		InfoHash:   infoHash,
-		MagnetURI:  req.MagnetURI,
-		FilePath:   req.FilePath,
-		FileSize:   req.FileSize,
-		Resolution: req.Resolution,
-		Source:     req.Source,
-	}
-
-	if err := s.assignmentRepo.Create(assignment); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+	// Check if torrent service is available
+	if s.torrentService == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available - Stage 2 required")
 		return
 	}
 
-	c.JSON(http.StatusCreated, toAssignmentResponse(assignment))
+	// Add torrent and get file list
+	torrentInfo, err := s.torrentService.AddTorrent(req.MagnetURI)
+	if err != nil {
+		errorResponse(c, http.StatusInternalServerError, "Failed to add torrent: "+err.Error())
+		return
+	}
+
+	// Identify episodes in the torrent
+	identResult := s.identifier.Identify(torrentInfo.Files, torrentInfo.Name)
+
+	// Match identified files to library episodes
+	matchResult := identify.MatchToShow(show, identResult)
+
+	// Create assignments for matched episodes
+	matched := make([]MatchedAssignment, 0, len(matchResult.Matched))
+	for _, m := range matchResult.Matched {
+		assignment := &library.TorrentAssignment{
+			ItemType:   library.ItemTypeEpisode,
+			ItemID:     m.Episode.ID,
+			InfoHash:   infoHash,
+			MagnetURI:  req.MagnetURI,
+			FilePath:   m.FilePath,
+			FileSize:   m.FileSize,
+			Resolution: m.Quality.Resolution,
+			Source:     m.Quality.Source,
+		}
+
+		if err := s.assignmentRepo.Create(assignment); err != nil {
+			slog.Error("Failed to create assignment",
+				"episode_id", m.Episode.ID,
+				"error", err,
+			)
+			continue
+		}
+
+		matched = append(matched, MatchedAssignment{
+			EpisodeID:  m.Episode.ID,
+			Season:     m.Season.SeasonNumber,
+			Episode:    m.Episode.EpisodeNumber,
+			FilePath:   m.FilePath,
+			FileSize:   m.FileSize,
+			Resolution: m.Quality.Resolution,
+			Confidence: string(m.Confidence),
+		})
+	}
+
+	// Build unmatched response
+	unmatched := make([]UnmatchedAssignment, 0, len(matchResult.Unmatched))
+	for _, u := range matchResult.Unmatched {
+		unmatched = append(unmatched, UnmatchedAssignment{
+			FilePath: u.FilePath,
+			Reason:   string(u.Reason),
+			Season:   u.Season,
+			Episode:  u.Episode,
+		})
+
+		// Log unmatched files for investigation
+		slog.Warn("Unmatched file in torrent",
+			"show_id", id,
+			"show_title", show.Title,
+			"info_hash", infoHash,
+			"file_path", u.FilePath,
+			"reason", u.Reason,
+			"parsed_season", u.Season,
+			"parsed_episode", u.Episode,
+		)
+	}
+
+	// Calculate skipped count (non-video files that were filtered out)
+	skipped := identResult.TotalFiles - len(identResult.IdentifiedFiles) - len(identResult.UnidentifiedFiles)
+	if skipped < 0 {
+		skipped = 0
+	}
+
+	c.JSON(http.StatusCreated, ShowAssignmentResponse{
+		Success: true,
+		Summary: AssignmentSummary{
+			TotalFiles: identResult.TotalFiles,
+			Matched:    len(matched),
+			Unmatched:  len(unmatched),
+			Skipped:    skipped,
+		},
+		Matched:   matched,
+		Unmatched: unmatched,
+	})
 }
+
+// Episode handlers
 
 func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -520,41 +667,4 @@ func toAssignmentResponse(a *library.TorrentAssignment) *AssignmentResponse {
 		Resolution: a.Resolution,
 		Source:     a.Source,
 	}
-}
-
-// extractInfoHash extracts the info hash from a magnet URI
-func extractInfoHash(magnetURI string) string {
-	// Look for xt=urn:btih: in the URI
-	const prefix = "xt=urn:btih:"
-	idx := 0
-	for i := 0; i < len(magnetURI)-len(prefix); i++ {
-		if magnetURI[i:i+len(prefix)] == prefix {
-			idx = i + len(prefix)
-			break
-		}
-	}
-	if idx == 0 {
-		return ""
-	}
-
-	// Extract hash until next & or end
-	end := idx
-	for end < len(magnetURI) && magnetURI[end] != '&' {
-		end++
-	}
-
-	hash := magnetURI[idx:end]
-
-	// Handle base32 encoded hashes (40 chars) vs hex (40 chars)
-	// Normalize to lowercase
-	result := make([]byte, len(hash))
-	for i := 0; i < len(hash); i++ {
-		c := hash[i]
-		if c >= 'A' && c <= 'Z' {
-			c = c + 32 // lowercase
-		}
-		result[i] = c
-	}
-
-	return string(result)
 }

@@ -5,8 +5,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // Server represents the REST API server
@@ -16,6 +18,8 @@ type Server struct {
 	showRepo       *library.ShowRepository
 	assignmentRepo *library.AssignmentRepository
 	tmdbClient     *tmdb.Client
+	torrentService torrent.Service  // Optional: nil until Stage 2 implementation
+	identifier     *identify.Identifier
 }
 
 // NewServer creates a new API server
@@ -24,6 +28,7 @@ func NewServer(
 	showRepo *library.ShowRepository,
 	assignmentRepo *library.AssignmentRepository,
 	tmdbClient *tmdb.Client,
+	torrentService torrent.Service, // Can be nil until Stage 2
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -33,6 +38,8 @@ func NewServer(
 		showRepo:       showRepo,
 		assignmentRepo: assignmentRepo,
 		tmdbClient:     tmdbClient,
+		torrentService: torrentService,
+		identifier:     identify.NewIdentifier(nil),
 	}
 
 	s.setupMiddleware()
@@ -78,7 +85,7 @@ func (s *Server) setupRoutes() {
 	api.POST("/movies", s.createMovie)
 	api.GET("/movies/:id", s.getMovie)
 	api.DELETE("/movies/:id", s.deleteMovie)
-	api.POST("/movies/:id/assign", s.assignMovieTorrent)
+	api.POST("/movies/:id/assign-torrent", s.assignMovieTorrent) // Auto-detect movie file
 	api.DELETE("/movies/:id/assign", s.unassignMovieTorrent)
 
 	// Shows
@@ -86,9 +93,9 @@ func (s *Server) setupRoutes() {
 	api.POST("/shows", s.createShow)
 	api.GET("/shows/:id", s.getShow)
 	api.DELETE("/shows/:id", s.deleteShow)
+	api.POST("/shows/:id/assign-torrent", s.assignShowTorrent) // Auto-detect episodes
 
-	// Episodes
-	api.POST("/episodes/:id/assign", s.assignEpisodeTorrent)
+	// Episodes - only unassign, assignment is done via show-level API
 	api.DELETE("/episodes/:id/assign", s.unassignEpisodeTorrent)
 
 	// Status

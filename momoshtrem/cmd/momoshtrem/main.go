@@ -74,7 +74,8 @@ func main() {
 	slog.Info("VFS initialized")
 
 	// Initialize servers
-	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient)
+	// Note: torrent service is nil until Stage 2 implementation
+	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, nil)
 	webdavServer := webdav.NewServer(libraryFS)
 
 	// Start HTTP servers
