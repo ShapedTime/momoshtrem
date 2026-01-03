@@ -70,8 +70,8 @@ func main() {
 	}
 
 	// Initialize VFS
-	libraryFS := vfs.NewLibraryFS(movieRepo, showRepo, assignmentRepo)
-	slog.Info("VFS initialized")
+	libraryFS := vfs.NewLibraryFS(movieRepo, showRepo, assignmentRepo, cfg.VFS.TreeTTL)
+	slog.Info("VFS initialized", "tree_ttl_seconds", cfg.VFS.TreeTTL)
 
 	// Initialize servers
 	// Note: torrent service is nil until Stage 2 implementation

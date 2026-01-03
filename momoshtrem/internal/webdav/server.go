@@ -2,7 +2,7 @@ package webdav
 
 import (
 	"context"
-	"io/fs"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/net/webdav"
 
+	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
@@ -70,7 +70,7 @@ func (wfs *webdavFS) OpenFile(ctx context.Context, name string, flag int, perm o
 		return nil, os.ErrPermission
 	}
 
-	name = cleanPath(name)
+	name = common.CleanPath(name)
 
 	file, err := wfs.fs.Open(name)
 	if err != nil {
@@ -93,7 +93,7 @@ func (wfs *webdavFS) Rename(ctx context.Context, oldName, newName string) error 
 }
 
 func (wfs *webdavFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
-	name = cleanPath(name)
+	name = common.CleanPath(name)
 
 	file, err := wfs.fs.Open(name)
 	if err != nil {
@@ -138,11 +138,11 @@ func (f *webdavFile) Seek(offset int64, whence int) (int64, error) {
 	size := f.file.Size()
 
 	switch whence {
-	case 0: // SeekStart
+	case io.SeekStart:
 		f.pos = offset
-	case 1: // SeekCurrent
+	case io.SeekCurrent:
 		f.pos += offset
-	case 2: // SeekEnd
+	case io.SeekEnd:
 		f.pos = size + offset
 	}
 
@@ -252,7 +252,7 @@ func (f *webdavFile) ETag(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return `"` + info.Name() + "-" + itoa(info.Size()) + `"`, nil
+	return `"` + info.Name() + "-" + common.Itoa64(info.Size()) + `"`, nil
 }
 
 // Implement DeadPropsHolder to satisfy webdav requirements
@@ -263,45 +263,3 @@ func (f *webdavFile) DeadProps() (map[string][]byte, error) {
 func (f *webdavFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
 	return nil, os.ErrPermission
 }
-
-// Helper functions
-
-func cleanPath(p string) string {
-	p = path.Clean(p)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	return p
-}
-
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	s := ""
-	for n > 0 {
-		s = string('0'+byte(n%10)) + s
-		n /= 10
-	}
-	return s
-}
-
-// fileInfo wrapper for virtual files
-type fileInfoWrapper struct {
-	name    string
-	size    int64
-	isDir   bool
-	modTime time.Time
-}
-
-func (fi *fileInfoWrapper) Name() string       { return fi.name }
-func (fi *fileInfoWrapper) Size() int64        { return fi.size }
-func (fi *fileInfoWrapper) Mode() fs.FileMode  {
-	if fi.isDir {
-		return fs.ModeDir | 0755
-	}
-	return 0644
-}
-func (fi *fileInfoWrapper) ModTime() time.Time { return fi.modTime }
-func (fi *fileInfoWrapper) IsDir() bool        { return fi.isDir }
-func (fi *fileInfoWrapper) Sys() interface{}   { return nil }

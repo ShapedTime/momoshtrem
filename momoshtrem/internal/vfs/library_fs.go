@@ -1,13 +1,13 @@
 package vfs
 
 import (
-	"io/fs"
+	"log/slog"
 	"os"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/library"
 )
 
@@ -42,12 +42,17 @@ func NewLibraryFS(
 	movieRepo *library.MovieRepository,
 	showRepo *library.ShowRepository,
 	assignmentRepo *library.AssignmentRepository,
+	treeTTLSeconds int,
 ) *LibraryFS {
+	ttl := time.Duration(treeTTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = 30 * time.Second // Default to 30 seconds
+	}
 	return &LibraryFS{
 		movieRepo:      movieRepo,
 		showRepo:       showRepo,
 		assignmentRepo: assignmentRepo,
-		treeTTL:        30 * time.Second,
+		treeTTL:        ttl,
 	}
 }
 
@@ -57,7 +62,7 @@ func (fs *LibraryFS) Open(filepath string) (File, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	filepath = cleanPath(filepath)
+	filepath = common.CleanPath(filepath)
 
 	entry, exists := fs.tree.pathMap[filepath]
 	if !exists {
@@ -81,7 +86,7 @@ func (fs *LibraryFS) ReadDir(dirPath string) (map[string]File, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	dirPath = cleanPath(dirPath)
+	dirPath = common.CleanPath(dirPath)
 
 	// Handle root
 	if dirPath == "/" {
@@ -140,14 +145,17 @@ func (fs *LibraryFS) rebuildTree() {
 	tree.pathMap["/TV Shows"] = tvDir
 
 	// Add movies with active assignments
-	movies, _ := fs.movieRepo.ListWithAssignments()
+	movies, err := fs.movieRepo.ListWithAssignments()
+	if err != nil {
+		slog.Error("Failed to list movies for VFS", "error", err)
+	}
 	for _, movie := range movies {
 		if movie.Assignment == nil {
 			continue // Hide movies without torrents
 		}
 
 		// Create movie folder: /Movies/Title (Year)/
-		folderName := library.SanitizeFilename(movie.Title) + " (" + itoa(movie.Year) + ")"
+		folderName := library.SanitizeFilename(movie.Title) + " (" + common.Itoa(movie.Year) + ")"
 		folderPath := "/Movies/" + folderName
 
 		movieDir := NewVirtualDir(folderName)
@@ -159,7 +167,7 @@ func (fs *LibraryFS) rebuildTree() {
 		if ext == "" {
 			ext = ".mkv" // Default extension
 		}
-		fileName := library.SanitizeFilename(movie.Title) + " (" + itoa(movie.Year) + ")" + ext
+		fileName := library.SanitizeFilename(movie.Title) + " (" + common.Itoa(movie.Year) + ")" + ext
 		filePath := folderPath + "/" + fileName
 
 		videoFile := NewPlaceholderFile(fileName, movie.Assignment.FileSize, movie.Assignment)
@@ -168,10 +176,13 @@ func (fs *LibraryFS) rebuildTree() {
 	}
 
 	// Add TV shows with assigned episodes
-	shows, _ := fs.showRepo.GetShowsWithAssignedEpisodes()
+	shows, err := fs.showRepo.GetShowsWithAssignedEpisodes()
+	if err != nil {
+		slog.Error("Failed to list shows for VFS", "error", err)
+	}
 	for _, show := range shows {
 		// Create show folder: /TV Shows/Title (Year)/
-		showFolderName := library.SanitizeFilename(show.Title) + " (" + itoa(show.Year) + ")"
+		showFolderName := library.SanitizeFilename(show.Title) + " (" + common.Itoa(show.Year) + ")"
 		showPath := "/TV Shows/" + showFolderName
 
 		showDir := NewVirtualDir(showFolderName)
@@ -180,7 +191,7 @@ func (fs *LibraryFS) rebuildTree() {
 
 		for _, season := range show.Seasons {
 			// Create season folder: /TV Shows/Title (Year)/Season 01/
-			seasonFolderName := "Season " + padZero(season.SeasonNumber, 2)
+			seasonFolderName := "Season " + common.PadZero(season.SeasonNumber, 2)
 			seasonPath := showPath + "/" + seasonFolderName
 
 			seasonDir := NewVirtualDir(seasonFolderName)
@@ -200,11 +211,11 @@ func (fs *LibraryFS) rebuildTree() {
 
 				episodeName := episode.Name
 				if episodeName == "" {
-					episodeName = "Episode " + itoa(episode.EpisodeNumber)
+					episodeName = "Episode " + common.Itoa(episode.EpisodeNumber)
 				}
 
 				fileName := library.SanitizeFilename(show.Title) + " - S" +
-					padZero(season.SeasonNumber, 2) + "E" + padZero(episode.EpisodeNumber, 2) +
+					common.PadZero(season.SeasonNumber, 2) + "E" + common.PadZero(episode.EpisodeNumber, 2) +
 					" - " + library.SanitizeFilename(episodeName) + ext
 				filePath := seasonPath + "/" + fileName
 
@@ -255,7 +266,7 @@ func (f *DirFile) Read([]byte) (int, error) { return 0, os.ErrInvalid }
 func (f *DirFile) ReadAt([]byte, int64) (int, error) { return 0, os.ErrInvalid }
 func (f *DirFile) Close() error   { return nil }
 func (f *DirFile) Stat() (os.FileInfo, error) {
-	return &fileInfo{name: f.dir.name, size: 0, isDir: true, modTime: time.Now()}, nil
+	return common.NewFileInfo(f.dir.name, 0, true, time.Now()), nil
 }
 
 // PlaceholderFile represents a file that will be backed by a torrent (in Stage 2)
@@ -285,7 +296,7 @@ func (f *PlaceholderFile) ReadAt([]byte, int64) (int, error) {
 }
 func (f *PlaceholderFile) Close() error { return nil }
 func (f *PlaceholderFile) Stat() (os.FileInfo, error) {
-	return &fileInfo{name: f.name, size: f.size, isDir: false, modTime: time.Now()}, nil
+	return common.NewFileInfo(f.name, f.size, false, time.Now()), nil
 }
 
 // GetAssignment returns the torrent assignment for this file
@@ -293,35 +304,7 @@ func (f *PlaceholderFile) GetAssignment() *library.TorrentAssignment {
 	return f.assignment
 }
 
-// fileInfo implements os.FileInfo
-type fileInfo struct {
-	name    string
-	size    int64
-	isDir   bool
-	modTime time.Time
-}
-
-func (fi *fileInfo) Name() string       { return fi.name }
-func (fi *fileInfo) Size() int64        { return fi.size }
-func (fi *fileInfo) Mode() fs.FileMode  {
-	if fi.isDir {
-		return fs.ModeDir | 0755
-	}
-	return 0644
-}
-func (fi *fileInfo) ModTime() time.Time { return fi.modTime }
-func (fi *fileInfo) IsDir() bool        { return fi.isDir }
-func (fi *fileInfo) Sys() interface{}   { return nil }
-
 // Helper functions
-
-func cleanPath(p string) string {
-	p = path.Clean(p)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	return p
-}
 
 func entryToFile(e Entry) File {
 	switch v := e.(type) {
@@ -332,20 +315,4 @@ func entryToFile(e Entry) File {
 	default:
 		return nil
 	}
-}
-
-func itoa(n int) string {
-	return strings.TrimLeft(padZero(n, 1), "0")
-}
-
-func padZero(n, width int) string {
-	s := ""
-	for n > 0 || len(s) < width {
-		s = string('0'+byte(n%10)) + s
-		n /= 10
-	}
-	if s == "" {
-		s = "0"
-	}
-	return s
 }

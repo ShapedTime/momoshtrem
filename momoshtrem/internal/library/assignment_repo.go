@@ -16,6 +16,31 @@ func NewAssignmentRepository(db *DB) *AssignmentRepository {
 	return &AssignmentRepository{db: db}
 }
 
+// scanner is an interface for sql.Row and sql.Rows
+type scanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// scanAssignment scans a row into a TorrentAssignment
+func scanAssignment(s scanner) (*TorrentAssignment, error) {
+	assignment := &TorrentAssignment{}
+	var resolution, source sql.NullString
+
+	err := s.Scan(
+		&assignment.ID, &assignment.ItemType, &assignment.ItemID,
+		&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
+		&resolution, &source, &assignment.IsActive, &assignment.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	assignment.Resolution = resolution.String
+	assignment.Source = source.String
+
+	return assignment, nil
+}
+
 // Create adds a new torrent assignment
 func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
 	// Deactivate any existing active assignments for this item
@@ -51,19 +76,13 @@ func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
 
 // GetByID retrieves an assignment by its ID
 func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
-	assignment := &TorrentAssignment{}
-	var resolution, source sql.NullString
-
-	err := r.db.QueryRow(
+	row := r.db.QueryRow(
 		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
 		 FROM torrent_assignments WHERE id = ?`,
 		id,
-	).Scan(
-		&assignment.ID, &assignment.ItemType, &assignment.ItemID,
-		&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
-		&resolution, &source, &assignment.IsActive, &assignment.CreatedAt,
 	)
 
+	assignment, err := scanAssignment(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -71,36 +90,24 @@ func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
 		return nil, fmt.Errorf("failed to get assignment: %w", err)
 	}
 
-	assignment.Resolution = resolution.String
-	assignment.Source = source.String
-
 	return assignment, nil
 }
 
 // GetActiveForItem retrieves the active assignment for a library item
 func (r *AssignmentRepository) GetActiveForItem(itemType ItemType, itemID int64) (*TorrentAssignment, error) {
-	assignment := &TorrentAssignment{}
-	var resolution, source sql.NullString
-
-	err := r.db.QueryRow(
+	row := r.db.QueryRow(
 		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
 		 FROM torrent_assignments WHERE item_type = ? AND item_id = ? AND is_active = TRUE`,
 		itemType, itemID,
-	).Scan(
-		&assignment.ID, &assignment.ItemType, &assignment.ItemID,
-		&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
-		&resolution, &source, &assignment.IsActive, &assignment.CreatedAt,
 	)
 
+	assignment, err := scanAssignment(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active assignment: %w", err)
 	}
-
-	assignment.Resolution = resolution.String
-	assignment.Source = source.String
 
 	return assignment, nil
 }
@@ -119,19 +126,10 @@ func (r *AssignmentRepository) GetByInfoHash(infoHash string) ([]*TorrentAssignm
 
 	var assignments []*TorrentAssignment
 	for rows.Next() {
-		assignment := &TorrentAssignment{}
-		var resolution, source sql.NullString
-
-		if err := rows.Scan(
-			&assignment.ID, &assignment.ItemType, &assignment.ItemID,
-			&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
-			&resolution, &source, &assignment.IsActive, &assignment.CreatedAt,
-		); err != nil {
+		assignment, err := scanAssignment(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan assignment: %w", err)
 		}
-
-		assignment.Resolution = resolution.String
-		assignment.Source = source.String
 		assignments = append(assignments, assignment)
 	}
 
@@ -152,19 +150,10 @@ func (r *AssignmentRepository) GetActiveByInfoHash(infoHash string) ([]*TorrentA
 
 	var assignments []*TorrentAssignment
 	for rows.Next() {
-		assignment := &TorrentAssignment{}
-		var resolution, source sql.NullString
-
-		if err := rows.Scan(
-			&assignment.ID, &assignment.ItemType, &assignment.ItemID,
-			&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
-			&resolution, &source, &assignment.IsActive, &assignment.CreatedAt,
-		); err != nil {
+		assignment, err := scanAssignment(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan assignment: %w", err)
 		}
-
-		assignment.Resolution = resolution.String
-		assignment.Source = source.String
 		assignments = append(assignments, assignment)
 	}
 

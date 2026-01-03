@@ -1,8 +1,9 @@
 package library
 
 import (
-	"strconv"
 	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/common"
 )
 
 // ItemType represents the type of library item
@@ -75,26 +76,26 @@ type TorrentAssignment struct {
 
 // VFSPath returns the virtual filesystem path for a movie
 func (m *Movie) VFSPath() string {
-	return "/" + SanitizeFilename(m.Title) + " (" + itoa(m.Year) + ")"
+	return "/" + SanitizeFilename(m.Title) + " (" + common.Itoa(m.Year) + ")"
 }
 
 // VFSPath returns the virtual filesystem path for a show
 func (s *Show) VFSPath() string {
-	return "/" + SanitizeFilename(s.Title) + " (" + itoa(s.Year) + ")"
+	return "/" + SanitizeFilename(s.Title) + " (" + common.Itoa(s.Year) + ")"
 }
 
 // VFSPath returns the virtual filesystem path for a season
 func (sn *Season) VFSPath(showPath string) string {
-	return showPath + "/Season " + padZero(sn.SeasonNumber, 2)
+	return showPath + "/Season " + common.PadZero(sn.SeasonNumber, 2)
 }
 
 // VFSPath returns the virtual filesystem path for an episode
 func (e *Episode) VFSPath(seasonPath string, showTitle string, seasonNumber int) string {
 	name := e.Name
 	if name == "" {
-		name = "Episode " + itoa(e.EpisodeNumber)
+		name = "Episode " + common.Itoa(e.EpisodeNumber)
 	}
-	return seasonPath + "/" + SanitizeFilename(showTitle) + " - S" + padZero(seasonNumber, 2) + "E" + padZero(e.EpisodeNumber, 2) + " - " + SanitizeFilename(name)
+	return seasonPath + "/" + SanitizeFilename(showTitle) + " - S" + common.PadZero(seasonNumber, 2) + "E" + common.PadZero(e.EpisodeNumber, 2) + " - " + SanitizeFilename(name)
 }
 
 // SanitizeFilename removes or replaces characters invalid in file paths
@@ -118,16 +119,4 @@ func SanitizeFilename(name string) string {
 		}
 	}
 	return string(result)
-}
-
-func itoa(n int) string {
-	return strconv.Itoa(n)
-}
-
-func padZero(n, width int) string {
-	s := strconv.Itoa(n)
-	for len(s) < width {
-		s = "0" + s
-	}
-	return s
 }

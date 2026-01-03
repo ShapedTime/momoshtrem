@@ -13,6 +13,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Torrent  TorrentConfig  `yaml:"torrent"`
 	TMDB     TMDBConfig     `yaml:"tmdb"`
+	VFS      VFSConfig      `yaml:"vfs"`
 }
 
 type ServerConfig struct {
@@ -38,6 +39,10 @@ type TMDBConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
+type VFSConfig struct {
+	TreeTTL int `yaml:"tree_ttl"` // seconds - how long to cache VFS tree structure
+}
+
 // DefaultConfig returns configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -56,6 +61,9 @@ func DefaultConfig() *Config {
 			IdleEnabled:     true,
 			IdleTimeout:     300,
 			StartPaused:     true,
+		},
+		VFS: VFSConfig{
+			TreeTTL: 30, // 30 seconds
 		},
 	}
 }

@@ -107,6 +107,20 @@ type UnmatchedAssignment struct {
 	Episode  int    `json:"episode"`
 }
 
+// parseID parses and validates an ID parameter
+func parseID(c *gin.Context, param string) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param(param), 10, 64)
+	if err != nil {
+		errorResponse(c, http.StatusBadRequest, "Invalid ID format")
+		return 0, false
+	}
+	if id <= 0 {
+		errorResponse(c, http.StatusBadRequest, "ID must be positive")
+		return 0, false
+	}
+	return id, true
+}
+
 // Movie handlers
 
 func (s *Server) listMovies(c *gin.Context) {
@@ -119,7 +133,10 @@ func (s *Server) listMovies(c *gin.Context) {
 	// Get assignments for each movie
 	response := make([]MovieResponse, len(movies))
 	for i, movie := range movies {
-		assignment, _ := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
+		assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
+		if err != nil {
+			slog.Error("Failed to get assignment for movie", "movie_id", movie.ID, "error", err)
+		}
 		response[i] = toMovieResponse(movie, assignment)
 	}
 
@@ -166,9 +183,8 @@ func (s *Server) createMovie(c *gin.Context) {
 }
 
 func (s *Server) getMovie(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -182,19 +198,23 @@ func (s *Server) getMovie(c *gin.Context) {
 		return
 	}
 
-	assignment, _ := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
+	assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
+	if err != nil {
+		slog.Error("Failed to get assignment for movie", "movie_id", movie.ID, "error", err)
+	}
 	c.JSON(http.StatusOK, toMovieResponse(movie, assignment))
 }
 
 func (s *Server) deleteMovie(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
 	// Deactivate assignments first
-	_ = s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id)
+	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id); err != nil {
+		slog.Error("Failed to deactivate assignments for movie", "movie_id", id, "error", err)
+	}
 
 	if err := s.movieRepo.Delete(id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
@@ -205,9 +225,8 @@ func (s *Server) deleteMovie(c *gin.Context) {
 }
 
 func (s *Server) assignMovieTorrent(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -287,9 +306,8 @@ func (s *Server) assignMovieTorrent(c *gin.Context) {
 }
 
 func (s *Server) unassignMovieTorrent(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -338,7 +356,10 @@ func (s *Server) createShow(c *gin.Context) {
 	}
 	if existing != nil {
 		// Return existing with seasons
-		show, _ := s.showRepo.GetWithSeasonsAndEpisodes(existing.ID)
+		show, err := s.showRepo.GetWithSeasonsAndEpisodes(existing.ID)
+		if err != nil {
+			slog.Error("Failed to get show with seasons", "show_id", existing.ID, "error", err)
+		}
 		c.JSON(http.StatusOK, toShowResponse(show))
 		return
 	}
@@ -378,12 +399,14 @@ func (s *Server) createShow(c *gin.Context) {
 			SeasonNumber: seasonNum,
 		}
 		if err := s.showRepo.CreateSeason(season); err != nil {
-			continue // Skip on error
+			slog.Error("Failed to create season", "show_id", show.ID, "season", seasonNum, "error", err)
+			continue
 		}
 
 		// Fetch episodes from TMDB
 		tmdbSeason, err := s.tmdbClient.GetSeason(req.TMDBID, seasonNum)
 		if err != nil {
+			slog.Error("Failed to fetch season from TMDB", "tmdb_id", req.TMDBID, "season", seasonNum, "error", err)
 			continue
 		}
 
@@ -393,21 +416,25 @@ func (s *Server) createShow(c *gin.Context) {
 				EpisodeNumber: ep.EpisodeNumber,
 				Name:          ep.Name,
 			}
-			_ = s.showRepo.CreateEpisode(episode)
+			if err := s.showRepo.CreateEpisode(episode); err != nil {
+				slog.Error("Failed to create episode", "season_id", season.ID, "episode", ep.EpisodeNumber, "error", err)
+			}
 		}
 
 		show.Seasons = append(show.Seasons, *season)
 	}
 
 	// Reload with full data
-	show, _ = s.showRepo.GetWithSeasonsAndEpisodes(show.ID)
+	show, err = s.showRepo.GetWithSeasonsAndEpisodes(show.ID)
+	if err != nil {
+		slog.Error("Failed to reload show with seasons", "show_id", show.ID, "error", err)
+	}
 	c.JSON(http.StatusCreated, toShowResponse(show))
 }
 
 func (s *Server) getShow(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -425,7 +452,10 @@ func (s *Server) getShow(c *gin.Context) {
 	for i := range show.Seasons {
 		for j := range show.Seasons[i].Episodes {
 			ep := &show.Seasons[i].Episodes[j]
-			assignment, _ := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, ep.ID)
+			assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, ep.ID)
+			if err != nil {
+				slog.Error("Failed to get assignment for episode", "episode_id", ep.ID, "error", err)
+			}
 			ep.Assignment = assignment
 		}
 	}
@@ -434,18 +464,22 @@ func (s *Server) getShow(c *gin.Context) {
 }
 
 func (s *Server) deleteShow(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
 	// Get all episodes to deactivate their assignments
-	show, _ := s.showRepo.GetWithSeasonsAndEpisodes(id)
+	show, err := s.showRepo.GetWithSeasonsAndEpisodes(id)
+	if err != nil {
+		slog.Error("Failed to get show for deletion", "show_id", id, "error", err)
+	}
 	if show != nil {
 		for _, season := range show.Seasons {
 			for _, ep := range season.Episodes {
-				_ = s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, ep.ID)
+				if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, ep.ID); err != nil {
+					slog.Error("Failed to deactivate assignment for episode", "episode_id", ep.ID, "error", err)
+				}
 			}
 		}
 	}
@@ -461,9 +495,8 @@ func (s *Server) deleteShow(c *gin.Context) {
 // Show assignment handler - auto-detects episodes from torrent
 
 func (s *Server) assignShowTorrent(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -587,9 +620,8 @@ func (s *Server) assignShowTorrent(c *gin.Context) {
 // Episode handlers
 
 func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Invalid ID")
+	id, ok := parseID(c, "id")
+	if !ok {
 		return
 	}
 
