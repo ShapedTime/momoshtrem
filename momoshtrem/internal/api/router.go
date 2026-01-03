@@ -98,6 +98,13 @@ func (s *Server) setupRoutes() {
 	// Episodes - only unassign, assignment is done via show-level API
 	api.DELETE("/episodes/:id/assign", s.unassignEpisodeTorrent)
 
+	// Torrents - torrent management
+	api.GET("/torrents", s.listTorrents)
+	api.GET("/torrents/:hash", s.getTorrent)
+	api.DELETE("/torrents/:hash", s.deleteTorrent)
+	api.POST("/torrents/:hash/pause", s.pauseTorrent)
+	api.POST("/torrents/:hash/resume", s.resumeTorrent)
+
 	// Status
 	api.GET("/status", s.getStatus)
 }

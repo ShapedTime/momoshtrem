@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 	"github.com/shapedtime/momoshtrem/internal/webdav"
 )
@@ -69,13 +71,98 @@ func main() {
 		tmdbClient = tmdb.NewClient("") // Empty client will fail on API calls
 	}
 
+	// Initialize torrent storage
+	pieceStorage, _, pieceCompletion, err := torrent.InitStorage(
+		cfg.Torrent.MetadataFolder,
+		cfg.Torrent.GlobalCacheSize,
+	)
+	if err != nil {
+		slog.Error("Failed to initialize torrent storage", "error", err)
+		os.Exit(1)
+	}
+	defer pieceCompletion.Close()
+	slog.Info("Torrent storage initialized",
+		"metadata_folder", cfg.Torrent.MetadataFolder,
+		"cache_size_mb", cfg.Torrent.GlobalCacheSize,
+	)
+
+	// Initialize DHT item store
+	itemStore, err := torrent.NewItemStore(
+		filepath.Join(cfg.Torrent.MetadataFolder, "dht-items"),
+		2*time.Hour,
+	)
+	if err != nil {
+		slog.Error("Failed to initialize DHT item store", "error", err)
+		os.Exit(1)
+	}
+	defer itemStore.Close()
+
+	// Get or create peer ID
+	peerID, err := torrent.GetOrCreatePeerID(
+		filepath.Join(cfg.Torrent.MetadataFolder, "peer-id"),
+	)
+	if err != nil {
+		slog.Error("Failed to get peer ID", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Peer ID initialized")
+
+	// Create torrent client
+	torrentClient, err := torrent.NewClient(&cfg.Torrent, &torrent.ClientConfig{
+		Storage:         pieceStorage,
+		ItemStore:       itemStore,
+		PeerID:          peerID,
+		PieceCompletion: pieceCompletion,
+	})
+	if err != nil {
+		slog.Error("Failed to create torrent client", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Torrent client created")
+
+	// Create activity manager (if idle mode enabled)
+	var activityManager *torrent.ActivityManager
+	if cfg.Torrent.IdleEnabled {
+		activityManager = torrent.NewActivityManager(
+			time.Duration(cfg.Torrent.IdleTimeout)*time.Second,
+			cfg.Torrent.StartPaused,
+		)
+		activityManager.Start()
+		slog.Info("Activity manager started",
+			"idle_timeout_seconds", cfg.Torrent.IdleTimeout,
+			"start_paused", cfg.Torrent.StartPaused,
+		)
+	}
+
+	// Create torrent service
+	torrentService := torrent.NewService(
+		torrentClient,
+		activityManager,
+		time.Duration(cfg.Torrent.AddTimeout)*time.Second,
+		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
+	)
+	slog.Info("Torrent service initialized",
+		"add_timeout_seconds", cfg.Torrent.AddTimeout,
+		"read_timeout_seconds", cfg.Torrent.ReadTimeout,
+	)
+
 	// Initialize VFS
 	libraryFS := vfs.NewLibraryFS(movieRepo, showRepo, assignmentRepo, cfg.VFS.TreeTTL)
 	slog.Info("VFS initialized", "tree_ttl_seconds", cfg.VFS.TreeTTL)
 
-	// Initialize servers
-	// Note: torrent service is nil until Stage 2 implementation
-	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, nil)
+	// Wire torrent service into VFS
+	var activityCallback func(string)
+	if activityManager != nil {
+		activityCallback = activityManager.MarkActive
+	}
+	libraryFS.SetTorrentService(
+		torrentService,
+		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
+		activityCallback,
+	)
+
+	// Initialize servers with torrent service
+	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService)
 	webdavServer := webdav.NewServer(libraryFS)
 
 	// Start HTTP servers
@@ -120,12 +207,26 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Shutdown HTTP servers
 	if err := httpServer.Shutdown(ctx); err != nil {
 		slog.Error("REST API server shutdown error", "error", err)
 	}
 	if err := webdavHTTPServer.Shutdown(ctx); err != nil {
 		slog.Error("WebDAV server shutdown error", "error", err)
 	}
+
+	// Stop activity manager
+	if activityManager != nil {
+		activityManager.Stop()
+	}
+
+	// Close torrent service
+	if err := torrentService.Close(); err != nil {
+		slog.Error("Torrent service close error", "error", err)
+	}
+
+	// Close torrent client
+	torrentClient.Close()
 
 	slog.Info("momoshtrem stopped")
 }

@@ -9,10 +9,11 @@ import (
 
 // Common errors
 var (
-	ErrTorrentNotFound    = errors.New("torrent not found")
-	ErrMetadataTimeout    = errors.New("timeout waiting for torrent metadata")
-	ErrInvalidMagnet      = errors.New("invalid magnet URI")
-	ErrNoFiles            = errors.New("torrent contains no files")
+	ErrTorrentNotFound = errors.New("torrent not found")
+	ErrMetadataTimeout = errors.New("timeout waiting for torrent metadata")
+	ErrInvalidMagnet   = errors.New("invalid magnet URI")
+	ErrNoFiles         = errors.New("torrent contains no files")
+	ErrFileNotFound    = errors.New("file not found in torrent")
 )
 
 // TorrentInfo contains information about an added torrent
@@ -38,9 +39,9 @@ type TorrentStatus struct {
 	IsPaused      bool
 }
 
-// Service manages torrent operations
-// This interface is used by the API handlers to add torrents and get file metadata.
-// The actual implementation using anacrolix/torrent is a Stage 2 task.
+// Service manages torrent operations.
+// This interface is used by the API handlers to add torrents and get file metadata,
+// and by the VFS layer to stream file content.
 type Service interface {
 	// AddTorrent adds a torrent by magnet URI, waits for metadata,
 	// and returns information about the torrent including its files.
@@ -56,6 +57,11 @@ type Service interface {
 
 	// GetOrAddTorrent returns an existing torrent or adds it if not present.
 	GetOrAddTorrent(magnetURI string) (*TorrentInfo, error)
+
+	// GetFile returns a file handle for streaming a specific file from a torrent.
+	// Returns ErrTorrentNotFound if the torrent is not loaded.
+	// Returns ErrFileNotFound if the file path doesn't exist in the torrent.
+	GetFile(infoHash string, filePath string) (TorrentFileHandle, error)
 
 	// RemoveTorrent removes a torrent from the client.
 	// If deleteData is true, also deletes downloaded data.
@@ -75,6 +81,25 @@ type Service interface {
 
 	// Close shuts down the torrent service.
 	Close() error
+}
+
+// TorrentFileHandle provides access to a file within a torrent for streaming.
+type TorrentFileHandle interface {
+	// Path returns the file path within the torrent.
+	Path() string
+	// Length returns the file size in bytes.
+	Length() int64
+	// NewReader creates a new reader for the file content.
+	NewReader() TorrentReader
+}
+
+// TorrentReader provides reading capabilities for torrent file content.
+type TorrentReader interface {
+	Read(p []byte) (n int, err error)
+	Seek(offset int64, whence int) (int64, error)
+	Close() error
+	// SetResponsive prioritizes the current reading position.
+	SetResponsive()
 }
 
 // extractInfoHash extracts the info hash from a magnet URI

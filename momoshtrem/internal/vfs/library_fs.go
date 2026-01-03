@@ -9,6 +9,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // LibraryFS implements Filesystem backed by the library database
@@ -17,6 +18,11 @@ type LibraryFS struct {
 	movieRepo      *library.MovieRepository
 	showRepo       *library.ShowRepository
 	assignmentRepo *library.AssignmentRepository
+
+	// Torrent service for file streaming (Stage 2)
+	torrentService torrent.Service
+	readTimeout    time.Duration
+	onActivity     func(hash string)
 
 	// Cached tree structure
 	tree        *DirectoryTree
@@ -56,6 +62,21 @@ func NewLibraryFS(
 	}
 }
 
+// SetTorrentService configures the torrent service for file streaming.
+// This should be called after creating the LibraryFS but before serving requests.
+func (fs *LibraryFS) SetTorrentService(
+	svc torrent.Service,
+	readTimeout time.Duration,
+	onActivity func(hash string),
+) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.torrentService = svc
+	fs.readTimeout = readTimeout
+	fs.onActivity = onActivity
+	slog.Info("VFS torrent service configured", "read_timeout_seconds", readTimeout.Seconds())
+}
+
 // Open returns a file handle for reading
 func (fs *LibraryFS) Open(filepath string) (File, error) {
 	fs.ensureTree()
@@ -73,11 +94,50 @@ func (fs *LibraryFS) Open(filepath string) (File, error) {
 	case *VirtualDir:
 		return &DirFile{dir: e}, nil
 	case *PlaceholderFile:
-		// Stage 1: Return placeholder (no torrent backend yet)
+		// If torrent service is available and file has assignment, return real torrent file
+		if fs.torrentService != nil && e.assignment != nil {
+			return fs.openTorrentFile(e)
+		}
+		// Fallback: return placeholder (Stage 1 behavior)
 		return e, nil
 	default:
 		return nil, os.ErrNotExist
 	}
+}
+
+// openTorrentFile creates a TorrentFile for streaming from a PlaceholderFile.
+func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
+	assignment := pf.assignment
+
+	// Ensure torrent is loaded (lazy loading via GetOrAddTorrent)
+	_, err := fs.torrentService.GetOrAddTorrent(assignment.MagnetURI)
+	if err != nil {
+		slog.Error("Failed to load torrent for file",
+			"info_hash", assignment.InfoHash,
+			"file_path", assignment.FilePath,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	// Get the specific file handle from the torrent
+	handle, err := fs.torrentService.GetFile(assignment.InfoHash, assignment.FilePath)
+	if err != nil {
+		slog.Error("Failed to get file from torrent",
+			"info_hash", assignment.InfoHash,
+			"file_path", assignment.FilePath,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	return NewTorrentFile(
+		handle,
+		pf.name,
+		assignment.InfoHash,
+		fs.readTimeout,
+		fs.onActivity,
+	), nil
 }
 
 // ReadDir returns directory contents
