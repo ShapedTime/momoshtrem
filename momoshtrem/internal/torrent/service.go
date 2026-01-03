@@ -4,6 +4,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/anacrolix/torrent"
+
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
 
@@ -91,6 +93,10 @@ type TorrentFileHandle interface {
 	Length() int64
 	// NewReader creates a new reader for the file content.
 	NewReader() TorrentReader
+	// Torrent returns the underlying torrent for piece prioritization.
+	Torrent() *torrent.Torrent
+	// File returns the underlying file for piece prioritization.
+	File() *torrent.File
 }
 
 // TorrentReader provides reading capabilities for torrent file content.

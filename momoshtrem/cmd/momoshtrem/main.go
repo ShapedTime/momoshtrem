@@ -15,6 +15,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
@@ -150,15 +151,33 @@ func main() {
 	libraryFS := vfs.NewLibraryFS(movieRepo, showRepo, assignmentRepo, cfg.VFS.TreeTTL)
 	slog.Info("VFS initialized", "tree_ttl_seconds", cfg.VFS.TreeTTL)
 
-	// Wire torrent service into VFS
+	// Wire torrent service into VFS with streaming optimization
 	var activityCallback func(string)
 	if activityManager != nil {
 		activityCallback = activityManager.MarkActive
 	}
+
+	// Create streaming config from application config
+	streamingCfg := streaming.Config{
+		HeaderPriorityBytes: cfg.Streaming.HeaderPriorityBytes,
+		FooterPriorityBytes: cfg.Streaming.FooterPriorityBytes,
+		ReadaheadBytes:      cfg.Streaming.ReadaheadBytes,
+		UrgentBufferBytes:   cfg.Streaming.UrgentBufferBytes,
+	}
+	if streamingCfg.IsZero() {
+		streamingCfg = streaming.DefaultConfig()
+	}
+	slog.Info("Streaming optimization configured",
+		"header_priority_mb", streamingCfg.HeaderPriorityBytes/(1024*1024),
+		"footer_priority_mb", streamingCfg.FooterPriorityBytes/(1024*1024),
+		"readahead_mb", streamingCfg.ReadaheadBytes/(1024*1024),
+	)
+
 	libraryFS.SetTorrentService(
 		torrentService,
 		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
 		activityCallback,
+		streamingCfg,
 	)
 
 	// Initialize servers with torrent service

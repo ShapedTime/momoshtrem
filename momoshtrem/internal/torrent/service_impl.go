@@ -345,6 +345,14 @@ func (f *fileHandle) NewReader() TorrentReader {
 	return &readerWrapper{reader: reader}
 }
 
+func (f *fileHandle) Torrent() *torrent.Torrent {
+	return f.file.Torrent()
+}
+
+func (f *fileHandle) File() *torrent.File {
+	return f.file
+}
+
 // readerWrapper wraps a torrent.Reader to implement TorrentReader.
 type readerWrapper struct {
 	reader torrent.Reader

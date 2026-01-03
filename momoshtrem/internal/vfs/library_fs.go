@@ -9,6 +9,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -23,6 +24,9 @@ type LibraryFS struct {
 	torrentService torrent.Service
 	readTimeout    time.Duration
 	onActivity     func(hash string)
+
+	// Streaming optimization config (Stage 3)
+	streamingCfg streaming.Config
 
 	// Cached tree structure
 	tree        *DirectoryTree
@@ -68,13 +72,19 @@ func (fs *LibraryFS) SetTorrentService(
 	svc torrent.Service,
 	readTimeout time.Duration,
 	onActivity func(hash string),
+	streamingCfg streaming.Config,
 ) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	fs.torrentService = svc
 	fs.readTimeout = readTimeout
 	fs.onActivity = onActivity
-	slog.Info("VFS torrent service configured", "read_timeout_seconds", readTimeout.Seconds())
+	fs.streamingCfg = streamingCfg
+	slog.Info("VFS torrent service configured",
+		"read_timeout_seconds", readTimeout.Seconds(),
+		"header_priority_mb", streamingCfg.HeaderPriorityBytes/(1024*1024),
+		"readahead_mb", streamingCfg.ReadaheadBytes/(1024*1024),
+	)
 }
 
 // Open returns a file handle for reading
@@ -137,6 +147,7 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		assignment.InfoHash,
 		fs.readTimeout,
 		fs.onActivity,
+		fs.streamingCfg,
 	), nil
 }
 

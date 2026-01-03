@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/common"
+	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -15,15 +16,19 @@ import (
 var _ File = (*TorrentFile)(nil)
 
 // TorrentFile wraps a torrent file handle with VFS File interface.
-// It provides lazy reader initialization, timeout handling, and activity tracking.
+// It provides lazy reader initialization, timeout handling, activity tracking,
+// and intelligent piece prioritization for optimal streaming performance.
 type TorrentFile struct {
 	mu     sync.Mutex
 	handle torrent.TorrentFileHandle
-	reader torrent.TorrentReader
+	reader *streaming.PriorityReader
 
 	name        string
 	hash        string
 	readTimeout time.Duration
+
+	// Streaming optimization config
+	streamingCfg streaming.Config
 
 	// Activity callback for idle mode tracking
 	onActivity func(hash string)
@@ -36,23 +41,36 @@ func NewTorrentFile(
 	hash string,
 	readTimeout time.Duration,
 	onActivity func(hash string),
+	streamingCfg streaming.Config,
 ) *TorrentFile {
 	return &TorrentFile{
-		handle:      handle,
-		name:        name,
-		hash:        hash,
-		readTimeout: readTimeout,
-		onActivity:  onActivity,
+		handle:       handle,
+		name:         name,
+		hash:         hash,
+		readTimeout:  readTimeout,
+		onActivity:   onActivity,
+		streamingCfg: streamingCfg,
 	}
 }
 
-// ensureReader lazily initializes the reader.
+// ensureReader lazily initializes the reader with priority-aware streaming.
 func (f *TorrentFile) ensureReader() {
 	if f.reader != nil {
 		return
 	}
-	f.reader = f.handle.NewReader()
-	f.reader.SetResponsive() // Prioritize current position for streaming
+
+	// Create activity callback that includes the hash
+	onActivity := func() {
+		f.markActivity()
+	}
+
+	// Create priority-aware reader for optimized streaming
+	f.reader = streaming.NewPriorityReader(
+		f.handle.Torrent(),
+		f.handle.File(),
+		f.streamingCfg,
+		onActivity,
+	)
 }
 
 // markActivity notifies the activity manager that this torrent is being accessed.
@@ -155,16 +173,7 @@ func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 }
 
 // readContext reads using a context for timeout/cancellation.
-// If the reader supports ReadContext, use it; otherwise fall back to goroutine.
 func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
-	// Check if reader supports ReadContext
-	if rc, ok := f.reader.(interface {
-		ReadContext(context.Context, []byte) (int, error)
-	}); ok {
-		return rc.ReadContext(ctx, p)
-	}
-
-	// Fallback: read in goroutine with context cancellation
 	type result struct {
 		n   int
 		err error

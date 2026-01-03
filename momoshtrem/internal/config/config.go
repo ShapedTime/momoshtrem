@@ -9,11 +9,12 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Torrent  TorrentConfig  `yaml:"torrent"`
-	TMDB     TMDBConfig     `yaml:"tmdb"`
-	VFS      VFSConfig      `yaml:"vfs"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Torrent   TorrentConfig   `yaml:"torrent"`
+	TMDB      TMDBConfig      `yaml:"tmdb"`
+	VFS       VFSConfig       `yaml:"vfs"`
+	Streaming StreamingConfig `yaml:"streaming"`
 }
 
 type ServerConfig struct {
@@ -43,6 +44,14 @@ type VFSConfig struct {
 	TreeTTL int `yaml:"tree_ttl"` // seconds - how long to cache VFS tree structure
 }
 
+// StreamingConfig configures streaming optimization for video playback
+type StreamingConfig struct {
+	HeaderPriorityBytes int64 `yaml:"header_priority_bytes"` // Bytes at start to prioritize (default: 10MB)
+	FooterPriorityBytes int64 `yaml:"footer_priority_bytes"` // Bytes at end to prioritize (default: 5MB)
+	ReadaheadBytes      int64 `yaml:"readahead_bytes"`       // Bytes to read ahead (default: 16MB)
+	UrgentBufferBytes   int64 `yaml:"urgent_buffer_bytes"`   // Immediate buffer around seek (default: 2MB)
+}
+
 // DefaultConfig returns configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -64,6 +73,12 @@ func DefaultConfig() *Config {
 		},
 		VFS: VFSConfig{
 			TreeTTL: 30, // 30 seconds
+		},
+		Streaming: StreamingConfig{
+			HeaderPriorityBytes: 10 * 1024 * 1024, // 10MB
+			FooterPriorityBytes: 5 * 1024 * 1024,  // 5MB
+			ReadaheadBytes:      16 * 1024 * 1024, // 16MB
+			UrgentBufferBytes:   2 * 1024 * 1024,  // 2MB
 		},
 	}
 }
