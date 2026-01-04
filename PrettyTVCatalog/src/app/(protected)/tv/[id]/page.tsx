@@ -3,8 +3,10 @@
 import { useParams } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import { useTVShow, useSeason } from '@/hooks/useTMDB';
+import { useLibraryStatus } from '@/hooks/useLibrary';
 import { TorrentSearchModal } from '@/components/torrent';
 import type { TorrentSearchContext } from '@/types/jackett';
+import type { LibraryStatus } from '@/types/momoshtrem';
 import { extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -54,6 +56,26 @@ export default function TVShowPage() {
 
   // Fetch show details
   const { data: show, isLoading: showLoading, error: showError } = useTVShow(showId);
+
+  // Library status
+  const {
+    status: libraryStatus,
+    refresh: refreshLibraryStatus,
+  } = useLibraryStatus('tv', showId || 0);
+
+  // Local state for optimistic updates
+  const [localLibraryStatus, setLocalLibraryStatus] = useState<LibraryStatus>('not_in_library');
+
+  // Sync library status from hook
+  useEffect(() => {
+    setLocalLibraryStatus(libraryStatus);
+  }, [libraryStatus]);
+
+  // Handler for library status changes
+  const handleLibraryStatusChange = useCallback((newStatus: LibraryStatus) => {
+    setLocalLibraryStatus(newStatus);
+    refreshLibraryStatus();
+  }, [refreshLibraryStatus]);
 
   // Selected season state (null until show loads)
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
@@ -122,6 +144,12 @@ export default function TVShowPage() {
     [show, showId]
   );
 
+  // Handler for torrent modal close (may need to refresh status)
+  const handleTorrentModalClose = useCallback(() => {
+    setIsTorrentModalOpen(false);
+    refreshLibraryStatus();
+  }, [refreshLibraryStatus]);
+
   // Invalid ID state
   if (!showId || isNaN(showId)) {
     return <ErrorState message="Invalid TV show ID" />;
@@ -174,6 +202,9 @@ export default function TVShowPage() {
         releaseDate={releaseDate}
         genres={show.genres}
         mediaType="tv"
+        tmdbId={showId}
+        libraryStatus={localLibraryStatus}
+        onLibraryStatusChange={handleLibraryStatusChange}
         onSearchTorrents={handleSearchTorrents}
       />
 
@@ -212,7 +243,7 @@ export default function TVShowPage() {
       {torrentContext && (
         <TorrentSearchModal
           isOpen={isTorrentModalOpen}
-          onClose={() => setIsTorrentModalOpen(false)}
+          onClose={handleTorrentModalClose}
           context={torrentContext}
         />
       )}
