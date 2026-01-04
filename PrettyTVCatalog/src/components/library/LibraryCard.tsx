@@ -2,16 +2,19 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { buildImageUrl } from '@/config/tmdb';
 import { LibraryStatusBadge } from './LibraryStatusBadge';
 import type { LibraryMovie, LibraryShow, LibraryStatus } from '@/types/momoshtrem';
+import type { TorrentStatus } from '@/types/torrent';
 
 interface LibraryCardProps {
   item: LibraryMovie | LibraryShow;
   mediaType: 'movie' | 'tv';
   posterPath?: string | null;
   onRemove?: (id: number, mediaType: 'movie' | 'tv') => void;
+  /** Optional torrent status for visual border/glow indicator */
+  torrentStatus?: TorrentStatus | null;
 }
 
 function FilmIcon({ size = 48 }: { size?: number }) {
@@ -73,13 +76,52 @@ function getLibraryStatus(item: LibraryMovie | LibraryShow, mediaType: 'movie' |
   }
 }
 
-export function LibraryCard({ item, mediaType, posterPath, onRemove }: LibraryCardProps) {
+/**
+ * Get border/glow classes based on torrent status.
+ * - No assignment: No border
+ * - Has assignment, downloading: Blue ring + blue glow
+ * - Has assignment, complete/seeding: Green ring + green glow
+ * - Has assignment, paused: Yellow ring
+ */
+function getTorrentBorderClasses(
+  hasAssignment: boolean,
+  torrentStatus: TorrentStatus | null | undefined
+): string {
+  if (!hasAssignment) return '';
+
+  if (!torrentStatus) {
+    // Has assignment but torrent not active (no status available)
+    // Show a subtle white ring to indicate assigned but not downloading
+    return 'ring-1 ring-white/20';
+  }
+
+  if (torrentStatus.is_paused) {
+    return 'ring-2 ring-accent-yellow';
+  }
+
+  if (torrentStatus.progress >= 1) {
+    // Complete/seeding
+    return 'ring-2 ring-accent-green shadow-lg shadow-accent-green/20';
+  }
+
+  // Downloading
+  return 'ring-2 ring-accent-blue shadow-lg shadow-accent-blue/20';
+}
+
+export function LibraryCard({ item, mediaType, posterPath, onRemove, torrentStatus }: LibraryCardProps) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
 
   const href = mediaType === 'movie' ? `/movie/${item.tmdb_id}` : `/tv/${item.tmdb_id}`;
   const posterUrl = posterPath ? buildImageUrl(posterPath, 'poster', 'medium') : null;
   const status = getLibraryStatus(item, mediaType);
+  const hasAssignment = status === 'has_assignment';
+
+  // Compute border/glow classes based on torrent status
+  const borderClasses = useMemo(
+    () => getTorrentBorderClasses(hasAssignment, torrentStatus),
+    [hasAssignment, torrentStatus]
+  );
 
   const handleRemoveClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -115,12 +157,13 @@ export function LibraryCard({ item, mediaType, posterPath, onRemove }: LibraryCa
       >
         {/* Poster container */}
         <div
-          className="
+          className={`
             relative aspect-[2/3] rounded-md overflow-hidden
             bg-bg-elevated
-            transition-transform duration-200 motion-reduce:transition-none
+            transition-all duration-200 motion-reduce:transition-none
             group-hover:scale-105 group-hover:z-10
-          "
+            ${borderClasses}
+          `}
         >
           {posterUrl ? (
             <Image

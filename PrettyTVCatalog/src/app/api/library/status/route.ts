@@ -60,9 +60,9 @@ export async function GET(
       }
 
       // Check if any episode has assignment
-      const hasAnyAssignment = show.seasons.some((season) =>
-        season.episodes.some((episode) => episode.has_assignment)
-      );
+      const hasAnyAssignment = show.seasons?.some((season) =>
+        season.episodes?.some((episode) => episode.has_assignment)
+      ) ?? false;
 
       return NextResponse.json({
         status: hasAnyAssignment ? 'has_assignment' : 'in_library',

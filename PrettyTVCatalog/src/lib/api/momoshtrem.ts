@@ -7,6 +7,7 @@ import type {
   ShowAssignmentResponse,
   MomoshtremError,
 } from '@/types/momoshtrem';
+import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
 
 /**
  * momoshtrem API client.
@@ -273,10 +274,14 @@ class MomoshtremClient {
   /**
    * Find a show in the library by TMDB ID.
    * Returns null if not found.
+   * Fetches full show data including seasons and episodes.
    */
   async findShowByTmdbId(tmdbId: number): Promise<LibraryShow | null> {
     const shows = await this.getShows();
-    return shows.find((s) => s.tmdb_id === tmdbId) || null;
+    const show = shows.find((s) => s.tmdb_id === tmdbId);
+    if (!show) return null;
+    // Fetch full show data including seasons
+    return this.getShow(show.id);
   }
 
   /**
@@ -379,6 +384,86 @@ class MomoshtremClient {
     if (!magnetUri || !magnetUri.startsWith('magnet:?')) {
       throw new ValidationError('Invalid magnet URI');
     }
+  }
+
+  // ============================================================================
+  // Torrent Management API
+  // ============================================================================
+
+  /**
+   * Get all active torrents with their status.
+   */
+  async getTorrents(): Promise<TorrentStatus[]> {
+    const result = await this.request<TorrentListResponse>(
+      'GET',
+      '/api/torrents',
+      undefined,
+      'get torrents'
+    );
+    return result?.torrents || [];
+  }
+
+  /**
+   * Get detailed status for a specific torrent.
+   */
+  async getTorrentStatus(infoHash: string): Promise<TorrentStatus> {
+    return this.request<TorrentStatus>(
+      'GET',
+      `/api/torrents/${infoHash}`,
+      undefined,
+      'get torrent status'
+    );
+  }
+
+  /**
+   * Remove a torrent.
+   * @param infoHash - The torrent info hash
+   * @param deleteData - If true, also deletes downloaded data
+   */
+  async removeTorrent(infoHash: string, deleteData = false): Promise<void> {
+    const query = deleteData ? '?delete_data=true' : '';
+    await this.request<void>(
+      'DELETE',
+      `/api/torrents/${infoHash}${query}`,
+      undefined,
+      'remove torrent'
+    );
+  }
+
+  /**
+   * Pause a torrent.
+   */
+  async pauseTorrent(infoHash: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/torrents/${infoHash}/pause`,
+      undefined,
+      'pause torrent'
+    );
+  }
+
+  /**
+   * Resume a paused torrent.
+   */
+  async resumeTorrent(infoHash: string): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/torrents/${infoHash}/resume`,
+      undefined,
+      'resume torrent'
+    );
+  }
+
+  /**
+   * Unassign torrent from a specific episode.
+   */
+  async unassignEpisodeTorrent(episodeId: number): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/episodes/${episodeId}/assign`,
+      undefined,
+      'unassign episode torrent'
+    );
   }
 }
 

@@ -13,3 +13,5 @@ export { useTorrentSearch, sortTorrents, filterByQuality } from './useJackett';
 export { useLibrary, useLibraryStatus, useRemoveFromLibrary } from './useLibrary';
 
 export { useAddToLibrary, useAddTorrent, isShowResponse } from './useAddToLibrary';
+
+export { useTorrents, useTorrentStatus } from './useTorrents';

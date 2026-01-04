@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { LibraryGrid } from '@/components/library';
+import { useTorrents } from '@/hooks';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 
 interface LibraryState {
@@ -23,6 +24,9 @@ export default function LibraryPage() {
     error: null,
   });
   const [posterPaths, setPosterPaths] = useState<PosterPaths>({});
+
+  // Fetch torrent status for border/glow indicators (auto-refresh every 5 seconds)
+  const { torrentMap } = useTorrents({ autoRefresh: true, refreshInterval: 5000 });
 
   const fetchLibrary = useCallback(async () => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
@@ -131,6 +135,7 @@ export default function LibraryPage() {
           isLoading={state.isLoading}
           posterPaths={posterPaths}
           onRefresh={fetchLibrary}
+          torrentStatusMap={torrentMap}
         />
       )}
     </main>

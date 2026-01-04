@@ -1,12 +1,13 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTVShow, useSeason } from '@/hooks/useTMDB';
 import { useLibraryStatus } from '@/hooks/useLibrary';
+import { useTorrents } from '@/hooks/useTorrents';
 import { TorrentSearchModal } from '@/components/torrent';
 import type { TorrentSearchContext } from '@/types/jackett';
-import type { LibraryStatus } from '@/types/momoshtrem';
+import type { LibraryStatus, LibraryShow } from '@/types/momoshtrem';
 import { extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -17,6 +18,7 @@ import {
   SeasonPickerSkeleton,
   EpisodeList,
   EpisodeListSkeleton,
+  type EpisodeAssignmentInfo,
 } from '@/components/media';
 import { Button, AlertCircleIcon, Breadcrumb } from '@/components/ui';
 
@@ -60,16 +62,49 @@ export default function TVShowPage() {
   // Library status
   const {
     status: libraryStatus,
+    libraryId,
+    hasAssignment,
     refresh: refreshLibraryStatus,
   } = useLibraryStatus('tv', showId || 0);
 
   // Local state for optimistic updates
   const [localLibraryStatus, setLocalLibraryStatus] = useState<LibraryStatus>('not_in_library');
 
+  // Library show data (for episode assignments)
+  const [libraryShow, setLibraryShow] = useState<LibraryShow | null>(null);
+
+  // Fetch torrent statuses
+  const { torrentMap, refresh: refreshTorrents } = useTorrents({
+    autoRefresh: hasAssignment,
+    refreshInterval: 5000,
+  });
+
   // Sync library status from hook
   useEffect(() => {
     setLocalLibraryStatus(libraryStatus);
   }, [libraryStatus]);
+
+  // Fetch library show data when in library
+  useEffect(() => {
+    const fetchLibraryShow = async () => {
+      if (!libraryId) {
+        setLibraryShow(null);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/library/shows/${libraryId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setLibraryShow(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch library show:', err);
+      }
+    };
+
+    fetchLibraryShow();
+  }, [libraryId]);
 
   // Handler for library status changes
   const handleLibraryStatusChange = useCallback((newStatus: LibraryStatus) => {
@@ -150,6 +185,57 @@ export default function TVShowPage() {
     refreshLibraryStatus();
   }, [refreshLibraryStatus]);
 
+  // Build episode assignments map for the current season
+  const episodeAssignments = useMemo(() => {
+    if (!libraryShow || selectedSeason === null) {
+      return new Map<number, EpisodeAssignmentInfo>();
+    }
+
+    const librarySeason = libraryShow.seasons?.find(
+      (s) => s.season_number === selectedSeason
+    );
+
+    if (!librarySeason) {
+      return new Map<number, EpisodeAssignmentInfo>();
+    }
+
+    const map = new Map<number, EpisodeAssignmentInfo>();
+    for (const ep of librarySeason.episodes) {
+      if (ep.has_assignment && ep.assignment) {
+        map.set(ep.episode_number, {
+          episodeId: ep.id,
+          assignment: ep.assignment,
+          torrentStatus: torrentMap.get(ep.assignment.info_hash) || null,
+        });
+      }
+    }
+
+    return map;
+  }, [libraryShow, selectedSeason, torrentMap]);
+
+  // Handler for unassigning episode torrent
+  const handleUnassignEpisode = useCallback(async (episodeId: number) => {
+    try {
+      const res = await fetch(`/api/episodes/${episodeId}/assign`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        // Refresh library show data to update assignments
+        if (libraryId) {
+          const showRes = await fetch(`/api/library/shows/${libraryId}`);
+          if (showRes.ok) {
+            const data = await showRes.json();
+            setLibraryShow(data);
+          }
+        }
+        refreshTorrents();
+      }
+    } catch (err) {
+      console.error('Failed to unassign episode:', err);
+    }
+  }, [libraryId, refreshTorrents]);
+
   // Invalid ID state
   if (!showId || isNaN(showId)) {
     return <ErrorState message="Invalid TV show ID" />;
@@ -228,6 +314,8 @@ export default function TVShowPage() {
             showName={show.name}
             seasonNumber={selectedSeason || 1}
             onSearchTorrents={handleEpisodeTorrentSearch}
+            episodeAssignments={episodeAssignments}
+            onUnassignEpisode={handleUnassignEpisode}
           />
         ) : seasonError ? (
           <p className="text-text-secondary py-4">Failed to load episodes: {seasonError}</p>

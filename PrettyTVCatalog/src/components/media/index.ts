@@ -4,5 +4,5 @@ export { HeroBanner, HeroBannerSkeleton } from './HeroBanner';
 export { MediaDetails, MediaDetailsSkeleton } from './MediaDetails';
 export { CastCarousel, CastCarouselSkeleton } from './CastCarousel';
 export { SeasonPicker, SeasonPickerSkeleton } from './SeasonPicker';
-export { EpisodeCard, EpisodeCardSkeleton } from './EpisodeCard';
+export { EpisodeCard, EpisodeCardSkeleton, type EpisodeAssignmentInfo } from './EpisodeCard';
 export { EpisodeList, EpisodeListSkeleton } from './EpisodeList';

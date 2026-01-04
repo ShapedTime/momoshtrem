@@ -25,7 +25,8 @@ export interface LibraryShow {
   title: string;
   year: number;
   created_at: string;
-  seasons: LibrarySeason[];
+  /** Optional - not included in list endpoint response for performance */
+  seasons?: LibrarySeason[];
 }
 
 export interface LibrarySeason {

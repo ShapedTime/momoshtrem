@@ -125,6 +125,7 @@ export function Header() {
   const isMovies = pathname === '/movies' || pathname.startsWith('/movie/');
   const isTVShows = pathname === '/tv-shows' || pathname.startsWith('/tv/');
   const isLibrary = pathname === '/library';
+  const isTorrents = pathname === '/torrents';
 
   return (
     <>
@@ -172,6 +173,9 @@ export function Header() {
             </NavLink>
             <NavLink href="/library" active={isLibrary}>
               Library
+            </NavLink>
+            <NavLink href="/torrents" active={isTorrents}>
+              Torrents
             </NavLink>
           </nav>
 
@@ -314,6 +318,9 @@ export function Header() {
               </NavLink>
               <NavLink href="/library" active={isLibrary} onClick={closeMobileMenu} mobile>
                 Library
+              </NavLink>
+              <NavLink href="/torrents" active={isTorrents} onClick={closeMobileMenu} mobile>
+                Torrents
               </NavLink>
             </div>
           </nav>

@@ -1,11 +1,15 @@
 import type { Episode } from '@/types/tmdb';
-import { EpisodeCard, EpisodeCardSkeleton } from './EpisodeCard';
+import { EpisodeCard, EpisodeCardSkeleton, type EpisodeAssignmentInfo } from './EpisodeCard';
 
 interface EpisodeListProps {
   episodes: Episode[];
   showName: string;
   seasonNumber: number;
   onSearchTorrents?: (query: string) => void;
+  /** Map of episode number to assignment info */
+  episodeAssignments?: Map<number, EpisodeAssignmentInfo>;
+  /** Handler for unassigning torrent from episode */
+  onUnassignEpisode?: (episodeId: number) => Promise<void>;
 }
 
 /**
@@ -17,6 +21,8 @@ export function EpisodeList({
   showName,
   seasonNumber,
   onSearchTorrents,
+  episodeAssignments,
+  onUnassignEpisode,
 }: EpisodeListProps) {
   if (episodes.length === 0) {
     return (
@@ -26,11 +32,22 @@ export function EpisodeList({
     );
   }
 
+  // Count episodes with assignments for summary
+  const assignedCount = episodeAssignments?.size || 0;
+
   return (
     <section aria-label="Episodes">
-      <h2 className="text-xl sm:text-2xl font-semibold text-white mb-4 sm:mb-6">
-        Episodes
-      </h2>
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
+        <h2 className="text-xl sm:text-2xl font-semibold text-white">
+          Episodes
+        </h2>
+        {assignedCount > 0 && (
+          <span className="text-sm text-text-secondary">
+            <span className="text-accent-green">{assignedCount}</span>
+            {' / '}{episodes.length} assigned
+          </span>
+        )}
+      </div>
       <div className="space-y-4">
         {episodes
           .sort((a, b) => a.episodeNumber - b.episodeNumber)
@@ -41,6 +58,8 @@ export function EpisodeList({
               showName={showName}
               seasonNumber={seasonNumber}
               onSearchTorrents={onSearchTorrents}
+              assignmentInfo={episodeAssignments?.get(episode.episodeNumber)}
+              onUnassign={onUnassignEpisode}
             />
           ))}
       </div>

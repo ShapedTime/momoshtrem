@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { LibraryCard, LibraryCardSkeleton } from './LibraryCard';
 import { EmptyLibrary } from './EmptyLibrary';
 import { useToast } from '@/components/ui/Toast';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
+import type { TorrentStatus } from '@/types/torrent';
 
 type FilterType = 'all' | 'movies' | 'shows';
 
@@ -16,6 +17,8 @@ interface LibraryGridProps {
   posterPaths?: Record<string, string | null>;
   /** Called when library is updated (item removed) */
   onRefresh?: () => void;
+  /** Map of info_hash to TorrentStatus for border/glow indicators */
+  torrentStatusMap?: Map<string, TorrentStatus>;
 }
 
 const filterTabs: { value: FilterType; label: string }[] = [
@@ -24,12 +27,59 @@ const filterTabs: { value: FilterType; label: string }[] = [
   { value: 'shows', label: 'TV Shows' },
 ];
 
+/**
+ * Get torrent status for a movie by looking up its assignment info_hash.
+ */
+function getMovieTorrentStatus(
+  movie: LibraryMovie,
+  torrentStatusMap: Map<string, TorrentStatus> | undefined
+): TorrentStatus | null {
+  if (!torrentStatusMap || !movie.assignment?.info_hash) {
+    return null;
+  }
+  return torrentStatusMap.get(movie.assignment.info_hash) || null;
+}
+
+/**
+ * Get torrent status for a show by finding any active torrent from episode assignments.
+ * Returns the first active torrent found (shows typically share one torrent for multiple episodes).
+ */
+function getShowTorrentStatus(
+  show: LibraryShow,
+  torrentStatusMap: Map<string, TorrentStatus> | undefined
+): TorrentStatus | null {
+  if (!torrentStatusMap || !show.seasons) {
+    return null;
+  }
+
+  // Collect all unique info_hashes from episode assignments
+  const infoHashes = new Set<string>();
+  for (const season of show.seasons) {
+    for (const episode of season.episodes || []) {
+      if (episode.assignment?.info_hash) {
+        infoHashes.add(episode.assignment.info_hash);
+      }
+    }
+  }
+
+  // Return the first active torrent found
+  for (const hash of infoHashes) {
+    const status = torrentStatusMap.get(hash);
+    if (status) {
+      return status;
+    }
+  }
+
+  return null;
+}
+
 export function LibraryGrid({
   movies,
   shows,
   isLoading,
   posterPaths = {},
   onRefresh,
+  torrentStatusMap,
 }: LibraryGridProps) {
   const [filter, setFilter] = useState<FilterType>('all');
   const { showToast } = useToast();
@@ -146,6 +196,7 @@ export function LibraryGrid({
               mediaType="movie"
               posterPath={posterPaths[`movie-${movie.tmdb_id}`]}
               onRemove={handleRemove}
+              torrentStatus={getMovieTorrentStatus(movie, torrentStatusMap)}
             />
           ))}
 
@@ -157,6 +208,7 @@ export function LibraryGrid({
               mediaType="tv"
               posterPath={posterPaths[`tv-${show.tmdb_id}`]}
               onRemove={handleRemove}
+              torrentStatus={getShowTorrentStatus(show, torrentStatusMap)}
             />
           ))}
         </div>

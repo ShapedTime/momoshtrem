@@ -3,12 +3,24 @@ import { buildImageUrl } from '@/config/tmdb';
 import { formatRuntime } from '@/lib/utils';
 import { Button, FilmIcon, StarIcon } from '@/components/ui';
 import type { Episode } from '@/types/tmdb';
+import type { TorrentAssignment } from '@/types/momoshtrem';
+import { formatBytes, type TorrentStatus } from '@/types/torrent';
+
+export interface EpisodeAssignmentInfo {
+  episodeId: number;
+  assignment: TorrentAssignment;
+  torrentStatus?: TorrentStatus | null;
+}
 
 interface EpisodeCardProps {
   episode: Episode;
   showName: string;
   seasonNumber: number;
   onSearchTorrents?: (query: string) => void;
+  /** Assignment info for this episode (if has torrent assigned) */
+  assignmentInfo?: EpisodeAssignmentInfo;
+  /** Handler for unassigning torrent from episode */
+  onUnassign?: (episodeId: number) => Promise<void>;
 }
 
 /**
@@ -21,12 +33,15 @@ function formatEpisodeCode(season: number, episode: number): string {
 /**
  * Horizontal episode card with 16:9 still image.
  * Shows episode metadata and "Search Torrents" button.
+ * Displays assignment status when episode has a torrent assigned.
  */
 export function EpisodeCard({
   episode,
   showName,
   seasonNumber,
   onSearchTorrents,
+  assignmentInfo,
+  onUnassign,
 }: EpisodeCardProps) {
   const stillUrl = buildImageUrl(episode.stillPath, 'still', 'large');
   const episodeCode = formatEpisodeCode(seasonNumber, episode.episodeNumber);
@@ -37,15 +52,39 @@ export function EpisodeCard({
     onSearchTorrents?.(searchQuery);
   };
 
+  const handleUnassign = async () => {
+    if (assignmentInfo && onUnassign) {
+      await onUnassign(assignmentInfo.episodeId);
+    }
+  };
+
+  // Determine assignment status for styling
+  const hasAssignment = !!assignmentInfo;
+  const torrentStatus = assignmentInfo?.torrentStatus;
+  const isDownloading = torrentStatus && !torrentStatus.is_paused && torrentStatus.progress < 1;
+  const isComplete = torrentStatus && torrentStatus.progress >= 1;
+  const isPaused = torrentStatus?.is_paused;
+
+  // Get border classes based on torrent status
+  const getBorderClasses = () => {
+    if (!hasAssignment) return '';
+    if (!torrentStatus) return 'ring-1 ring-white/20';
+    if (isPaused) return 'ring-2 ring-accent-yellow';
+    if (isComplete) return 'ring-2 ring-accent-green';
+    if (isDownloading) return 'ring-2 ring-accent-blue';
+    return 'ring-1 ring-white/20';
+  };
+
   return (
     <article
-      className="
+      className={`
         flex flex-col sm:flex-row gap-4
         p-4 rounded-lg
         bg-bg-elevated
         hover:bg-bg-hover
         transition-colors duration-200 motion-reduce:transition-none
-      "
+        ${getBorderClasses()}
+      `}
     >
       {/* Episode Still Image - 16:9 aspect ratio */}
       <div className="flex-shrink-0 w-full sm:w-[200px] lg:w-[260px]">
@@ -67,6 +106,17 @@ export function EpisodeCard({
           <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 rounded text-xs font-medium text-white">
             {episodeCode}
           </div>
+          {/* Assignment status badge */}
+          {hasAssignment && (
+            <div className="absolute top-2 right-2">
+              <EpisodeStatusBadge
+                isComplete={!!isComplete}
+                isDownloading={!!isDownloading}
+                isPaused={!!isPaused}
+                progress={torrentStatus?.progress}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -94,16 +144,37 @@ export function EpisodeCard({
             </div>
           </div>
 
-          {/* Search Torrents Button - Desktop */}
-          <div className="hidden sm:block flex-shrink-0">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleSearchClick}
-              aria-label={`Search torrents for ${showName} ${episodeCode}`}
-            >
-              Search Torrents
-            </Button>
+          {/* Actions - Desktop */}
+          <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+            {hasAssignment ? (
+              <>
+                {/* Show assignment info and remove button */}
+                <span className="text-xs text-text-secondary">
+                  {formatBytes(assignmentInfo.assignment.file_size)}
+                  {assignmentInfo.assignment.resolution && (
+                    <> • {assignmentInfo.assignment.resolution}</>
+                  )}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUnassign}
+                  aria-label={`Remove torrent for ${showName} ${episodeCode}`}
+                  className="text-text-muted hover:text-accent-red"
+                >
+                  Remove
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSearchClick}
+                aria-label={`Search torrents for ${showName} ${episodeCode}`}
+              >
+                Search Torrents
+              </Button>
+            )}
           </div>
         </div>
 
@@ -114,17 +185,57 @@ export function EpisodeCard({
           </p>
         )}
 
-        {/* Search Torrents Button - Mobile */}
+        {/* Assignment info row (when assigned) */}
+        {hasAssignment && torrentStatus && (
+          <div className="mt-2 flex items-center gap-4 text-xs text-text-secondary">
+            {isDownloading && (
+              <>
+                <span className="text-accent-blue">
+                  {Math.round(torrentStatus.progress * 100)}% downloaded
+                </span>
+                <span>↓ {formatBytes(torrentStatus.download_speed)}/s</span>
+              </>
+            )}
+            {isComplete && (
+              <span className="text-accent-green">Complete</span>
+            )}
+            {isPaused && (
+              <span className="text-accent-yellow">Paused</span>
+            )}
+          </div>
+        )}
+
+        {/* Actions - Mobile */}
         <div className="sm:hidden mt-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleSearchClick}
-            className="w-full"
-            aria-label={`Search torrents for ${showName} ${episodeCode}`}
-          >
-            Search Torrents
-          </Button>
+          {hasAssignment ? (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-text-secondary">
+                {formatBytes(assignmentInfo.assignment.file_size)}
+                {assignmentInfo.assignment.resolution && (
+                  <> • {assignmentInfo.assignment.resolution}</>
+                )}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleUnassign}
+                aria-label={`Remove torrent for ${showName} ${episodeCode}`}
+                className="text-text-muted hover:text-accent-red"
+              >
+                Remove
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleSearchClick}
+              className="w-full"
+              aria-label={`Search torrents for ${showName} ${episodeCode}`}
+            >
+              Search Torrents
+            </Button>
+          )}
         </div>
       </div>
     </article>
@@ -148,5 +259,115 @@ export function EpisodeCardSkeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Badge showing episode torrent status.
+ */
+function EpisodeStatusBadge({
+  isComplete,
+  isDownloading,
+  isPaused,
+  progress,
+}: {
+  isComplete: boolean;
+  isDownloading: boolean;
+  isPaused: boolean;
+  progress?: number;
+}) {
+  if (isComplete) {
+    return (
+      <div
+        className="flex items-center justify-center w-6 h-6 rounded-full bg-accent-green text-white"
+        title="Download complete"
+      >
+        <CheckIcon />
+      </div>
+    );
+  }
+
+  if (isDownloading) {
+    return (
+      <div
+        className="flex items-center justify-center px-2 py-1 rounded bg-accent-blue/90 text-white text-xs font-medium"
+        title={`Downloading: ${Math.round((progress || 0) * 100)}%`}
+      >
+        <DownloadIcon className="w-3 h-3 mr-1" />
+        {Math.round((progress || 0) * 100)}%
+      </div>
+    );
+  }
+
+  if (isPaused) {
+    return (
+      <div
+        className="flex items-center justify-center w-6 h-6 rounded-full bg-accent-yellow text-white"
+        title="Download paused"
+      >
+        <PauseIcon />
+      </div>
+    );
+  }
+
+  // Has assignment but no active torrent status
+  return (
+    <div
+      className="flex items-center justify-center w-6 h-6 rounded-full bg-white/20 text-white"
+      title="Torrent assigned"
+    >
+      <CheckIcon />
+    </div>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      className="w-3.5 h-3.5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={3}
+        d="M5 13l4 4L19 7"
+      />
+    </svg>
+  );
+}
+
+function DownloadIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+      />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg
+      className="w-3 h-3"
+      fill="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+    </svg>
   );
 }

@@ -4,9 +4,10 @@ import { useParams } from 'next/navigation';
 import { useState, useCallback, useEffect } from 'react';
 import { useMovie } from '@/hooks/useTMDB';
 import { useLibraryStatus } from '@/hooks/useLibrary';
-import { TorrentSearchModal } from '@/components/torrent';
+import { useTorrentStatus } from '@/hooks/useTorrents';
+import { TorrentSearchModal, TorrentInfoSection } from '@/components/torrent';
 import type { TorrentSearchContext } from '@/types/jackett';
-import type { LibraryStatus } from '@/types/momoshtrem';
+import type { LibraryStatus, LibraryMovie } from '@/types/momoshtrem';
 import { formatRuntime, extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -51,22 +52,77 @@ export default function MoviePage() {
   // Library status
   const {
     status: libraryStatus,
+    libraryId,
+    hasAssignment,
     refresh: refreshLibraryStatus,
   } = useLibraryStatus('movie', movieId || 0);
 
   // Local state for optimistic updates
   const [localLibraryStatus, setLocalLibraryStatus] = useState<LibraryStatus>('not_in_library');
 
+  // Library movie data (for assignment details)
+  const [libraryMovie, setLibraryMovie] = useState<LibraryMovie | null>(null);
+  const [isUnassigning, setIsUnassigning] = useState(false);
+
+  // Fetch torrent status for the assignment
+  const { status: torrentStatus, refresh: refreshTorrentStatus } = useTorrentStatus(
+    libraryMovie?.assignment?.info_hash
+  );
+
   // Sync library status from hook
   useEffect(() => {
     setLocalLibraryStatus(libraryStatus);
   }, [libraryStatus]);
+
+  // Fetch library movie data when we have an assignment
+  useEffect(() => {
+    const fetchLibraryMovie = async () => {
+      if (!libraryId || !hasAssignment) {
+        setLibraryMovie(null);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/library/movies/${libraryId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setLibraryMovie(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch library movie:', err);
+      }
+    };
+
+    fetchLibraryMovie();
+  }, [libraryId, hasAssignment]);
 
   // Handler for library status changes
   const handleLibraryStatusChange = useCallback((newStatus: LibraryStatus) => {
     setLocalLibraryStatus(newStatus);
     refreshLibraryStatus();
   }, [refreshLibraryStatus]);
+
+  // Handler for unassigning torrent
+  const handleUnassign = useCallback(async () => {
+    if (!libraryId) return;
+
+    setIsUnassigning(true);
+    try {
+      const res = await fetch(`/api/library/movies/${libraryId}/assign`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        setLibraryMovie(null);
+        setLocalLibraryStatus('in_library');
+        refreshLibraryStatus();
+      }
+    } catch (err) {
+      console.error('Failed to unassign torrent:', err);
+    } finally {
+      setIsUnassigning(false);
+    }
+  }, [libraryId, refreshLibraryStatus]);
 
   // Torrent search modal state
   const [isTorrentModalOpen, setIsTorrentModalOpen] = useState(false);
@@ -155,6 +211,18 @@ export default function MoviePage() {
       {/* Cast Carousel */}
       {movie.credits.cast.length > 0 && (
         <CastCarousel cast={movie.credits.cast} maxItems={10} />
+      )}
+
+      {/* Torrent Info Section (when movie has torrent assigned) */}
+      {libraryMovie?.assignment && (
+        <section className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8">
+          <TorrentInfoSection
+            assignment={libraryMovie.assignment}
+            torrentStatus={torrentStatus}
+            onUnassign={handleUnassign}
+            isUnassigning={isUnassigning}
+          />
+        </section>
       )}
 
       {/* Torrent Search Modal */}
