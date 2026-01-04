@@ -207,6 +207,9 @@ func (fs *LibraryFS) rebuildTree() {
 		pathMap: make(map[string]Entry),
 	}
 
+	// Add root to pathMap so Open("/") works for WebDAV PROPFIND
+	tree.pathMap["/"] = tree.root
+
 	// Create root directories
 	moviesDir := NewVirtualDir("Movies")
 	tvDir := NewVirtualDir("TV Shows")
