@@ -14,5 +14,8 @@ torrent:
   idle_timeout: 300
   start_paused: true
 
+vfs:
+  tree_ttl: 86400  # 1 day in seconds (partial updates make long TTL safe)
+
 tmdb:
   api_key: ""  # Set your TMDB API key here

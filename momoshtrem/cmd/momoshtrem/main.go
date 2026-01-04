@@ -180,8 +180,8 @@ func main() {
 		streamingCfg,
 	)
 
-	// Initialize servers with torrent service
-	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService)
+	// Initialize servers with torrent service and tree updater
+	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
 	webdavServer := webdav.NewServer(libraryFS)
 
 	// Start HTTP servers

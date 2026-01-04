@@ -9,6 +9,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
+	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
 // Movie request/response types
@@ -211,6 +212,12 @@ func (s *Server) deleteMovie(c *gin.Context) {
 		return
 	}
 
+	// Get movie info before deletion for tree update
+	movie, err := s.movieRepo.GetByID(id)
+	if err != nil {
+		slog.Error("Failed to get movie for deletion", "movie_id", id, "error", err)
+	}
+
 	// Deactivate assignments first
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id); err != nil {
 		slog.Error("Failed to deactivate assignments for movie", "movie_id", id, "error", err)
@@ -219,6 +226,11 @@ func (s *Server) deleteMovie(c *gin.Context) {
 	if err := s.movieRepo.Delete(id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Update VFS tree immediately
+	if movie != nil && s.treeUpdater != nil {
+		s.treeUpdater.RemoveMovieFromTree(movie.Title, movie.Year)
 	}
 
 	c.Status(http.StatusNoContent)
@@ -299,6 +311,11 @@ func (s *Server) assignMovieTorrent(c *gin.Context) {
 		return
 	}
 
+	// Update VFS tree immediately
+	if s.treeUpdater != nil {
+		s.treeUpdater.AddMovieToTree(movie, assignment)
+	}
+
 	c.JSON(http.StatusCreated, MovieAssignmentResponse{
 		Success:    true,
 		Assignment: toAssignmentResponse(assignment),
@@ -311,9 +328,20 @@ func (s *Server) unassignMovieTorrent(c *gin.Context) {
 		return
 	}
 
+	// Get movie info before deactivating for tree update
+	movie, err := s.movieRepo.GetByID(id)
+	if err != nil {
+		slog.Error("Failed to get movie for unassign", "movie_id", id, "error", err)
+	}
+
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Update VFS tree immediately
+	if movie != nil && s.treeUpdater != nil {
+		s.treeUpdater.RemoveMovieFromTree(movie.Title, movie.Year)
 	}
 
 	c.Status(http.StatusNoContent)
@@ -474,7 +502,14 @@ func (s *Server) deleteShow(c *gin.Context) {
 	if err != nil {
 		slog.Error("Failed to get show for deletion", "show_id", id, "error", err)
 	}
+
+	// Store show info for tree update before deletion
+	var showTitle string
+	var showYear int
 	if show != nil {
+		showTitle = show.Title
+		showYear = show.Year
+
 		for _, season := range show.Seasons {
 			for _, ep := range season.Episodes {
 				if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, ep.ID); err != nil {
@@ -487,6 +522,11 @@ func (s *Server) deleteShow(c *gin.Context) {
 	if err := s.showRepo.Delete(id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Update VFS tree immediately
+	if showTitle != "" && s.treeUpdater != nil {
+		s.treeUpdater.RemoveShowFromTree(showTitle, showYear)
 	}
 
 	c.Status(http.StatusNoContent)
@@ -545,6 +585,7 @@ func (s *Server) assignShowTorrent(c *gin.Context) {
 
 	// Create assignments for matched episodes
 	matched := make([]MatchedAssignment, 0, len(matchResult.Matched))
+	episodesForTree := make([]vfs.EpisodeWithContext, 0, len(matchResult.Matched))
 	for _, m := range matchResult.Matched {
 		assignment := &library.TorrentAssignment{
 			ItemType:   library.ItemTypeEpisode,
@@ -574,6 +615,20 @@ func (s *Server) assignShowTorrent(c *gin.Context) {
 			Resolution: m.Quality.Resolution,
 			Confidence: string(m.Confidence),
 		})
+
+		// Collect for tree update
+		episodesForTree = append(episodesForTree, vfs.EpisodeWithContext{
+			ShowTitle:    show.Title,
+			ShowYear:     show.Year,
+			SeasonNumber: m.Season.SeasonNumber,
+			Episode:      m.Episode,
+			Assignment:   assignment,
+		})
+	}
+
+	// Update VFS tree immediately
+	if s.treeUpdater != nil && len(episodesForTree) > 0 {
+		s.treeUpdater.AddEpisodesToTree(episodesForTree)
 	}
 
 	// Build unmatched response
@@ -625,9 +680,32 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 		return
 	}
 
+	// Get episode context before deactivating for tree update
+	var showTitle string
+	var showYear, seasonNumber, episodeNumber int
+
+	episode, err := s.showRepo.GetEpisodeByID(id)
+	if err == nil && episode != nil {
+		episodeNumber = episode.EpisodeNumber
+		season, err := s.showRepo.GetSeasonByID(episode.SeasonID)
+		if err == nil && season != nil {
+			seasonNumber = season.SeasonNumber
+			show, err := s.showRepo.GetByID(season.ShowID)
+			if err == nil && show != nil {
+				showTitle = show.Title
+				showYear = show.Year
+			}
+		}
+	}
+
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Update VFS tree immediately
+	if showTitle != "" && s.treeUpdater != nil {
+		s.treeUpdater.RemoveEpisodeFromTree(showTitle, showYear, seasonNumber, episodeNumber)
 	}
 
 	c.Status(http.StatusNoContent)

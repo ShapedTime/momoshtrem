@@ -9,6 +9,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
+	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
 // Server represents the REST API server
@@ -18,8 +19,9 @@ type Server struct {
 	showRepo       *library.ShowRepository
 	assignmentRepo *library.AssignmentRepository
 	tmdbClient     *tmdb.Client
-	torrentService torrent.Service  // Optional: nil until Stage 2 implementation
+	torrentService torrent.Service     // Optional: nil until Stage 2 implementation
 	identifier     *identify.Identifier
+	treeUpdater    vfs.TreeUpdater     // Optional: updates VFS tree on assignment changes
 }
 
 // NewServer creates a new API server
@@ -29,6 +31,7 @@ func NewServer(
 	assignmentRepo *library.AssignmentRepository,
 	tmdbClient *tmdb.Client,
 	torrentService torrent.Service, // Can be nil until Stage 2
+	treeUpdater vfs.TreeUpdater,    // Optional: updates VFS tree on assignment changes
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -40,6 +43,7 @@ func NewServer(
 		tmdbClient:     tmdbClient,
 		torrentService: torrentService,
 		identifier:     identify.NewIdentifier(nil),
+		treeUpdater:    treeUpdater,
 	}
 
 	s.setupMiddleware()
