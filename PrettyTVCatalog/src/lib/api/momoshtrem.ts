@@ -123,13 +123,13 @@ class MomoshtremClient {
    * Get all movies in the library.
    */
   async getMovies(): Promise<LibraryMovie[]> {
-    const result = await this.request<{ movies: LibraryMovie[] }>(
+    const result = await this.request<LibraryMovie[]>(
       'GET',
       '/api/movies',
       undefined,
       'get movies'
     );
-    return result.movies || [];
+    return result || [];
   }
 
   /**
@@ -206,13 +206,13 @@ class MomoshtremClient {
    * Get all shows in the library.
    */
   async getShows(): Promise<LibraryShow[]> {
-    const result = await this.request<{ shows: LibraryShow[] }>(
+    const result = await this.request<LibraryShow[]>(
       'GET',
       '/api/shows',
       undefined,
       'get shows'
     );
-    return result.shows || [];
+    return result || [];
   }
 
   /**
