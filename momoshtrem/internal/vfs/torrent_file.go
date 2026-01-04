@@ -32,6 +32,9 @@ type TorrentFile struct {
 
 	// Activity callback for idle mode tracking
 	onActivity func(hash string)
+
+	// Track if this is the first read (for retry logic)
+	firstRead bool
 }
 
 // NewTorrentFile creates a new TorrentFile.
@@ -50,6 +53,7 @@ func NewTorrentFile(
 		readTimeout:  readTimeout,
 		onActivity:   onActivity,
 		streamingCfg: streamingCfg,
+		firstRead:    true,
 	}
 }
 
@@ -108,6 +112,12 @@ func (f *TorrentFile) Read(p []byte) (int, error) {
 	f.ensureReader()
 	f.markActivity()
 
+	// Use retry logic for first read to handle start_paused race condition
+	if f.firstRead {
+		f.firstRead = false
+		return f.firstReadWithRetry(p)
+	}
+
 	return f.readWithTimeout(p)
 }
 
@@ -148,19 +158,43 @@ func (f *TorrentFile) readWithTimeout(p []byte) (int, error) {
 	return f.readContext(ctx, p)
 }
 
+// firstReadWithRetry performs the first read with retry logic.
+// This handles the race condition where the torrent may start paused
+// (start_paused: true) and needs time to wake up via the activity callback.
+func (f *TorrentFile) firstReadWithRetry(p []byte) (int, error) {
+	const maxRetries = 3
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		n, err := f.readWithTimeout(p)
+		if err == nil || err == io.EOF {
+			return n, err
+		}
+		lastErr = err
+
+		// Exponential backoff: 100ms, 200ms, 300ms
+		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+	}
+
+	return 0, lastErr
+}
+
 // readAtLeast reads at least min bytes with timeout.
+// Uses a single context for the entire operation to avoid overhead of
+// creating new contexts per iteration.
 func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 	if len(buf) < min {
 		return 0, io.ErrShortBuffer
 	}
 
+	// Create a single context for the entire read operation
+	ctx, cancel := context.WithTimeout(context.Background(), f.readTimeout)
+	defer cancel()
+
 	for n < min && err == nil {
 		var nn int
-
-		ctx, cancel := context.WithTimeout(context.Background(), f.readTimeout)
 		nn, err = f.readContext(ctx, buf[n:])
 		n += nn
-		cancel()
 	}
 
 	if n >= min {

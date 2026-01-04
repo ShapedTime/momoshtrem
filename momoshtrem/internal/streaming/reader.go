@@ -115,7 +115,8 @@ func (r *PriorityReader) Seek(offset int64, whence int) (int64, error) {
 	r.prioritizer.UpdateForSeek(newPos)
 	r.pos = newPos
 
-	r.log.Debug("seek completed", "position", newPos)
+	// Note: Seek logging removed to reduce verbosity.
+	// Priority updates are logged in Prioritizer.UpdateForSeek when significant.
 
 	return newPos, nil
 }

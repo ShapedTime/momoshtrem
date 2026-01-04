@@ -30,6 +30,9 @@ type Prioritizer struct {
 	// Tracking
 	initialized bool
 
+	// Debouncing: track last seek position to avoid redundant priority updates
+	lastSeekOffset int64
+
 	log *slog.Logger
 }
 
@@ -112,6 +115,7 @@ func (p *Prioritizer) SetFormatInfo(info *FormatInfo) {
 
 // UpdateForSeek updates priorities based on seek position.
 // Sets pieces around current position to NOW priority, and ahead to READAHEAD.
+// Debounces updates - skips if position changed by less than piece length.
 func (p *Prioritizer) UpdateForSeek(offset int64) {
 	if p == nil {
 		return
@@ -128,6 +132,20 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 		offset = p.fileLength
 	}
 
+	// Debounce: skip if position changed by less than piece length
+	// This avoids excessive priority updates during normal sequential reading
+	// and when the media player makes frequent position checks while paused
+	if p.pieceLength > 0 {
+		diff := offset - p.lastSeekOffset
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff < p.pieceLength {
+			return
+		}
+	}
+	p.lastSeekOffset = offset
+
 	// Urgent: immediate position + buffer
 	urgentEnd := min(offset+p.cfg.UrgentBufferBytes, p.fileLength)
 	p.setPieceRangePriority(offset, urgentEnd, types.PiecePriorityNow)
@@ -138,6 +156,7 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 		p.setPieceRangePriority(urgentEnd, readaheadEnd, types.PiecePriorityReadahead)
 	}
 
+	// Only log significant priority updates (not every call)
 	p.log.Debug("updated seek priorities",
 		"offset", offset,
 		"urgent_end", urgentEnd,
