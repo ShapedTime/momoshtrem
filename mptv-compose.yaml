@@ -1,0 +1,54 @@
+services:
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    ports:
+      - 9117:9117
+    volumes:
+      - /mnt/data/3/jackett:/config
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    restart: unless-stopped
+
+  momoshtrem:
+    container_name: momoshtrem
+    build:
+      context: ./momoshtrem
+      dockerfile: Dockerfile
+    ports:
+      - 4444:4444
+      - 36911:36911
+    volumes:
+      - /mnt/data/3/momoshtrem/config:/config
+      - /mnt/data/3/momoshtrem/data:/data
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY}
+    restart: unless-stopped
+
+  prettytvcatalog:
+    container_name: prettytvcatalog
+    build:
+      context: ./PrettyTVCatalog
+      dockerfile: Dockerfile
+    ports:
+      - 3000:3000
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - JACKETT_URL=http://jackett:9117
+      - JACKETT_API_KEY=${JACKETT_API_KEY}
+      - MOMOSHTREM_URL=http://momoshtrem:4444
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SECURE_COOKIES=false
+    depends_on:
+      - jackett
+      - momoshtrem
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

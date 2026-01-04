@@ -99,6 +99,11 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Environment variable overrides
+	if envKey := os.Getenv("TMDB_API_KEY"); envKey != "" {
+		cfg.TMDB.APIKey = envKey
+	}
+
 	return cfg, nil
 }
 
