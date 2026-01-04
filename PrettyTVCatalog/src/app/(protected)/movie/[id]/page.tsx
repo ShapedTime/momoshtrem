@@ -1,10 +1,12 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useMovie } from '@/hooks/useTMDB';
+import { useLibraryStatus } from '@/hooks/useLibrary';
 import { TorrentSearchModal } from '@/components/torrent';
 import type { TorrentSearchContext } from '@/types/jackett';
+import type { LibraryStatus } from '@/types/momoshtrem';
 import { formatRuntime, extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -46,6 +48,26 @@ export default function MoviePage() {
 
   const { data: movie, isLoading, error } = useMovie(movieId);
 
+  // Library status
+  const {
+    status: libraryStatus,
+    refresh: refreshLibraryStatus,
+  } = useLibraryStatus('movie', movieId || 0);
+
+  // Local state for optimistic updates
+  const [localLibraryStatus, setLocalLibraryStatus] = useState<LibraryStatus>('not_in_library');
+
+  // Sync library status from hook
+  useEffect(() => {
+    setLocalLibraryStatus(libraryStatus);
+  }, [libraryStatus]);
+
+  // Handler for library status changes
+  const handleLibraryStatusChange = useCallback((newStatus: LibraryStatus) => {
+    setLocalLibraryStatus(newStatus);
+    refreshLibraryStatus();
+  }, [refreshLibraryStatus]);
+
   // Torrent search modal state
   const [isTorrentModalOpen, setIsTorrentModalOpen] = useState(false);
   const [torrentContext, setTorrentContext] = useState<TorrentSearchContext | null>(null);
@@ -68,6 +90,12 @@ export default function MoviePage() {
     });
     setIsTorrentModalOpen(true);
   }, [movie, movieId]);
+
+  // Handler for torrent modal close (may need to refresh status)
+  const handleTorrentModalClose = useCallback(() => {
+    setIsTorrentModalOpen(false);
+    refreshLibraryStatus();
+  }, [refreshLibraryStatus]);
 
   // Invalid ID state
   if (!movieId || isNaN(movieId)) {
@@ -118,6 +146,9 @@ export default function MoviePage() {
         releaseDate={releaseDate}
         genres={movie.genres}
         mediaType="movie"
+        tmdbId={movieId}
+        libraryStatus={localLibraryStatus}
+        onLibraryStatusChange={handleLibraryStatusChange}
         onSearchTorrents={handleSearchTorrents}
       />
 
@@ -130,7 +161,7 @@ export default function MoviePage() {
       {torrentContext && (
         <TorrentSearchModal
           isOpen={isTorrentModalOpen}
-          onClose={() => setIsTorrentModalOpen(false)}
+          onClose={handleTorrentModalClose}
           context={torrentContext}
         />
       )}

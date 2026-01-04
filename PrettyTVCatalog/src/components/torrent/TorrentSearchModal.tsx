@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Modal, Input, Button, useToast } from '@/components/ui';
 import { TorrentResults } from './TorrentResults';
 import { QualityFilter } from './QualityFilter';
-import { useTorrentSearch, sortTorrents, filterByQuality, useAddTorrent } from '@/hooks';
+import { AssignmentResultsModal } from '@/components/library';
+import { useTorrentSearch, sortTorrents, filterByQuality } from '@/hooks';
+import { useAddTorrent, isShowResponse } from '@/hooks/useAddToLibrary';
 import type {
   TorrentSearchContext,
   VideoQuality,
   TorrentSortField,
   SortDirection,
 } from '@/types/jackett';
-import type { TMDBMetadata } from '@/types/distribyted';
+import type { AddTorrentResponse, AssignmentSummary, EpisodeMatch, UnmatchedFile } from '@/types/momoshtrem';
 
 interface TorrentSearchModalProps {
   isOpen: boolean;
@@ -27,8 +29,8 @@ export function TorrentSearchModal({
   // Search state
   const { results, isLoading, error, search, clearResults } = useTorrentSearch();
 
-  // Add torrent state
-  const { addTorrent, isAdding, isAdded, error: addError } = useAddTorrent();
+  // Add torrent state (using new momoshtrem flow)
+  const { addTorrent, isAdding, isAdded, error: addError, reset: resetAddState } = useAddTorrent();
 
   // Toast notifications
   const { showToast } = useToast();
@@ -39,6 +41,15 @@ export function TorrentSearchModal({
   const [sortField, setSortField] = useState<TorrentSortField>('seeders');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
+  // Assignment results modal state (for TV shows)
+  const [showAssignmentResults, setShowAssignmentResults] = useState(false);
+  const [assignmentResults, setAssignmentResults] = useState<{
+    showTitle: string;
+    summary: AssignmentSummary;
+    matched: EpisodeMatch[];
+    unmatched: UnmatchedFile[];
+  } | null>(null);
+
   // Reset state when modal opens with new context
   useEffect(() => {
     if (isOpen) {
@@ -46,8 +57,9 @@ export function TorrentSearchModal({
       setQualityFilter([]);
       setSortField('seeders');
       setSortDirection('desc');
+      resetAddState();
     }
-  }, [isOpen, context.query]);
+  }, [isOpen, context.query, resetAddState]);
 
   // Auto-search on open
   useEffect(() => {
@@ -97,40 +109,64 @@ export function TorrentSearchModal({
     []
   );
 
-  // Build TMDB metadata from context
-  const buildMetadata = useCallback((): TMDBMetadata | undefined => {
-    // Need tmdbId and year to build valid metadata
-    if (!context.tmdbId || !context.year) {
-      return undefined;
-    }
-
-    // Map mediaType: 'episode' -> 'tv' for the API
-    const type = context.mediaType === 'movie' ? 'movie' : 'tv';
-
-    return {
-      type,
-      tmdb_id: context.tmdbId,
-      title: context.title,
-      year: context.year,
-      season: context.season,
-      episode: context.episode,
-    };
-  }, [context]);
-
-  // Handle adding torrent
+  // Handle adding torrent with new momoshtrem flow
   const handleAddTorrent = useCallback(
     async (magnetUri: string) => {
-      const metadata = buildMetadata();
-      const success = await addTorrent(magnetUri, metadata);
+      // Determine media type for momoshtrem API
+      // 'episode' searches are treated as 'tv' for assignment
+      const mediaType = context.mediaType === 'movie' ? 'movie' : 'tv';
 
-      if (success) {
-        showToast('success', 'Torrent added to streaming queue');
-      } else {
+      if (!context.tmdbId) {
+        showToast('error', 'Missing TMDB ID - cannot add to library');
+        return;
+      }
+
+      const result = await addTorrent(magnetUri, mediaType, context.tmdbId);
+
+      if (!result) {
         showToast('error', addError || 'Failed to add torrent');
+        return;
+      }
+
+      // Handle response based on media type
+      if (result.media_type === 'movie') {
+        // Movie: simple success message
+        const message = result.added_to_library
+          ? 'Added to library and assigned torrent'
+          : 'Torrent assigned to movie';
+        showToast('success', message);
+      } else {
+        // TV Show: show assignment results modal
+        if (isShowResponse(result) && result.summary) {
+          setAssignmentResults({
+            showTitle: context.title,
+            summary: result.summary,
+            matched: result.matched || [],
+            unmatched: result.unmatched || [],
+          });
+          setShowAssignmentResults(true);
+
+          // Also show a quick toast
+          const matchText = `Matched ${result.summary.matched} of ${result.summary.total_files} files`;
+          if (result.added_to_library) {
+            showToast('success', `Added to library. ${matchText}`);
+          } else {
+            showToast('success', matchText);
+          }
+        } else {
+          // Fallback for unexpected response
+          showToast('success', 'Torrent assigned to show');
+        }
       }
     },
-    [addTorrent, addError, showToast, buildMetadata]
+    [context.mediaType, context.tmdbId, context.title, addTorrent, addError, showToast]
   );
+
+  // Handle assignment results modal close
+  const handleAssignmentResultsClose = useCallback(() => {
+    setShowAssignmentResults(false);
+    setAssignmentResults(null);
+  }, []);
 
   // Build modal title based on context
   const modalTitle = useMemo(() => {
@@ -146,44 +182,58 @@ export function TorrentSearchModal({
   }, [context]);
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title={modalTitle} size="2xl">
-      <div className="space-y-4">
-        {/* Search Form */}
-        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
-          <div className="flex-1">
-            <Input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search for torrents..."
-              aria-label="Search torrents"
-            />
-          </div>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={isLoading || !searchQuery.trim()}
-          >
-            Search
-          </Button>
-        </form>
+    <>
+      <Modal isOpen={isOpen} onClose={handleClose} title={modalTitle} size="2xl">
+        <div className="space-y-4">
+          {/* Search Form */}
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
+            <div className="flex-1">
+              <Input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search for torrents..."
+                aria-label="Search torrents"
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={isLoading || !searchQuery.trim()}
+            >
+              Search
+            </Button>
+          </form>
 
-        {/* Quality Filter */}
-        <QualityFilter selected={qualityFilter} onToggle={toggleQuality} />
+          {/* Quality Filter */}
+          <QualityFilter selected={qualityFilter} onToggle={toggleQuality} />
 
-        {/* Results */}
-        <TorrentResults
-          results={processedResults}
-          isLoading={isLoading}
-          error={error}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          onSortChange={handleSortChange}
-          onAddTorrent={handleAddTorrent}
-          isAdding={isAdding}
-          isAdded={isAdded}
+          {/* Results */}
+          <TorrentResults
+            results={processedResults}
+            isLoading={isLoading}
+            error={error}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortChange={handleSortChange}
+            onAddTorrent={handleAddTorrent}
+            isAdding={isAdding}
+            isAdded={isAdded}
+          />
+        </div>
+      </Modal>
+
+      {/* Assignment Results Modal (for TV shows) */}
+      {assignmentResults && (
+        <AssignmentResultsModal
+          isOpen={showAssignmentResults}
+          onClose={handleAssignmentResultsClose}
+          showTitle={assignmentResults.showTitle}
+          summary={assignmentResults.summary}
+          matched={assignmentResults.matched}
+          unmatched={assignmentResults.unmatched}
         />
-      </div>
-    </Modal>
+      )}
+    </>
   );
 }

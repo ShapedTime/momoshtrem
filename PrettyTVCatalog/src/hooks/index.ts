@@ -10,4 +10,6 @@ export { useDebounce } from './useDebounce';
 
 export { useTorrentSearch, sortTorrents, filterByQuality } from './useJackett';
 
-export { useAddTorrent } from './useDistribyted';
+export { useLibrary, useLibraryStatus, useRemoveFromLibrary } from './useLibrary';
+
+export { useAddToLibrary, useAddTorrent, isShowResponse } from './useAddToLibrary';
