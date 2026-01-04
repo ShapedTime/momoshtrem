@@ -19,8 +19,7 @@ export interface EnvConfig {
   // Optional - warnings logged but app continues
   JACKETT_URL: string | undefined;
   JACKETT_API_KEY: string | undefined;
-  DISTRIBYTED_URL: string | undefined;
-  DISTRIBYTED_ROUTE: string | undefined;
+  MOMOSHTREM_URL: string | undefined;
 }
 
 const REQUIRED_VARS = ['APP_PASSWORD', 'TMDB_API_KEY', 'SESSION_SECRET'] as const;
@@ -28,8 +27,7 @@ const REQUIRED_VARS = ['APP_PASSWORD', 'TMDB_API_KEY', 'SESSION_SECRET'] as cons
 const OPTIONAL_VARS = [
   'JACKETT_URL',
   'JACKETT_API_KEY',
-  'DISTRIBYTED_URL',
-  'DISTRIBYTED_ROUTE',
+  'MOMOSHTREM_URL',
 ] as const;
 
 /**
@@ -82,8 +80,7 @@ export function validateEnvironment(): EnvConfig {
     SESSION_SECRET: process.env.SESSION_SECRET!,
     JACKETT_URL: process.env.JACKETT_URL,
     JACKETT_API_KEY: process.env.JACKETT_API_KEY,
-    DISTRIBYTED_URL: process.env.DISTRIBYTED_URL,
-    DISTRIBYTED_ROUTE: process.env.DISTRIBYTED_ROUTE,
+    MOMOSHTREM_URL: process.env.MOMOSHTREM_URL,
   };
 }
 

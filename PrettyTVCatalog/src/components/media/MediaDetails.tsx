@@ -1,7 +1,9 @@
 import Image from 'next/image';
 import { buildImageUrl } from '@/config/tmdb';
 import { Button, RatingBadge, FilmIcon } from '@/components/ui';
+import { AddToLibraryButton, LibraryStatusBadge } from '@/components/library';
 import type { Genre } from '@/types/tmdb';
+import type { LibraryStatus } from '@/types/momoshtrem';
 
 interface MediaDetailsProps {
   title: string;
@@ -15,6 +17,9 @@ interface MediaDetailsProps {
   releaseDate?: string | null;
   genres: Genre[];
   mediaType: 'movie' | 'tv';
+  tmdbId: number;
+  libraryStatus: LibraryStatus;
+  onLibraryStatusChange?: (status: LibraryStatus, libraryId?: number) => void;
   onSearchTorrents: () => void;
 }
 
@@ -30,6 +35,9 @@ export function MediaDetails({
   releaseDate,
   genres,
   mediaType,
+  tmdbId,
+  libraryStatus,
+  onLibraryStatusChange,
   onSearchTorrents,
 }: MediaDetailsProps) {
   const backdropUrl = buildImageUrl(backdropPath, 'backdrop', 'large');
@@ -148,7 +156,7 @@ export function MediaDetails({
             )}
 
             {/* Action Buttons */}
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Button
                 variant="primary"
                 size="lg"
@@ -157,6 +165,17 @@ export function MediaDetails({
               >
                 Search Torrents
               </Button>
+              <AddToLibraryButton
+                mediaType={mediaType}
+                tmdbId={tmdbId}
+                title={title}
+                status={libraryStatus}
+                onStatusChange={onLibraryStatusChange}
+                size="lg"
+              />
+              {libraryStatus !== 'not_in_library' && (
+                <LibraryStatusBadge status={libraryStatus} variant="inline" />
+              )}
             </div>
           </div>
         </div>
