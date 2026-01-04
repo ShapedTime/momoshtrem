@@ -1,6 +1,12 @@
 server:
   http_port: 4444
   webdav_port: 36911
+  # WebDAV authentication (optional)
+  # webdav_auth:
+  #   enabled: true
+  #   username: "webdav"
+  #   password: "your-secure-password"
+  # Or use environment variables: WEBDAV_AUTH_ENABLED, WEBDAV_USERNAME, WEBDAV_PASSWORD
 
 database:
   path: ./data/momoshtrem.db

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,8 +19,16 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	HTTPPort   int `yaml:"http_port"`
-	WebDAVPort int `yaml:"webdav_port"`
+	HTTPPort   int              `yaml:"http_port"`
+	WebDAVPort int              `yaml:"webdav_port"`
+	WebDAVAuth WebDAVAuthConfig `yaml:"webdav_auth"`
+}
+
+// WebDAVAuthConfig configures authentication for the WebDAV server
+type WebDAVAuthConfig struct {
+	Enabled  bool   `yaml:"enabled"`  // Enable Basic Auth (default: false)
+	Username string `yaml:"username"` // Username for Basic Auth
+	Password string `yaml:"password"` // Password for Basic Auth
 }
 
 type DatabaseConfig struct {
@@ -58,6 +67,9 @@ func DefaultConfig() *Config {
 		Server: ServerConfig{
 			HTTPPort:   4444,
 			WebDAVPort: 36911,
+			WebDAVAuth: WebDAVAuthConfig{
+				Enabled: false, // Disabled by default for backward compatibility
+			},
 		},
 		Database: DatabaseConfig{
 			Path: "./data/momoshtrem.db",
@@ -102,6 +114,17 @@ func Load(path string) (*Config, error) {
 	// Environment variable overrides
 	if envKey := os.Getenv("TMDB_API_KEY"); envKey != "" {
 		cfg.TMDB.APIKey = envKey
+	}
+
+	// WebDAV auth environment variable overrides
+	if envEnabled := os.Getenv("WEBDAV_AUTH_ENABLED"); envEnabled != "" {
+		cfg.Server.WebDAVAuth.Enabled = strings.ToLower(envEnabled) == "true"
+	}
+	if envUser := os.Getenv("WEBDAV_USERNAME"); envUser != "" {
+		cfg.Server.WebDAVAuth.Username = envUser
+	}
+	if envPass := os.Getenv("WEBDAV_PASSWORD"); envPass != "" {
+		cfg.Server.WebDAVAuth.Password = envPass
 	}
 
 	return cfg, nil

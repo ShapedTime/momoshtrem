@@ -182,7 +182,10 @@ func main() {
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
-	webdavServer := webdav.NewServer(libraryFS)
+
+	// Validate WebDAV auth config and create server
+	webdav.ValidateConfig(cfg.Server.WebDAVAuth)
+	webdavServer := webdav.NewServer(libraryFS, cfg.Server.WebDAVAuth)
 
 	// Start HTTP servers
 	httpServer := &http.Server{
@@ -213,6 +216,7 @@ func main() {
 	slog.Info("momoshtrem is ready",
 		"api_url", fmt.Sprintf("http://localhost:%d/api", cfg.Server.HTTPPort),
 		"webdav_url", fmt.Sprintf("http://localhost:%d", cfg.Server.WebDAVPort),
+		"webdav_auth_enabled", cfg.Server.WebDAVAuth.Enabled,
 	)
 
 	// Wait for shutdown signal

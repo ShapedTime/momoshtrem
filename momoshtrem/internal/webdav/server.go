@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/webdav"
 
 	"github.com/shapedtime/momoshtrem/internal/common"
+	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
@@ -21,11 +22,12 @@ import (
 type Server struct {
 	fs      *vfs.LibraryFS
 	handler *webdav.Handler
+	authCfg config.WebDAVAuthConfig
 }
 
 // NewServer creates a new WebDAV server
-func NewServer(libraryFS *vfs.LibraryFS) *Server {
-	s := &Server{fs: libraryFS}
+func NewServer(libraryFS *vfs.LibraryFS, authCfg config.WebDAVAuthConfig) *Server {
+	s := &Server{fs: libraryFS, authCfg: authCfg}
 
 	s.handler = &webdav.Handler{
 		Prefix:     "",
@@ -50,9 +52,9 @@ func NewServer(libraryFS *vfs.LibraryFS) *Server {
 	return s
 }
 
-// Handler returns the HTTP handler
+// Handler returns the HTTP handler wrapped with authentication middleware
 func (s *Server) Handler() http.Handler {
-	return s.handler
+	return NewAuthMiddleware(s.handler, s.authCfg)
 }
 
 // webdavFS adapts LibraryFS to webdav.FileSystem
