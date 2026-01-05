@@ -10,12 +10,14 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Torrent   TorrentConfig   `yaml:"torrent"`
-	TMDB      TMDBConfig      `yaml:"tmdb"`
-	VFS       VFSConfig       `yaml:"vfs"`
-	Streaming StreamingConfig `yaml:"streaming"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Torrent       TorrentConfig       `yaml:"torrent"`
+	TMDB          TMDBConfig          `yaml:"tmdb"`
+	VFS           VFSConfig           `yaml:"vfs"`
+	Streaming     StreamingConfig     `yaml:"streaming"`
+	OpenSubtitles OpenSubtitlesConfig `yaml:"opensubtitles"`
+	Subtitles     SubtitlesConfig     `yaml:"subtitles"`
 }
 
 type ServerConfig struct {
@@ -61,6 +63,18 @@ type StreamingConfig struct {
 	UrgentBufferBytes   int64 `yaml:"urgent_buffer_bytes"`   // Immediate buffer around seek (default: 2MB)
 }
 
+// OpenSubtitlesConfig configures the OpenSubtitles API client
+type OpenSubtitlesConfig struct {
+	APIKey   string `yaml:"api_key"`  // Required: OpenSubtitles API key
+	Username string `yaml:"username"` // Optional: for higher download limits
+	Password string `yaml:"password"` // Optional: for authenticated downloads
+}
+
+// SubtitlesConfig configures subtitle storage
+type SubtitlesConfig struct {
+	DownloadPath string `yaml:"download_path"` // Local storage path for downloaded subtitles
+}
+
 // DefaultConfig returns configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -91,6 +105,10 @@ func DefaultConfig() *Config {
 			FooterPriorityBytes: 5 * 1024 * 1024,  // 5MB
 			ReadaheadBytes:      16 * 1024 * 1024, // 16MB
 			UrgentBufferBytes:   2 * 1024 * 1024,  // 2MB
+		},
+		OpenSubtitles: OpenSubtitlesConfig{},
+		Subtitles: SubtitlesConfig{
+			DownloadPath: "./data/subtitles",
 		},
 	}
 }
@@ -127,6 +145,17 @@ func Load(path string) (*Config, error) {
 		cfg.Server.WebDAVAuth.Password = envPass
 	}
 
+	// OpenSubtitles environment variable overrides
+	if envKey := os.Getenv("OPENSUBTITLES_API_KEY"); envKey != "" {
+		cfg.OpenSubtitles.APIKey = envKey
+	}
+	if envUser := os.Getenv("OPENSUBTITLES_USERNAME"); envUser != "" {
+		cfg.OpenSubtitles.Username = envUser
+	}
+	if envPass := os.Getenv("OPENSUBTITLES_PASSWORD"); envPass != "" {
+		cfg.OpenSubtitles.Password = envPass
+	}
+
 	return cfg, nil
 }
 
@@ -135,6 +164,7 @@ func (c *Config) EnsureDirectories() error {
 	dirs := []string{
 		filepath.Dir(c.Database.Path),
 		c.Torrent.MetadataFolder,
+		c.Subtitles.DownloadPath,
 	}
 
 	for _, dir := range dirs {

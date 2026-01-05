@@ -6,7 +6,9 @@ import { useTVShow, useSeason } from '@/hooks/useTMDB';
 import { useLibraryStatus } from '@/hooks/useLibrary';
 import { useTorrents } from '@/hooks/useTorrents';
 import { TorrentSearchModal } from '@/components/torrent';
+import { SubtitleSearchModal } from '@/components/subtitle';
 import type { TorrentSearchContext } from '@/types/jackett';
+import type { SubtitleSearchContext } from '@/types/subtitle';
 import type { LibraryStatus, LibraryShow } from '@/types/momoshtrem';
 import { extractYear, formatReleaseDate } from '@/lib/utils';
 import {
@@ -119,6 +121,10 @@ export default function TVShowPage() {
   const [isTorrentModalOpen, setIsTorrentModalOpen] = useState(false);
   const [torrentContext, setTorrentContext] = useState<TorrentSearchContext | null>(null);
 
+  // Subtitle search modal state
+  const [isSubtitleModalOpen, setIsSubtitleModalOpen] = useState(false);
+  const [subtitleContext, setSubtitleContext] = useState<SubtitleSearchContext | null>(null);
+
   // Fetch season details when selectedSeason is set
   const {
     data: seasonData,
@@ -184,6 +190,27 @@ export default function TVShowPage() {
     setIsTorrentModalOpen(false);
     refreshLibraryStatus();
   }, [refreshLibraryStatus]);
+
+  // Handler for finding subtitles for an episode
+  const handleFindSubtitles = useCallback(
+    (episodeId: number, tmdbId: number, seasonNumber: number, episodeNumber: number, title: string) => {
+      setSubtitleContext({
+        mediaType: 'episode',
+        tmdbId,
+        title,
+        itemId: episodeId,
+        season: seasonNumber,
+        episode: episodeNumber,
+      });
+      setIsSubtitleModalOpen(true);
+    },
+    []
+  );
+
+  // Handler for subtitle modal close
+  const handleSubtitleModalClose = useCallback(() => {
+    setIsSubtitleModalOpen(false);
+  }, []);
 
   // Build episode assignments map for the current season
   const episodeAssignments = useMemo(() => {
@@ -313,9 +340,11 @@ export default function TVShowPage() {
             episodes={seasonData.episodes}
             showName={show.name}
             seasonNumber={selectedSeason || 1}
+            tmdbId={showId}
             onSearchTorrents={handleEpisodeTorrentSearch}
             episodeAssignments={episodeAssignments}
             onUnassignEpisode={handleUnassignEpisode}
+            onFindSubtitles={handleFindSubtitles}
           />
         ) : seasonError ? (
           <p className="text-text-secondary py-4">Failed to load episodes: {seasonError}</p>
@@ -333,6 +362,15 @@ export default function TVShowPage() {
           isOpen={isTorrentModalOpen}
           onClose={handleTorrentModalClose}
           context={torrentContext}
+        />
+      )}
+
+      {/* Subtitle Search Modal */}
+      {subtitleContext && (
+        <SubtitleSearchModal
+          isOpen={isSubtitleModalOpen}
+          onClose={handleSubtitleModalClose}
+          context={subtitleContext}
         />
       )}
     </>

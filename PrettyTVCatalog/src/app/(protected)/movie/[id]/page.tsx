@@ -6,7 +6,10 @@ import { useMovie } from '@/hooks/useTMDB';
 import { useLibraryStatus } from '@/hooks/useLibrary';
 import { useTorrentStatus } from '@/hooks/useTorrents';
 import { TorrentSearchModal, TorrentInfoSection } from '@/components/torrent';
+import { SubtitleSearchModal, SubtitleList } from '@/components/subtitle';
+import { useSubtitles } from '@/hooks';
 import type { TorrentSearchContext } from '@/types/jackett';
+import type { SubtitleSearchContext } from '@/types/subtitle';
 import type { LibraryStatus, LibraryMovie } from '@/types/momoshtrem';
 import { formatRuntime, extractYear, formatReleaseDate } from '@/lib/utils';
 import {
@@ -128,6 +131,17 @@ export default function MoviePage() {
   const [isTorrentModalOpen, setIsTorrentModalOpen] = useState(false);
   const [torrentContext, setTorrentContext] = useState<TorrentSearchContext | null>(null);
 
+  // Subtitle modal state
+  const [isSubtitleModalOpen, setIsSubtitleModalOpen] = useState(false);
+  const [subtitleContext, setSubtitleContext] = useState<SubtitleSearchContext | null>(null);
+
+  // Subtitles hook
+  const {
+    subtitles,
+    isLoading: isLoadingSubtitles,
+    deleteSubtitle,
+  } = useSubtitles('movie', libraryId || undefined);
+
   // Handler for "Search Torrents" button
   const handleSearchTorrents = useCallback(() => {
     if (!movie || !movieId) return;
@@ -152,6 +166,24 @@ export default function MoviePage() {
     setIsTorrentModalOpen(false);
     refreshLibraryStatus();
   }, [refreshLibraryStatus]);
+
+  // Handler for "Find Subtitles" button
+  const handleFindSubtitles = useCallback(() => {
+    if (!movie || !movieId || !libraryId) return;
+
+    setSubtitleContext({
+      mediaType: 'movie',
+      tmdbId: movieId,
+      title: movie.title,
+      itemId: libraryId,
+    });
+    setIsSubtitleModalOpen(true);
+  }, [movie, movieId, libraryId]);
+
+  // Handler for subtitle modal close
+  const handleSubtitleModalClose = useCallback(() => {
+    setIsSubtitleModalOpen(false);
+  }, []);
 
   // Invalid ID state
   if (!movieId || isNaN(movieId)) {
@@ -222,6 +254,24 @@ export default function MoviePage() {
             onUnassign={handleUnassign}
             isUnassigning={isUnassigning}
           />
+
+          {/* Subtitles Section */}
+          <div className="mt-6 p-4 bg-bg-secondary rounded-lg border border-border">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Subtitles</h3>
+              <Button
+                variant="secondary"
+                onClick={handleFindSubtitles}
+              >
+                Find Subtitles
+              </Button>
+            </div>
+            <SubtitleList
+              subtitles={subtitles}
+              isLoading={isLoadingSubtitles}
+              onDelete={deleteSubtitle}
+            />
+          </div>
         </section>
       )}
 
@@ -231,6 +281,15 @@ export default function MoviePage() {
           isOpen={isTorrentModalOpen}
           onClose={handleTorrentModalClose}
           context={torrentContext}
+        />
+      )}
+
+      {/* Subtitle Search Modal */}
+      {subtitleContext && (
+        <SubtitleSearchModal
+          isOpen={isSubtitleModalOpen}
+          onClose={handleSubtitleModalClose}
+          context={subtitleContext}
         />
       )}
     </>

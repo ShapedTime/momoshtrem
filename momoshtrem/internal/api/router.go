@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
@@ -14,14 +15,15 @@ import (
 
 // Server represents the REST API server
 type Server struct {
-	router         *gin.Engine
-	movieRepo      *library.MovieRepository
-	showRepo       *library.ShowRepository
-	assignmentRepo *library.AssignmentRepository
-	tmdbClient     *tmdb.Client
-	torrentService torrent.Service     // Optional: nil until Stage 2 implementation
-	identifier     *identify.Identifier
-	treeUpdater    vfs.TreeUpdater     // Optional: updates VFS tree on assignment changes
+	router          *gin.Engine
+	movieRepo       *library.MovieRepository
+	showRepo        *library.ShowRepository
+	assignmentRepo  *library.AssignmentRepository
+	tmdbClient      *tmdb.Client
+	torrentService  torrent.Service      // Optional: nil until Stage 2 implementation
+	identifier      *identify.Identifier
+	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
+	subtitleService *subtitle.Service    // Optional: subtitle search/download service
 }
 
 // NewServer creates a new API server
@@ -50,6 +52,12 @@ func NewServer(
 	s.setupRoutes()
 
 	return s
+}
+
+// SetSubtitleService configures subtitle support
+func (s *Server) SetSubtitleService(svc *subtitle.Service) {
+	s.subtitleService = svc
+	slog.Info("Subtitle service configured")
 }
 
 func (s *Server) setupMiddleware() {
@@ -108,6 +116,13 @@ func (s *Server) setupRoutes() {
 	api.DELETE("/torrents/:hash", s.deleteTorrent)
 	api.POST("/torrents/:hash/pause", s.pauseTorrent)
 	api.POST("/torrents/:hash/resume", s.resumeTorrent)
+
+	// Subtitles
+	api.GET("/subtitles/search", s.searchSubtitles)
+	api.POST("/subtitles/download", s.downloadSubtitle)
+	api.DELETE("/subtitles/:id", s.deleteSubtitle)
+	api.GET("/movies/:id/subtitles", s.getMovieSubtitles)
+	api.GET("/episodes/:id/subtitles", s.getEpisodeSubtitles)
 
 	// Status
 	api.GET("/status", s.getStatus)

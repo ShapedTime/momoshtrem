@@ -25,6 +25,9 @@ services:
       - /mnt/data/3/momoshtrem/data:/data
     environment:
       - TMDB_API_KEY=${TMDB_API_KEY}
+      - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
+      - OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
+      - OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
     restart: unless-stopped
 
   prettytvcatalog:

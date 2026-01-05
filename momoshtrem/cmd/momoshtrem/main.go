@@ -15,7 +15,9 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
@@ -182,6 +184,24 @@ func main() {
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
+
+	// Initialize subtitle repository (always, for VFS to show existing subtitles)
+	subtitleRepo := subtitle.NewRepository(db.DB)
+	libraryFS.SetSubtitleRepository(subtitleRepo)
+
+	// Initialize subtitle service (optional, for downloading new subtitles)
+	if cfg.OpenSubtitles.APIKey != "" {
+		osClient := opensubtitles.NewClient(
+			cfg.OpenSubtitles.APIKey,
+			cfg.OpenSubtitles.Username,
+			cfg.OpenSubtitles.Password,
+		)
+		subtitleService := subtitle.NewService(osClient, subtitleRepo, cfg.Subtitles.DownloadPath)
+		apiServer.SetSubtitleService(subtitleService)
+		slog.Info("Subtitle service initialized with OpenSubtitles client")
+	} else {
+		slog.Warn("OpenSubtitles API key not configured, subtitle download unavailable")
+	}
 
 	// Validate WebDAV auth config and create server
 	webdav.ValidateConfig(cfg.Server.WebDAVAuth)

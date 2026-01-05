@@ -5,11 +5,14 @@ interface EpisodeListProps {
   episodes: Episode[];
   showName: string;
   seasonNumber: number;
+  tmdbId: number;
   onSearchTorrents?: (query: string) => void;
   /** Map of episode number to assignment info */
   episodeAssignments?: Map<number, EpisodeAssignmentInfo>;
   /** Handler for unassigning torrent from episode */
   onUnassignEpisode?: (episodeId: number) => Promise<void>;
+  /** Handler for finding subtitles for an episode */
+  onFindSubtitles?: (episodeId: number, tmdbId: number, seasonNumber: number, episodeNumber: number, title: string) => void;
 }
 
 /**
@@ -20,9 +23,11 @@ export function EpisodeList({
   episodes,
   showName,
   seasonNumber,
+  tmdbId,
   onSearchTorrents,
   episodeAssignments,
   onUnassignEpisode,
+  onFindSubtitles,
 }: EpisodeListProps) {
   if (episodes.length === 0) {
     return (
@@ -57,9 +62,11 @@ export function EpisodeList({
               episode={episode}
               showName={showName}
               seasonNumber={seasonNumber}
+              tmdbId={tmdbId}
               onSearchTorrents={onSearchTorrents}
               assignmentInfo={episodeAssignments?.get(episode.episodeNumber)}
               onUnassign={onUnassignEpisode}
+              onFindSubtitles={onFindSubtitles}
             />
           ))}
       </div>

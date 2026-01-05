@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path"
@@ -11,6 +12,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -62,6 +64,7 @@ type LibraryFS struct {
 	movieRepo      *library.MovieRepository
 	showRepo       *library.ShowRepository
 	assignmentRepo *library.AssignmentRepository
+	subtitleRepo   *subtitle.Repository
 
 	// Torrent service for file streaming (Stage 2)
 	torrentService torrent.Service
@@ -130,6 +133,14 @@ func (fs *LibraryFS) SetTorrentService(
 	)
 }
 
+// SetSubtitleRepository configures subtitle support for the VFS.
+func (fs *LibraryFS) SetSubtitleRepository(repo *subtitle.Repository) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.subtitleRepo = repo
+	slog.Info("VFS subtitle repository configured")
+}
+
 // Open returns a file handle for reading
 func (fs *LibraryFS) Open(filepath string) (File, error) {
 	fs.ensureTree()
@@ -152,6 +163,9 @@ func (fs *LibraryFS) Open(filepath string) (File, error) {
 			return fs.openTorrentFile(e)
 		}
 		// Fallback: return placeholder (Stage 1 behavior)
+		return e, nil
+	case *SubtitleFile:
+		// Subtitle files are backed by local storage
 		return e, nil
 	default:
 		return nil, os.ErrNotExist
@@ -287,6 +301,9 @@ func (fs *LibraryFS) rebuildTree() {
 		videoFile := NewPlaceholderFile(fileName, movie.Assignment.FileSize, movie.Assignment)
 		movieDir.children[fileName] = videoFile
 		tree.pathMap[filePath] = videoFile
+
+		// Add subtitle files for this movie
+		fs.addSubtitlesToDir(tree, movieDir, folderPath, folderName, subtitle.ItemTypeMovie, movie.ID)
 	}
 
 	// Add TV shows with assigned episodes
@@ -325,6 +342,10 @@ func (fs *LibraryFS) rebuildTree() {
 				videoFile := NewPlaceholderFile(fileName, episode.Assignment.FileSize, episode.Assignment)
 				seasonDir.children[fileName] = videoFile
 				tree.pathMap[filePath] = videoFile
+
+				// Add subtitle files for this episode
+				videoBaseName := strings.TrimSuffix(fileName, ext)
+				fs.addSubtitlesToDir(tree, seasonDir, seasonPath, videoBaseName, subtitle.ItemTypeEpisode, episode.ID)
 			}
 		}
 	}
@@ -677,6 +698,100 @@ func (f *PlaceholderFile) GetAssignment() *library.TorrentAssignment {
 	return f.assignment
 }
 
+// SubtitleFile represents a subtitle file backed by local storage
+type SubtitleFile struct {
+	name      string
+	localPath string
+	size      int64
+	file      *os.File // Opened file handle
+}
+
+func NewSubtitleFile(name, localPath string, size int64) *SubtitleFile {
+	return &SubtitleFile{
+		name:      name,
+		localPath: localPath,
+		size:      size,
+	}
+}
+
+func (f *SubtitleFile) Name() string { return f.name }
+func (f *SubtitleFile) IsDir() bool  { return false }
+func (f *SubtitleFile) Size() int64  { return f.size }
+
+// ensureOpen lazily opens the underlying file if not already open.
+func (f *SubtitleFile) ensureOpen() error {
+	if f.file != nil {
+		return nil
+	}
+	file, err := os.Open(f.localPath)
+	if err != nil {
+		return err
+	}
+	f.file = file
+	return nil
+}
+
+func (f *SubtitleFile) Read(p []byte) (int, error) {
+	if err := f.ensureOpen(); err != nil {
+		return 0, err
+	}
+	return f.file.Read(p)
+}
+
+func (f *SubtitleFile) ReadAt(p []byte, off int64) (int, error) {
+	if err := f.ensureOpen(); err != nil {
+		return 0, err
+	}
+	return f.file.ReadAt(p, off)
+}
+
+func (f *SubtitleFile) Seek(offset int64, whence int) (int64, error) {
+	if err := f.ensureOpen(); err != nil {
+		return 0, err
+	}
+	return f.file.Seek(offset, whence)
+}
+
+func (f *SubtitleFile) Close() error {
+	if f.file != nil {
+		err := f.file.Close()
+		f.file = nil
+		return err
+	}
+	return nil
+}
+
+func (f *SubtitleFile) Stat() (os.FileInfo, error) {
+	return common.NewFileInfo(f.name, f.size, false, time.Now()), nil
+}
+
+// makeSubtitleFileName creates a subtitle filename: "VideoName.lang.format"
+func makeSubtitleFileName(videoBaseName, langCode, format string) string {
+	return videoBaseName + "." + langCode + "." + format
+}
+
+// addSubtitlesToDir adds subtitle files for a media item to the given directory.
+// This is a helper to avoid duplicate code for movies and episodes.
+func (fs *LibraryFS) addSubtitlesToDir(tree *DirectoryTree, dir *VirtualDir, dirPath, videoBaseName string, itemType subtitle.ItemType, itemID int64) {
+	if fs.subtitleRepo == nil {
+		return
+	}
+
+	subtitles, err := fs.subtitleRepo.GetByItem(context.Background(), itemType, itemID)
+	if err != nil {
+		slog.Error("Failed to get subtitles", "item_type", itemType, "item_id", itemID, "error", err)
+		return
+	}
+
+	for _, sub := range subtitles {
+		subFileName := makeSubtitleFileName(videoBaseName, sub.LanguageCode, sub.Format)
+		subFilePath := dirPath + "/" + subFileName
+		subFile := NewSubtitleFile(subFileName, sub.FilePath, sub.FileSize)
+		dir.children[subFileName] = subFile
+		tree.pathMap[subFilePath] = subFile
+	}
+}
+
 // Helper functions
 
 func entryToFile(e Entry) File {
@@ -684,6 +799,8 @@ func entryToFile(e Entry) File {
 	case *VirtualDir:
 		return &DirFile{dir: v}
 	case *PlaceholderFile:
+		return v
+	case *SubtitleFile:
 		return v
 	default:
 		return nil

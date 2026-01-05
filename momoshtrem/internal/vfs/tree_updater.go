@@ -29,4 +29,7 @@ type TreeUpdater interface {
 
 	// RemoveShowFromTree removes an entire show subtree
 	RemoveShowFromTree(title string, year int)
+
+	// InvalidateTree forces a full tree rebuild on next access
+	InvalidateTree()
 }

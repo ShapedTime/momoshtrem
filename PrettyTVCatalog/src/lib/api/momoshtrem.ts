@@ -8,6 +8,11 @@ import type {
   MomoshtremError,
 } from '@/types/momoshtrem';
 import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
+import type {
+  SubtitleSearchResult,
+  Subtitle,
+  DownloadSubtitleRequest,
+} from '@/types/subtitle';
 
 /**
  * momoshtrem API client.
@@ -463,6 +468,91 @@ class MomoshtremClient {
       `/api/episodes/${episodeId}/assign`,
       undefined,
       'unassign episode torrent'
+    );
+  }
+
+  // ============================================================================
+  // Subtitles API
+  // ============================================================================
+
+  /**
+   * Search for subtitles on OpenSubtitles.
+   */
+  async searchSubtitles(
+    tmdbId: number,
+    type: 'movie' | 'episode',
+    languages: string[],
+    season?: number,
+    episode?: number
+  ): Promise<SubtitleSearchResult[]> {
+    const params = new URLSearchParams({
+      tmdb_id: tmdbId.toString(),
+      type,
+      languages: languages.join(','),
+    });
+
+    if (type === 'episode') {
+      if (season) params.set('season', season.toString());
+      if (episode) params.set('episode', episode.toString());
+    }
+
+    const result = await this.request<{ results: SubtitleSearchResult[] }>(
+      'GET',
+      `/api/subtitles/search?${params}`,
+      undefined,
+      'search subtitles'
+    );
+    return result.results || [];
+  }
+
+  /**
+   * Download and save a subtitle from OpenSubtitles.
+   */
+  async downloadSubtitle(params: DownloadSubtitleRequest): Promise<Subtitle> {
+    const result = await this.request<{ subtitle: Subtitle }>(
+      'POST',
+      '/api/subtitles/download',
+      params,
+      'download subtitle'
+    );
+    return result.subtitle;
+  }
+
+  /**
+   * Get all subtitles for a movie.
+   */
+  async getMovieSubtitles(movieId: number): Promise<Subtitle[]> {
+    const result = await this.request<{ subtitles: Subtitle[] }>(
+      'GET',
+      `/api/movies/${movieId}/subtitles`,
+      undefined,
+      'get movie subtitles'
+    );
+    return result.subtitles || [];
+  }
+
+  /**
+   * Get all subtitles for an episode.
+   */
+  async getEpisodeSubtitles(episodeId: number): Promise<Subtitle[]> {
+    const result = await this.request<{ subtitles: Subtitle[] }>(
+      'GET',
+      `/api/episodes/${episodeId}/subtitles`,
+      undefined,
+      'get episode subtitles'
+    );
+    return result.subtitles || [];
+  }
+
+  /**
+   * Delete a subtitle.
+   */
+  async deleteSubtitle(subtitleId: number): Promise<void> {
+    await this.request<void>(
+      'DELETE',
+      `/api/subtitles/${subtitleId}`,
+      undefined,
+      'delete subtitle'
     );
   }
 }

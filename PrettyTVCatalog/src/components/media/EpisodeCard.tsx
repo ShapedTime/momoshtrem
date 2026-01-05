@@ -10,17 +10,21 @@ export interface EpisodeAssignmentInfo {
   episodeId: number;
   assignment: TorrentAssignment;
   torrentStatus?: TorrentStatus | null;
+  subtitleCount?: number;
 }
 
 interface EpisodeCardProps {
   episode: Episode;
   showName: string;
   seasonNumber: number;
+  tmdbId: number;
   onSearchTorrents?: (query: string) => void;
   /** Assignment info for this episode (if has torrent assigned) */
   assignmentInfo?: EpisodeAssignmentInfo;
   /** Handler for unassigning torrent from episode */
   onUnassign?: (episodeId: number) => Promise<void>;
+  /** Handler for finding subtitles for this episode */
+  onFindSubtitles?: (episodeId: number, tmdbId: number, seasonNumber: number, episodeNumber: number, title: string) => void;
 }
 
 /**
@@ -39,9 +43,11 @@ export function EpisodeCard({
   episode,
   showName,
   seasonNumber,
+  tmdbId,
   onSearchTorrents,
   assignmentInfo,
   onUnassign,
+  onFindSubtitles,
 }: EpisodeCardProps) {
   const stillUrl = buildImageUrl(episode.stillPath, 'still', 'large');
   const episodeCode = formatEpisodeCode(seasonNumber, episode.episodeNumber);
@@ -55,6 +61,18 @@ export function EpisodeCard({
   const handleUnassign = async () => {
     if (assignmentInfo && onUnassign) {
       await onUnassign(assignmentInfo.episodeId);
+    }
+  };
+
+  const handleFindSubtitles = () => {
+    if (assignmentInfo && onFindSubtitles) {
+      onFindSubtitles(
+        assignmentInfo.episodeId,
+        tmdbId,
+        seasonNumber,
+        episode.episodeNumber,
+        `${showName} ${episodeCode}`
+      );
     }
   };
 
@@ -148,13 +166,29 @@ export function EpisodeCard({
           <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
             {hasAssignment ? (
               <>
-                {/* Show assignment info and remove button */}
+                {/* Show assignment info */}
                 <span className="text-xs text-text-secondary">
                   {formatBytes(assignmentInfo.assignment.file_size)}
                   {assignmentInfo.assignment.resolution && (
                     <> • {assignmentInfo.assignment.resolution}</>
                   )}
                 </span>
+                {/* Subtitle count badge */}
+                {assignmentInfo.subtitleCount !== undefined && assignmentInfo.subtitleCount > 0 && (
+                  <span className="px-1.5 py-0.5 bg-accent-blue/20 text-accent-blue text-xs rounded">
+                    {assignmentInfo.subtitleCount} sub{assignmentInfo.subtitleCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {/* Subtitles button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleFindSubtitles}
+                  aria-label={`Find subtitles for ${showName} ${episodeCode}`}
+                  className="text-text-secondary hover:text-white"
+                >
+                  Subtitles
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -208,22 +242,40 @@ export function EpisodeCard({
         {/* Actions - Mobile */}
         <div className="sm:hidden mt-3">
           {hasAssignment ? (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-text-secondary">
-                {formatBytes(assignmentInfo.assignment.file_size)}
-                {assignmentInfo.assignment.resolution && (
-                  <> • {assignmentInfo.assignment.resolution}</>
-                )}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleUnassign}
-                aria-label={`Remove torrent for ${showName} ${episodeCode}`}
-                className="text-text-muted hover:text-accent-red"
-              >
-                Remove
-              </Button>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-text-secondary">
+                  {formatBytes(assignmentInfo.assignment.file_size)}
+                  {assignmentInfo.assignment.resolution && (
+                    <> • {assignmentInfo.assignment.resolution}</>
+                  )}
+                  {assignmentInfo.subtitleCount !== undefined && assignmentInfo.subtitleCount > 0 && (
+                    <span className="ml-2 px-1.5 py-0.5 bg-accent-blue/20 text-accent-blue rounded">
+                      {assignmentInfo.subtitleCount} sub{assignmentInfo.subtitleCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleFindSubtitles}
+                  className="flex-1"
+                  aria-label={`Find subtitles for ${showName} ${episodeCode}`}
+                >
+                  Subtitles
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUnassign}
+                  aria-label={`Remove torrent for ${showName} ${episodeCode}`}
+                  className="text-text-muted hover:text-accent-red"
+                >
+                  Remove
+                </Button>
+              </div>
             </div>
           ) : (
             <Button
