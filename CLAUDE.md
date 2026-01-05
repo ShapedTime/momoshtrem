@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Apple TV Torrent Streaming Stack - A self-hosted media streaming service combining:
-- **distribyted** (Go): Torrent client exposing content via WebDAV for streaming
+Self-hosted media streaming stack for Apple TV with library management:
+- **momoshtrem** (Go): Library-first torrent streaming service with WebDAV
+- **PrettyTVCatalog** (Next.js): Frontend for browsing TMDB, managing library, searching torrents
 - **Jackett**: Torrent indexer aggregator
-- **PrettyTVCatalog** (Next.js): Frontend for browsing TMDB, searching torrents, managing library
 
 ## Commands
 
@@ -15,76 +15,90 @@ Apple TV Torrent Streaming Stack - A self-hosted media streaming service combini
 # Start all services
 docker-compose up -d
 
-# Build and start with rebuild
+# Rebuild and start
 docker-compose up -d --build
 
-# View logs
-docker-compose logs -f [service]  # jackett, distribyted, prettytvcatalog
+# Frontend development
+cd PrettyTVCatalog && npm run dev
 
-# Stop services
-docker-compose down
-```
-
-### PrettyTVCatalog (when implemented)
-```bash
-cd PrettyTVCatalog
-npm install
-npm run dev          # Development server on :3000
-npm run build        # Production build
-npm run lint         # ESLint
+# Go service (momoshtrem)
+cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 ```
 
 ## Architecture
 
 ```
-Browser/AppleTV ─► PrettyTVCatalog (:3000) ─► distribyted (:4444 API, :36911 WebDAV)
-                        │
-            ┌───────────┴───────────┐
-            ▼                       ▼
-         TMDB API              Jackett (:9117)
+                    ┌─────────────────────────────────────────┐
+                    │          PrettyTVCatalog (:3000)        │
+                    │   Browse TMDB, manage library, search   │
+                    └──────────────────┬──────────────────────┘
+                                       │
+               ┌───────────────────────┼───────────────────────┐
+               ▼                       ▼                       ▼
+          TMDB API              Jackett (:9117)        momoshtrem (:4444)
+                                                              │
+                                                              ▼
+                                                       SQLite Library
+                                                              │
+AppleTV/Infuse ─────────────────────────────────► WebDAV (:36911)
+                                                              │
+                                                              ▼
+                                                       OpenSubtitles API
 ```
 
-**Flow**: Browse TMDB → Search torrents via Jackett → Add magnet to distribyted → Stream via WebDAV
+**Flow**: Browse TMDB → Add to library → Search torrents via Jackett → Assign torrent → Stream via WebDAV (Infuse)
+
+**Key design**: momoshtrem is library-first. The VFS structure is driven by the SQLite database (movies, shows, episodes), not by torrent contents.
 
 ## Key APIs
 
-### distribyted REST API (port 4444)
+### momoshtrem REST API (port 4444)
 ```
-POST /api/routes/{route}/torrent    # Add magnet: {"magnet": "magnet:?xt=..."}
-DELETE /api/routes/{route}/torrent/{hash}
-GET /api/routes                     # List routes and torrents
-GET /api/status                     # Status info
+POST /api/movies              # Add movie by TMDB ID
+POST /api/shows               # Add show by TMDB ID
+POST /api/movies/{id}/assign-torrent   # Assign torrent to movie
+POST /api/shows/{id}/assign-torrent    # Auto-detect episodes from torrent
+GET  /api/torrents            # List active torrents
+POST /api/subtitles/search    # Search OpenSubtitles
 ```
 
 ### Jackett Torznab API (port 9117)
 ```
 GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 ```
-Returns XML - parse for title, size, seeders, magnet URI.
 
-## Documentation References
+## Code Quality
 
-| Topic | Location |
-|-------|----------|
-| Frontend style guide | `docs/prettytvcatalog/STYLE_GUIDE.md` |
-| ALWAYS follow code quality standards | `docs/prettytvcatalog/CODE_QUALITY.md` |
-| Stage 1 implementation tasks | `docs/prettytvcatalog/STAGE_1_TASKS.md` |
-| distribyted architecture | `docs/distribyted-architecture.md` |
-| Deployment guide | `proxmox-installation.md` |
+**ALWAYS follow these standards:**
+- `docs/prettytvcatalog/CODE_QUALITY.md` - Architecture, TypeScript, error handling
+- `docs/prettytvcatalog/STYLE_GUIDE.md` - UI patterns, responsive design
+- `docs/momoshtrem/CODE_QUALITY.md` - Go patterns, interfaces, concurrency
+
+**Key principles:**
+- API routes are thin orchestration; business logic lives in `lib/api/`
+- TypeScript strict mode, avoid `any`, use type guards
+- Custom error classes: `APIError`, `NotFoundError`, `ValidationError`
+- Conventional commits: `feat:`, `fix:`, `refactor:`, `chore:`
+
+## Key Source Locations
+
+**momoshtrem (Go):**
+- `cmd/momoshtrem/main.go` - Entry point
+- `internal/api/router.go` - REST API endpoints
+- `internal/vfs/library_fs.go` - Virtual filesystem
+- `internal/torrent/service.go` - Torrent service interface
+- `internal/streaming/prioritizer.go` - Piece prioritization
+
+**PrettyTVCatalog (Next.js):**
+- `src/lib/api/` - API clients (momoshtrem, jackett, tmdb)
+- `src/app/api/` - Next.js API routes
+- `src/types/` - TypeScript interfaces
 
 ## Environment Variables
 
 ```env
-APP_PASSWORD=...           # Frontend auth
-TMDB_API_KEY=...          # themoviedb.org API key
-JACKETT_API_KEY=...       # From Jackett dashboard
-DISTRIBYTED_URL=http://distribyted:4444
-DISTRIBYTED_ROUTE=media   # Single route for all content
+TMDB_API_KEY=...              # themoviedb.org
+JACKETT_API_KEY=...           # From Jackett dashboard
+APP_PASSWORD=...              # Frontend auth
+OPENSUBTITLES_API_KEY=...     # Optional: subtitles
 ```
-
-## Key Source Locations
-
-- `distribyted/http/api.go` - REST API endpoints
-- `distribyted/torrent/service.go` - Torrent management
-- `distribyted/webdav/` - WebDAV server
-- `distribyted/config/model.go` - Configuration structure

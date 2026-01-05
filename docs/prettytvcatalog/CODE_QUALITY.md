@@ -21,7 +21,8 @@ src/
 │   ├── api/              # External API clients
 │   │   ├── tmdb.ts       # TMDB API
 │   │   ├── jackett.ts    # Jackett API
-│   │   └── distribyted.ts # Distribyted API
+│   │   ├── momoshtrem.ts # momoshtrem API (library, torrents)
+│   │   └── subtitle.ts   # OpenSubtitles API
 │   ├── services/         # Business logic services
 │   ├── auth/             # Authentication logic
 │   └── utils/            # Pure utility functions
