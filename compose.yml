@@ -5,31 +5,29 @@ services:
     ports:
       - 9117:9117
     volumes:
-      - ${HOME}/.config/jackett:/config
+      - /mnt/data/3/jackett:/config
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=UTC
     restart: unless-stopped
 
-  distribyted:
-    container_name: distribyted
+  momoshtrem:
+    container_name: momoshtrem
     build:
-      context: ./distribyted
+      context: ./momoshtrem
       dockerfile: Dockerfile
     ports:
       - 4444:4444
       - 36911:36911
     volumes:
-      - ${HOME}/.config/distribyted/mount:/distribyted-data/mount:shared
-      - ${HOME}/.config/distribyted/metadata:/distribyted-data/metadata
-      - ${HOME}/.config/distribyted/config:/distribyted-data/config
-    security_opt:
-      - apparmor:unconfined
-    devices:
-      - /dev/fuse
-    cap_add:
-      - SYS_ADMIN
+      - /mnt/data/3/momoshtrem/config:/config
+      - /mnt/data/3/momoshtrem/data:/data
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
+      - OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
+      - OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
     restart: unless-stopped
 
   prettytvcatalog:
@@ -44,13 +42,12 @@ services:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - JACKETT_URL=http://jackett:9117
       - JACKETT_API_KEY=${JACKETT_API_KEY}
-      - DISTRIBYTED_URL=http://distribyted:4444
-      - DISTRIBYTED_ROUTE=media
+      - MOMOSHTREM_URL=http://momoshtrem:4444
       - SESSION_SECRET=${SESSION_SECRET}
       - SECURE_COOKIES=false
     depends_on:
       - jackett
-      - distribyted
+      - momoshtrem
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
@@ -58,6 +55,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-volumes:
-  assetsVolume: null
