@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { LibraryShow } from '@/types/momoshtrem';
 
 interface RouteParams {
@@ -15,6 +16,9 @@ export async function GET(
   _request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<LibraryShow | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const showId = parseInt(id, 10);
@@ -50,6 +54,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<{ success: boolean } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const showId = parseInt(id, 10);

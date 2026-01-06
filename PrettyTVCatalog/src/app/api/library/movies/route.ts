@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { LibraryMovie } from '@/types/momoshtrem';
 
 /**
@@ -8,6 +9,9 @@ import type { LibraryMovie } from '@/types/momoshtrem';
  * List all movies in the library.
  */
 export async function GET(): Promise<NextResponse<{ movies: LibraryMovie[] } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const movies = await momoshtremClient.getMovies();
     return NextResponse.json({ movies });
@@ -39,6 +43,9 @@ interface AddMovieBody {
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<LibraryMovie | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const body = (await request.json()) as AddMovieBody;
     const { tmdb_id } = body;

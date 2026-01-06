@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { ShowAssignmentResponse } from '@/types/momoshtrem';
 
 interface RouteParams {
@@ -20,6 +21,9 @@ export async function POST(
   request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<ShowAssignmentResponse | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const showId = parseInt(id, 10);

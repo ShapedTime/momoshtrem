@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 
 interface RouteParams {
   params: Promise<{ hash: string }>;
@@ -14,6 +15,9 @@ export async function POST(
   _request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<{ success: boolean; message: string } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { hash } = await params;
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { AddTorrentResponse } from '@/types/momoshtrem';
 
 interface AddTorrentBody {
@@ -22,6 +23,9 @@ interface AddTorrentBody {
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<AddTorrentResponse | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const body = (await request.json()) as AddTorrentBody;
     const { magnet_uri, media_type, tmdb_id } = body;

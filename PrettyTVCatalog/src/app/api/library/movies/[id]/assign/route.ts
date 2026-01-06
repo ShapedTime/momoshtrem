@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { MovieAssignmentResponse } from '@/types/momoshtrem';
 
 interface RouteParams {
@@ -19,6 +20,9 @@ export async function POST(
   request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<MovieAssignmentResponse | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const movieId = parseInt(id, 10);
@@ -61,6 +65,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<{ success: boolean } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const movieId = parseInt(id, 10);

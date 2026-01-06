@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { DownloadSubtitleRequest, Subtitle } from '@/types/subtitle';
 
 const VALID_ITEM_TYPES = ['movie', 'episode'] as const;
@@ -16,6 +17,9 @@ function isValidItemType(type: unknown): type is 'movie' | 'episode' {
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<{ subtitle: Subtitle } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const body = await request.json();
 

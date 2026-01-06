@@ -5,12 +5,38 @@ import {
   setSessionCookie,
   clearSession,
 } from '@/lib/auth';
+import {
+  checkRateLimit,
+  recordFailedAttempt,
+  clearRateLimit,
+  getClientIp,
+} from '@/lib/auth/rate-limit';
 import type { LoginRequest, LoginResponse } from '@/types/auth';
 
 // POST /api/auth - Login
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<LoginResponse>> {
+  const clientIp = getClientIp(request);
+
+  // Check rate limit before processing
+  const rateLimitResult = checkRateLimit(clientIp);
+  if (!rateLimitResult.allowed) {
+    const retryAfterSeconds = rateLimitResult.blockedUntil
+      ? Math.ceil((rateLimitResult.blockedUntil - Date.now()) / 1000)
+      : 900; // 15 minutes default
+
+    return NextResponse.json(
+      { success: false, error: 'Too many login attempts. Please try again later.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(retryAfterSeconds),
+        },
+      }
+    );
+  }
+
   try {
     const body = (await request.json()) as LoginRequest;
     const { password } = body;
@@ -25,11 +51,16 @@ export async function POST(
 
     // Verify password
     if (!verifyPassword(password)) {
+      // Record failed attempt for rate limiting
+      recordFailedAttempt(clientIp);
       return NextResponse.json(
         { success: false, error: 'Invalid password' },
         { status: 401 }
       );
     }
+
+    // Successful login - clear rate limit
+    clearRateLimit(clientIp);
 
     // Create and set session
     const token = await createSessionToken();

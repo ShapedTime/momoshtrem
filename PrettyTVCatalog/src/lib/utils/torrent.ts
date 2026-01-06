@@ -9,6 +9,37 @@ import parseTorrent, { toMagnetURI } from 'parse-torrent';
 // Configuration
 // ============================================
 
+/** Regex pattern to detect private/internal IP addresses */
+const PRIVATE_IP_PATTERN =
+  /^(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|0\.0\.0\.0|\[::1\]|\[::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}\])$/i;
+
+/**
+ * Validate that a URL is safe to fetch (SSRF protection).
+ * Blocks internal/private network addresses and non-HTTP protocols.
+ *
+ * @param url - URL to validate
+ * @returns Object with valid status and error message if invalid
+ */
+function validateExternalUrl(url: string): { valid: boolean; error?: string } {
+  try {
+    const parsed = new URL(url);
+
+    // Only allow HTTP and HTTPS protocols
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { valid: false, error: `Blocked protocol: ${parsed.protocol}` };
+    }
+
+    // Block private/internal IP addresses to prevent SSRF
+    if (PRIVATE_IP_PATTERN.test(parsed.hostname)) {
+      return { valid: false, error: 'Blocked internal address' };
+    }
+
+    return { valid: true };
+  } catch {
+    return { valid: false, error: 'Invalid URL format' };
+  }
+}
+
 export const TORRENT_CONVERSION_CONFIG = {
   /** Timeout for fetching individual .torrent files (ms) */
   fetchTimeout: 5000,
@@ -41,6 +72,16 @@ export interface ConversionResult {
 export async function convertTorrentUrlToMagnet(
   torrentUrl: string
 ): Promise<ConversionResult> {
+  // SSRF protection: validate URL before fetching
+  const validation = validateExternalUrl(torrentUrl);
+  if (!validation.valid) {
+    return {
+      success: false,
+      magnetUri: null,
+      error: validation.error,
+    };
+  }
+
   try {
     // Fetch the .torrent file with timeout
     const controller = new AbortController();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tmdbClient } from '@/lib/api/tmdb';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { SeasonDetails } from '@/types/tmdb';
 
 interface RouteParams {
@@ -11,6 +12,9 @@ export async function GET(
   request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<SeasonDetails | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id, season } = await params;
     const showId = parseInt(id, 10);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { Subtitle } from '@/types/subtitle';
 
 interface RouteParams {
@@ -15,6 +16,9 @@ export async function GET(
   _request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<{ subtitles: Subtitle[] } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const movieId = parseInt(id, 10);

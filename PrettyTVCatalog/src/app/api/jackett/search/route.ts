@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jackettClient } from '@/lib/api/jackett';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { JackettSearchResponse } from '@/types/jackett';
 import type { TorznabCategory } from '@/config/jackett';
 
 export async function GET(
   request: NextRequest
 ): Promise<NextResponse<JackettSearchResponse | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('q');

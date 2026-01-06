@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 
 /**
  * GET /api/subtitles/search
@@ -9,6 +10,9 @@ import { isAppError } from '@/lib/errors';
 export async function GET(
   request: NextRequest
 ): Promise<NextResponse<{ results: unknown[] } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const tmdbId = searchParams.get('tmdb_id');

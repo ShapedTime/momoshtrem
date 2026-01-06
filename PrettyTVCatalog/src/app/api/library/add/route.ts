@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 
 interface AddToLibraryBody {
@@ -23,6 +24,9 @@ interface AddToLibraryResponse {
 export async function POST(
   request: NextRequest
 ): Promise<NextResponse<AddToLibraryResponse | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const body = (await request.json()) as AddToLibraryBody;
     const { media_type, tmdb_id } = body;

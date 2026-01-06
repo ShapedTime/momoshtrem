@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { tmdbClient } from '@/lib/api/tmdb';
 import { isAppError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { Genre } from '@/types/tmdb';
 
 interface GenresResponse {
@@ -10,6 +11,9 @@ interface GenresResponse {
 export async function GET(
   request: NextRequest
 ): Promise<NextResponse<GenresResponse | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const type = searchParams.get('type');

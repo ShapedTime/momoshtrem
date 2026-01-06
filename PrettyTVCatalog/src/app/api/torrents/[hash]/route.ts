@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { TorrentStatus } from '@/types/torrent';
 
 interface RouteParams {
@@ -15,6 +16,9 @@ export async function GET(
   _request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<TorrentStatus | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { hash } = await params;
 
@@ -51,6 +55,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse<{ success: boolean } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const { hash } = await params;
 

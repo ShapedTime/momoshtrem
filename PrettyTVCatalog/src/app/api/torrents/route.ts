@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
+import { requireAuth } from '@/lib/api/auth-guard';
 import type { TorrentStatus } from '@/types/torrent';
 
 /**
@@ -8,6 +9,9 @@ import type { TorrentStatus } from '@/types/torrent';
  * List all active torrents with their status.
  */
 export async function GET(): Promise<NextResponse<{ torrents: TorrentStatus[] } | { error: string }>> {
+  const authError = await requireAuth();
+  if (authError) return authError;
+
   try {
     const torrents = await momoshtremClient.getTorrents();
     return NextResponse.json({ torrents });
