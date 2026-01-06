@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
@@ -63,6 +64,7 @@ func main() {
 	movieRepo := library.NewMovieRepository(db)
 	showRepo := library.NewShowRepository(db)
 	assignmentRepo := library.NewAssignmentRepository(db)
+	syncMetaRepo := library.NewSyncMetadataRepository(db)
 
 	// Initialize TMDB client
 	var tmdbClient *tmdb.Client
@@ -185,6 +187,20 @@ func main() {
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
 
+	// Initialize air date sync service
+	var airDateSync *airdate.SyncService
+	if cfg.AirDateSync.Enabled && cfg.TMDB.APIKey != "" {
+		airDateSync = airdate.NewSyncService(cfg.AirDateSync, showRepo, syncMetaRepo, tmdbClient)
+		airDateSync.Start()
+		apiServer.SetAirDateSyncService(airDateSync)
+		slog.Info("Air date sync service initialized",
+			"interval_hours", cfg.AirDateSync.SyncIntervalHours,
+			"lookback_days", cfg.AirDateSync.LookbackDays,
+		)
+	} else {
+		slog.Warn("Air date sync service disabled (requires TMDB API key)")
+	}
+
 	// Initialize subtitle repository (always, for VFS to show existing subtitles)
 	subtitleRepo := subtitle.NewRepository(db.DB)
 	libraryFS.SetSubtitleRepository(subtitleRepo)
@@ -261,6 +277,11 @@ func main() {
 	// Stop activity manager
 	if activityManager != nil {
 		activityManager.Stop()
+	}
+
+	// Stop air date sync service
+	if airDateSync != nil {
+		airDateSync.Stop()
 	}
 
 	// Close torrent service

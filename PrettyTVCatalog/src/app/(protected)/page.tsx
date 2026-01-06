@@ -10,6 +10,7 @@ import {
   MediaCarouselSkeleton,
 } from '@/components/media';
 import { Button, AlertCircleIcon } from '@/components/ui';
+import { RecentlyAiredSection } from '@/components/library/RecentlyAiredSection';
 import { getRandomItem } from '@/lib/utils';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -76,6 +77,11 @@ export default function HomePage() {
     <>
       {/* Hero Banner */}
       {featuredItem && <HeroBanner media={featuredItem} />}
+
+      {/* Recently Aired Episodes from Library */}
+      <div className="px-4 sm:px-6 lg:px-12 xl:px-16 mt-6">
+        <RecentlyAiredSection />
+      </div>
 
       {/* Trending Movies Carousel */}
       {trending.movies.length > 0 && (

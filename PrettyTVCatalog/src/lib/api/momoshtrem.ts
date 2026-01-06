@@ -6,6 +6,7 @@ import type {
   MovieAssignmentResponse,
   ShowAssignmentResponse,
   MomoshtremError,
+  RecentlyAiredResponse,
 } from '@/types/momoshtrem';
 import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
 import type {
@@ -553,6 +554,36 @@ class MomoshtremClient {
       `/api/subtitles/${subtitleId}`,
       undefined,
       'delete subtitle'
+    );
+  }
+
+  // ============================================================================
+  // Recently Aired API
+  // ============================================================================
+
+  /**
+   * Get recently aired episodes from library shows.
+   * @param lookbackDays Number of days to look back (default: 30, max: 90)
+   */
+  async getRecentlyAiredEpisodes(lookbackDays = 30): Promise<RecentlyAiredResponse> {
+    return this.request<RecentlyAiredResponse>(
+      'GET',
+      `/api/shows/recently-aired?lookback_days=${lookbackDays}`,
+      undefined,
+      'get recently aired episodes'
+    );
+  }
+
+  /**
+   * Trigger a manual air date sync from TMDB.
+   * Returns immediately; sync runs in background.
+   */
+  async triggerAirDateSync(): Promise<void> {
+    await this.request<void>(
+      'POST',
+      '/api/shows/sync-air-dates',
+      undefined,
+      'trigger air date sync'
     );
   }
 }

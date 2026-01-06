@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -20,10 +21,11 @@ type Server struct {
 	showRepo        *library.ShowRepository
 	assignmentRepo  *library.AssignmentRepository
 	tmdbClient      *tmdb.Client
-	torrentService  torrent.Service      // Optional: nil until Stage 2 implementation
+	torrentService  torrent.Service       // Optional: nil until Stage 2 implementation
 	identifier      *identify.Identifier
-	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
-	subtitleService *subtitle.Service    // Optional: subtitle search/download service
+	treeUpdater     vfs.TreeUpdater       // Optional: updates VFS tree on assignment changes
+	subtitleService *subtitle.Service     // Optional: subtitle search/download service
+	airDateSync     *airdate.SyncService  // Optional: air date sync service
 }
 
 // NewServer creates a new API server
@@ -58,6 +60,12 @@ func NewServer(
 func (s *Server) SetSubtitleService(svc *subtitle.Service) {
 	s.subtitleService = svc
 	slog.Info("Subtitle service configured")
+}
+
+// SetAirDateSyncService configures air date sync support
+func (s *Server) SetAirDateSyncService(svc *airdate.SyncService) {
+	s.airDateSync = svc
+	slog.Info("Air date sync service configured")
 }
 
 func (s *Server) setupMiddleware() {
@@ -106,6 +114,8 @@ func (s *Server) setupRoutes() {
 	api.GET("/shows/:id", s.getShow)
 	api.DELETE("/shows/:id", s.deleteShow)
 	api.POST("/shows/:id/assign-torrent", s.assignShowTorrent) // Auto-detect episodes
+	api.GET("/shows/recently-aired", s.getRecentlyAiredEpisodes)
+	api.POST("/shows/sync-air-dates", s.triggerAirDateSync)
 
 	// Episodes - only unassign, assignment is done via show-level API
 	api.DELETE("/episodes/:id/assign", s.unassignEpisodeTorrent)

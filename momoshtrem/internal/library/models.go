@@ -54,6 +54,7 @@ type Episode struct {
 	SeasonID      int64
 	EpisodeNumber int
 	Name          string
+	AirDate       *time.Time // When the episode aired (from TMDB)
 
 	// Loaded on demand
 	Assignment *TorrentAssignment
@@ -96,6 +97,20 @@ func (e *Episode) VFSPath(seasonPath string, showTitle string, seasonNumber int)
 		name = "Episode " + common.Itoa(e.EpisodeNumber)
 	}
 	return seasonPath + "/" + SanitizeFilename(showTitle) + " - S" + common.PadZero(seasonNumber, 2) + "E" + common.PadZero(e.EpisodeNumber, 2) + " - " + SanitizeFilename(name)
+}
+
+// RecentlyAiredEpisode represents an episode with show context for the recently-aired API
+type RecentlyAiredEpisode struct {
+	ShowID        int64
+	ShowTMDBID    int
+	ShowTitle     string
+	ShowYear      int
+	SeasonNumber  int
+	EpisodeID     int64
+	EpisodeNumber int
+	EpisodeName   string
+	AirDate       string
+	HasAssignment bool
 }
 
 // SanitizeFilename removes or replaces characters invalid in file paths

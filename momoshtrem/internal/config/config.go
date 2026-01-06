@@ -18,6 +18,7 @@ type Config struct {
 	Streaming     StreamingConfig     `yaml:"streaming"`
 	OpenSubtitles OpenSubtitlesConfig `yaml:"opensubtitles"`
 	Subtitles     SubtitlesConfig     `yaml:"subtitles"`
+	AirDateSync   AirDateSyncConfig   `yaml:"airdate_sync"`
 }
 
 type ServerConfig struct {
@@ -75,6 +76,15 @@ type SubtitlesConfig struct {
 	DownloadPath string `yaml:"download_path"` // Local storage path for downloaded subtitles
 }
 
+// AirDateSyncConfig configures the background air date sync service
+type AirDateSyncConfig struct {
+	Enabled           bool `yaml:"enabled"`             // Enable air date sync (default: true)
+	SyncIntervalHours int  `yaml:"sync_interval_hours"` // Hours between syncs (default: 24)
+	LookbackDays      int  `yaml:"lookback_days"`       // Days to look back for recently aired (default: 30)
+	BatchSize         int  `yaml:"batch_size"`          // Shows per batch to avoid rate limits (default: 5)
+	BatchDelayMs      int  `yaml:"batch_delay_ms"`      // Delay between batches in ms (default: 500)
+}
+
 // DefaultConfig returns configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -109,6 +119,13 @@ func DefaultConfig() *Config {
 		OpenSubtitles: OpenSubtitlesConfig{},
 		Subtitles: SubtitlesConfig{
 			DownloadPath: "./data/subtitles",
+		},
+		AirDateSync: AirDateSyncConfig{
+			Enabled:           true,
+			SyncIntervalHours: 24,
+			LookbackDays:      30,
+			BatchSize:         5,
+			BatchDelayMs:      500,
 		},
 	}
 }

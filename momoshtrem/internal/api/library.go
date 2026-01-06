@@ -778,3 +778,98 @@ func toAssignmentResponse(a *library.TorrentAssignment) *AssignmentResponse {
 		Source:     a.Source,
 	}
 }
+
+// Recently aired episode response types
+type RecentlyAiredEpisodeResponse struct {
+	ShowID        int64  `json:"show_id"`
+	ShowTMDBID    int    `json:"show_tmdb_id"`
+	ShowTitle     string `json:"show_title"`
+	ShowYear      int    `json:"show_year"`
+	SeasonNumber  int    `json:"season_number"`
+	EpisodeID     int64  `json:"episode_id"`
+	EpisodeNumber int    `json:"episode_number"`
+	EpisodeName   string `json:"episode_name"`
+	AirDate       string `json:"air_date"`
+	HasAssignment bool   `json:"has_assignment"`
+}
+
+type RecentlyAiredResponse struct {
+	Episodes     []RecentlyAiredEpisodeResponse `json:"episodes"`
+	LastSyncTime string                         `json:"last_sync_time"`
+	SyncStatus   string                         `json:"sync_status"`
+}
+
+// getRecentlyAiredEpisodes returns episodes that recently aired
+func (s *Server) getRecentlyAiredEpisodes(c *gin.Context) {
+	// Parse optional lookback_days query param (default: 30)
+	lookbackDays := 30
+	if s.airDateSync != nil {
+		lookbackDays = s.airDateSync.GetLookbackDays()
+	}
+	if days := c.Query("lookback_days"); days != "" {
+		if parsed, err := strconv.Atoi(days); err == nil && parsed > 0 && parsed <= 90 {
+			lookbackDays = parsed
+		}
+	}
+
+	episodes, err := s.showRepo.GetRecentlyAiredEpisodes(lookbackDays)
+	if err != nil {
+		errorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Convert to response type
+	respEpisodes := make([]RecentlyAiredEpisodeResponse, len(episodes))
+	for i, ep := range episodes {
+		respEpisodes[i] = RecentlyAiredEpisodeResponse{
+			ShowID:        ep.ShowID,
+			ShowTMDBID:    ep.ShowTMDBID,
+			ShowTitle:     ep.ShowTitle,
+			ShowYear:      ep.ShowYear,
+			SeasonNumber:  ep.SeasonNumber,
+			EpisodeID:     ep.EpisodeID,
+			EpisodeNumber: ep.EpisodeNumber,
+			EpisodeName:   ep.EpisodeName,
+			AirDate:       ep.AirDate,
+			HasAssignment: ep.HasAssignment,
+		}
+	}
+
+	// Get sync status
+	var lastSyncTime string
+	var syncStatus string
+	if s.airDateSync != nil {
+		lastSync, status, _ := s.airDateSync.GetStatus()
+		if !lastSync.IsZero() {
+			lastSyncTime = lastSync.Format("2006-01-02T15:04:05Z07:00")
+		}
+		syncStatus = status
+	} else {
+		syncStatus = "disabled"
+	}
+
+	c.JSON(http.StatusOK, RecentlyAiredResponse{
+		Episodes:     respEpisodes,
+		LastSyncTime: lastSyncTime,
+		SyncStatus:   syncStatus,
+	})
+}
+
+// triggerAirDateSync manually triggers an air date sync
+func (s *Server) triggerAirDateSync(c *gin.Context) {
+	if s.airDateSync == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Air date sync service not configured")
+		return
+	}
+
+	// Start sync in background
+	go func() {
+		if err := s.airDateSync.TriggerSync(); err != nil {
+			slog.Warn("Manual air date sync failed", "error", err)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Air date sync started",
+	})
+}

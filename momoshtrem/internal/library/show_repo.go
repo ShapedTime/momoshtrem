@@ -446,3 +446,64 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 
 	return episodes, rows.Err()
 }
+
+// UpdateEpisodeAirDate sets the air date for a specific episode
+func (r *ShowRepository) UpdateEpisodeAirDate(seasonID int64, episodeNumber int, airDate string) error {
+	_, err := r.db.Exec(
+		`UPDATE episodes SET air_date = ? WHERE season_id = ? AND episode_number = ?`,
+		airDate, seasonID, episodeNumber,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update episode air date: %w", err)
+	}
+	return nil
+}
+
+// GetRecentlyAiredEpisodes returns episodes that aired within the lookback period
+func (r *ShowRepository) GetRecentlyAiredEpisodes(lookbackDays int) ([]RecentlyAiredEpisode, error) {
+	cutoffDate := time.Now().AddDate(0, 0, -lookbackDays).Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
+
+	rows, err := r.db.Query(`
+		SELECT
+			s.id, s.tmdb_id, s.title, s.year,
+			sn.season_number,
+			e.id, e.episode_number, e.name, e.air_date,
+			CASE WHEN ta.id IS NOT NULL THEN 1 ELSE 0 END as has_assignment
+		FROM episodes e
+		INNER JOIN seasons sn ON sn.id = e.season_id
+		INNER JOIN shows s ON s.id = sn.show_id
+		LEFT JOIN torrent_assignments ta ON ta.item_type = 'episode' AND ta.item_id = e.id AND ta.is_active = TRUE
+		WHERE e.air_date IS NOT NULL
+		  AND e.air_date >= ?
+		  AND e.air_date <= ?
+		ORDER BY e.air_date DESC, s.title ASC, sn.season_number ASC, e.episode_number ASC
+	`, cutoffDate, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recently aired episodes: %w", err)
+	}
+	defer rows.Close()
+
+	var episodes []RecentlyAiredEpisode
+	for rows.Next() {
+		var ep RecentlyAiredEpisode
+		var name sql.NullString
+		var hasAssignment int
+
+		err := rows.Scan(
+			&ep.ShowID, &ep.ShowTMDBID, &ep.ShowTitle, &ep.ShowYear,
+			&ep.SeasonNumber,
+			&ep.EpisodeID, &ep.EpisodeNumber, &name, &ep.AirDate,
+			&hasAssignment,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan recently aired episode: %w", err)
+		}
+
+		ep.EpisodeName = name.String
+		ep.HasAssignment = hasAssignment == 1
+		episodes = append(episodes, ep)
+	}
+
+	return episodes, rows.Err()
+}
