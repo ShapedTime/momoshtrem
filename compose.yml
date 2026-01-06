@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: ghcr.io/tarampampam/caddy-docker:2-with-duckdns
+    image: serfriz/caddy-duckdns:latest
     container_name: caddy
     ports:
       - "443:443"   # HTTPS
