@@ -17,9 +17,12 @@ services:
     build:
       context: ./momoshtrem
       dockerfile: Dockerfile
-    ports:
-      - 4444:4444
-      - 36911:36911
+    # Ports NOT exposed to host - only accessible via Docker internal network
+    # REST API (4444) accessible by prettytvcatalog internally
+    # WebDAV (36911) accessible by caddy internally
+    expose:
+      - "4444"
+      - "36911"
     volumes:
       - /mnt/data/3/momoshtrem/config:/config
       - /mnt/data/3/momoshtrem/data:/data
@@ -28,6 +31,22 @@ services:
       - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
       - OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
       - OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
+    restart: unless-stopped
+
+  caddy:
+    image: ghcr.io/tarampampam/caddy-docker:2-with-duckdns
+    container_name: caddy
+    ports:
+      - "443:443"   # HTTPS
+      - "80:80"     # HTTP redirect
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}
+    depends_on:
+      - momoshtrem
     restart: unless-stopped
 
   prettytvcatalog:
@@ -55,3 +74,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+volumes:
+  caddy_data:
+  caddy_config:
