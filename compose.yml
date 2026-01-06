@@ -34,17 +34,14 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: serfriz/caddy-duckdns:latest
+    image: caddy:2-alpine
     container_name: caddy
     ports:
-      - "443:443"   # HTTPS
-      - "80:80"     # HTTP redirect
+      - "36911:36911"   # WebDAV via HTTPS
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    environment:
-      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}
     depends_on:
       - momoshtrem
     restart: unless-stopped
