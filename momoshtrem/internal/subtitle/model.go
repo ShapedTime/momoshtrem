@@ -15,6 +15,14 @@ const (
 	ItemTypeEpisode ItemType = "episode"
 )
 
+// Source represents where the subtitle came from
+type Source string
+
+const (
+	SourceOpenSubtitles Source = "opensubtitles"
+	SourceTorrent       Source = "torrent"
+)
+
 // ParseItemType converts a string to ItemType with validation.
 func ParseItemType(s string) (ItemType, error) {
 	switch strings.ToLower(s) {
@@ -27,7 +35,7 @@ func ParseItemType(s string) (ItemType, error) {
 	}
 }
 
-// Subtitle represents a downloaded subtitle file for a library item
+// Subtitle represents a subtitle file for a library item
 type Subtitle struct {
 	ID           int64
 	ItemType     ItemType
@@ -35,8 +43,10 @@ type Subtitle struct {
 	LanguageCode string // ISO 639-1 (en, ru, tr, az)
 	LanguageName string // Display name (English, Russian, etc.)
 	Format       string // srt, vtt, ass, ssa, sub
-	FilePath     string // Local storage path
+	FilePath     string // Local storage path OR torrent file path (for Source=torrent)
 	FileSize     int64
+	Source       Source // "opensubtitles" or "torrent"
+	InfoHash     string // For torrent subtitles: the torrent info hash
 	CreatedAt    time.Time
 }
 

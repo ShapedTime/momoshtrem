@@ -2,6 +2,7 @@ package identify
 
 import (
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 )
 
 // UnmatchedReason describes why a file couldn't be matched
@@ -17,8 +18,20 @@ const (
 
 // MatchResult contains the results of matching identified files to library episodes
 type MatchResult struct {
-	Matched   []MatchedEpisode
-	Unmatched []UnmatchedFile
+	Matched          []MatchedEpisode
+	MatchedSubtitles []MatchedSubtitle
+	Unmatched        []UnmatchedFile
+}
+
+// MatchedSubtitle represents a subtitle file matched to a library episode
+type MatchedSubtitle struct {
+	Episode      *library.Episode
+	Season       *library.Season
+	FilePath     string
+	FileSize     int64
+	LanguageCode string
+	LanguageName string
+	Format       string
 }
 
 // MatchedEpisode represents a successful match between a torrent file and a library episode
@@ -45,8 +58,9 @@ type UnmatchedFile struct {
 // It builds a lookup of existing episodes and matches identified files against it
 func MatchToShow(show *library.Show, result *IdentificationResult) *MatchResult {
 	matchResult := &MatchResult{
-		Matched:   make([]MatchedEpisode, 0),
-		Unmatched: make([]UnmatchedFile, 0),
+		Matched:          make([]MatchedEpisode, 0),
+		MatchedSubtitles: make([]MatchedSubtitle, 0),
+		Unmatched:        make([]UnmatchedFile, 0),
 	}
 
 	// Build episode lookup: map[seasonNumber][episodeNumber] -> (Episode, Season)
@@ -74,16 +88,10 @@ func MatchToShow(show *library.Show, result *IdentificationResult) *MatchResult 
 		}
 	}
 
-	// Process identified files
+	// First pass: Process video files
 	for _, identified := range result.IdentifiedFiles {
-		// Skip non-video files
+		// Skip subtitle files in first pass (processed separately below)
 		if identified.FileType != FileTypeVideo {
-			matchResult.Unmatched = append(matchResult.Unmatched, UnmatchedFile{
-				FilePath: identified.FilePath,
-				Reason:   ReasonNotVideo,
-				Season:   identified.Season,
-				Episode:  firstEpisode(identified.Episodes),
-			})
 			continue
 		}
 
@@ -111,6 +119,53 @@ func MatchToShow(show *library.Show, result *IdentificationResult) *MatchResult 
 					Confidence:  identified.Confidence,
 					NeedsReview: identified.NeedsReview,
 					PatternUsed: identified.PatternUsed,
+				})
+			} else {
+				matchResult.Unmatched = append(matchResult.Unmatched, UnmatchedFile{
+					FilePath: identified.FilePath,
+					Reason:   ReasonNoLibraryEpisode,
+					Season:   identified.Season,
+					Episode:  epNum,
+				})
+			}
+		}
+	}
+
+	// Second pass: Process subtitle files
+	for _, identified := range result.IdentifiedFiles {
+		if identified.FileType != FileTypeSubtitle {
+			continue
+		}
+
+		// Skip special episodes for now
+		if identified.IsSpecial {
+			matchResult.Unmatched = append(matchResult.Unmatched, UnmatchedFile{
+				FilePath: identified.FilePath,
+				Reason:   ReasonSpecialNotSupport,
+				Season:   0,
+				Episode:  firstEpisode(identified.Episodes),
+			})
+			continue
+		}
+
+		// Detect language from filename
+		langCode, langName, _ := subtitle.DetectLanguage(identified.FilePath)
+
+		// Determine format from extension
+		format := subtitle.ParseFormat(identified.FilePath)
+
+		// For each episode in the identified subtitle
+		for _, epNum := range identified.Episodes {
+			key := episodeKey{season: identified.Season, episode: epNum}
+			if entry, ok := episodeLookup[key]; ok {
+				matchResult.MatchedSubtitles = append(matchResult.MatchedSubtitles, MatchedSubtitle{
+					Episode:      entry.episode,
+					Season:       entry.season,
+					FilePath:     identified.FilePath,
+					FileSize:     identified.FileSize,
+					LanguageCode: langCode,
+					LanguageName: langName,
+					Format:       format,
 				})
 			} else {
 				matchResult.Unmatched = append(matchResult.Unmatched, UnmatchedFile{

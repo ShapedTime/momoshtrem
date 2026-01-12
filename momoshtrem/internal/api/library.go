@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
@@ -85,10 +86,11 @@ type ShowAssignmentResponse struct {
 }
 
 type AssignmentSummary struct {
-	TotalFiles int `json:"total_files"`
-	Matched    int `json:"matched"`
-	Unmatched  int `json:"unmatched"`
-	Skipped    int `json:"skipped"`
+	TotalFiles     int `json:"total_files"`
+	Matched        int `json:"matched"`
+	Unmatched      int `json:"unmatched"`
+	Skipped        int `json:"skipped"`
+	SubtitlesFound int `json:"subtitles_found"`
 }
 
 type MatchedAssignment struct {
@@ -631,6 +633,47 @@ func (s *Server) assignShowTorrent(c *gin.Context) {
 		s.treeUpdater.AddEpisodesToTree(episodesForTree)
 	}
 
+	// Process matched subtitles
+	subtitlesCreated := 0
+	if s.subtitleService != nil && len(matchResult.MatchedSubtitles) > 0 {
+		for _, ms := range matchResult.MatchedSubtitles {
+			sub := &subtitle.Subtitle{
+				ItemType:     subtitle.ItemTypeEpisode,
+				ItemID:       ms.Episode.ID,
+				LanguageCode: ms.LanguageCode,
+				LanguageName: ms.LanguageName,
+				Format:       ms.Format,
+				FilePath:     ms.FilePath,
+				FileSize:     ms.FileSize,
+				Source:       subtitle.SourceTorrent,
+				InfoHash:     infoHash,
+			}
+
+			if err := s.subtitleService.CreateTorrentSubtitle(c.Request.Context(), sub); err != nil {
+				slog.Error("Failed to create torrent subtitle",
+					"episode_id", ms.Episode.ID,
+					"file_path", ms.FilePath,
+					"error", err,
+				)
+				continue
+			}
+			subtitlesCreated++
+
+			slog.Info("Torrent subtitle assigned",
+				"episode_id", ms.Episode.ID,
+				"season", ms.Season.SeasonNumber,
+				"episode", ms.Episode.EpisodeNumber,
+				"language", ms.LanguageCode,
+				"file_path", ms.FilePath,
+			)
+		}
+
+		// Invalidate VFS tree to pick up new subtitles
+		if s.treeUpdater != nil && subtitlesCreated > 0 {
+			s.treeUpdater.InvalidateTree()
+		}
+	}
+
 	// Build unmatched response
 	unmatched := make([]UnmatchedAssignment, 0, len(matchResult.Unmatched))
 	for _, u := range matchResult.Unmatched {
@@ -662,10 +705,11 @@ func (s *Server) assignShowTorrent(c *gin.Context) {
 	c.JSON(http.StatusCreated, ShowAssignmentResponse{
 		Success: true,
 		Summary: AssignmentSummary{
-			TotalFiles: identResult.TotalFiles,
-			Matched:    len(matched),
-			Unmatched:  len(unmatched),
-			Skipped:    skipped,
+			TotalFiles:     identResult.TotalFiles,
+			Matched:        len(matched),
+			Unmatched:      len(unmatched),
+			Skipped:        skipped,
+			SubtitlesFound: subtitlesCreated,
 		},
 		Matched:   matched,
 		Unmatched: unmatched,

@@ -167,6 +167,12 @@ func (fs *LibraryFS) Open(filepath string) (File, error) {
 	case *SubtitleFile:
 		// Subtitle files are backed by local storage
 		return e, nil
+	case *TorrentSubtitleFile:
+		// Torrent-embedded subtitle: stream from torrent
+		if fs.torrentService != nil {
+			return fs.openTorrentSubtitleFile(e)
+		}
+		return nil, os.ErrNotExist
 	default:
 		return nil, os.ErrNotExist
 	}
@@ -202,6 +208,54 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		handle,
 		pf.name,
 		assignment.InfoHash,
+		fs.readTimeout,
+		fs.onActivity,
+		fs.streamingCfg,
+	), nil
+}
+
+// openTorrentSubtitleFile creates a TorrentFile for streaming a subtitle from a torrent.
+func (fs *LibraryFS) openTorrentSubtitleFile(tsf *TorrentSubtitleFile) (File, error) {
+	// Look up magnet_uri from torrent_assignments using the info_hash
+	assignments, err := fs.assignmentRepo.GetByInfoHash(tsf.infoHash)
+	if err != nil || len(assignments) == 0 {
+		slog.Error("Failed to find torrent assignment for subtitle",
+			"info_hash", tsf.infoHash,
+			"subtitle_path", tsf.torrentPath,
+			"error", err,
+		)
+		return nil, os.ErrNotExist
+	}
+
+	// Use the first assignment's magnet URI (all assignments for same hash have same magnet)
+	magnetURI := assignments[0].MagnetURI
+
+	// Ensure torrent is loaded (lazy loading via GetOrAddTorrent)
+	_, err = fs.torrentService.GetOrAddTorrent(magnetURI)
+	if err != nil {
+		slog.Error("Failed to load torrent for subtitle",
+			"info_hash", tsf.infoHash,
+			"subtitle_path", tsf.torrentPath,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	// Get the specific file handle from the torrent
+	handle, err := fs.torrentService.GetFile(tsf.infoHash, tsf.torrentPath)
+	if err != nil {
+		slog.Error("Failed to get subtitle file from torrent",
+			"info_hash", tsf.infoHash,
+			"subtitle_path", tsf.torrentPath,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	return NewTorrentFile(
+		handle,
+		tsf.name,
+		tsf.infoHash,
 		fs.readTimeout,
 		fs.onActivity,
 		fs.streamingCfg,
@@ -765,6 +819,31 @@ func (f *SubtitleFile) Stat() (os.FileInfo, error) {
 	return common.NewFileInfo(f.name, f.size, false, time.Now()), nil
 }
 
+// TorrentSubtitleFile represents a subtitle file embedded in a torrent
+type TorrentSubtitleFile struct {
+	name        string
+	torrentPath string // Path within the torrent
+	size        int64
+	infoHash    string
+}
+
+func NewTorrentSubtitleFile(name, torrentPath string, size int64, infoHash string) *TorrentSubtitleFile {
+	return &TorrentSubtitleFile{
+		name:        name,
+		torrentPath: torrentPath,
+		size:        size,
+		infoHash:    infoHash,
+	}
+}
+
+func (f *TorrentSubtitleFile) Name() string { return f.name }
+func (f *TorrentSubtitleFile) IsDir() bool  { return false }
+func (f *TorrentSubtitleFile) Size() int64  { return f.size }
+
+func (f *TorrentSubtitleFile) Stat() (os.FileInfo, error) {
+	return common.NewFileInfo(f.name, f.size, false, time.Now()), nil
+}
+
 // makeSubtitleFileName creates a subtitle filename: "VideoName.lang.format"
 func makeSubtitleFileName(videoBaseName, langCode, format string) string {
 	return videoBaseName + "." + langCode + "." + format
@@ -786,7 +865,16 @@ func (fs *LibraryFS) addSubtitlesToDir(tree *DirectoryTree, dir *VirtualDir, dir
 	for _, sub := range subtitles {
 		subFileName := makeSubtitleFileName(videoBaseName, sub.LanguageCode, sub.Format)
 		subFilePath := dirPath + "/" + subFileName
-		subFile := NewSubtitleFile(subFileName, sub.FilePath, sub.FileSize)
+
+		var subFile Entry
+		if sub.Source == subtitle.SourceTorrent {
+			// Torrent-embedded subtitle: will be streamed from torrent
+			subFile = NewTorrentSubtitleFile(subFileName, sub.FilePath, sub.FileSize, sub.InfoHash)
+		} else {
+			// Local subtitle: backed by local storage (OpenSubtitles download)
+			subFile = NewSubtitleFile(subFileName, sub.FilePath, sub.FileSize)
+		}
+
 		dir.children[subFileName] = subFile
 		tree.pathMap[subFilePath] = subFile
 	}
@@ -802,6 +890,9 @@ func entryToFile(e Entry) File {
 		return v
 	case *SubtitleFile:
 		return v
+	case *TorrentSubtitleFile:
+		// Note: TorrentSubtitleFile needs to be opened via LibraryFS.Open() to get actual torrent file
+		return nil
 	default:
 		return nil
 	}

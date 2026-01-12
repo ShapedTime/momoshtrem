@@ -24,42 +24,61 @@ type scanner interface {
 // scanSubtitle scans a row into a Subtitle
 func scanSubtitle(s scanner) (*Subtitle, error) {
 	sub := &Subtitle{}
+	var infoHash sql.NullString
 	err := s.Scan(
 		&sub.ID, &sub.ItemType, &sub.ItemID,
 		&sub.LanguageCode, &sub.LanguageName,
 		&sub.Format, &sub.FilePath, &sub.FileSize,
+		&sub.Source, &infoHash,
 		&sub.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	sub.InfoHash = infoHash.String
 	return sub, nil
+}
+
+// nullString converts an empty string to sql.NullString for nullable columns
+func nullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
 }
 
 // Create adds or updates a subtitle record (upsert).
 // After upsert, it queries the actual row to get correct ID and CreatedAt.
 func (r *Repository) Create(ctx context.Context, sub *Subtitle) error {
+	// Default source to opensubtitles if not set
+	source := sub.Source
+	if source == "" {
+		source = SourceOpenSubtitles
+	}
+
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO subtitles (item_type, item_id, language_code, language_name, format, file_path, file_size)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO subtitles (item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(item_type, item_id, language_code) DO UPDATE SET
 		 language_name = excluded.language_name,
 		 format = excluded.format,
 		 file_path = excluded.file_path,
-		 file_size = excluded.file_size`,
+		 file_size = excluded.file_size,
+		 source = excluded.source,
+		 info_hash = excluded.info_hash`,
 		sub.ItemType, sub.ItemID, sub.LanguageCode, sub.LanguageName,
-		sub.Format, sub.FilePath, sub.FileSize,
+		sub.Format, sub.FilePath, sub.FileSize, source, nullString(sub.InfoHash),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create subtitle: %w", err)
 	}
 
-	// Query the actual row to get correct ID and CreatedAt (LastInsertId unreliable after UPSERT)
+	// Query the actual row to get correct ID, Source, and CreatedAt (LastInsertId unreliable after UPSERT)
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, created_at FROM subtitles WHERE item_type = ? AND item_id = ? AND language_code = ?`,
+		`SELECT id, source, created_at FROM subtitles WHERE item_type = ? AND item_id = ? AND language_code = ?`,
 		sub.ItemType, sub.ItemID, sub.LanguageCode,
 	)
-	if err := row.Scan(&sub.ID, &sub.CreatedAt); err != nil {
+	if err := row.Scan(&sub.ID, &sub.Source, &sub.CreatedAt); err != nil {
 		return fmt.Errorf("failed to get subtitle after upsert: %w", err)
 	}
 
@@ -69,7 +88,7 @@ func (r *Repository) Create(ctx context.Context, sub *Subtitle) error {
 // GetByID retrieves a subtitle by its ID
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Subtitle, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, created_at
+		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash, created_at
 		 FROM subtitles WHERE id = ?`,
 		id,
 	)
@@ -88,7 +107,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Subtitle, error) {
 // GetByItem retrieves all subtitles for a library item
 func (r *Repository) GetByItem(ctx context.Context, itemType ItemType, itemID int64) ([]*Subtitle, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, created_at
+		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash, created_at
 		 FROM subtitles WHERE item_type = ? AND item_id = ?
 		 ORDER BY language_code`,
 		itemType, itemID,
@@ -113,7 +132,7 @@ func (r *Repository) GetByItem(ctx context.Context, itemType ItemType, itemID in
 // GetByItemAndLanguage retrieves a specific subtitle by item and language
 func (r *Repository) GetByItemAndLanguage(ctx context.Context, itemType ItemType, itemID int64, languageCode string) (*Subtitle, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, created_at
+		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash, created_at
 		 FROM subtitles WHERE item_type = ? AND item_id = ? AND language_code = ?`,
 		itemType, itemID, languageCode,
 	)

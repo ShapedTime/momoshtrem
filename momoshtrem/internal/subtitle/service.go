@@ -135,6 +135,29 @@ func (s *Service) GetByItem(ctx context.Context, itemType ItemType, itemID int64
 	return s.repo.GetByItem(ctx, itemType, itemID)
 }
 
+// CreateTorrentSubtitle creates a subtitle record for a torrent-embedded subtitle.
+// Unlike DownloadAndStore, this doesn't download anything - the subtitle is streamed from the torrent.
+func (s *Service) CreateTorrentSubtitle(ctx context.Context, sub *Subtitle) error {
+	// Ensure source is set correctly
+	sub.Source = SourceTorrent
+
+	// Create/update the database record
+	if err := s.repo.Create(ctx, sub); err != nil {
+		return fmt.Errorf("failed to save torrent subtitle record: %w", err)
+	}
+
+	slog.Info("Torrent subtitle created",
+		"item_type", sub.ItemType,
+		"item_id", sub.ItemID,
+		"language", sub.LanguageCode,
+		"format", sub.Format,
+		"torrent_path", sub.FilePath,
+		"info_hash", sub.InfoHash,
+	)
+
+	return nil
+}
+
 // writeFileAtomic writes content to a file atomically using a temp file and rename.
 func (s *Service) writeFileAtomic(path string, content []byte) error {
 	dir := filepath.Dir(path)
