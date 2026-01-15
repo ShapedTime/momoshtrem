@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTorrents } from '@/hooks/useTorrents';
 import {
   TorrentManagementCard,
@@ -73,6 +73,18 @@ export default function TorrentsPage() {
     resumeTorrent,
     removeTorrent,
   } = useTorrents({ autoRefresh: true, refreshInterval: 3000 });
+
+  // Sort: active (not paused) first, then alphabetical
+  const sortedTorrents = useMemo(() => {
+    return [...torrents].sort((a, b) => {
+      // Primary: active (not paused) first
+      if (a.is_paused !== b.is_paused) {
+        return a.is_paused ? 1 : -1;
+      }
+      // Secondary: alphabetical by name
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+  }, [torrents]);
 
   const handleRefresh = useCallback(async () => {
     await refresh();
@@ -156,7 +168,7 @@ export default function TorrentsPage() {
       {/* Torrents list */}
       {torrents.length > 0 && (
         <div className="space-y-4">
-          {torrents.map((torrent) => (
+          {sortedTorrents.map((torrent) => (
             <TorrentManagementCard
               key={torrent.info_hash}
               torrent={torrent}
