@@ -52,10 +52,14 @@ export async function verifySessionToken(
 // Set session cookie
 export async function setSessionCookie(token: string): Promise<void> {
   const cookieStore = await cookies();
+  // Allow disabling secure cookies for local network HTTP deployments
+  const useSecureCookies =
+    process.env.SECURE_COOKIES !== 'false' &&
+    process.env.NODE_ENV === 'production';
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: useSecureCookies,
+    sameSite: 'lax',
     maxAge: SESSION_DURATION_SECONDS,
     path: '/',
   });
