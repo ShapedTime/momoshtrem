@@ -507,3 +507,32 @@ func (r *ShowRepository) GetRecentlyAiredEpisodes(lookbackDays int) ([]RecentlyA
 
 	return episodes, rows.Err()
 }
+
+// EpisodeContext contains the full context needed for VFS tree operations
+type EpisodeContext struct {
+	ShowTitle     string
+	ShowYear      int
+	SeasonNumber  int
+	EpisodeNumber int
+}
+
+// GetEpisodeContext returns the full context for an episode in a single query
+func (r *ShowRepository) GetEpisodeContext(episodeID int64) (*EpisodeContext, error) {
+	ctx := &EpisodeContext{}
+	err := r.db.QueryRow(`
+		SELECT s.title, s.year, sn.season_number, e.episode_number
+		FROM episodes e
+		INNER JOIN seasons sn ON sn.id = e.season_id
+		INNER JOIN shows s ON s.id = sn.show_id
+		WHERE e.id = ?
+	`, episodeID).Scan(&ctx.ShowTitle, &ctx.ShowYear, &ctx.SeasonNumber, &ctx.EpisodeNumber)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episode context: %w", err)
+	}
+
+	return ctx, nil
+}

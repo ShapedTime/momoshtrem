@@ -725,22 +725,7 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	}
 
 	// Get episode context before deactivating for tree update
-	var showTitle string
-	var showYear, seasonNumber, episodeNumber int
-
-	episode, err := s.showRepo.GetEpisodeByID(id)
-	if err == nil && episode != nil {
-		episodeNumber = episode.EpisodeNumber
-		season, err := s.showRepo.GetSeasonByID(episode.SeasonID)
-		if err == nil && season != nil {
-			seasonNumber = season.SeasonNumber
-			show, err := s.showRepo.GetByID(season.ShowID)
-			if err == nil && show != nil {
-				showTitle = show.Title
-				showYear = show.Year
-			}
-		}
-	}
+	ctx, _ := s.showRepo.GetEpisodeContext(id)
 
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
@@ -748,8 +733,8 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	}
 
 	// Update VFS tree immediately
-	if showTitle != "" && s.treeUpdater != nil {
-		s.treeUpdater.RemoveEpisodeFromTree(showTitle, showYear, seasonNumber, episodeNumber)
+	if ctx != nil && s.treeUpdater != nil {
+		s.treeUpdater.RemoveEpisodeFromTree(ctx.ShowTitle, ctx.ShowYear, ctx.SeasonNumber, ctx.EpisodeNumber)
 	}
 
 	c.Status(http.StatusNoContent)

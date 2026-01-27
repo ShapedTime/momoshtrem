@@ -234,6 +234,19 @@ func (r *AssignmentRepository) ListDistinctTorrents() ([]string, error) {
 	return hashes, rows.Err()
 }
 
+// DeleteByInfoHash removes all assignments using a specific torrent
+func (r *AssignmentRepository) DeleteByInfoHash(infoHash string) (int64, error) {
+	result, err := r.db.Exec(`DELETE FROM torrent_assignments WHERE info_hash = ?`, infoHash)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete assignments by hash: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	return affected, nil
+}
+
 // Helper to convert empty string to NULL
 func nullString(s string) sql.NullString {
 	if s == "" {
