@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTorrents } from '@/hooks/useTorrents';
 import {
   TorrentManagementCard,
@@ -74,17 +74,33 @@ export default function TorrentsPage() {
     removeTorrent,
   } = useTorrents({ autoRefresh: true, refreshInterval: 3000 });
 
-  // Sort: active (not paused) first, then alphabetical
-  const sortedTorrents = useMemo(() => {
-    return [...torrents].sort((a, b) => {
-      // Primary: active (not paused) first
+  const [filter, setFilter] = useState<'active' | 'seeding' | 'paused' | null>(null);
+
+  // Filter and sort torrents
+  const displayedTorrents = useMemo(() => {
+    let filtered = torrents;
+
+    // Apply filter
+    if (filter === 'active') {
+      filtered = torrents.filter((t) => !t.is_paused && t.progress < 1);
+    } else if (filter === 'seeding') {
+      filtered = torrents.filter((t) => !t.is_paused && t.progress >= 1);
+    } else if (filter === 'paused') {
+      filtered = torrents.filter((t) => t.is_paused);
+    }
+
+    // Sort: active (not paused) first, then alphabetical
+    return [...filtered].sort((a, b) => {
       if (a.is_paused !== b.is_paused) {
         return a.is_paused ? 1 : -1;
       }
-      // Secondary: alphabetical by name
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
-  }, [torrents]);
+  }, [torrents, filter]);
+
+  const toggleFilter = useCallback((newFilter: 'active' | 'seeding' | 'paused') => {
+    setFilter((current) => (current === newFilter ? null : newFilter));
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     await refresh();
@@ -131,16 +147,22 @@ export default function TorrentsPage() {
             label="Active"
             value={torrents.filter((t) => !t.is_paused && t.progress < 1).length}
             color="blue"
+            isSelected={filter === 'active'}
+            onClick={() => toggleFilter('active')}
           />
           <StatCard
             label="Seeding"
             value={torrents.filter((t) => !t.is_paused && t.progress >= 1).length}
             color="green"
+            isSelected={filter === 'seeding'}
+            onClick={() => toggleFilter('seeding')}
           />
           <StatCard
             label="Paused"
             value={torrents.filter((t) => t.is_paused).length}
             color="yellow"
+            isSelected={filter === 'paused'}
+            onClick={() => toggleFilter('paused')}
           />
           <StatCard label="Total" value={torrents.length} color="white" />
         </div>
@@ -168,7 +190,7 @@ export default function TorrentsPage() {
       {/* Torrents list */}
       {torrents.length > 0 && (
         <div className="space-y-4">
-          {sortedTorrents.map((torrent) => (
+          {displayedTorrents.map((torrent) => (
             <TorrentManagementCard
               key={torrent.info_hash}
               torrent={torrent}
@@ -187,10 +209,14 @@ function StatCard({
   label,
   value,
   color,
+  isSelected,
+  onClick,
 }: {
   label: string;
   value: number;
   color: 'blue' | 'green' | 'yellow' | 'white';
+  isSelected?: boolean;
+  onClick?: () => void;
 }) {
   const colorClasses = {
     blue: 'text-accent-blue',
@@ -199,8 +225,20 @@ function StatCard({
     white: 'text-white',
   };
 
+  const isClickable = !!onClick;
+
   return (
-    <div className="bg-bg-elevated rounded-lg p-4">
+    <div
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={isClickable ? (e) => e.key === 'Enter' && onClick() : undefined}
+      className={`
+        bg-bg-elevated rounded-lg p-4 transition-all
+        ${isClickable ? 'cursor-pointer hover:bg-bg-hover' : ''}
+        ${isSelected ? 'ring-2 ring-accent-blue ring-offset-2 ring-offset-bg-primary' : ''}
+      `}
+    >
       <p className="text-sm text-text-secondary">{label}</p>
       <p className={`text-2xl font-bold ${colorClasses[color]}`}>{value}</p>
     </div>
