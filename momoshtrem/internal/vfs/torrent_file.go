@@ -15,6 +15,12 @@ import (
 // Ensure TorrentFile implements File interface
 var _ File = (*TorrentFile)(nil)
 
+// readResult holds the outcome of a read goroutine.
+type readResult struct {
+	n   int
+	err error
+}
+
 // TorrentFile wraps a torrent file handle with VFS File interface.
 // It provides lazy reader initialization, timeout handling, activity tracking,
 // and intelligent piece prioritization for optimal streaming performance.
@@ -35,6 +41,11 @@ type TorrentFile struct {
 
 	// Track if this is the first read (for retry logic)
 	firstRead bool
+
+	// pendingRead is non-nil when a timed-out read goroutine is still
+	// running. We drain it before spawning a new goroutine, bounding
+	// the leak to at most one goroutine per TorrentFile.
+	pendingRead chan readResult
 }
 
 // NewTorrentFile creates a new TorrentFile.
@@ -207,22 +218,41 @@ func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 }
 
 // readContext reads using a context for timeout/cancellation.
+//
+// A private buffer is used instead of the caller's slice to prevent a data
+// race: on timeout the goroutine may still be writing to the buffer while the
+// caller has already returned or reused it (e.g. firstReadWithRetry retries
+// with the same slice).
+//
+// Before spawning a new goroutine we drain any outstanding one from a previous
+// timeout.  PriorityReader.mu serialises reads anyway, so waiting here does
+// not change the observable concurrency.  This bounds the goroutine leak to at
+// most one per TorrentFile instead of growing without limit.
 func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
-	type result struct {
-		n   int
-		err error
+	// Drain a pending goroutine from a previous timeout.
+	if f.pendingRead != nil {
+		select {
+		case <-f.pendingRead:
+			f.pendingRead = nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
 	}
 
-	done := make(chan result, 1)
+	buf := make([]byte, len(p))
+	done := make(chan readResult, 1)
+
 	go func() {
-		n, err := f.reader.Read(p)
-		done <- result{n, err}
+		n, err := f.reader.Read(buf)
+		done <- readResult{n, err}
 	}()
 
 	select {
 	case r := <-done:
+		copy(p[:r.n], buf[:r.n])
 		return r.n, r.err
 	case <-ctx.Done():
+		f.pendingRead = done
 		return 0, ctx.Err()
 	}
 }
