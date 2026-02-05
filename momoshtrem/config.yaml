@@ -13,7 +13,7 @@ database:
 
 torrent:
   metadata_folder: ./data/torrents
-  global_cache_size: 4096    # MB
+  global_cache_size: 92160    # MB
   add_timeout: 60            # seconds
   read_timeout: 120
   idle_enabled: true
