@@ -16,10 +16,72 @@ import (
 // Ensure TorrentFile implements File interface
 var _ File = (*TorrentFile)(nil)
 
+// Buffer size classes for pooling. Each class covers reads up to that size.
+// Reads larger than the largest class fall back to direct allocation.
+const (
+	bufSizeSmall  = 64 * 1024   // 64KB - small reads, seeks
+	bufSizeMedium = 256 * 1024  // 256KB - typical streaming
+	bufSizeLarge  = 1024 * 1024 // 1MB - aggressive prefetch
+)
+
+// Buffer pools by size class. Using pointer to slice avoids allocation on Put.
+var (
+	bufPoolSmall = sync.Pool{
+		New: func() any {
+			buf := make([]byte, bufSizeSmall)
+			return &buf
+		},
+	}
+	bufPoolMedium = sync.Pool{
+		New: func() any {
+			buf := make([]byte, bufSizeMedium)
+			return &buf
+		},
+	}
+	bufPoolLarge = sync.Pool{
+		New: func() any {
+			buf := make([]byte, bufSizeLarge)
+			return &buf
+		},
+	}
+)
+
+// pooledBuffer tracks which pool a buffer came from for proper return.
+type pooledBuffer struct {
+	buf  *[]byte
+	pool *sync.Pool
+}
+
+// getBuffer returns a buffer of at least size n from the appropriate pool.
+// Returns nil buffer if size exceeds largest pool (caller must allocate).
+func getBuffer(n int) ([]byte, pooledBuffer) {
+	switch {
+	case n <= bufSizeSmall:
+		pb := bufPoolSmall.Get().(*[]byte)
+		return (*pb)[:n], pooledBuffer{pb, &bufPoolSmall}
+	case n <= bufSizeMedium:
+		pb := bufPoolMedium.Get().(*[]byte)
+		return (*pb)[:n], pooledBuffer{pb, &bufPoolMedium}
+	case n <= bufSizeLarge:
+		pb := bufPoolLarge.Get().(*[]byte)
+		return (*pb)[:n], pooledBuffer{pb, &bufPoolLarge}
+	default:
+		return nil, pooledBuffer{}
+	}
+}
+
+// returnBuffer returns a buffer to its pool. Safe to call with zero pooledBuffer.
+func returnBuffer(pb pooledBuffer) {
+	if pb.pool != nil && pb.buf != nil {
+		pb.pool.Put(pb.buf)
+	}
+}
+
 // readResult holds the outcome of a read goroutine.
 type readResult struct {
-	n   int
-	err error
+	n      int
+	err    error
+	pooled pooledBuffer // Buffer to return to pool
 }
 
 // TorrentFile wraps a torrent file handle with VFS File interface.
@@ -229,6 +291,9 @@ func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 // race: on timeout the goroutine may still be writing to the buffer while the
 // caller has already returned or reused it.
 //
+// Buffers are pooled by size class (64KB, 256KB, 1MB) to reduce allocation
+// pressure during streaming. Reads larger than 1MB fall back to allocation.
+//
 // Before spawning a new goroutine we drain any outstanding one from a previous
 // timeout.  PriorityReader.mu serialises reads anyway, so waiting here does
 // not change the observable concurrency.  This bounds the goroutine leak to at
@@ -237,24 +302,31 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 	// Drain a pending goroutine from a previous timeout.
 	if f.pendingRead != nil {
 		select {
-		case <-f.pendingRead:
+		case r := <-f.pendingRead:
+			returnBuffer(r.pooled)
 			f.pendingRead = nil
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		}
 	}
 
-	buf := make([]byte, len(p))
+	// Get buffer from pool, or allocate if too large
+	buf, pooled := getBuffer(len(p))
+	if buf == nil {
+		buf = make([]byte, len(p))
+	}
+
 	done := make(chan readResult, 1)
 
 	go func() {
 		n, err := f.reader.Read(buf)
-		done <- readResult{n, err}
+		done <- readResult{n: n, err: err, pooled: pooled}
 	}()
 
 	select {
 	case r := <-done:
 		copy(p[:r.n], buf[:r.n])
+		returnBuffer(r.pooled)
 		return r.n, r.err
 	case <-ctx.Done():
 		f.pendingRead = done
