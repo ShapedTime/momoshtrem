@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -8,9 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
-	"github.com/shapedtime/momoshtrem/internal/subtitle"
+	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
-	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
 // Movie request/response types
@@ -78,36 +78,11 @@ type MovieAssignmentResponse struct {
 
 // Show assignment response
 type ShowAssignmentResponse struct {
-	Success   bool                   `json:"success"`
-	Summary   AssignmentSummary      `json:"summary"`
-	Matched   []MatchedAssignment    `json:"matched"`
-	Unmatched []UnmatchedAssignment  `json:"unmatched,omitempty"`
-	Error     string                 `json:"error,omitempty"`
-}
-
-type AssignmentSummary struct {
-	TotalFiles     int `json:"total_files"`
-	Matched        int `json:"matched"`
-	Unmatched      int `json:"unmatched"`
-	Skipped        int `json:"skipped"`
-	SubtitlesFound int `json:"subtitles_found"`
-}
-
-type MatchedAssignment struct {
-	EpisodeID  int64  `json:"episode_id"`
-	Season     int    `json:"season"`
-	Episode    int    `json:"episode"`
-	FilePath   string `json:"file_path"`
-	FileSize   int64  `json:"file_size"`
-	Resolution string `json:"resolution,omitempty"`
-	Confidence string `json:"confidence"`
-}
-
-type UnmatchedAssignment struct {
-	FilePath string `json:"file_path"`
-	Reason   string `json:"reason"`
-	Season   int    `json:"season"`
-	Episode  int    `json:"episode"`
+	Success   bool                        `json:"success"`
+	Summary   service.AssignmentSummary   `json:"summary"`
+	Matched   []service.MatchedAssignment `json:"matched"`
+	Unmatched []service.UnmatchedAssignment `json:"unmatched,omitempty"`
+	Error     string                      `json:"error,omitempty"`
 }
 
 // parseID parses and validates an ID parameter
@@ -381,88 +356,25 @@ func (s *Server) createShow(c *gin.Context) {
 		return
 	}
 
-	// Check if already exists
-	existing, err := s.showRepo.GetByTMDBID(req.TMDBID)
+	result, err := s.showService.Create(c.Request.Context(), service.CreateShowInput{
+		TMDBID:  req.TMDBID,
+		Seasons: req.Seasons,
+	})
 	if err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing != nil {
-		// Return existing with seasons
-		show, err := s.showRepo.GetWithSeasonsAndEpisodes(existing.ID)
-		if err != nil {
-			slog.Error("Failed to get show with seasons", "show_id", existing.ID, "error", err)
-		}
-		c.JSON(http.StatusOK, toShowResponse(show))
-		return
+
+	// Log any season errors (non-fatal)
+	for _, se := range result.SeasonErrors {
+		slog.Warn("Season creation error", "error", se.Error())
 	}
 
-	// Fetch from TMDB
-	tmdbShow, err := s.tmdbClient.GetShowDetails(req.TMDBID)
-	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Failed to fetch from TMDB: "+err.Error())
-		return
+	status := http.StatusCreated
+	if result.IsExisting {
+		status = http.StatusOK
 	}
-
-	show := &library.Show{
-		TMDBID: tmdbShow.ID,
-		Title:  tmdbShow.Name,
-		Year:   tmdbShow.Year(),
-	}
-
-	if err := s.showRepo.Create(show); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Add seasons and episodes
-	seasonsToAdd := req.Seasons
-	if len(seasonsToAdd) == 0 {
-		// Add all seasons
-		for _, s := range tmdbShow.Seasons {
-			if s.SeasonNumber > 0 { // Skip specials (season 0)
-				seasonsToAdd = append(seasonsToAdd, s.SeasonNumber)
-			}
-		}
-	}
-
-	for _, seasonNum := range seasonsToAdd {
-		season := &library.Season{
-			ShowID:       show.ID,
-			SeasonNumber: seasonNum,
-		}
-		if err := s.showRepo.CreateSeason(season); err != nil {
-			slog.Error("Failed to create season", "show_id", show.ID, "season", seasonNum, "error", err)
-			continue
-		}
-
-		// Fetch episodes from TMDB
-		tmdbSeason, err := s.tmdbClient.GetSeason(req.TMDBID, seasonNum)
-		if err != nil {
-			slog.Error("Failed to fetch season from TMDB", "tmdb_id", req.TMDBID, "season", seasonNum, "error", err)
-			continue
-		}
-
-		for _, ep := range tmdbSeason.Episodes {
-			episode := &library.Episode{
-				SeasonID:      season.ID,
-				EpisodeNumber: ep.EpisodeNumber,
-				Name:          ep.Name,
-			}
-			if err := s.showRepo.CreateEpisode(episode); err != nil {
-				slog.Error("Failed to create episode", "season_id", season.ID, "episode", ep.EpisodeNumber, "error", err)
-			}
-		}
-
-		show.Seasons = append(show.Seasons, *season)
-	}
-
-	// Reload with full data
-	show, err = s.showRepo.GetWithSeasonsAndEpisodes(show.ID)
-	if err != nil {
-		slog.Error("Failed to reload show with seasons", "show_id", show.ID, "error", err)
-	}
-	c.JSON(http.StatusCreated, toShowResponse(show))
+	c.JSON(status, toShowResponse(result.Show))
 }
 
 func (s *Server) getShow(c *gin.Context) {
@@ -553,171 +465,26 @@ func (s *Server) assignShowTorrent(c *gin.Context) {
 		return
 	}
 
-	// Verify show exists and load with all seasons/episodes
-	show, err := s.showRepo.GetWithSeasonsAndEpisodes(id)
+	result, err := s.showAssignmentService.AssignTorrent(c.Request.Context(), id, req.MagnetURI)
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if show == nil {
-		errorResponse(c, http.StatusNotFound, "Show not found")
-		return
-	}
-
-	// Extract info hash from magnet URI
-	infoHash := torrent.ExtractInfoHash(req.MagnetURI)
-	if infoHash == "" {
-		errorResponse(c, http.StatusBadRequest, "Invalid magnet URI")
-		return
-	}
-
-	// Check if torrent service is available
-	if s.torrentService == nil {
-		errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available - Stage 2 required")
-		return
-	}
-
-	// Add torrent and get file list
-	torrentInfo, err := s.torrentService.AddTorrent(req.MagnetURI)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Failed to add torrent: "+err.Error())
-		return
-	}
-
-	// Identify episodes in the torrent
-	identResult := s.identifier.Identify(torrentInfo.Files, torrentInfo.Name)
-
-	// Match identified files to library episodes
-	matchResult := identify.MatchToShow(show, identResult)
-
-	// Create assignments for matched episodes
-	matched := make([]MatchedAssignment, 0, len(matchResult.Matched))
-	episodesForTree := make([]vfs.EpisodeWithContext, 0, len(matchResult.Matched))
-	for _, m := range matchResult.Matched {
-		assignment := &library.TorrentAssignment{
-			ItemType:   library.ItemTypeEpisode,
-			ItemID:     m.Episode.ID,
-			InfoHash:   infoHash,
-			MagnetURI:  req.MagnetURI,
-			FilePath:   m.FilePath,
-			FileSize:   m.FileSize,
-			Resolution: m.Quality.Resolution,
-			Source:     m.Quality.Source,
+		switch {
+		case errors.Is(err, library.ErrShowNotFound):
+			errorResponse(c, http.StatusNotFound, "Show not found")
+		case errors.Is(err, library.ErrInvalidMagnet):
+			errorResponse(c, http.StatusBadRequest, "Invalid magnet URI")
+		case errors.Is(err, library.ErrTorrentServiceUnavailable):
+			errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available - Stage 2 required")
+		default:
+			errorResponse(c, http.StatusInternalServerError, err.Error())
 		}
-
-		if err := s.assignmentRepo.Create(assignment); err != nil {
-			slog.Error("Failed to create assignment",
-				"episode_id", m.Episode.ID,
-				"error", err,
-			)
-			continue
-		}
-
-		matched = append(matched, MatchedAssignment{
-			EpisodeID:  m.Episode.ID,
-			Season:     m.Season.SeasonNumber,
-			Episode:    m.Episode.EpisodeNumber,
-			FilePath:   m.FilePath,
-			FileSize:   m.FileSize,
-			Resolution: m.Quality.Resolution,
-			Confidence: string(m.Confidence),
-		})
-
-		// Collect for tree update
-		episodesForTree = append(episodesForTree, vfs.EpisodeWithContext{
-			ShowTitle:    show.Title,
-			ShowYear:     show.Year,
-			SeasonNumber: m.Season.SeasonNumber,
-			Episode:      m.Episode,
-			Assignment:   assignment,
-		})
-	}
-
-	// Update VFS tree immediately
-	if s.treeUpdater != nil && len(episodesForTree) > 0 {
-		s.treeUpdater.AddEpisodesToTree(episodesForTree)
-	}
-
-	// Process matched subtitles
-	subtitlesCreated := 0
-	if s.subtitleService != nil && len(matchResult.MatchedSubtitles) > 0 {
-		for _, ms := range matchResult.MatchedSubtitles {
-			sub := &subtitle.Subtitle{
-				ItemType:     subtitle.ItemTypeEpisode,
-				ItemID:       ms.Episode.ID,
-				LanguageCode: ms.LanguageCode,
-				LanguageName: ms.LanguageName,
-				Format:       ms.Format,
-				FilePath:     ms.FilePath,
-				FileSize:     ms.FileSize,
-				Source:       subtitle.SourceTorrent,
-				InfoHash:     infoHash,
-			}
-
-			if err := s.subtitleService.CreateTorrentSubtitle(c.Request.Context(), sub); err != nil {
-				slog.Error("Failed to create torrent subtitle",
-					"episode_id", ms.Episode.ID,
-					"file_path", ms.FilePath,
-					"error", err,
-				)
-				continue
-			}
-			subtitlesCreated++
-
-			slog.Info("Torrent subtitle assigned",
-				"episode_id", ms.Episode.ID,
-				"season", ms.Season.SeasonNumber,
-				"episode", ms.Episode.EpisodeNumber,
-				"language", ms.LanguageCode,
-				"file_path", ms.FilePath,
-			)
-		}
-
-		// Invalidate VFS tree to pick up new subtitles
-		if s.treeUpdater != nil && subtitlesCreated > 0 {
-			s.treeUpdater.InvalidateTree()
-		}
-	}
-
-	// Build unmatched response
-	unmatched := make([]UnmatchedAssignment, 0, len(matchResult.Unmatched))
-	for _, u := range matchResult.Unmatched {
-		unmatched = append(unmatched, UnmatchedAssignment{
-			FilePath: u.FilePath,
-			Reason:   string(u.Reason),
-			Season:   u.Season,
-			Episode:  u.Episode,
-		})
-
-		// Log unmatched files for investigation
-		slog.Warn("Unmatched file in torrent",
-			"show_id", id,
-			"show_title", show.Title,
-			"info_hash", infoHash,
-			"file_path", u.FilePath,
-			"reason", u.Reason,
-			"parsed_season", u.Season,
-			"parsed_episode", u.Episode,
-		)
-	}
-
-	// Calculate skipped count (non-video files that were filtered out)
-	skipped := identResult.TotalFiles - len(identResult.IdentifiedFiles) - len(identResult.UnidentifiedFiles)
-	if skipped < 0 {
-		skipped = 0
+		return
 	}
 
 	c.JSON(http.StatusCreated, ShowAssignmentResponse{
-		Success: true,
-		Summary: AssignmentSummary{
-			TotalFiles:     identResult.TotalFiles,
-			Matched:        len(matched),
-			Unmatched:      len(unmatched),
-			Skipped:        skipped,
-			SubtitlesFound: subtitlesCreated,
-		},
-		Matched:   matched,
-		Unmatched: unmatched,
+		Success:   true,
+		Summary:   result.Summary,
+		Matched:   result.Matched,
+		Unmatched: result.Unmatched,
 	})
 }
 

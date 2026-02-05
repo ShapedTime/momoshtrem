@@ -8,6 +8,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -26,6 +27,10 @@ type Server struct {
 	treeUpdater     vfs.TreeUpdater       // Optional: updates VFS tree on assignment changes
 	subtitleService *subtitle.Service     // Optional: subtitle search/download service
 	airDateSync     *airdate.SyncService  // Optional: air date sync service
+
+	// Business logic services
+	showService           *service.ShowService
+	showAssignmentService *service.ShowAssignmentService
 }
 
 // NewServer creates a new API server
@@ -39,6 +44,8 @@ func NewServer(
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
+	identifier := identify.NewIdentifier(nil)
+
 	s := &Server{
 		router:         gin.New(),
 		movieRepo:      movieRepo,
@@ -46,9 +53,25 @@ func NewServer(
 		assignmentRepo: assignmentRepo,
 		tmdbClient:     tmdbClient,
 		torrentService: torrentService,
-		identifier:     identify.NewIdentifier(nil),
+		identifier:     identifier,
 		treeUpdater:    treeUpdater,
 	}
+
+	// Initialize business logic services
+	s.showService = service.NewShowService(showRepo, tmdbClient)
+
+	// Build assignment service with optional dependencies
+	var assignmentOpts []service.AssignmentServiceOption
+	if treeUpdater != nil {
+		assignmentOpts = append(assignmentOpts, service.WithTreeUpdater(treeUpdater))
+	}
+	s.showAssignmentService = service.NewShowAssignmentService(
+		showRepo,
+		assignmentRepo,
+		torrentService,
+		identifier,
+		assignmentOpts...,
+	)
 
 	s.setupMiddleware()
 	s.setupRoutes()
@@ -59,6 +82,10 @@ func NewServer(
 // SetSubtitleService configures subtitle support
 func (s *Server) SetSubtitleService(svc *subtitle.Service) {
 	s.subtitleService = svc
+	// Configure subtitle creator on assignment service
+	if s.showAssignmentService != nil {
+		s.showAssignmentService.SetSubtitleCreator(svc)
+	}
 	slog.Info("Subtitle service configured")
 }
 
