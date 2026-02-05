@@ -76,15 +76,34 @@ type LibraryFS struct {
 	streamingCfg streaming.Config
 
 	// Cached tree structure
-	tree        *DirectoryTree
-	treeBuiltAt time.Time
-	treeTTL     time.Duration
+	tree       *DirectoryTree
+	rebuilding sync.Mutex // Coordinates rebuild operations to prevent concurrent rebuilds
+	cacheDir   string     // Directory for persistent VFS cache (optional)
 }
 
 // DirectoryTree represents the virtual directory structure
 type DirectoryTree struct {
 	root    *VirtualDir
 	pathMap map[string]Entry // Fast lookup by path
+}
+
+// newEmptyTree creates a DirectoryTree with root and standard directories (Movies, TV Shows).
+// Used by both buildTreeFromDB and loadTreeFromCache to avoid duplication.
+func newEmptyTree() (*DirectoryTree, *VirtualDir, *VirtualDir) {
+	tree := &DirectoryTree{
+		root:    NewVirtualDir("/"),
+		pathMap: make(map[string]Entry),
+	}
+	tree.pathMap["/"] = tree.root
+
+	moviesDir := NewVirtualDir("Movies")
+	tvDir := NewVirtualDir("TV Shows")
+	tree.root.children["Movies"] = moviesDir
+	tree.root.children["TV Shows"] = tvDir
+	tree.pathMap[MoviesPath] = moviesDir
+	tree.pathMap[TVShowsPath] = tvDir
+
+	return tree, moviesDir, tvDir
 }
 
 // Entry represents an entry in the virtual filesystem
@@ -94,22 +113,22 @@ type Entry interface {
 	Size() int64
 }
 
-// NewLibraryFS creates a new library-backed filesystem
+// NewLibraryFS creates a new library-backed filesystem.
+// Note: treeTTLSeconds parameter is deprecated and ignored - updates are now event-driven.
 func NewLibraryFS(
 	movieRepo *library.MovieRepository,
 	showRepo *library.ShowRepository,
 	assignmentRepo *library.AssignmentRepository,
 	treeTTLSeconds int,
 ) *LibraryFS {
-	ttl := time.Duration(treeTTLSeconds) * time.Second
-	if ttl <= 0 {
-		ttl = 30 * time.Second // Default to 30 seconds
+	if treeTTLSeconds > 0 {
+		slog.Warn("VFS tree_ttl is deprecated - updates are now event-driven",
+			"configured_ttl_seconds", treeTTLSeconds)
 	}
 	return &LibraryFS{
 		movieRepo:      movieRepo,
 		showRepo:       showRepo,
 		assignmentRepo: assignmentRepo,
-		treeTTL:        ttl,
 	}
 }
 
@@ -142,6 +161,17 @@ func (fs *LibraryFS) SetSubtitleRepository(repo *subtitle.Repository) {
 	defer fs.mu.Unlock()
 	fs.subtitleRepo = repo
 	slog.Info("VFS subtitle repository configured")
+}
+
+// SetCacheDir configures the directory for persistent VFS tree caching.
+// When set, the tree will be saved to disk after rebuilds and loaded on startup.
+func (fs *LibraryFS) SetCacheDir(dir string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.cacheDir = dir
+	if dir != "" {
+		slog.Info("VFS cache directory configured", "path", dir)
+	}
 }
 
 // Open returns a file handle for reading
@@ -302,37 +332,64 @@ func (fs *LibraryFS) ReadDir(dirPath string) (map[string]File, error) {
 	return result, nil
 }
 
-// ensureTree rebuilds tree if stale
+// ensureTree builds tree on first access only.
+// Updates are event-driven via TreeUpdater methods, no periodic rebuilds.
+// On first access, tries to load from persistent cache before rebuilding.
 func (fs *LibraryFS) ensureTree() {
 	fs.mu.RLock()
-	needsRebuild := fs.tree == nil || time.Since(fs.treeBuiltAt) > fs.treeTTL
+	needsBuild := fs.tree == nil
+	cacheDir := fs.cacheDir
 	fs.mu.RUnlock()
 
-	if needsRebuild {
+	if needsBuild {
+		// Try loading from persistent cache first
+		if cacheDir != "" {
+			if err := fs.loadTreeFromCache(); err == nil {
+				return // Successfully loaded from cache
+			}
+			// Cache miss or invalid - fall through to rebuild
+		}
 		fs.rebuildTree()
 	}
 }
 
-// rebuildTree constructs the VFS tree from database
+// rebuildTree constructs the VFS tree from database.
+// Uses lock-free building with atomic swap for minimal lock duration.
+// Callers block if another rebuild is in progress (ensures tree is non-nil on return).
 func (fs *LibraryFS) rebuildTree() {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	// Serialize rebuilds - callers wait rather than skip
+	fs.rebuilding.Lock()
+	defer fs.rebuilding.Unlock()
 
-	tree := &DirectoryTree{
-		root:    NewVirtualDir("/"),
-		pathMap: make(map[string]Entry),
+	// Double-check: tree may have been built while we waited for the lock
+	fs.mu.RLock()
+	alreadyBuilt := fs.tree != nil
+	fs.mu.RUnlock()
+	if alreadyBuilt {
+		return
 	}
 
-	// Add root to pathMap so Open("/") works for WebDAV PROPFIND
-	tree.pathMap["/"] = tree.root
+	// Build tree completely outside the RWMutex lock
+	tree := fs.buildTreeFromDB()
 
-	// Create root directories
-	moviesDir := NewVirtualDir("Movies")
-	tvDir := NewVirtualDir("TV Shows")
-	tree.root.children["Movies"] = moviesDir
-	tree.root.children["TV Shows"] = tvDir
-	tree.pathMap[MoviesPath] = moviesDir
-	tree.pathMap[TVShowsPath] = tvDir
+	// Atomic swap - only lock for pointer assignment
+	fs.mu.Lock()
+	fs.tree = tree
+	cacheDir := fs.cacheDir
+	fs.mu.Unlock()
+
+	slog.Debug("VFS tree rebuilt", "entries", len(tree.pathMap))
+
+	// Save to persistent cache (synchronous to avoid race with DeleteCache)
+	if cacheDir != "" {
+		fs.saveTreeToCache()
+	}
+}
+
+// buildTreeFromDB constructs the VFS tree from database without holding locks.
+// This allows concurrent reads to continue during tree construction.
+func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
+	tree, moviesDir, tvDir := newEmptyTree()
 
 	// Add movies with active assignments
 	movies, err := fs.movieRepo.ListWithAssignments()
@@ -409,15 +466,16 @@ func (fs *LibraryFS) rebuildTree() {
 		}
 	}
 
-	fs.tree = tree
-	fs.treeBuiltAt = time.Now()
+	return tree
 }
 
-// InvalidateTree forces a tree rebuild on next access
+// InvalidateTree forces an immediate tree rebuild.
+// This is used as a fallback when targeted updates aren't possible (e.g., subtitles added).
 func (fs *LibraryFS) InvalidateTree() {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	fs.treeBuiltAt = time.Time{} // Zero time forces rebuild
+	slog.Debug("VFS tree invalidation requested")
+	// Delete stale cache - rebuildTree will create a new one
+	fs.DeleteCache()
+	fs.rebuildTree()
 }
 
 // AddMovieToTree adds a movie with its assignment to the VFS tree.

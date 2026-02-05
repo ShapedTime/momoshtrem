@@ -195,19 +195,39 @@ func (am *ActivityManager) idleCheckLoop() {
 }
 
 // checkIdleTorrents finds active torrents that should become idle.
+// Uses two-phase locking to minimize contention with MarkActive().
 func (am *ActivityManager) checkIdleTorrents() {
+	// Phase 1: Collect candidates using RLock (allows concurrent MarkActive)
+	am.mu.RLock()
+	now := time.Now()
+	var candidates []string
+	for hash := range am.torrents {
+		if am.state[hash] == StateActive {
+			if now.Sub(am.lastAccess[hash]) >= am.idleTimeout {
+				candidates = append(candidates, hash)
+			}
+		}
+	}
+	am.mu.RUnlock()
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Phase 2: Apply changes using Lock (brief, targeted)
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	now := time.Now()
-
-	for hash, t := range am.torrents {
+	for _, hash := range candidates {
+		// Re-check conditions - state may have changed since Phase 1
 		if am.state[hash] != StateActive {
 			continue
 		}
-
-		lastAccess := am.lastAccess[hash]
-		if now.Sub(lastAccess) >= am.idleTimeout {
+		// Re-check time - might have been marked active since collection
+		if time.Since(am.lastAccess[hash]) < am.idleTimeout {
+			continue
+		}
+		if t, ok := am.torrents[hash]; ok {
 			am.setIdle(hash, t)
 		}
 	}

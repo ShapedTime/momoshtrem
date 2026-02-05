@@ -53,7 +53,8 @@ type TMDBConfig struct {
 }
 
 type VFSConfig struct {
-	TreeTTL int `yaml:"tree_ttl"` // seconds - how long to cache VFS tree structure
+	TreeTTL  int    `yaml:"tree_ttl"`  // DEPRECATED: ignored, updates are now event-driven
+	CacheDir string `yaml:"cache_dir"` // Directory for persistent VFS tree cache
 }
 
 // StreamingConfig configures streaming optimization for video playback
@@ -108,7 +109,8 @@ func DefaultConfig() *Config {
 			StartPaused:     true,
 		},
 		VFS: VFSConfig{
-			TreeTTL: 30, // 30 seconds
+			TreeTTL:  0,              // DEPRECATED: ignored
+			CacheDir: "./data/cache", // Persistent VFS tree cache
 		},
 		Streaming: StreamingConfig{
 			HeaderPriorityBytes: 10 * 1024 * 1024, // 10MB
@@ -182,6 +184,11 @@ func (c *Config) EnsureDirectories() error {
 		filepath.Dir(c.Database.Path),
 		c.Torrent.MetadataFolder,
 		c.Subtitles.DownloadPath,
+	}
+
+	// Add VFS cache directory if configured
+	if c.VFS.CacheDir != "" {
+		dirs = append(dirs, c.VFS.CacheDir)
 	}
 
 	for _, dir := range dirs {

@@ -151,9 +151,12 @@ func main() {
 		"read_timeout_seconds", cfg.Torrent.ReadTimeout,
 	)
 
-	// Initialize VFS
+	// Initialize VFS (event-driven updates, no periodic rebuilds)
 	libraryFS := vfs.NewLibraryFS(movieRepo, showRepo, assignmentRepo, cfg.VFS.TreeTTL)
-	slog.Info("VFS initialized", "tree_ttl_seconds", cfg.VFS.TreeTTL)
+	if cfg.VFS.CacheDir != "" {
+		libraryFS.SetCacheDir(cfg.VFS.CacheDir)
+	}
+	slog.Info("VFS initialized", "cache_dir", cfg.VFS.CacheDir)
 
 	// Wire torrent service into VFS with streaming optimization
 	var activityCallback func(string)
