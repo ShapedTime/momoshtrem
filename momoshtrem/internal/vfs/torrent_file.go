@@ -3,6 +3,7 @@ package vfs
 import (
 	"context"
 	"io"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -39,7 +40,10 @@ type TorrentFile struct {
 	// Activity callback for idle mode tracking
 	onActivity func(hash string)
 
-	// Track if this is the first read (for retry logic)
+	// Callback to wait for torrent activation (peers connected)
+	waitForActivation func(hash string, timeout time.Duration) error
+
+	// Track if this is the first read (for activation wait)
 	firstRead bool
 
 	// pendingRead is non-nil when a timed-out read goroutine is still
@@ -55,16 +59,18 @@ func NewTorrentFile(
 	hash string,
 	readTimeout time.Duration,
 	onActivity func(hash string),
+	waitForActivation func(hash string, timeout time.Duration) error,
 	streamingCfg streaming.Config,
 ) *TorrentFile {
 	return &TorrentFile{
-		handle:       handle,
-		name:         name,
-		hash:         hash,
-		readTimeout:  readTimeout,
-		onActivity:   onActivity,
-		streamingCfg: streamingCfg,
-		firstRead:    true,
+		handle:            handle,
+		name:              name,
+		hash:              hash,
+		readTimeout:       readTimeout,
+		onActivity:        onActivity,
+		waitForActivation: waitForActivation,
+		streamingCfg:      streamingCfg,
+		firstRead:         true,
 	}
 }
 
@@ -122,12 +128,7 @@ func (f *TorrentFile) Read(p []byte) (int, error) {
 
 	f.ensureReader()
 	f.markActivity()
-
-	// Use retry logic for first read to handle start_paused race condition
-	if f.firstRead {
-		f.firstRead = false
-		return f.firstReadWithRetry(p)
-	}
+	f.waitForFirstAccess()
 
 	return f.readWithTimeout(p)
 }
@@ -139,6 +140,7 @@ func (f *TorrentFile) ReadAt(p []byte, off int64) (int, error) {
 
 	f.ensureReader()
 	f.markActivity()
+	f.waitForFirstAccess()
 
 	// Seek to offset
 	if _, err := f.reader.Seek(off, io.SeekStart); err != nil {
@@ -169,25 +171,29 @@ func (f *TorrentFile) readWithTimeout(p []byte) (int, error) {
 	return f.readContext(ctx, p)
 }
 
-// firstReadWithRetry performs the first read with retry logic.
-// This handles the race condition where the torrent may start paused
-// (start_paused: true) and needs time to wake up via the activity callback.
-func (f *TorrentFile) firstReadWithRetry(p []byte) (int, error) {
-	const maxRetries = 3
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		n, err := f.readWithTimeout(p)
-		if err == nil || err == io.EOF {
-			return n, err
-		}
-		lastErr = err
-
-		// Exponential backoff: 100ms, 200ms, 300ms
-		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+// waitForFirstAccess handles activation wait on first file access.
+// This addresses the race condition where a torrent may start paused (start_paused: true)
+// and needs time to connect to peers before data is available.
+// Safe to call multiple times - only runs once per TorrentFile.
+func (f *TorrentFile) waitForFirstAccess() {
+	if !f.firstRead {
+		return
 	}
+	f.firstRead = false
 
-	return 0, lastErr
+	if f.waitForActivation != nil {
+		// Use a portion of read timeout for activation
+		activationTimeout := f.readTimeout / 2
+		if activationTimeout < 500*time.Millisecond {
+			activationTimeout = 500 * time.Millisecond
+		}
+
+		if err := f.waitForActivation(f.hash, activationTimeout); err != nil {
+			// Log but don't fail - proceed with read attempt anyway
+			// The torrent may have some local data or may connect soon
+			slog.Debug("activation wait timed out, proceeding with read", "hash", f.hash)
+		}
+	}
 }
 
 // readAtLeast reads at least min bytes with timeout.
@@ -221,8 +227,7 @@ func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 //
 // A private buffer is used instead of the caller's slice to prevent a data
 // race: on timeout the goroutine may still be writing to the buffer while the
-// caller has already returned or reused it (e.g. firstReadWithRetry retries
-// with the same slice).
+// caller has already returned or reused it.
 //
 // Before spawning a new goroutine we drain any outstanding one from a previous
 // timeout.  PriorityReader.mu serialises reads anyway, so waiting here does

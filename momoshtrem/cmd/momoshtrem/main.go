@@ -157,8 +157,10 @@ func main() {
 
 	// Wire torrent service into VFS with streaming optimization
 	var activityCallback func(string)
+	var activationCallback func(string, time.Duration) error
 	if activityManager != nil {
 		activityCallback = activityManager.MarkActive
+		activationCallback = activityManager.WaitForActivation
 	}
 
 	// Create streaming config from application config
@@ -181,6 +183,7 @@ func main() {
 		torrentService,
 		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
 		activityCallback,
+		activationCallback,
 		streamingCfg,
 	)
 

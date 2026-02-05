@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -95,6 +96,44 @@ func (am *ActivityManager) MarkActive(hash string) {
 	if am.state[hash] == StateIdle {
 		if t, ok := am.torrents[hash]; ok {
 			am.setActive(hash, t)
+		}
+	}
+}
+
+// WaitForActivation blocks until the torrent has connected peers or timeout expires.
+// Returns immediately if: torrent not registered, already has peers, or start_paused is false.
+// This fixes the race condition where MarkActive enables network but the torrent needs
+// time to connect to peers before data is available.
+func (am *ActivityManager) WaitForActivation(hash string, timeout time.Duration) error {
+	am.MarkActive(hash) // Enable network first
+
+	if !am.startPaused {
+		return nil
+	}
+
+	am.mu.RLock()
+	t, exists := am.torrents[hash]
+	am.mu.RUnlock()
+
+	if !exists || t.Stats().ActivePeers > 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			am.log.Warn("timeout waiting for torrent activation", "hash", hash)
+			return ctx.Err()
+		case <-ticker.C:
+			if t.Stats().ActivePeers > 0 {
+				return nil
+			}
 		}
 	}
 }

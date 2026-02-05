@@ -67,9 +67,10 @@ type LibraryFS struct {
 	subtitleRepo   *subtitle.Repository
 
 	// Torrent service for file streaming (Stage 2)
-	torrentService torrent.Service
-	readTimeout    time.Duration
-	onActivity     func(hash string)
+	torrentService    torrent.Service
+	readTimeout       time.Duration
+	onActivity        func(hash string)
+	waitForActivation func(hash string, timeout time.Duration) error
 
 	// Streaming optimization config (Stage 3)
 	streamingCfg streaming.Config
@@ -118,6 +119,7 @@ func (fs *LibraryFS) SetTorrentService(
 	svc torrent.Service,
 	readTimeout time.Duration,
 	onActivity func(hash string),
+	waitForActivation func(hash string, timeout time.Duration) error,
 	streamingCfg streaming.Config,
 ) {
 	fs.mu.Lock()
@@ -125,6 +127,7 @@ func (fs *LibraryFS) SetTorrentService(
 	fs.torrentService = svc
 	fs.readTimeout = readTimeout
 	fs.onActivity = onActivity
+	fs.waitForActivation = waitForActivation
 	fs.streamingCfg = streamingCfg
 	slog.Info("VFS torrent service configured",
 		"read_timeout_seconds", readTimeout.Seconds(),
@@ -210,6 +213,7 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		assignment.InfoHash,
 		fs.readTimeout,
 		fs.onActivity,
+		fs.waitForActivation,
 		fs.streamingCfg,
 	), nil
 }
@@ -258,6 +262,7 @@ func (fs *LibraryFS) openTorrentSubtitleFile(tsf *TorrentSubtitleFile) (File, er
 		tsf.infoHash,
 		fs.readTimeout,
 		fs.onActivity,
+		fs.waitForActivation,
 		fs.streamingCfg,
 	), nil
 }
