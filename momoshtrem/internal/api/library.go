@@ -138,7 +138,8 @@ func (s *Server) listMovies(c *gin.Context) {
 	for i, movie := range movies {
 		assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
 		if err != nil {
-			slog.Error("Failed to get assignment for movie", "movie_id", movie.ID, "error", err)
+			errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for movie")
+			return
 		}
 		response[i] = toMovieResponse(movie, assignment)
 	}
@@ -203,7 +204,8 @@ func (s *Server) getMovie(c *gin.Context) {
 
 	assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
 	if err != nil {
-		slog.Error("Failed to get assignment for movie", "movie_id", movie.ID, "error", err)
+		errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for movie")
+		return
 	}
 	c.JSON(http.StatusOK, toMovieResponse(movie, assignment))
 }
@@ -217,7 +219,8 @@ func (s *Server) deleteMovie(c *gin.Context) {
 	// Get movie info before deletion for tree update
 	movie, err := s.movieRepo.GetByID(id)
 	if err != nil {
-		slog.Error("Failed to get movie for deletion", "movie_id", id, "error", err)
+		errorResponse(c, http.StatusInternalServerError, "Failed to get movie for deletion")
+		return
 	}
 
 	// Deactivate assignments first
@@ -484,7 +487,8 @@ func (s *Server) getShow(c *gin.Context) {
 			ep := &show.Seasons[i].Episodes[j]
 			assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, ep.ID)
 			if err != nil {
-				slog.Error("Failed to get assignment for episode", "episode_id", ep.ID, "error", err)
+				errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for episode")
+				return
 			}
 			ep.Assignment = assignment
 		}
@@ -502,7 +506,8 @@ func (s *Server) deleteShow(c *gin.Context) {
 	// Get all episodes to deactivate their assignments
 	show, err := s.showRepo.GetWithSeasonsAndEpisodes(id)
 	if err != nil {
-		slog.Error("Failed to get show for deletion", "show_id", id, "error", err)
+		errorResponse(c, http.StatusInternalServerError, "Failed to get show for deletion")
+		return
 	}
 
 	// Store show info for tree update before deletion
@@ -725,7 +730,10 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	}
 
 	// Get episode context before deactivating for tree update
-	ctx, _ := s.showRepo.GetEpisodeContext(id)
+	ctx, err := s.showRepo.GetEpisodeContext(id)
+	if err != nil {
+		slog.Error("Failed to get episode context for unassign", "episode_id", id, "error", err)
+	}
 
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, id); err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
