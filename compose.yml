@@ -12,6 +12,24 @@ services:
       - TZ=UTC
     restart: unless-stopped
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: momoshtrem-postgres
+    environment:
+      POSTGRES_DB: momoshtrem
+      POSTGRES_USER: momoshtrem
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - /mnt/data/3/momoshtrem/pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U momoshtrem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   momoshtrem:
     container_name: momoshtrem
     build:
@@ -32,6 +50,10 @@ services:
       - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
       - OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
       - OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
+      - DATABASE_URL=postgres://momoshtrem:${POSTGRES_PASSWORD}@postgres:5432/momoshtrem?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   caddy:

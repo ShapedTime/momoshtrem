@@ -3,7 +3,6 @@ package library
 import (
 	"database/sql"
 	"fmt"
-	"time"
 )
 
 // MovieRepository handles movie database operations
@@ -18,21 +17,13 @@ func NewMovieRepository(db *DB) *MovieRepository {
 
 // Create adds a new movie to the library
 func (r *MovieRepository) Create(movie *Movie) error {
-	result, err := r.db.Exec(
-		`INSERT INTO movies (tmdb_id, title, year) VALUES (?, ?, ?)`,
+	err := r.db.QueryRow(
+		`INSERT INTO movies (tmdb_id, title, year) VALUES ($1, $2, $3) RETURNING id, created_at`,
 		movie.TMDBID, movie.Title, movie.Year,
-	)
+	).Scan(&movie.ID, &movie.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create movie: %w", err)
 	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get movie id: %w", err)
-	}
-	movie.ID = id
-	movie.CreatedAt = time.Now()
-
 	return nil
 }
 
@@ -40,7 +31,7 @@ func (r *MovieRepository) Create(movie *Movie) error {
 func (r *MovieRepository) GetByID(id int64) (*Movie, error) {
 	movie := &Movie{}
 	err := r.db.QueryRow(
-		`SELECT id, tmdb_id, title, year, created_at FROM movies WHERE id = ?`,
+		`SELECT id, tmdb_id, title, year, created_at FROM movies WHERE id = $1`,
 		id,
 	).Scan(&movie.ID, &movie.TMDBID, &movie.Title, &movie.Year, &movie.CreatedAt)
 
@@ -58,7 +49,7 @@ func (r *MovieRepository) GetByID(id int64) (*Movie, error) {
 func (r *MovieRepository) GetByTMDBID(tmdbID int) (*Movie, error) {
 	movie := &Movie{}
 	err := r.db.QueryRow(
-		`SELECT id, tmdb_id, title, year, created_at FROM movies WHERE tmdb_id = ?`,
+		`SELECT id, tmdb_id, title, year, created_at FROM movies WHERE tmdb_id = $1`,
 		tmdbID,
 	).Scan(&movie.ID, &movie.TMDBID, &movie.Title, &movie.Year, &movie.CreatedAt)
 
@@ -139,7 +130,7 @@ func (r *MovieRepository) ListWithAssignments() ([]*Movie, error) {
 
 // Delete removes a movie from the library
 func (r *MovieRepository) Delete(id int64) error {
-	result, err := r.db.Exec(`DELETE FROM movies WHERE id = ?`, id)
+	result, err := r.db.Exec(`DELETE FROM movies WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete movie: %w", err)
 	}
@@ -158,7 +149,7 @@ func (r *MovieRepository) Delete(id int64) error {
 // Update updates a movie's metadata
 func (r *MovieRepository) Update(movie *Movie) error {
 	_, err := r.db.Exec(
-		`UPDATE movies SET title = ?, year = ? WHERE id = ?`,
+		`UPDATE movies SET title = $1, year = $2 WHERE id = $3`,
 		movie.Title, movie.Year, movie.ID,
 	)
 	if err != nil {

@@ -3,7 +3,6 @@ package library
 import (
 	"database/sql"
 	"fmt"
-	"time"
 )
 
 // AssignmentRepository handles torrent assignment database operations
@@ -43,9 +42,15 @@ func scanAssignment(s scanner) (*TorrentAssignment, error) {
 
 // Create adds a new torrent assignment
 func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
 	// Deactivate any existing active assignments for this item
-	_, err := r.db.Exec(
-		`UPDATE torrent_assignments SET is_active = FALSE WHERE item_type = ? AND item_id = ? AND is_active = TRUE`,
+	_, err = tx.Exec(
+		`UPDATE torrent_assignments SET is_active = FALSE WHERE item_type = $1 AND item_id = $2 AND is_active = TRUE`,
 		assignment.ItemType, assignment.ItemID,
 	)
 	if err != nil {
@@ -53,32 +58,25 @@ func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
 	}
 
 	// Create new assignment
-	result, err := r.db.Exec(
+	err = tx.QueryRow(
 		`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE) RETURNING id, created_at`,
 		assignment.ItemType, assignment.ItemID, assignment.InfoHash, assignment.MagnetURI,
 		assignment.FilePath, assignment.FileSize, nullString(assignment.Resolution), nullString(assignment.Source),
-	)
+	).Scan(&assignment.ID, &assignment.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create assignment: %w", err)
 	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get assignment id: %w", err)
-	}
-	assignment.ID = id
 	assignment.IsActive = true
-	assignment.CreatedAt = time.Now()
 
-	return nil
+	return tx.Commit()
 }
 
 // GetByID retrieves an assignment by its ID
 func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
 	row := r.db.QueryRow(
 		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
-		 FROM torrent_assignments WHERE id = ?`,
+		 FROM torrent_assignments WHERE id = $1`,
 		id,
 	)
 
@@ -97,7 +95,7 @@ func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
 func (r *AssignmentRepository) GetActiveForItem(itemType ItemType, itemID int64) (*TorrentAssignment, error) {
 	row := r.db.QueryRow(
 		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
-		 FROM torrent_assignments WHERE item_type = ? AND item_id = ? AND is_active = TRUE`,
+		 FROM torrent_assignments WHERE item_type = $1 AND item_id = $2 AND is_active = TRUE`,
 		itemType, itemID,
 	)
 
@@ -116,7 +114,7 @@ func (r *AssignmentRepository) GetActiveForItem(itemType ItemType, itemID int64)
 func (r *AssignmentRepository) GetByInfoHash(infoHash string) ([]*TorrentAssignment, error) {
 	rows, err := r.db.Query(
 		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
-		 FROM torrent_assignments WHERE info_hash = ?`,
+		 FROM torrent_assignments WHERE info_hash = $1`,
 		infoHash,
 	)
 	if err != nil {
@@ -140,7 +138,7 @@ func (r *AssignmentRepository) GetByInfoHash(infoHash string) ([]*TorrentAssignm
 func (r *AssignmentRepository) GetActiveByInfoHash(infoHash string) ([]*TorrentAssignment, error) {
 	rows, err := r.db.Query(
 		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
-		 FROM torrent_assignments WHERE info_hash = ? AND is_active = TRUE`,
+		 FROM torrent_assignments WHERE info_hash = $1 AND is_active = TRUE`,
 		infoHash,
 	)
 	if err != nil {
@@ -163,7 +161,7 @@ func (r *AssignmentRepository) GetActiveByInfoHash(infoHash string) ([]*TorrentA
 // Deactivate deactivates an assignment
 func (r *AssignmentRepository) Deactivate(id int64) error {
 	result, err := r.db.Exec(
-		`UPDATE torrent_assignments SET is_active = FALSE WHERE id = ?`,
+		`UPDATE torrent_assignments SET is_active = FALSE WHERE id = $1`,
 		id,
 	)
 	if err != nil {
@@ -184,7 +182,7 @@ func (r *AssignmentRepository) Deactivate(id int64) error {
 // DeactivateForItem deactivates all assignments for a library item
 func (r *AssignmentRepository) DeactivateForItem(itemType ItemType, itemID int64) error {
 	_, err := r.db.Exec(
-		`UPDATE torrent_assignments SET is_active = FALSE WHERE item_type = ? AND item_id = ?`,
+		`UPDATE torrent_assignments SET is_active = FALSE WHERE item_type = $1 AND item_id = $2`,
 		itemType, itemID,
 	)
 	if err != nil {
@@ -196,7 +194,7 @@ func (r *AssignmentRepository) DeactivateForItem(itemType ItemType, itemID int64
 
 // Delete removes an assignment
 func (r *AssignmentRepository) Delete(id int64) error {
-	result, err := r.db.Exec(`DELETE FROM torrent_assignments WHERE id = ?`, id)
+	result, err := r.db.Exec(`DELETE FROM torrent_assignments WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete assignment: %w", err)
 	}
@@ -236,7 +234,7 @@ func (r *AssignmentRepository) ListDistinctTorrents() ([]string, error) {
 
 // DeleteByInfoHash removes all assignments using a specific torrent
 func (r *AssignmentRepository) DeleteByInfoHash(infoHash string) (int64, error) {
-	result, err := r.db.Exec(`DELETE FROM torrent_assignments WHERE info_hash = ?`, infoHash)
+	result, err := r.db.Exec(`DELETE FROM torrent_assignments WHERE info_hash = $1`, infoHash)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete assignments by hash: %w", err)
 	}

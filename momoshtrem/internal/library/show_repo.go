@@ -18,21 +18,13 @@ func NewShowRepository(db *DB) *ShowRepository {
 
 // Create adds a new show to the library
 func (r *ShowRepository) Create(show *Show) error {
-	result, err := r.db.Exec(
-		`INSERT INTO shows (tmdb_id, title, year) VALUES (?, ?, ?)`,
+	err := r.db.QueryRow(
+		`INSERT INTO shows (tmdb_id, title, year) VALUES ($1, $2, $3) RETURNING id, created_at`,
 		show.TMDBID, show.Title, show.Year,
-	)
+	).Scan(&show.ID, &show.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create show: %w", err)
 	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get show id: %w", err)
-	}
-	show.ID = id
-	show.CreatedAt = time.Now()
-
 	return nil
 }
 
@@ -40,7 +32,7 @@ func (r *ShowRepository) Create(show *Show) error {
 func (r *ShowRepository) GetByID(id int64) (*Show, error) {
 	show := &Show{}
 	err := r.db.QueryRow(
-		`SELECT id, tmdb_id, title, year, created_at FROM shows WHERE id = ?`,
+		`SELECT id, tmdb_id, title, year, created_at FROM shows WHERE id = $1`,
 		id,
 	).Scan(&show.ID, &show.TMDBID, &show.Title, &show.Year, &show.CreatedAt)
 
@@ -58,7 +50,7 @@ func (r *ShowRepository) GetByID(id int64) (*Show, error) {
 func (r *ShowRepository) GetByTMDBID(tmdbID int) (*Show, error) {
 	show := &Show{}
 	err := r.db.QueryRow(
-		`SELECT id, tmdb_id, title, year, created_at FROM shows WHERE tmdb_id = ?`,
+		`SELECT id, tmdb_id, title, year, created_at FROM shows WHERE tmdb_id = $1`,
 		tmdbID,
 	).Scan(&show.ID, &show.TMDBID, &show.Title, &show.Year, &show.CreatedAt)
 
@@ -130,7 +122,7 @@ func (r *ShowRepository) GetWithSeasonsAndEpisodes(id int64) (*Show, error) {
 
 // Delete removes a show from the library (cascades to seasons and episodes)
 func (r *ShowRepository) Delete(id int64) error {
-	result, err := r.db.Exec(`DELETE FROM shows WHERE id = ?`, id)
+	result, err := r.db.Exec(`DELETE FROM shows WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete show: %w", err)
 	}
@@ -150,30 +142,15 @@ func (r *ShowRepository) Delete(id int64) error {
 
 // CreateSeason adds a new season to a show
 func (r *ShowRepository) CreateSeason(season *Season) error {
-	result, err := r.db.Exec(
-		`INSERT INTO seasons (show_id, season_number) VALUES (?, ?)
-		 ON CONFLICT(show_id, season_number) DO NOTHING`,
+	err := r.db.QueryRow(
+		`INSERT INTO seasons (show_id, season_number) VALUES ($1, $2)
+		 ON CONFLICT(show_id, season_number) DO UPDATE SET season_number = EXCLUDED.season_number
+		 RETURNING id`,
 		season.ShowID, season.SeasonNumber,
-	)
+	).Scan(&season.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create season: %w", err)
 	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get season id: %w", err)
-	}
-	if id > 0 {
-		season.ID = id
-	} else {
-		// Already exists, get the ID
-		existing, err := r.GetSeason(season.ShowID, season.SeasonNumber)
-		if err != nil {
-			return err
-		}
-		season.ID = existing.ID
-	}
-
 	return nil
 }
 
@@ -181,7 +158,7 @@ func (r *ShowRepository) CreateSeason(season *Season) error {
 func (r *ShowRepository) GetSeason(showID int64, seasonNumber int) (*Season, error) {
 	season := &Season{}
 	err := r.db.QueryRow(
-		`SELECT id, show_id, season_number FROM seasons WHERE show_id = ? AND season_number = ?`,
+		`SELECT id, show_id, season_number FROM seasons WHERE show_id = $1 AND season_number = $2`,
 		showID, seasonNumber,
 	).Scan(&season.ID, &season.ShowID, &season.SeasonNumber)
 
@@ -199,7 +176,7 @@ func (r *ShowRepository) GetSeason(showID int64, seasonNumber int) (*Season, err
 func (r *ShowRepository) GetSeasonByID(id int64) (*Season, error) {
 	season := &Season{}
 	err := r.db.QueryRow(
-		`SELECT id, show_id, season_number FROM seasons WHERE id = ?`,
+		`SELECT id, show_id, season_number FROM seasons WHERE id = $1`,
 		id,
 	).Scan(&season.ID, &season.ShowID, &season.SeasonNumber)
 
@@ -216,7 +193,7 @@ func (r *ShowRepository) GetSeasonByID(id int64) (*Season, error) {
 // GetSeasons retrieves all seasons for a show
 func (r *ShowRepository) GetSeasons(showID int64) ([]Season, error) {
 	rows, err := r.db.Query(
-		`SELECT id, show_id, season_number FROM seasons WHERE show_id = ? ORDER BY season_number`,
+		`SELECT id, show_id, season_number FROM seasons WHERE show_id = $1 ORDER BY season_number`,
 		showID,
 	)
 	if err != nil {
@@ -240,30 +217,15 @@ func (r *ShowRepository) GetSeasons(showID int64) ([]Season, error) {
 
 // CreateEpisode adds a new episode to a season
 func (r *ShowRepository) CreateEpisode(episode *Episode) error {
-	result, err := r.db.Exec(
-		`INSERT INTO episodes (season_id, episode_number, name) VALUES (?, ?, ?)
-		 ON CONFLICT(season_id, episode_number) DO UPDATE SET name = excluded.name`,
+	err := r.db.QueryRow(
+		`INSERT INTO episodes (season_id, episode_number, name) VALUES ($1, $2, $3)
+		 ON CONFLICT(season_id, episode_number) DO UPDATE SET name = EXCLUDED.name
+		 RETURNING id`,
 		episode.SeasonID, episode.EpisodeNumber, episode.Name,
-	)
+	).Scan(&episode.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create episode: %w", err)
 	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get episode id: %w", err)
-	}
-	if id > 0 {
-		episode.ID = id
-	} else {
-		// Updated existing, get the ID
-		existing, err := r.GetEpisode(episode.SeasonID, episode.EpisodeNumber)
-		if err != nil {
-			return err
-		}
-		episode.ID = existing.ID
-	}
-
 	return nil
 }
 
@@ -272,7 +234,7 @@ func (r *ShowRepository) GetEpisode(seasonID int64, episodeNumber int) (*Episode
 	episode := &Episode{}
 	var name sql.NullString
 	err := r.db.QueryRow(
-		`SELECT id, season_id, episode_number, name FROM episodes WHERE season_id = ? AND episode_number = ?`,
+		`SELECT id, season_id, episode_number, name FROM episodes WHERE season_id = $1 AND episode_number = $2`,
 		seasonID, episodeNumber,
 	).Scan(&episode.ID, &episode.SeasonID, &episode.EpisodeNumber, &name)
 
@@ -292,7 +254,7 @@ func (r *ShowRepository) GetEpisodeByID(id int64) (*Episode, error) {
 	episode := &Episode{}
 	var name sql.NullString
 	err := r.db.QueryRow(
-		`SELECT id, season_id, episode_number, name FROM episodes WHERE id = ?`,
+		`SELECT id, season_id, episode_number, name FROM episodes WHERE id = $1`,
 		id,
 	).Scan(&episode.ID, &episode.SeasonID, &episode.EpisodeNumber, &name)
 
@@ -310,7 +272,7 @@ func (r *ShowRepository) GetEpisodeByID(id int64) (*Episode, error) {
 // GetEpisodes retrieves all episodes for a season
 func (r *ShowRepository) GetEpisodes(seasonID int64) ([]Episode, error) {
 	rows, err := r.db.Query(
-		`SELECT id, season_id, episode_number, name FROM episodes WHERE season_id = ? ORDER BY episode_number`,
+		`SELECT id, season_id, episode_number, name FROM episodes WHERE season_id = $1 ORDER BY episode_number`,
 		seasonID,
 	)
 	if err != nil {
@@ -375,7 +337,7 @@ func (r *ShowRepository) GetSeasonsWithAssignedEpisodes(showID int64) ([]Season,
 		FROM seasons sn
 		INNER JOIN episodes e ON e.season_id = sn.id
 		INNER JOIN torrent_assignments ta ON ta.item_type = 'episode' AND ta.item_id = e.id AND ta.is_active = TRUE
-		WHERE sn.show_id = ?
+		WHERE sn.show_id = $1
 		ORDER BY sn.season_number
 	`, showID)
 	if err != nil {
@@ -411,7 +373,7 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 		       ta.resolution, ta.source, ta.created_at
 		FROM episodes e
 		INNER JOIN torrent_assignments ta ON ta.item_type = 'episode' AND ta.item_id = e.id AND ta.is_active = TRUE
-		WHERE e.season_id = ?
+		WHERE e.season_id = $1
 		ORDER BY e.episode_number
 	`, seasonID)
 	if err != nil {
@@ -450,7 +412,7 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 // UpdateEpisodeAirDate sets the air date for a specific episode
 func (r *ShowRepository) UpdateEpisodeAirDate(seasonID int64, episodeNumber int, airDate string) error {
 	_, err := r.db.Exec(
-		`UPDATE episodes SET air_date = ? WHERE season_id = ? AND episode_number = ?`,
+		`UPDATE episodes SET air_date = $1 WHERE season_id = $2 AND episode_number = $3`,
 		airDate, seasonID, episodeNumber,
 	)
 	if err != nil {
@@ -475,8 +437,8 @@ func (r *ShowRepository) GetRecentlyAiredEpisodes(lookbackDays int) ([]RecentlyA
 		INNER JOIN shows s ON s.id = sn.show_id
 		LEFT JOIN torrent_assignments ta ON ta.item_type = 'episode' AND ta.item_id = e.id AND ta.is_active = TRUE
 		WHERE e.air_date IS NOT NULL
-		  AND e.air_date >= ?
-		  AND e.air_date <= ?
+		  AND e.air_date >= $1
+		  AND e.air_date <= $2
 		ORDER BY e.air_date DESC, s.title ASC, sn.season_number ASC, e.episode_number ASC
 	`, cutoffDate, today)
 	if err != nil {
@@ -524,7 +486,7 @@ func (r *ShowRepository) GetEpisodeContext(episodeID int64) (*EpisodeContext, er
 		FROM episodes e
 		INNER JOIN seasons sn ON sn.id = e.season_id
 		INNER JOIN shows s ON s.id = sn.show_id
-		WHERE e.id = ?
+		WHERE e.id = $1
 	`, episodeID).Scan(&ctx.ShowTitle, &ctx.ShowYear, &ctx.SeasonNumber, &ctx.EpisodeNumber)
 
 	if err == sql.ErrNoRows {

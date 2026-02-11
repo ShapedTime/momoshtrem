@@ -21,7 +21,7 @@ func NewSyncMetadataRepository(db *DB) *SyncMetadataRepository {
 func (r *SyncMetadataRepository) GetLastSyncTime(key string) (time.Time, error) {
 	var value string
 	err := r.db.QueryRow(
-		`SELECT value FROM sync_metadata WHERE key = ?`,
+		`SELECT value FROM sync_metadata WHERE key = $1`,
 		"last_"+key,
 	).Scan(&value)
 
@@ -49,8 +49,8 @@ func (r *SyncMetadataRepository) GetLastSyncTime(key string) (time.Time, error) 
 // SetLastSyncTime updates the last sync time for a given key
 func (r *SyncMetadataRepository) SetLastSyncTime(key string, t time.Time) error {
 	_, err := r.db.Exec(`
-		INSERT INTO sync_metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+		INSERT INTO sync_metadata (key, value, updated_at) VALUES ($1, $2, NOW())
+		ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
 	`, "last_"+key, t.Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("failed to set last sync time: %w", err)
@@ -62,7 +62,7 @@ func (r *SyncMetadataRepository) SetLastSyncTime(key string, t time.Time) error 
 func (r *SyncMetadataRepository) GetValue(key string) (string, error) {
 	var value string
 	err := r.db.QueryRow(
-		`SELECT value FROM sync_metadata WHERE key = ?`,
+		`SELECT value FROM sync_metadata WHERE key = $1`,
 		key,
 	).Scan(&value)
 
@@ -79,8 +79,8 @@ func (r *SyncMetadataRepository) GetValue(key string) (string, error) {
 // SetValue sets a generic value in sync metadata
 func (r *SyncMetadataRepository) SetValue(key, value string) error {
 	_, err := r.db.Exec(`
-		INSERT INTO sync_metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+		INSERT INTO sync_metadata (key, value, updated_at) VALUES ($1, $2, NOW())
+		ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
 	`, key, value)
 	if err != nil {
 		return fmt.Errorf("failed to set sync metadata value: %w", err)

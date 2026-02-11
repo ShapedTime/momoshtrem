@@ -56,13 +56,13 @@ func main() {
 	}
 
 	// Initialize database
-	db, err := library.NewDB(cfg.Database.Path)
+	db, err := library.NewDB(cfg.Database.URL)
 	if err != nil {
 		slog.Error("Failed to open database", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
-	slog.Info("Database initialized", "path", cfg.Database.Path)
+	slog.Info("Database initialized", "host", "postgres")
 
 	// Initialize repositories
 	movieRepo := library.NewMovieRepository(db)

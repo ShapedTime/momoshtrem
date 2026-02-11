@@ -38,6 +38,7 @@ type WebDAVAuthConfig struct {
 
 type DatabaseConfig struct {
 	Path string `yaml:"path"`
+	URL  string `yaml:"url"`
 }
 
 type TorrentConfig struct {
@@ -108,6 +109,7 @@ func DefaultConfig() *Config {
 		},
 		Database: DatabaseConfig{
 			Path: "./data/momoshtrem.db",
+			URL:  "postgres://momoshtrem:momoshtrem@localhost:5432/momoshtrem?sslmode=disable",
 		},
 		Torrent: TorrentConfig{
 			MetadataFolder:       "./data/torrents",
@@ -190,6 +192,11 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// Database URL environment variable override
+	if envURL := os.Getenv("DATABASE_URL"); envURL != "" {
+		cfg.Database.URL = envURL
+	}
+
 	// OpenSubtitles environment variable overrides
 	if envKey := os.Getenv("OPENSUBTITLES_API_KEY"); envKey != "" {
 		cfg.OpenSubtitles.APIKey = envKey
@@ -207,9 +214,13 @@ func Load(path string) (*Config, error) {
 // EnsureDirectories creates required directories
 func (c *Config) EnsureDirectories() error {
 	dirs := []string{
-		filepath.Dir(c.Database.Path),
 		c.Torrent.MetadataFolder,
 		c.Subtitles.DownloadPath,
+	}
+
+	// Only create SQLite directory if Path is configured
+	if c.Database.Path != "" {
+		dirs = append(dirs, filepath.Dir(c.Database.Path))
 	}
 
 	// Add VFS cache directory if configured

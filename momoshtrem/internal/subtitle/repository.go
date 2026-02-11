@@ -48,40 +48,29 @@ func nullString(s string) sql.NullString {
 }
 
 // Create adds or updates a subtitle record (upsert).
-// After upsert, it queries the actual row to get correct ID and CreatedAt.
 func (r *Repository) Create(ctx context.Context, sub *Subtitle) error {
-	// Default source to opensubtitles if not set
 	source := sub.Source
 	if source == "" {
 		source = SourceOpenSubtitles
 	}
 
-	_, err := r.db.ExecContext(ctx,
+	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO subtitles (item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 ON CONFLICT(item_type, item_id, language_code) DO UPDATE SET
-		 language_name = excluded.language_name,
-		 format = excluded.format,
-		 file_path = excluded.file_path,
-		 file_size = excluded.file_size,
-		 source = excluded.source,
-		 info_hash = excluded.info_hash`,
+		 language_name = EXCLUDED.language_name,
+		 format = EXCLUDED.format,
+		 file_path = EXCLUDED.file_path,
+		 file_size = EXCLUDED.file_size,
+		 source = EXCLUDED.source,
+		 info_hash = EXCLUDED.info_hash
+		 RETURNING id, source, created_at`,
 		sub.ItemType, sub.ItemID, sub.LanguageCode, sub.LanguageName,
 		sub.Format, sub.FilePath, sub.FileSize, source, nullString(sub.InfoHash),
-	)
+	).Scan(&sub.ID, &sub.Source, &sub.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create subtitle: %w", err)
 	}
-
-	// Query the actual row to get correct ID, Source, and CreatedAt (LastInsertId unreliable after UPSERT)
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, source, created_at FROM subtitles WHERE item_type = ? AND item_id = ? AND language_code = ?`,
-		sub.ItemType, sub.ItemID, sub.LanguageCode,
-	)
-	if err := row.Scan(&sub.ID, &sub.Source, &sub.CreatedAt); err != nil {
-		return fmt.Errorf("failed to get subtitle after upsert: %w", err)
-	}
-
 	return nil
 }
 
@@ -89,7 +78,7 @@ func (r *Repository) Create(ctx context.Context, sub *Subtitle) error {
 func (r *Repository) GetByID(ctx context.Context, id int64) (*Subtitle, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash, created_at
-		 FROM subtitles WHERE id = ?`,
+		 FROM subtitles WHERE id = $1`,
 		id,
 	)
 
@@ -108,7 +97,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (*Subtitle, error) {
 func (r *Repository) GetByItem(ctx context.Context, itemType ItemType, itemID int64) ([]*Subtitle, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash, created_at
-		 FROM subtitles WHERE item_type = ? AND item_id = ?
+		 FROM subtitles WHERE item_type = $1 AND item_id = $2
 		 ORDER BY language_code`,
 		itemType, itemID,
 	)
@@ -133,7 +122,7 @@ func (r *Repository) GetByItem(ctx context.Context, itemType ItemType, itemID in
 func (r *Repository) GetByItemAndLanguage(ctx context.Context, itemType ItemType, itemID int64, languageCode string) (*Subtitle, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, item_type, item_id, language_code, language_name, format, file_path, file_size, source, info_hash, created_at
-		 FROM subtitles WHERE item_type = ? AND item_id = ? AND language_code = ?`,
+		 FROM subtitles WHERE item_type = $1 AND item_id = $2 AND language_code = $3`,
 		itemType, itemID, languageCode,
 	)
 
@@ -150,7 +139,7 @@ func (r *Repository) GetByItemAndLanguage(ctx context.Context, itemType ItemType
 
 // Delete removes a subtitle by ID
 func (r *Repository) Delete(ctx context.Context, id int64) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM subtitles WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM subtitles WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete subtitle: %w", err)
 	}
@@ -169,7 +158,7 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 // DeleteByItem removes all subtitles for a library item
 func (r *Repository) DeleteByItem(ctx context.Context, itemType ItemType, itemID int64) error {
 	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM subtitles WHERE item_type = ? AND item_id = ?`,
+		`DELETE FROM subtitles WHERE item_type = $1 AND item_id = $2`,
 		itemType, itemID,
 	)
 	if err != nil {
