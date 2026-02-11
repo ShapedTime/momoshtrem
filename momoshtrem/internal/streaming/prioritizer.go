@@ -33,6 +33,15 @@ type Prioritizer struct {
 	// Debouncing: track last seek position to avoid redundant priority updates
 	lastSeekOffset int64
 
+	// Previous priority ranges for downgrading stale pieces
+	lastUrgentStart  int64
+	lastUrgentEnd    int64
+	lastReadaheadEnd int64
+
+	// Metrics callbacks (nil-safe)
+	onSeek      func(forward bool) // called on each non-debounced seek
+	onDowngrade func(count int)    // called with number of pieces downgraded
+
 	log *slog.Logger
 }
 
@@ -44,15 +53,16 @@ func NewPrioritizer(t *torrent.Torrent, file *torrent.File, cfg Config) *Priorit
 	}
 
 	return &Prioritizer{
-		t:           t,
-		file:        file,
-		cfg:         cfg,
-		pieceLength: info.PieceLength,
-		beginPiece:  file.BeginPieceIndex(),
-		endPiece:    file.EndPieceIndex(),
-		fileOffset:  file.Offset(),
-		fileLength:  file.Length(),
-		log:         slog.With("component", "prioritizer", "file", file.Path()),
+		t:              t,
+		file:           file,
+		cfg:            cfg,
+		pieceLength:    info.PieceLength,
+		beginPiece:     file.BeginPieceIndex(),
+		endPiece:       file.EndPieceIndex(),
+		fileOffset:     file.Offset(),
+		fileLength:     file.Length(),
+		lastSeekOffset: -1, // sentinel: never seeked
+		log:            slog.With("component", "prioritizer", "file", file.Path()),
 	}
 }
 
@@ -115,6 +125,7 @@ func (p *Prioritizer) SetFormatInfo(info *FormatInfo) {
 
 // UpdateForSeek updates priorities based on seek position.
 // Sets pieces around current position to NOW priority, and ahead to READAHEAD.
+// Downgrades pieces from previous ranges that are now behind the cursor.
 // Debounces updates - skips if position changed by less than piece length.
 func (p *Prioritizer) UpdateForSeek(offset int64) {
 	if p == nil {
@@ -134,8 +145,9 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 
 	// Debounce: skip if position changed by less than piece length
 	// This avoids excessive priority updates during normal sequential reading
-	// and when the media player makes frequent position checks while paused
-	if p.pieceLength > 0 {
+	// and when the media player makes frequent position checks while paused.
+	// Skip debounce when lastSeekOffset < 0 (sentinel: never seeked).
+	if p.pieceLength > 0 && p.lastSeekOffset >= 0 {
 		diff := offset - p.lastSeekOffset
 		if diff < 0 {
 			diff = -diff
@@ -144,19 +156,54 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 			return
 		}
 	}
+
+	forward := offset >= p.lastSeekOffset
 	p.lastSeekOffset = offset
 
-	// Urgent: immediate position + buffer
+	if p.onSeek != nil {
+		p.onSeek(forward)
+	}
+
+	// Calculate new ranges
 	urgentEnd := min(offset+p.cfg.UrgentBufferBytes, p.fileLength)
+	readaheadEnd := min(urgentEnd+p.cfg.ReadaheadBytes, p.fileLength)
+
+	// Downgrade pieces from previous ranges that are now behind the cursor.
+	// Only downgrade pieces strictly before the new urgent start — the player
+	// has already consumed them and won't seek back (and if it does, they
+	// get re-prioritized immediately).
+	if p.lastReadaheadEnd > 0 {
+		downgradeEnd := min(p.lastReadaheadEnd, offset)
+		if p.lastUrgentStart < downgradeEnd {
+			downgraded := p.setPieceRangePriorityCount(p.lastUrgentStart, downgradeEnd, types.PiecePriorityNormal)
+			if downgraded > 0 && p.onDowngrade != nil {
+				p.onDowngrade(downgraded)
+			}
+		}
+	}
+
+	// Downgrade pieces from old range that are now beyond new readahead window.
+	// This handles backward seeks and forward seeks near end of file that shrink the window.
+	if p.lastReadaheadEnd > readaheadEnd {
+		downgraded := p.setPieceRangePriorityCount(readaheadEnd, p.lastReadaheadEnd, types.PiecePriorityNormal)
+		if downgraded > 0 && p.onDowngrade != nil {
+			p.onDowngrade(downgraded)
+		}
+	}
+
+	// Urgent: immediate position + buffer
 	p.setPieceRangePriority(offset, urgentEnd, types.PiecePriorityNow)
 
 	// Readahead: next chunk after urgent buffer
-	readaheadEnd := min(urgentEnd+p.cfg.ReadaheadBytes, p.fileLength)
 	if readaheadEnd > urgentEnd {
 		p.setPieceRangePriority(urgentEnd, readaheadEnd, types.PiecePriorityReadahead)
 	}
 
-	// Only log significant priority updates (not every call)
+	// Track for next downgrade
+	p.lastUrgentStart = offset
+	p.lastUrgentEnd = urgentEnd
+	p.lastReadaheadEnd = readaheadEnd
+
 	p.log.Debug("updated seek priorities",
 		"offset", offset,
 		"urgent_end", urgentEnd,
@@ -167,8 +214,14 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 // setPieceRangePriority sets priority for pieces covering a byte range within the file.
 // startByte and endByte are relative to file start (not torrent start).
 func (p *Prioritizer) setPieceRangePriority(startByte, endByte int64, priority types.PiecePriority) {
+	p.setPieceRangePriorityCount(startByte, endByte, priority)
+}
+
+// setPieceRangePriorityCount sets priority for pieces covering a byte range
+// and returns the number of pieces updated.
+func (p *Prioritizer) setPieceRangePriorityCount(startByte, endByte int64, priority types.PiecePriority) int {
 	if startByte >= endByte {
-		return
+		return 0
 	}
 
 	// Convert file-relative offsets to torrent-absolute offsets
@@ -188,10 +241,13 @@ func (p *Prioritizer) setPieceRangePriority(startByte, endByte int64, priority t
 	}
 
 	// Set priority for each piece
+	count := 0
 	for i := startPiece; i < endPiece; i++ {
 		piece := p.t.Piece(i)
 		piece.SetPriority(priority)
+		count++
 	}
+	return count
 }
 
 // byteToPiece converts absolute byte offset (torrent-relative) to piece index.

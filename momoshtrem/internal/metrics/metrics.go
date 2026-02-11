@@ -9,6 +9,11 @@ type Metrics struct {
 	StreamingReadTimeouts prometheus.Counter
 	StreamingReadDuration prometheus.Histogram
 	StreamingOpenFiles    prometheus.Gauge
+
+	// Streaming performance diagnostics
+	StreamingSeeks              *prometheus.CounterVec // labels: direction=forward|backward
+	StreamingPiecesDowngraded   prometheus.Counter
+	StreamingSlowReads          prometheus.Counter
 }
 
 // New creates and registers streaming metrics with the given registry.
@@ -45,6 +50,24 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name:      "open_files",
 			Help:      "Number of currently open torrent file handles.",
 		}),
+		StreamingSeeks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "seek_total",
+			Help:      "Seek operations by direction. High backward rate indicates rebuffering.",
+		}, []string{"direction"}),
+		StreamingPiecesDowngraded: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "pieces_downgraded_total",
+			Help:      "Pieces downgraded from high to normal priority (behind playback cursor).",
+		}),
+		StreamingSlowReads: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "slow_reads_total",
+			Help:      "Reads that blocked over 500ms waiting for piece data.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -53,6 +76,9 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.StreamingReadTimeouts,
 		m.StreamingReadDuration,
 		m.StreamingOpenFiles,
+		m.StreamingSeeks,
+		m.StreamingPiecesDowngraded,
+		m.StreamingSlowReads,
 	)
 
 	return m

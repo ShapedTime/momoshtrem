@@ -156,12 +156,30 @@ func (f *TorrentFile) ensureReader() {
 		f.markActivity()
 	}
 
+	// Wire metrics callbacks for streaming performance diagnostics
+	var callbacks *streaming.PriorityCallbacks
+	if f.metrics != nil {
+		callbacks = &streaming.PriorityCallbacks{
+			OnSeek: func(forward bool) {
+				dir := "forward"
+				if !forward {
+					dir = "backward"
+				}
+				f.metrics.StreamingSeeks.WithLabelValues(dir).Inc()
+			},
+			OnDowngrade: func(count int) {
+				f.metrics.StreamingPiecesDowngraded.Add(float64(count))
+			},
+		}
+	}
+
 	// Create priority-aware reader for optimized streaming
 	f.reader = streaming.NewPriorityReader(
 		f.handle.Torrent(),
 		f.handle.File(),
 		f.streamingCfg,
 		onActivity,
+		callbacks,
 	)
 }
 
@@ -341,9 +359,13 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 	select {
 	case r := <-done:
 		if f.metrics != nil {
-			f.metrics.StreamingReadDuration.Observe(time.Since(start).Seconds())
+			elapsed := time.Since(start)
+			f.metrics.StreamingReadDuration.Observe(elapsed.Seconds())
 			f.metrics.StreamingReads.Inc()
 			f.metrics.StreamingReadBytes.Add(float64(r.n))
+			if elapsed > 500*time.Millisecond {
+				f.metrics.StreamingSlowReads.Inc()
+			}
 		}
 		copy(p[:r.n], buf[:r.n])
 		returnBuffer(r.pooled)

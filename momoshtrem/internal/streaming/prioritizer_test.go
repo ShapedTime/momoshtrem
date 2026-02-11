@@ -39,11 +39,11 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.FooterPriorityBytes != 5*1024*1024 {
 		t.Errorf("FooterPriorityBytes = %d, want %d", cfg.FooterPriorityBytes, 5*1024*1024)
 	}
-	if cfg.ReadaheadBytes != 16*1024*1024 {
-		t.Errorf("ReadaheadBytes = %d, want %d", cfg.ReadaheadBytes, 16*1024*1024)
+	if cfg.ReadaheadBytes != 64*1024*1024 {
+		t.Errorf("ReadaheadBytes = %d, want %d", cfg.ReadaheadBytes, 64*1024*1024)
 	}
-	if cfg.UrgentBufferBytes != 2*1024*1024 {
-		t.Errorf("UrgentBufferBytes = %d, want %d", cfg.UrgentBufferBytes, 2*1024*1024)
+	if cfg.UrgentBufferBytes != 8*1024*1024 {
+		t.Errorf("UrgentBufferBytes = %d, want %d", cfg.UrgentBufferBytes, 8*1024*1024)
 	}
 }
 
@@ -103,5 +103,70 @@ func TestNilPrioritizerSafety(t *testing.T) {
 	begin, end := p.FilePieceRange()
 	if begin != 0 || end != 0 {
 		t.Error("FilePieceRange() on nil should return 0, 0")
+	}
+}
+
+func TestUpdateForSeekTracksRanges(t *testing.T) {
+	// Test that UpdateForSeek updates tracking fields for downgrade logic.
+	// We can't use a real torrent.Torrent in unit tests, but we can verify
+	// the tracking fields and callback invocations by constructing a
+	// Prioritizer with nil torrent (the setPieceRangePriority calls will
+	// panic, so we only test the debounce and tracking logic).
+	cfg := DefaultConfig()
+
+	var seekCount int
+	var downgradeCount int
+
+	p := &Prioritizer{
+		cfg:         cfg,
+		pieceLength: 1024 * 1024, // 1MB pieces
+		fileLength:  500 * 1024 * 1024,
+		onSeek: func(_ bool) {
+			seekCount++
+		},
+		onDowngrade: func(count int) {
+			downgradeCount += count
+		},
+	}
+
+	// UpdateForSeek with nil torrent will panic in setPieceRangePriority,
+	// so we test the debounce logic and field tracking directly.
+
+	// Test debounce: small movement should be ignored
+	p.lastSeekOffset = 100 // simulate having already seeked once
+	p.UpdateForSeek(100 + p.pieceLength - 1) // Less than piece length
+	if seekCount != 0 {
+		t.Errorf("expected debounce to skip seek callback, got %d calls", seekCount)
+	}
+
+	// Verify tracking fields are zero-valued initially (no setPieceRangePriority called)
+	if p.lastUrgentStart != 0 || p.lastUrgentEnd != 0 || p.lastReadaheadEnd != 0 {
+		// These should still be 0 because the debounce skipped the update
+		t.Error("tracking fields should be zero after debounced seek")
+	}
+}
+
+func TestPriorityCallbacksStruct(t *testing.T) {
+	// Verify PriorityCallbacks can be constructed with both callbacks
+	var seekCalled bool
+	var downgradeCalled bool
+
+	callbacks := &PriorityCallbacks{
+		OnSeek: func(forward bool) {
+			seekCalled = true
+		},
+		OnDowngrade: func(count int) {
+			downgradeCalled = true
+		},
+	}
+
+	callbacks.OnSeek(true)
+	callbacks.OnDowngrade(5)
+
+	if !seekCalled {
+		t.Error("OnSeek callback not called")
+	}
+	if !downgradeCalled {
+		t.Error("OnDowngrade callback not called")
 	}
 }

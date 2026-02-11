@@ -46,8 +46,8 @@ func DefaultConfig() Config {
 	return Config{
 		HeaderPriorityBytes: 10 * 1024 * 1024, // 10MB
 		FooterPriorityBytes: 5 * 1024 * 1024,  // 5MB
-		ReadaheadBytes:      16 * 1024 * 1024, // 16MB
-		UrgentBufferBytes:   2 * 1024 * 1024,  // 2MB
+		ReadaheadBytes:      64 * 1024 * 1024,  // 64MB
+		UrgentBufferBytes:   8 * 1024 * 1024,   // 8MB
 	}
 }
 

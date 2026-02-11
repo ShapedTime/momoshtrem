@@ -98,6 +98,14 @@ func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, er
 	// Disable IPv6 for simpler networking
 	torrentCfg.DisableIPv6 = true
 
+	// Prevent duplicate peer connections that send redundant chunks
+	torrentCfg.DropDuplicatePeerIds = cfg.DropDuplicatePeerIds
+
+	// Cap in-flight unverified data to reduce wasted chunks when priorities change
+	if cfg.MaxUnverifiedMB > 0 {
+		torrentCfg.MaxUnverifiedBytes = cfg.MaxUnverifiedMB * 1024 * 1024
+	}
+
 	// Configure logging
 	tl := tlog.NewLogger()
 	tl.SetHandlers(&torrentLogHandler{log: log})
@@ -118,6 +126,8 @@ func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, er
 	log.Info("torrent client created",
 		"seeding", true,
 		"ipv6_disabled", true,
+		"drop_duplicate_peers", cfg.DropDuplicatePeerIds,
+		"max_unverified_mb", cfg.MaxUnverifiedMB,
 	)
 
 	return client, nil

@@ -31,6 +31,13 @@ type PriorityReader struct {
 	log *slog.Logger
 }
 
+// PriorityCallbacks holds optional callbacks for streaming performance metrics.
+// Using callbacks avoids coupling the streaming package to the metrics package.
+type PriorityCallbacks struct {
+	OnSeek      func(forward bool) // Called on each non-debounced seek
+	OnDowngrade func(count int)    // Called with number of pieces downgraded
+}
+
 // NewPriorityReader creates a priority-aware reader for a torrent file.
 // It immediately sets up initial prioritization and configures the underlying reader.
 func NewPriorityReader(
@@ -38,12 +45,17 @@ func NewPriorityReader(
 	file *torrent.File,
 	cfg Config,
 	onActivity func(),
+	callbacks *PriorityCallbacks,
 ) *PriorityReader {
 	reader := file.NewReader()
 	reader.SetReadahead(cfg.ReadaheadBytes)
 	reader.SetResponsive()
 
 	prioritizer := NewPrioritizer(t, file, cfg)
+	if callbacks != nil && prioritizer != nil {
+		prioritizer.onSeek = callbacks.OnSeek
+		prioritizer.onDowngrade = callbacks.OnDowngrade
+	}
 	prioritizer.InitialPrioritize()
 
 	pr := &PriorityReader{

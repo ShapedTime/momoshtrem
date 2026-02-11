@@ -41,13 +41,15 @@ type DatabaseConfig struct {
 }
 
 type TorrentConfig struct {
-	MetadataFolder  string `yaml:"metadata_folder"`
-	GlobalCacheSize int64  `yaml:"global_cache_size"` // MB
-	AddTimeout      int    `yaml:"add_timeout"`       // seconds
-	ReadTimeout     int    `yaml:"read_timeout"`      // seconds
-	IdleEnabled     bool   `yaml:"idle_enabled"`
-	IdleTimeout     int    `yaml:"idle_timeout"` // seconds
-	StartPaused     bool   `yaml:"start_paused"`
+	MetadataFolder       string `yaml:"metadata_folder"`
+	GlobalCacheSize      int64  `yaml:"global_cache_size"`       // MB
+	AddTimeout           int    `yaml:"add_timeout"`             // seconds
+	ReadTimeout          int    `yaml:"read_timeout"`            // seconds
+	IdleEnabled          bool   `yaml:"idle_enabled"`
+	IdleTimeout          int    `yaml:"idle_timeout"`            // seconds
+	StartPaused          bool   `yaml:"start_paused"`
+	DropDuplicatePeerIds bool   `yaml:"drop_duplicate_peer_ids"` // Prevent duplicate peer connections
+	MaxUnverifiedMB      int64  `yaml:"max_unverified_mb"`       // Cap in-flight unverified data (MB, 0=unlimited)
 }
 
 type TMDBConfig struct {
@@ -63,8 +65,8 @@ type VFSConfig struct {
 type StreamingConfig struct {
 	HeaderPriorityBytes int64 `yaml:"header_priority_bytes"` // Bytes at start to prioritize (default: 10MB)
 	FooterPriorityBytes int64 `yaml:"footer_priority_bytes"` // Bytes at end to prioritize (default: 5MB)
-	ReadaheadBytes      int64 `yaml:"readahead_bytes"`       // Bytes to read ahead (default: 16MB)
-	UrgentBufferBytes   int64 `yaml:"urgent_buffer_bytes"`   // Immediate buffer around seek (default: 2MB)
+	ReadaheadBytes      int64 `yaml:"readahead_bytes"`       // Bytes to read ahead (default: 64MB)
+	UrgentBufferBytes   int64 `yaml:"urgent_buffer_bytes"`   // Immediate buffer around seek (default: 8MB)
 }
 
 // OpenSubtitlesConfig configures the OpenSubtitles API client
@@ -108,13 +110,15 @@ func DefaultConfig() *Config {
 			Path: "./data/momoshtrem.db",
 		},
 		Torrent: TorrentConfig{
-			MetadataFolder:  "./data/torrents",
-			GlobalCacheSize: 4096, // 4GB
-			AddTimeout:      60,
-			ReadTimeout:     120,
-			IdleEnabled:     true,
-			IdleTimeout:     300,
-			StartPaused:     true,
+			MetadataFolder:       "./data/torrents",
+			GlobalCacheSize:      4096, // 4GB
+			AddTimeout:           60,
+			ReadTimeout:          120,
+			IdleEnabled:          true,
+			IdleTimeout:          300,
+			StartPaused:          true,
+			DropDuplicatePeerIds: true,
+			MaxUnverifiedMB:      32,
 		},
 		VFS: VFSConfig{
 			TreeTTL:  0,              // DEPRECATED: ignored
@@ -123,8 +127,8 @@ func DefaultConfig() *Config {
 		Streaming: StreamingConfig{
 			HeaderPriorityBytes: 10 * 1024 * 1024, // 10MB
 			FooterPriorityBytes: 5 * 1024 * 1024,  // 5MB
-			ReadaheadBytes:      16 * 1024 * 1024, // 16MB
-			UrgentBufferBytes:   2 * 1024 * 1024,  // 2MB
+			ReadaheadBytes:      64 * 1024 * 1024,  // 64MB
+			UrgentBufferBytes:   8 * 1024 * 1024,   // 8MB
 		},
 		OpenSubtitles: OpenSubtitlesConfig{},
 		Subtitles: SubtitlesConfig{
