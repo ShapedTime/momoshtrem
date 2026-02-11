@@ -23,8 +23,7 @@ services:
     expose:
       - "4444"
       - "36911"
-    ports:
-      - "9090:9090"   # Prometheus metrics (optional, can be removed if not needed)
+      - "9090"
     volumes:
       - /mnt/data/3/momoshtrem/config:/config
       - /mnt/data/3/momoshtrem/data:/data
@@ -40,6 +39,7 @@ services:
     container_name: caddy
     ports:
       - "36911:36911"   # WebDAV via HTTPS
+      - "9090:9090"     # Prometheus metrics
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
