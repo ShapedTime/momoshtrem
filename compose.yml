@@ -39,6 +39,7 @@ services:
     container_name: caddy
     ports:
       - "36911:36911"   # WebDAV via HTTPS
+      - "9090:9090"     # Prometheus metrics
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
