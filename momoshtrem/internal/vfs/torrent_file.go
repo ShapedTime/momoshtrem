@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/common"
+	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
@@ -112,6 +113,9 @@ type TorrentFile struct {
 	// running. We drain it before spawning a new goroutine, bounding
 	// the leak to at most one goroutine per TorrentFile.
 	pendingRead chan readResult
+
+	// Prometheus streaming metrics (nil when metrics disabled)
+	metrics *metrics.Metrics
 }
 
 // NewTorrentFile creates a new TorrentFile.
@@ -123,7 +127,11 @@ func NewTorrentFile(
 	onActivity func(hash string),
 	waitForActivation func(hash string, timeout time.Duration) error,
 	streamingCfg streaming.Config,
+	m *metrics.Metrics,
 ) *TorrentFile {
+	if m != nil {
+		m.StreamingOpenFiles.Inc()
+	}
 	return &TorrentFile{
 		handle:            handle,
 		name:              name,
@@ -133,6 +141,7 @@ func NewTorrentFile(
 		waitForActivation: waitForActivation,
 		streamingCfg:      streamingCfg,
 		firstRead:         true,
+		metrics:           m,
 	}
 }
 
@@ -216,6 +225,10 @@ func (f *TorrentFile) ReadAt(p []byte, off int64) (int, error) {
 func (f *TorrentFile) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if f.metrics != nil {
+		f.metrics.StreamingOpenFiles.Dec()
+	}
 
 	if f.reader != nil {
 		err := f.reader.Close()
@@ -310,6 +323,8 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 		}
 	}
 
+	start := time.Now()
+
 	// Get buffer from pool, or allocate if too large
 	buf, pooled := getBuffer(len(p))
 	if buf == nil {
@@ -325,10 +340,18 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 
 	select {
 	case r := <-done:
+		if f.metrics != nil {
+			f.metrics.StreamingReadDuration.Observe(time.Since(start).Seconds())
+			f.metrics.StreamingReads.Inc()
+			f.metrics.StreamingReadBytes.Add(float64(r.n))
+		}
 		copy(p[:r.n], buf[:r.n])
 		returnBuffer(r.pooled)
 		return r.n, r.err
 	case <-ctx.Done():
+		if f.metrics != nil {
+			f.metrics.StreamingReadTimeouts.Inc()
+		}
 		f.pendingRead = done
 		return 0, ctx.Err()
 	}

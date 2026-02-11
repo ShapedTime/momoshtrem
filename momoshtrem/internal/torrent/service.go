@@ -41,6 +41,23 @@ type TorrentStatus struct {
 	IsPaused      bool
 }
 
+// FullStats contains complete torrent statistics for Prometheus metrics collection.
+type FullStats struct {
+	InfoHash          string
+	Name              string
+	TotalSize         int64
+	BytesCompleted    int64
+	ActivePeers       int
+	ConnectedSeeders  int
+	HalfOpenPeers     int
+	PiecesComplete    int
+	BytesReadData     int64 // Cumulative data bytes downloaded from peers
+	BytesWrittenData  int64 // Cumulative data bytes uploaded to peers
+	ChunksReadWasted  int64 // Wasted chunks received
+	PiecesDirtiedGood int64 // Pieces that passed hash verification
+	PiecesDirtiedBad  int64 // Pieces that failed hash verification
+}
+
 // Service manages torrent operations.
 // This interface is used by the API handlers to add torrents and get file metadata,
 // and by the VFS layer to stream file content.
@@ -80,6 +97,10 @@ type Service interface {
 
 	// Resume resumes a paused torrent.
 	Resume(infoHash string) error
+
+	// CollectStats returns complete statistics for all active torrents.
+	// Used by the Prometheus metrics collector.
+	CollectStats() []FullStats
 
 	// Close shuts down the torrent service.
 	Close() error

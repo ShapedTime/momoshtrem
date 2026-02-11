@@ -23,5 +23,11 @@ torrent:
 vfs:
   tree_ttl: 86400  # 1 day in seconds (partial updates make long TTL safe)
 
+# Prometheus metrics (optional)
+# metrics:
+#   enabled: true
+#   port: 9090
+# Or use environment variables: METRICS_ENABLED=true, METRICS_PORT=9090
+
 tmdb:
   api_key: ""  # Set your TMDB API key here

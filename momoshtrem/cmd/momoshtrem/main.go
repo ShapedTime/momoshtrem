@@ -12,10 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -190,6 +194,30 @@ func main() {
 		streamingCfg,
 	)
 
+	// Initialize Prometheus metrics (optional)
+	var metricsServer *metrics.Server
+	if cfg.Metrics.Enabled {
+		reg := prometheus.NewRegistry()
+		reg.MustRegister(
+			collectors.NewGoCollector(),
+			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		)
+
+		streamingMetrics := metrics.New(reg)
+		libraryFS.SetMetrics(streamingMetrics)
+
+		torrentCollector := metrics.NewTorrentCollector(torrentService, activityManager)
+		reg.MustRegister(torrentCollector)
+
+		metricsServer = metrics.NewServer(cfg.Metrics.Port, reg)
+		go func() {
+			if err := metricsServer.Start(); err != nil {
+				slog.Error("Metrics server error", "error", err)
+			}
+		}()
+		slog.Info("Prometheus metrics enabled", "port", cfg.Metrics.Port)
+	}
+
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
 
@@ -271,6 +299,13 @@ func main() {
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// Shutdown metrics server first (so collectors don't access closing services)
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			slog.Error("Metrics server shutdown error", "error", err)
+		}
+	}
 
 	// Shutdown HTTP servers
 	if err := httpServer.Shutdown(ctx); err != nil {

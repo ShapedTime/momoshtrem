@@ -11,6 +11,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -74,6 +75,9 @@ type LibraryFS struct {
 
 	// Streaming optimization config (Stage 3)
 	streamingCfg streaming.Config
+
+	// Prometheus streaming metrics (nil when metrics disabled)
+	metrics *metrics.Metrics
 
 	// Cached tree structure
 	tree       *DirectoryTree
@@ -174,6 +178,14 @@ func (fs *LibraryFS) SetCacheDir(dir string) {
 	}
 }
 
+// SetMetrics configures Prometheus streaming metrics for the VFS.
+func (fs *LibraryFS) SetMetrics(m *metrics.Metrics) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.metrics = m
+	slog.Info("VFS metrics configured")
+}
+
 // Open returns a file handle for reading
 func (fs *LibraryFS) Open(filepath string) (File, error) {
 	fs.ensureTree()
@@ -245,6 +257,7 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		fs.onActivity,
 		fs.waitForActivation,
 		fs.streamingCfg,
+		fs.metrics,
 	), nil
 }
 
@@ -294,6 +307,7 @@ func (fs *LibraryFS) openTorrentSubtitleFile(tsf *TorrentSubtitleFile) (File, er
 		fs.onActivity,
 		fs.waitForActivation,
 		fs.streamingCfg,
+		fs.metrics,
 	), nil
 }
 

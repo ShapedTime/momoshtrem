@@ -263,6 +263,41 @@ func (s *service) Close() error {
 	return nil
 }
 
+// CollectStats returns complete statistics for all active torrents.
+func (s *service) CollectStats() []FullStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]FullStats, 0, len(s.torrents))
+	for _, t := range s.torrents {
+		stats := t.Stats()
+
+		var totalSize int64
+		var name string
+		if info := t.Info(); info != nil {
+			totalSize = info.TotalLength()
+			name = info.Name
+		}
+
+		result = append(result, FullStats{
+			InfoHash:          t.InfoHash().HexString(),
+			Name:              name,
+			TotalSize:         totalSize,
+			BytesCompleted:    t.BytesCompleted(),
+			ActivePeers:       stats.ActivePeers,
+			ConnectedSeeders:  stats.ConnectedSeeders,
+			HalfOpenPeers:     stats.HalfOpenPeers,
+			PiecesComplete:    stats.PiecesComplete,
+			BytesReadData:     stats.BytesReadData.Int64(),
+			BytesWrittenData:  stats.BytesWrittenData.Int64(),
+			ChunksReadWasted:  stats.ChunksReadWasted.Int64(),
+			PiecesDirtiedGood: stats.PiecesDirtiedGood.Int64(),
+			PiecesDirtiedBad:  stats.PiecesDirtiedBad.Int64(),
+		})
+	}
+	return result
+}
+
 // torrentToInfo converts a torrent.Torrent to TorrentInfo.
 func (s *service) torrentToInfo(t *torrent.Torrent) *TorrentInfo {
 	info := t.Info()

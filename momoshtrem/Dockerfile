@@ -35,6 +35,6 @@ RUN mkdir -p /data /config
 
 WORKDIR /data
 
-EXPOSE 4444 36911
+EXPOSE 4444 36911 9090
 
 ENTRYPOINT ["/bin/momoshtrem", "-config", "/config/config.yaml"]

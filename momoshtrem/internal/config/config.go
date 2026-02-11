@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -19,6 +20,7 @@ type Config struct {
 	OpenSubtitles OpenSubtitlesConfig `yaml:"opensubtitles"`
 	Subtitles     SubtitlesConfig     `yaml:"subtitles"`
 	AirDateSync   AirDateSyncConfig   `yaml:"airdate_sync"`
+	Metrics       MetricsConfig       `yaml:"metrics"`
 }
 
 type ServerConfig struct {
@@ -77,6 +79,12 @@ type SubtitlesConfig struct {
 	DownloadPath string `yaml:"download_path"` // Local storage path for downloaded subtitles
 }
 
+// MetricsConfig configures Prometheus metrics exposure
+type MetricsConfig struct {
+	Enabled bool `yaml:"enabled"` // Enable metrics endpoint (default: false)
+	Port    int  `yaml:"port"`    // HTTP port for /metrics (default: 9090)
+}
+
 // AirDateSyncConfig configures the background air date sync service
 type AirDateSyncConfig struct {
 	Enabled           bool `yaml:"enabled"`             // Enable air date sync (default: true)
@@ -129,6 +137,10 @@ func DefaultConfig() *Config {
 			BatchSize:         5,
 			BatchDelayMs:      500,
 		},
+		Metrics: MetricsConfig{
+			Enabled: false,
+			Port:    9090,
+		},
 	}
 }
 
@@ -162,6 +174,16 @@ func Load(path string) (*Config, error) {
 	}
 	if envPass := os.Getenv("WEBDAV_PASSWORD"); envPass != "" {
 		cfg.Server.WebDAVAuth.Password = envPass
+	}
+
+	// Metrics environment variable overrides
+	if envEnabled := os.Getenv("METRICS_ENABLED"); envEnabled != "" {
+		cfg.Metrics.Enabled = strings.ToLower(envEnabled) == "true"
+	}
+	if envPort := os.Getenv("METRICS_PORT"); envPort != "" {
+		if port, err := strconv.Atoi(envPort); err == nil {
+			cfg.Metrics.Port = port
+		}
 	}
 
 	// OpenSubtitles environment variable overrides

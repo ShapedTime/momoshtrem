@@ -23,6 +23,7 @@ services:
     expose:
       - "4444"
       - "36911"
+      - "9090"
     volumes:
       - /mnt/data/3/momoshtrem/config:/config
       - /mnt/data/3/momoshtrem/data:/data
