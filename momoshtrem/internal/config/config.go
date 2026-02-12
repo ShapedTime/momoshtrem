@@ -120,7 +120,7 @@ func DefaultConfig() *Config {
 			IdleTimeout:          300,
 			StartPaused:          true,
 			DropDuplicatePeerIds: true,
-			MaxUnverifiedMB:      32,
+			MaxUnverifiedMB:      16,
 		},
 		VFS: VFSConfig{
 			TreeTTL:  0,              // DEPRECATED: ignored
@@ -129,7 +129,7 @@ func DefaultConfig() *Config {
 		Streaming: StreamingConfig{
 			HeaderPriorityBytes: 10 * 1024 * 1024, // 10MB
 			FooterPriorityBytes: 5 * 1024 * 1024,  // 5MB
-			ReadaheadBytes:      64 * 1024 * 1024,  // 64MB
+			ReadaheadBytes:      32 * 1024 * 1024,  // 32MB
 			UrgentBufferBytes:   8 * 1024 * 1024,   // 8MB
 		},
 		OpenSubtitles: OpenSubtitlesConfig{},

@@ -20,11 +20,11 @@ torrent:
   idle_timeout: 300
   start_paused: true
   drop_duplicate_peer_ids: true   # Prevent duplicate peer connections (reduces wasted chunks)
-  max_unverified_mb: 32           # Cap in-flight unverified data in MB (0=unlimited)
+  max_unverified_mb: 16           # Cap in-flight unverified data in MB (0=unlimited)
 
 # Streaming buffer sizes for playback optimization
 streaming:
-  readahead_bytes: 67108864       # 64MB - buffer ahead of playback position
+  readahead_bytes: 33554432       # 32MB - buffer ahead of playback position
   urgent_buffer_bytes: 8388608    # 8MB - immediate buffer around seek position
   # header_priority_bytes: 10485760  # 10MB (default)
   # footer_priority_bytes: 5242880   # 5MB (default)

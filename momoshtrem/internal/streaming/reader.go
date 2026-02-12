@@ -48,7 +48,7 @@ func NewPriorityReader(
 	callbacks *PriorityCallbacks,
 ) *PriorityReader {
 	reader := file.NewReader()
-	reader.SetReadahead(cfg.ReadaheadBytes)
+	reader.SetReadahead(cfg.UrgentBufferBytes)
 	reader.SetResponsive()
 
 	prioritizer := NewPrioritizer(t, file, cfg)
@@ -70,7 +70,8 @@ func NewPriorityReader(
 
 	pr.log.Debug("priority reader created",
 		"file_size", file.Length(),
-		"readahead", cfg.ReadaheadBytes,
+		"reader_readahead", cfg.UrgentBufferBytes,
+		"prioritizer_readahead", cfg.ReadaheadBytes,
 	)
 
 	return pr

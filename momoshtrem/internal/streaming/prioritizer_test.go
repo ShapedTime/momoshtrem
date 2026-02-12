@@ -39,8 +39,8 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.FooterPriorityBytes != 5*1024*1024 {
 		t.Errorf("FooterPriorityBytes = %d, want %d", cfg.FooterPriorityBytes, 5*1024*1024)
 	}
-	if cfg.ReadaheadBytes != 64*1024*1024 {
-		t.Errorf("ReadaheadBytes = %d, want %d", cfg.ReadaheadBytes, 64*1024*1024)
+	if cfg.ReadaheadBytes != 32*1024*1024 {
+		t.Errorf("ReadaheadBytes = %d, want %d", cfg.ReadaheadBytes, 32*1024*1024)
 	}
 	if cfg.UrgentBufferBytes != 8*1024*1024 {
 		t.Errorf("UrgentBufferBytes = %d, want %d", cfg.UrgentBufferBytes, 8*1024*1024)
