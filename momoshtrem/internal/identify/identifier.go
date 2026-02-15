@@ -309,25 +309,28 @@ func (i *Identifier) tryPatterns(filename string, folderSeason int, hasFolderSea
 		}
 	}
 
-	// LOW CONFIDENCE PATTERNS (only use with folder context)
-	if hasFolderSeason {
-		// Try 4-digit concatenated format (0101 = S01E01)
-		if match := i.patterns.Concatenated4.FindStringSubmatch(filename); match != nil {
-			s := parseInt(match[1])
-			ep := parseInt(match[2])
-			// Validate that parsed season matches folder season for higher confidence
-			if s == folderSeason && ep > 0 && ep <= 99 {
+	// LOW CONFIDENCE PATTERNS
+	// Try 4-digit concatenated format (0101 = S01E01)
+	if match := i.patterns.Concatenated4.FindStringSubmatch(filename); match != nil {
+		s := parseInt(match[1])
+		ep := parseInt(match[2])
+		if s > 0 && ep > 0 && ep <= 99 {
+			if hasFolderSeason && s == folderSeason {
 				return s, []int{ep}, ConfidenceLow, "SSEE + folder", false, true
 			}
+			return s, []int{ep}, ConfidenceLow, "SSEE", false, true
 		}
+	}
 
-		// Try 3-digit concatenated format (101 = S1E01)
-		if match := i.patterns.Concatenated3.FindStringSubmatch(filename); match != nil {
-			s := parseInt(match[1])
-			ep := parseInt(match[2])
-			if s == folderSeason && ep > 0 && ep <= 99 {
+	// Try 3-digit concatenated format (101 = S1E01)
+	if match := i.patterns.Concatenated3.FindStringSubmatch(filename); match != nil {
+		s := parseInt(match[1])
+		ep := parseInt(match[2])
+		if s > 0 && ep > 0 && ep <= 99 {
+			if hasFolderSeason && s == folderSeason {
 				return s, []int{ep}, ConfidenceLow, "SEE + folder", false, true
 			}
+			return s, []int{ep}, ConfidenceLow, "SEE", false, true
 		}
 	}
 
