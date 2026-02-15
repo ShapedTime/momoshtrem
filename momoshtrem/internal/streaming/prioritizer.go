@@ -15,6 +15,7 @@ type Prioritizer struct {
 	mu          sync.Mutex
 	t           *torrent.Torrent
 	file        *torrent.File
+	nextFile    *torrent.File // next file in torrent for pre-fetching, may be nil
 	cfg         Config
 	formatInfo  *FormatInfo
 	pieceLength int64
@@ -46,7 +47,8 @@ type Prioritizer struct {
 }
 
 // NewPrioritizer creates a prioritizer for a file within a torrent.
-func NewPrioritizer(t *torrent.Torrent, file *torrent.File, cfg Config) *Prioritizer {
+// nextFile is the next file in torrent order for pre-fetching (may be nil).
+func NewPrioritizer(t *torrent.Torrent, file *torrent.File, cfg Config, nextFile *torrent.File) *Prioritizer {
 	info := t.Info()
 	if info == nil {
 		return nil
@@ -55,6 +57,7 @@ func NewPrioritizer(t *torrent.Torrent, file *torrent.File, cfg Config) *Priorit
 	return &Prioritizer{
 		t:              t,
 		file:           file,
+		nextFile:       nextFile,
 		cfg:            cfg,
 		pieceLength:    info.PieceLength,
 		beginPiece:     file.BeginPieceIndex(),
@@ -91,6 +94,29 @@ func (p *Prioritizer) InitialPrioritize() {
 	} else {
 		// File is smaller than footer size, entire file is high priority
 		p.setPieceRangePriority(0, p.fileLength, types.PiecePriorityHigh)
+	}
+
+	// Pre-fetch next file's header and footer at Normal priority for instant playback switching
+	if p.nextFile != nil {
+		nfOffset := p.nextFile.Offset()
+		nfLength := p.nextFile.Length()
+
+		// Header: first 10MB (same as HeaderPriorityBytes)
+		nfHeaderEnd := min(p.cfg.HeaderPriorityBytes, nfLength)
+		p.setAbsPieceRangePriority(nfOffset, nfOffset+nfHeaderEnd, types.PiecePriorityNormal)
+
+		// Footer: last 5MB (same as FooterPriorityBytes)
+		if nfLength > p.cfg.FooterPriorityBytes {
+			nfFooterStart := nfOffset + nfLength - p.cfg.FooterPriorityBytes
+			p.setAbsPieceRangePriority(nfFooterStart, nfOffset+nfLength, types.PiecePriorityNormal)
+		} else {
+			p.setAbsPieceRangePriority(nfOffset, nfOffset+nfLength, types.PiecePriorityNormal)
+		}
+
+		p.log.Debug("pre-fetched next file header/footer",
+			"next_file", p.nextFile.Path(),
+			"next_header_bytes", nfHeaderEnd,
+		)
 	}
 
 	p.initialized = true
@@ -272,4 +298,47 @@ func (p *Prioritizer) FilePieceRange() (begin, end int) {
 		return 0, 0
 	}
 	return p.beginPiece, p.endPiece
+}
+
+// ResetPriorities sets all pieces in this file's range back to PiecePriorityNone.
+// Called when the reader is closed to stop downloading pieces for non-streaming files.
+func (p *Prioritizer) ResetPriorities() {
+	if p == nil {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for i := p.beginPiece; i < p.endPiece; i++ {
+		p.t.Piece(i).SetPriority(types.PiecePriorityNone)
+	}
+
+	p.log.Debug("reset all piece priorities to None",
+		"piece_range", []int{p.beginPiece, p.endPiece},
+	)
+}
+
+// setAbsPieceRangePriority sets priority for pieces covering an absolute byte range
+// (torrent-relative, not file-relative). Used for cross-file pre-fetching.
+func (p *Prioritizer) setAbsPieceRangePriority(absStart, absEnd int64, priority types.PiecePriority) {
+	if absStart >= absEnd {
+		return
+	}
+
+	startPiece := p.byteToPiece(absStart)
+	endPiece := p.byteToPiece(absEnd-1) + 1
+
+	// Clamp to torrent piece range
+	if startPiece < 0 {
+		startPiece = 0
+	}
+	numPieces := p.t.NumPieces()
+	if endPiece > numPieces {
+		endPiece = numPieces
+	}
+
+	for i := startPiece; i < endPiece; i++ {
+		p.t.Piece(i).SetPriority(priority)
+	}
 }

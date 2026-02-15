@@ -25,6 +25,9 @@ type PriorityReader struct {
 	formatDetecting sync.Once
 	formatInfo      *FormatInfo
 
+	// Lifecycle
+	closed bool
+
 	// Callbacks
 	onActivity func()
 
@@ -40,18 +43,20 @@ type PriorityCallbacks struct {
 
 // NewPriorityReader creates a priority-aware reader for a torrent file.
 // It immediately sets up initial prioritization and configures the underlying reader.
+// nextFile is the next file in torrent order for pre-fetching (may be nil).
 func NewPriorityReader(
 	t *torrent.Torrent,
 	file *torrent.File,
 	cfg Config,
 	onActivity func(),
 	callbacks *PriorityCallbacks,
+	nextFile *torrent.File,
 ) *PriorityReader {
 	reader := file.NewReader()
 	reader.SetReadahead(cfg.UrgentBufferBytes)
 	reader.SetResponsive()
 
-	prioritizer := NewPrioritizer(t, file, cfg)
+	prioritizer := NewPrioritizer(t, file, cfg, nextFile)
 	if callbacks != nil && prioritizer != nil {
 		prioritizer.onSeek = callbacks.OnSeek
 		prioritizer.onDowngrade = callbacks.OnDowngrade
@@ -139,6 +144,11 @@ func (r *PriorityReader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.closed = true
+
+	// Reset this file's pieces back to None so closed files don't consume bandwidth
+	r.prioritizer.ResetPriorities()
+
 	r.log.Debug("reader closed", "final_position", r.pos)
 
 	return r.reader.Close()
@@ -173,6 +183,10 @@ func (r *PriorityReader) detectFormat() {
 	info := DetectFormat(adapter, r.file.Length(), r.file.Path())
 
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
 	r.formatInfo = info
 	r.prioritizer.SetFormatInfo(info)
 	r.mu.Unlock()

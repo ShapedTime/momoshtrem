@@ -118,6 +118,8 @@ type TorrentFileHandle interface {
 	Torrent() *torrent.Torrent
 	// File returns the underlying file for piece prioritization.
 	File() *torrent.File
+	// NextFile returns the next file in the torrent (for pre-fetching), or nil.
+	NextFile() *torrent.File
 }
 
 // TorrentReader provides reading capabilities for torrent file content.

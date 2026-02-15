@@ -180,6 +180,7 @@ func (f *TorrentFile) ensureReader() {
 		f.streamingCfg,
 		onActivity,
 		callbacks,
+		f.handle.NextFile(),
 	)
 }
 

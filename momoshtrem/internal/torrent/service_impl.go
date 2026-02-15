@@ -7,6 +7,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/types"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
@@ -22,6 +23,10 @@ type service struct {
 
 	// Loaded torrents by info hash (lowercase hex)
 	torrents map[string]*torrent.Torrent
+
+	// File index cache: infoHash -> filePath -> *torrent.File
+	// Built after metadata arrives, enables O(1) file lookup.
+	fileIndexes map[string]map[string]*torrent.File
 
 	// Configuration
 	addTimeout  time.Duration
@@ -40,6 +45,7 @@ func NewService(
 		client:      client,
 		am:          am,
 		torrents:    make(map[string]*torrent.Torrent),
+		fileIndexes: make(map[string]map[string]*torrent.File),
 		addTimeout:  addTimeout,
 		readTimeout: readTimeout,
 		log:         slog.With("component", "torrent-service"),
@@ -90,6 +96,18 @@ func (s *service) AddTorrent(magnetURI string) (*TorrentInfo, error) {
 		)
 	}
 
+	// Suppress all piece downloads until a file is opened for streaming.
+	// Each file's Prioritizer will raise its own pieces on open.
+	for i := 0; i < t.NumPieces(); i++ {
+		t.Piece(i).SetPriority(types.PiecePriorityNone)
+	}
+
+	// Build file index for O(1) lookup
+	idx := make(map[string]*torrent.File, len(t.Files()))
+	for _, f := range t.Files() {
+		idx[f.Path()] = f
+	}
+
 	// Register with activity manager for idle tracking
 	if s.am != nil {
 		s.am.Register(hash, t)
@@ -98,6 +116,7 @@ func (s *service) AddTorrent(magnetURI string) (*TorrentInfo, error) {
 	// Store in map
 	s.mu.Lock()
 	s.torrents[hash] = t
+	s.fileIndexes[hash] = idx
 	s.mu.Unlock()
 
 	return s.torrentToInfo(t), nil
@@ -140,20 +159,48 @@ func (s *service) GetOrAddTorrent(magnetURI string) (*TorrentInfo, error) {
 func (s *service) GetFile(infoHash string, filePath string) (TorrentFileHandle, error) {
 	s.mu.RLock()
 	t, exists := s.torrents[infoHash]
+	idx := s.fileIndexes[infoHash]
 	s.mu.RUnlock()
 
 	if !exists {
 		return nil, ErrTorrentNotFound
 	}
 
-	// Find the file by path
-	for _, f := range t.Files() {
-		if f.Path() == filePath {
-			return &fileHandle{file: f}, nil
+	// Use cached index for O(1) lookup
+	if idx != nil {
+		f, ok := idx[filePath]
+		if !ok {
+			return nil, ErrFileNotFound
 		}
+		// Find the next file in torrent order for pre-fetching
+		var next *torrent.File
+		files := t.Files()
+		for i, tf := range files {
+			if tf.Path() == filePath && i+1 < len(files) {
+				next = files[i+1]
+				break
+			}
+		}
+		return &fileHandle{file: f, nextFile: next}, nil
 	}
 
-	return nil, ErrFileNotFound
+	// Fallback: linear scan (should not happen with proper init)
+	var found *torrent.File
+	var next *torrent.File
+	files := t.Files()
+	for i, f := range files {
+		if f.Path() == filePath {
+			found = f
+			if i+1 < len(files) {
+				next = files[i+1]
+			}
+			break
+		}
+	}
+	if found == nil {
+		return nil, ErrFileNotFound
+	}
+	return &fileHandle{file: found, nextFile: next}, nil
 }
 
 // RemoveTorrent removes a torrent from the client.
@@ -165,6 +212,7 @@ func (s *service) RemoveTorrent(infoHash string, deleteData bool) error {
 		return ErrTorrentNotFound
 	}
 	delete(s.torrents, infoHash)
+	delete(s.fileIndexes, infoHash)
 	s.mu.Unlock()
 
 	// Unregister from activity manager
@@ -256,8 +304,9 @@ func (s *service) Close() error {
 		}
 	}
 
-	// Clear map (client shutdown is handled separately)
+	// Clear maps (client shutdown is handled separately)
 	s.torrents = make(map[string]*torrent.Torrent)
+	s.fileIndexes = make(map[string]map[string]*torrent.File)
 
 	s.log.Info("torrent service closed")
 	return nil
@@ -364,7 +413,8 @@ func (s *service) torrentToStatus(t *torrent.Torrent) TorrentStatus {
 
 // fileHandle wraps a torrent.File to implement TorrentFileHandle.
 type fileHandle struct {
-	file *torrent.File
+	file     *torrent.File
+	nextFile *torrent.File // next file in torrent order, for pre-fetching
 }
 
 func (f *fileHandle) Path() string {
@@ -386,6 +436,10 @@ func (f *fileHandle) Torrent() *torrent.Torrent {
 
 func (f *fileHandle) File() *torrent.File {
 	return f.file
+}
+
+func (f *fileHandle) NextFile() *torrent.File {
+	return f.nextFile
 }
 
 // readerWrapper wraps a torrent.Reader to implement TorrentReader.
