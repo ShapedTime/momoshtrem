@@ -20,7 +20,7 @@ torrent:
   idle_timeout: 300
   start_paused: true
   drop_duplicate_peer_ids: true   # Prevent duplicate peer connections (reduces wasted chunks)
-  max_unverified_mb: 16           # Cap in-flight unverified data in MB (0=unlimited)
+  max_unverified_mb: 64           # Cap in-flight unverified data in MB (0=unlimited)
 
 # Streaming buffer sizes for playback optimization
 streaming:

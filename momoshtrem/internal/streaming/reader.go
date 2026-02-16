@@ -4,9 +4,16 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/anacrolix/torrent"
 )
+
+// minResetDuration is the minimum time a reader must be open before its
+// priorities are reset on close. Short-lived readers (e.g. Infuse probing
+// the file header/moov atom) skip the reset so the next reader doesn't
+// have to re-download the same pieces from scratch.
+const minResetDuration = 30 * time.Second
 
 // PriorityReader wraps a torrent file reader with intelligent piece prioritization.
 // It performs async format detection and updates piece priorities based on seek position.
@@ -19,7 +26,8 @@ type PriorityReader struct {
 	cfg         Config
 
 	// Position tracking
-	pos int64
+	pos      int64
+	openedAt time.Time
 
 	// Format detection state (async)
 	formatDetecting sync.Once
@@ -70,7 +78,7 @@ func NewPriorityReader(
 	infoHash string,
 ) *PriorityReader {
 	reader := file.NewReader()
-	reader.SetReadahead(cfg.UrgentBufferBytes)
+	reader.SetReadahead(cfg.UrgentBufferBytes + cfg.ReadaheadBytes)
 	reader.SetResponsive()
 
 	prioritizer := NewPrioritizer(t, file, cfg, nextFile)
@@ -86,6 +94,7 @@ func NewPriorityReader(
 		reader:      reader,
 		prioritizer: prioritizer,
 		cfg:         cfg,
+		openedAt:    time.Now(),
 		onActivity:  onActivity,
 		log:         slog.With("component", "priority-reader", "file", file.Path()),
 	}
@@ -98,7 +107,7 @@ func NewPriorityReader(
 
 	pr.log.Debug("priority reader created",
 		"file_size", file.Length(),
-		"reader_readahead", cfg.UrgentBufferBytes,
+		"reader_readahead", cfg.UrgentBufferBytes+cfg.ReadaheadBytes,
 		"prioritizer_readahead", cfg.ReadaheadBytes,
 	)
 
@@ -173,10 +182,23 @@ func (r *PriorityReader) Close() error {
 		r.tracker.Unregister(r.infoHash, r)
 	}
 
-	// Reset this file's pieces back to None so closed files don't consume bandwidth
-	r.prioritizer.ResetPriorities()
-
-	r.log.Debug("reader closed", "final_position", r.pos)
+	// Skip priority reset for short-lived readers (e.g. Infuse probing
+	// header/moov atom). These quick open-read-close cycles would otherwise
+	// undo download progress, forcing the next reader to re-request the
+	// same pieces from peers.
+	openDuration := time.Since(r.openedAt)
+	if openDuration >= minResetDuration {
+		r.prioritizer.ResetPriorities()
+		r.log.Debug("reader closed, priorities reset",
+			"open_duration", openDuration,
+			"final_position", r.pos,
+		)
+	} else {
+		r.log.Debug("reader closed, priorities kept (short-lived)",
+			"open_duration", openDuration,
+			"final_position", r.pos,
+		)
+	}
 
 	return r.reader.Close()
 }
