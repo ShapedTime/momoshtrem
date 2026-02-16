@@ -54,14 +54,20 @@ type PriorityCallbacks struct {
 }
 
 // Snapshot returns a point-in-time snapshot of the reader's position.
-func (r *PriorityReader) Snapshot() ReaderSnapshot {
-	r.mu.Lock()
+// Uses TryLock so the debug endpoint never blocks on a busy reader.
+func (r *PriorityReader) Snapshot() (ReaderSnapshot, bool) {
+	if !r.mu.TryLock() {
+		return ReaderSnapshot{
+			FilePath:   r.file.Path(),
+			FileLength: r.file.Length(),
+		}, false
+	}
 	defer r.mu.Unlock()
 	return ReaderSnapshot{
 		FilePath:   r.file.Path(),
 		Position:   r.pos,
 		FileLength: r.file.Length(),
-	}
+	}, true
 }
 
 // NewPriorityReader creates a priority-aware reader for a torrent file.
@@ -115,15 +121,28 @@ func NewPriorityReader(
 }
 
 // Read implements io.Reader.
+// The mutex is released before the blocking anacrolix read so that Close()
+// can proceed and close the underlying reader, unblocking the read.
+// Without this, a timed-out readContext goroutine holds r.mu forever,
+// deadlocking Close and leaking the goroutine.
 func (r *PriorityReader) Read(p []byte) (n int, err error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	if r.closed {
+		r.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
 	r.markActivity()
 	r.startFormatDetection()
+	r.mu.Unlock()
 
+	// Read WITHOUT holding the mutex. This can block for a long time
+	// waiting for pieces. Releasing the mutex allows Close() to shut down
+	// the underlying reader, which unblocks this call.
 	n, err = r.reader.Read(p)
+
+	r.mu.Lock()
 	r.pos += int64(n)
+	r.mu.Unlock()
 
 	return n, err
 }

@@ -40,13 +40,16 @@ func (rt *ReaderTracker) Unregister(infoHash string, r *PriorityReader) {
 }
 
 // GetReaders returns snapshots of active reader positions for a torrent.
+// Readers that are busy (mutex held during a blocking read) are still
+// included with their last known position.
 func (rt *ReaderTracker) GetReaders(infoHash string) []ReaderSnapshot {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	readers := rt.readers[infoHash]
 	snapshots := make([]ReaderSnapshot, 0, len(readers))
 	for _, r := range readers {
-		snapshots = append(snapshots, r.Snapshot())
+		snap, _ := r.Snapshot()
+		snapshots = append(snapshots, snap)
 	}
 	return snapshots
 }
