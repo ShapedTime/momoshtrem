@@ -113,6 +113,12 @@ func (s *Server) deleteTorrent(c *gin.Context) {
 		slog.Info("Deleted assignments for torrent", "hash", hash, "count", deleted)
 	}
 
+	// Invalidate cached file handles before removing the torrent so that
+	// active readers are closed and piece priorities are reset cleanly.
+	if s.treeUpdater != nil {
+		s.treeUpdater.InvalidateFileHandles(hash)
+	}
+
 	if err := s.torrentService.RemoveTorrent(hash, deleteData); err != nil {
 		if err == torrent.ErrTorrentNotFound {
 			errorResponse(c, http.StatusNotFound, "Torrent not found")

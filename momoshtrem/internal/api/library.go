@@ -308,10 +308,17 @@ func (s *Server) unassignMovieTorrent(c *gin.Context) {
 		return
 	}
 
-	// Get movie info before deactivating for tree update
+	// Get movie info and assignment before deactivating for tree/cache update
 	movie, err := s.movieRepo.GetByID(id)
 	if err != nil {
 		slog.Error("Failed to get movie for unassign", "movie_id", id, "error", err)
+	}
+
+	// Invalidate cached file handles before deactivating assignment
+	if s.treeUpdater != nil {
+		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, id); err == nil && assignment != nil {
+			s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
+		}
 	}
 
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id); err != nil {
@@ -500,6 +507,13 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	ctx, err := s.showRepo.GetEpisodeContext(id)
 	if err != nil {
 		slog.Error("Failed to get episode context for unassign", "episode_id", id, "error", err)
+	}
+
+	// Invalidate cached file handles before deactivating assignment
+	if s.treeUpdater != nil {
+		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, id); err == nil && assignment != nil {
+			s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
+		}
 	}
 
 	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, id); err != nil {

@@ -32,4 +32,8 @@ type TreeUpdater interface {
 
 	// InvalidateTree forces a full tree rebuild on next access
 	InvalidateTree()
+
+	// InvalidateFileHandles closes cached file handles for a torrent.
+	// Call before removing a torrent or unassigning files.
+	InvalidateFileHandles(infoHash string)
 }
