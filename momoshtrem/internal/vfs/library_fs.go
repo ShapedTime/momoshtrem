@@ -158,7 +158,7 @@ func (fs *LibraryFS) SetTorrentService(
 	fs.onActivity = onActivity
 	fs.waitForActivation = waitForActivation
 	fs.streamingCfg = streamingCfg
-	fs.fileCache = newFileHandleCache(5 * time.Second)
+	fs.fileCache = newFileHandleCache(60 * time.Second)
 	slog.Info("VFS torrent service configured",
 		"read_timeout_seconds", readTimeout.Seconds(),
 		"header_priority_mb", streamingCfg.HeaderPriorityBytes/(1024*1024),

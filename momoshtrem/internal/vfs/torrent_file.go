@@ -223,8 +223,15 @@ func (f *TorrentFile) Read(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	readerWasNil := f.reader == nil
 	f.ensureReader()
 	f.markActivity()
+
+	// On first read, set priorities before activation wait
+	if readerWasNil {
+		f.reader.Seek(0, io.SeekStart)
+	}
+
 	f.waitForFirstAccess()
 
 	return f.readWithTimeout(p)
@@ -237,12 +244,14 @@ func (f *TorrentFile) ReadAt(p []byte, off int64) (int, error) {
 
 	f.ensureReader()
 	f.markActivity()
-	f.waitForFirstAccess()
 
-	// Seek to offset
+	// Set priorities BEFORE waiting for activation so the torrent client
+	// starts downloading urgent pieces immediately.
 	if _, err := f.reader.Seek(off, io.SeekStart); err != nil {
 		return 0, err
 	}
+
+	f.waitForFirstAccess()
 
 	return f.readAtLeast(p, len(p))
 }
