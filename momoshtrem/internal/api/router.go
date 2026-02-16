@@ -9,6 +9,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/service"
+	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -27,6 +28,8 @@ type Server struct {
 	treeUpdater     vfs.TreeUpdater       // Optional: updates VFS tree on assignment changes
 	subtitleService *subtitle.Service     // Optional: subtitle search/download service
 	airDateSync     *airdate.SyncService  // Optional: air date sync service
+
+	readerTracker *streaming.ReaderTracker // Optional: tracks active readers for debug endpoint
 
 	// Business logic services
 	showService           *service.ShowService
@@ -95,6 +98,11 @@ func (s *Server) SetAirDateSyncService(svc *airdate.SyncService) {
 	slog.Info("Air date sync service configured")
 }
 
+// SetReaderTracker configures reader tracking for the debug endpoint.
+func (s *Server) SetReaderTracker(rt *streaming.ReaderTracker) {
+	s.readerTracker = rt
+}
+
 func (s *Server) setupMiddleware() {
 	// Recovery middleware
 	s.router.Use(gin.Recovery())
@@ -153,6 +161,7 @@ func (s *Server) setupRoutes() {
 	api.DELETE("/torrents/:hash", s.deleteTorrent)
 	api.POST("/torrents/:hash/pause", s.pauseTorrent)
 	api.POST("/torrents/:hash/resume", s.resumeTorrent)
+	api.GET("/torrents/:hash/debug", s.getTorrentDebug)
 
 	// Subtitles
 	api.GET("/subtitles/search", s.searchSubtitles)

@@ -31,6 +31,10 @@ type PriorityReader struct {
 	// Callbacks
 	onActivity func()
 
+	// Reader tracking (optional)
+	tracker  *ReaderTracker
+	infoHash string
+
 	log *slog.Logger
 }
 
@@ -39,6 +43,17 @@ type PriorityReader struct {
 type PriorityCallbacks struct {
 	OnSeek      func(forward bool) // Called on each non-debounced seek
 	OnDowngrade func(count int)    // Called with number of pieces downgraded
+}
+
+// Snapshot returns a point-in-time snapshot of the reader's position.
+func (r *PriorityReader) Snapshot() ReaderSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return ReaderSnapshot{
+		FilePath:   r.file.Path(),
+		Position:   r.pos,
+		FileLength: r.file.Length(),
+	}
 }
 
 // NewPriorityReader creates a priority-aware reader for a torrent file.
@@ -51,6 +66,8 @@ func NewPriorityReader(
 	onActivity func(),
 	callbacks *PriorityCallbacks,
 	nextFile *torrent.File,
+	tracker *ReaderTracker,
+	infoHash string,
 ) *PriorityReader {
 	reader := file.NewReader()
 	reader.SetReadahead(cfg.UrgentBufferBytes)
@@ -71,6 +88,12 @@ func NewPriorityReader(
 		cfg:         cfg,
 		onActivity:  onActivity,
 		log:         slog.With("component", "priority-reader", "file", file.Path()),
+	}
+
+	if tracker != nil && infoHash != "" {
+		pr.tracker = tracker
+		pr.infoHash = infoHash
+		tracker.Register(infoHash, pr)
 	}
 
 	pr.log.Debug("priority reader created",
@@ -145,6 +168,10 @@ func (r *PriorityReader) Close() error {
 	defer r.mu.Unlock()
 
 	r.closed = true
+
+	if r.tracker != nil {
+		r.tracker.Unregister(r.infoHash, r)
+	}
 
 	// Reset this file's pieces back to None so closed files don't consume bandwidth
 	r.prioritizer.ResetPriorities()

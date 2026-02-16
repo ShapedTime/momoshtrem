@@ -155,6 +155,9 @@ func main() {
 		"read_timeout_seconds", cfg.Torrent.ReadTimeout,
 	)
 
+	// Create reader tracker for debug visualization
+	readerTracker := streaming.NewReaderTracker()
+
 	// Initialize VFS (event-driven updates, no periodic rebuilds)
 	libraryFS := vfs.NewLibraryFS(movieRepo, showRepo, assignmentRepo, cfg.VFS.TreeTTL)
 	if cfg.VFS.CacheDir != "" {
@@ -193,6 +196,7 @@ func main() {
 		activationCallback,
 		streamingCfg,
 	)
+	libraryFS.SetReaderTracker(readerTracker)
 
 	// Initialize Prometheus metrics (optional)
 	var metricsServer *metrics.Server
@@ -220,6 +224,7 @@ func main() {
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
+	apiServer.SetReaderTracker(readerTracker)
 
 	// Initialize air date sync service
 	var airDateSync *airdate.SyncService

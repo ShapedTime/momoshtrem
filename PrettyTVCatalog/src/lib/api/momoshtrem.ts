@@ -9,6 +9,7 @@ import type {
   RecentlyAiredResponse,
 } from '@/types/momoshtrem';
 import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
+import type { TorrentDebugInfo } from '@/types/torrent-debug';
 import type {
   SubtitleSearchResult,
   Subtitle,
@@ -469,6 +470,22 @@ class MomoshtremClient {
       `/api/episodes/${episodeId}/assign`,
       undefined,
       'unassign episode torrent'
+    );
+  }
+
+  // ============================================================================
+  // Torrent Debug API
+  // ============================================================================
+
+  /**
+   * Get detailed piece-level debug info for a torrent.
+   */
+  async getTorrentDebugInfo(infoHash: string): Promise<TorrentDebugInfo> {
+    return this.request<TorrentDebugInfo>(
+      'GET',
+      `/api/torrents/${infoHash}/debug`,
+      undefined,
+      'get torrent debug info'
     );
   }
 

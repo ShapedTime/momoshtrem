@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"encoding/base64"
 	"log/slog"
 	"sync"
 	"time"
@@ -345,6 +346,97 @@ func (s *service) CollectStats() []FullStats {
 		})
 	}
 	return result
+}
+
+// GetDebugInfo returns detailed piece-level debug information for a torrent.
+func (s *service) GetDebugInfo(infoHash string) (*DebugInfo, error) {
+	s.mu.RLock()
+	t, exists := s.torrents[infoHash]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrTorrentNotFound
+	}
+
+	info := t.Info()
+	if info == nil {
+		return &DebugInfo{
+			InfoHash: infoHash,
+			Name:     "Waiting for metadata...",
+		}, nil
+	}
+
+	numPieces := t.NumPieces()
+	pieceLength := info.PieceLength
+
+	// Build piece bitmap: bit 7 = complete, bit 6 = partial, bits 0-2 = priority
+	pieceBuf := make([]byte, numPieces)
+	piecesComplete := 0
+	for i := 0; i < numPieces; i++ {
+		ps := t.Piece(i).State()
+		var b byte
+		if ps.Completion.Complete {
+			b |= 0x80
+			piecesComplete++
+		}
+		if ps.Partial {
+			b |= 0x40
+		}
+		pri := int(ps.Priority)
+		if pri > 7 {
+			pri = 7
+		}
+		b |= byte(pri)
+		pieceBuf[i] = b
+	}
+
+	piecesB64 := base64.StdEncoding.EncodeToString(pieceBuf)
+
+	// Build file info
+	files := t.Files()
+	fileInfos := make([]DebugFileInfo, len(files))
+	for i, f := range files {
+		bc := f.BytesCompleted()
+		var progress float64
+		if f.Length() > 0 {
+			progress = float64(bc) / float64(f.Length())
+		}
+		beginPiece := int(f.Offset() / pieceLength)
+		endPiece := int((f.Offset() + f.Length() - 1) / pieceLength)
+		if f.Length() == 0 {
+			endPiece = beginPiece
+		}
+		fileInfos[i] = DebugFileInfo{
+			Path:           f.Path(),
+			Length:         f.Length(),
+			BytesCompleted: bc,
+			Progress:       progress,
+			BeginPiece:     beginPiece,
+			EndPiece:       endPiece,
+		}
+	}
+
+	// Build stats
+	stats := t.Stats()
+	totalSize := info.TotalLength()
+
+	return &DebugInfo{
+		InfoHash:    infoHash,
+		Name:        info.Name,
+		PieceLength: pieceLength,
+		NumPieces:   numPieces,
+		Pieces:      piecesB64,
+		Files:       fileInfos,
+		Readers:     []DebugReaderInfo{},
+		Stats: DebugStats{
+			PiecesComplete:   piecesComplete,
+			PiecesTotal:      numPieces,
+			ActivePeers:      stats.ActivePeers,
+			ConnectedSeeders: stats.ConnectedSeeders,
+			BytesCompleted:   t.BytesCompleted(),
+			TotalSize:        totalSize,
+		},
+	}, nil
 }
 
 // torrentToInfo converts a torrent.Torrent to TorrentInfo.

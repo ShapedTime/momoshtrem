@@ -17,3 +17,5 @@ export { useAddToLibrary, useAddTorrent, isShowResponse } from './useAddToLibrar
 export { useTorrents, useTorrentStatus } from './useTorrents';
 
 export { useSubtitles, useSubtitleSearch } from './useSubtitles';
+
+export { useTorrentDebug } from './useTorrentDebug';

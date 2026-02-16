@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { TorrentProgress } from './TorrentProgress';
 import {
   formatBytes,
@@ -162,6 +163,22 @@ export function TorrentManagementCard({
               <TrashIcon />
               Remove
             </button>
+
+            {/* Debug link */}
+            <Link
+              href={`/torrents/${torrent.info_hash}/debug`}
+              className="
+                flex items-center gap-2
+                px-3 py-2 text-sm font-medium
+                bg-bg-hover hover:bg-white/10
+                text-text-secondary hover:text-white
+                rounded-md transition-colors
+                ml-auto
+              "
+            >
+              <BugIcon />
+              Debug
+            </Link>
           </>
         ) : (
           <div className="flex items-center gap-3">
@@ -268,6 +285,25 @@ function TrashIcon() {
         strokeLinejoin="round"
         strokeWidth={2}
         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+      />
+    </svg>
+  );
+}
+
+function BugIcon() {
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 12v.01M8 12a4 4 0 018 0M6.343 17.657A8 8 0 1117.657 6.343M9.879 16.121A3 3 0 1012 9m0 6a3 3 0 01-2.121-5.121"
       />
     </svg>
   );

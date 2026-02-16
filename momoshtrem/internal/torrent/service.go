@@ -58,6 +58,46 @@ type FullStats struct {
 	PiecesDirtiedBad  int64 // Pieces that failed hash verification
 }
 
+// DebugInfo contains detailed piece-level information for debugging torrent streaming.
+type DebugInfo struct {
+	InfoHash    string          `json:"info_hash"`
+	Name        string          `json:"name"`
+	PieceLength int64           `json:"piece_length"`
+	NumPieces   int             `json:"num_pieces"`
+	Pieces      string          `json:"pieces"` // base64 encoded, 1 byte per piece
+	Files       []DebugFileInfo `json:"files"`
+	Readers     []DebugReaderInfo `json:"readers"`
+	Stats       DebugStats      `json:"stats"`
+}
+
+// DebugFileInfo contains per-file progress information.
+type DebugFileInfo struct {
+	Path           string  `json:"path"`
+	Length         int64   `json:"length"`
+	BytesCompleted int64   `json:"bytes_completed"`
+	Progress       float64 `json:"progress"`
+	BeginPiece     int     `json:"begin_piece"`
+	EndPiece       int     `json:"end_piece"`
+}
+
+// DebugReaderInfo contains information about an active reader.
+type DebugReaderInfo struct {
+	FilePath      string `json:"file_path"`
+	Position      int64  `json:"position"`
+	PositionPiece int    `json:"position_piece"`
+	FileLength    int64  `json:"file_length"`
+}
+
+// DebugStats contains aggregate torrent statistics.
+type DebugStats struct {
+	PiecesComplete   int   `json:"pieces_complete"`
+	PiecesTotal      int   `json:"pieces_total"`
+	ActivePeers      int   `json:"active_peers"`
+	ConnectedSeeders int   `json:"connected_seeders"`
+	BytesCompleted   int64 `json:"bytes_completed"`
+	TotalSize        int64 `json:"total_size"`
+}
+
 // Service manages torrent operations.
 // This interface is used by the API handlers to add torrents and get file metadata,
 // and by the VFS layer to stream file content.
@@ -101,6 +141,9 @@ type Service interface {
 	// CollectStats returns complete statistics for all active torrents.
 	// Used by the Prometheus metrics collector.
 	CollectStats() []FullStats
+
+	// GetDebugInfo returns detailed piece-level debug information for a torrent.
+	GetDebugInfo(infoHash string) (*DebugInfo, error)
 
 	// Close shuts down the torrent service.
 	Close() error

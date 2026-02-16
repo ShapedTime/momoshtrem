@@ -79,6 +79,9 @@ type LibraryFS struct {
 	// Prometheus streaming metrics (nil when metrics disabled)
 	metrics *metrics.Metrics
 
+	// Reader tracking for debug endpoint (optional)
+	readerTracker *streaming.ReaderTracker
+
 	// Cached tree structure
 	tree       *DirectoryTree
 	rebuilding sync.Mutex // Coordinates rebuild operations to prevent concurrent rebuilds
@@ -186,6 +189,13 @@ func (fs *LibraryFS) SetMetrics(m *metrics.Metrics) {
 	slog.Info("VFS metrics configured")
 }
 
+// SetReaderTracker configures reader tracking for debug visualization.
+func (fs *LibraryFS) SetReaderTracker(rt *streaming.ReaderTracker) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.readerTracker = rt
+}
+
 // Open returns a file handle for reading
 func (fs *LibraryFS) Open(filepath string) (File, error) {
 	fs.ensureTree()
@@ -258,6 +268,7 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		fs.waitForActivation,
 		fs.streamingCfg,
 		fs.metrics,
+		fs.readerTracker,
 	), nil
 }
 
@@ -308,6 +319,7 @@ func (fs *LibraryFS) openTorrentSubtitleFile(tsf *TorrentSubtitleFile) (File, er
 		fs.waitForActivation,
 		fs.streamingCfg,
 		fs.metrics,
+		fs.readerTracker,
 	), nil
 }
 

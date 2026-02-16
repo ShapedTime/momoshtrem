@@ -116,6 +116,9 @@ type TorrentFile struct {
 
 	// Prometheus streaming metrics (nil when metrics disabled)
 	metrics *metrics.Metrics
+
+	// Reader tracking for debug endpoint (optional)
+	readerTracker *streaming.ReaderTracker
 }
 
 // NewTorrentFile creates a new TorrentFile.
@@ -128,6 +131,7 @@ func NewTorrentFile(
 	waitForActivation func(hash string, timeout time.Duration) error,
 	streamingCfg streaming.Config,
 	m *metrics.Metrics,
+	readerTracker *streaming.ReaderTracker,
 ) *TorrentFile {
 	if m != nil {
 		m.StreamingOpenFiles.Inc()
@@ -142,6 +146,7 @@ func NewTorrentFile(
 		streamingCfg:      streamingCfg,
 		firstRead:         true,
 		metrics:           m,
+		readerTracker:     readerTracker,
 	}
 }
 
@@ -181,6 +186,8 @@ func (f *TorrentFile) ensureReader() {
 		onActivity,
 		callbacks,
 		f.handle.NextFile(),
+		f.readerTracker,
+		f.hash,
 	)
 }
 
