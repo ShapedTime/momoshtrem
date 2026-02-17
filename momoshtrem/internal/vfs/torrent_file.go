@@ -227,9 +227,10 @@ func (f *TorrentFile) Read(p []byte) (int, error) {
 	f.ensureReader()
 	f.markActivity()
 
-	// On first read, set priorities before activation wait
+	// On first read, set priorities before activation wait.
+	// Only update priorities — the anacrolix reader already starts at position 0.
 	if readerWasNil {
-		f.reader.Seek(0, io.SeekStart)
+		f.reader.UpdatePriorities(0)
 	}
 
 	f.waitForFirstAccess()
@@ -245,15 +246,13 @@ func (f *TorrentFile) ReadAt(p []byte, off int64) (int, error) {
 	f.ensureReader()
 	f.markActivity()
 
-	// Set priorities BEFORE waiting for activation so the torrent client
-	// starts downloading urgent pieces immediately.
-	if _, err := f.reader.Seek(off, io.SeekStart); err != nil {
-		return 0, err
-	}
+	// Set priorities immediately — only touches Prioritizer, not anacrolix reader.
+	// This is non-blocking even if a timed-out goroutine is still reading.
+	f.reader.UpdatePriorities(off)
 
 	f.waitForFirstAccess()
 
-	return f.readAtLeast(p, len(p))
+	return f.seekAndReadAtLeast(off, p, len(p))
 }
 
 // Close closes the reader.
@@ -318,6 +317,50 @@ func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), f.readTimeout)
 	defer cancel()
 
+	for n < min && err == nil {
+		var nn int
+		nn, err = f.readContext(ctx, buf[n:])
+		n += nn
+	}
+
+	if n >= min {
+		err = nil
+	} else if n > 0 && err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
+
+	return
+}
+
+// seekAndReadAtLeast drains any pending read goroutine, seeks to the
+// requested offset, then reads at least min bytes.
+// Draining before seeking prevents blocking on the anacrolix reader's
+// internal mutex (which a timed-out goroutine may still hold).
+func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int, err error) {
+	if len(buf) < min {
+		return 0, io.ErrShortBuffer
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), f.readTimeout)
+	defer cancel()
+
+	// Drain pending goroutine BEFORE seeking.
+	if f.pendingRead != nil {
+		select {
+		case r := <-f.pendingRead:
+			returnBuffer(r.pooled)
+			f.pendingRead = nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+
+	// Safe to seek — no goroutine is using the anacrolix reader.
+	if _, err := f.reader.Seek(off, io.SeekStart); err != nil {
+		return 0, err
+	}
+
+	// Read loop
 	for n < min && err == nil {
 		var nn int
 		nn, err = f.readContext(ctx, buf[n:])

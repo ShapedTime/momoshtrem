@@ -171,6 +171,15 @@ func (r *PriorityReader) ReadAt(p []byte, off int64) (n int, err error) {
 	return n, err
 }
 
+// UpdatePriorities sets piece priorities for the given offset without
+// repositioning the underlying reader. Safe to call while a read goroutine
+// is active, since it only touches the Prioritizer (not the anacrolix reader).
+func (r *PriorityReader) UpdatePriorities(offset int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.prioritizer.UpdateForSeek(offset)
+}
+
 // Seek implements io.Seeker.
 func (r *PriorityReader) Seek(offset int64, whence int) (int64, error) {
 	r.mu.Lock()
