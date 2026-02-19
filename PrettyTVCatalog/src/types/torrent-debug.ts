@@ -39,18 +39,20 @@ export interface DebugStats {
   total_size: number;
 }
 
-/** Priority levels matching anacrolix/torrent iota values. */
+/** Priority levels matching anacrolix/torrent iota values (types/types.go:47-57). */
 export enum PiecePriority {
   None = 0,
   Normal = 1,
-  Readahead = 2,
-  Next = 3,
-  Now = 4,
+  High = 2,
+  Readahead = 3,
+  Next = 4,
+  Now = 5,
 }
 
 export const PRIORITY_LABELS: Record<number, string> = {
   [PiecePriority.None]: 'None',
   [PiecePriority.Normal]: 'Normal',
+  [PiecePriority.High]: 'High',
   [PiecePriority.Readahead]: 'Readahead',
   [PiecePriority.Next]: 'Next',
   [PiecePriority.Now]: 'Now',

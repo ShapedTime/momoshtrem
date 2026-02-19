@@ -5,6 +5,7 @@ const LEGEND_ITEMS = [
   { color: '#ef4444', label: 'Now (streaming)' },
   { color: '#f97316', label: 'Next' },
   { color: '#d97706', label: 'Readahead' },
+  { color: '#a855f7', label: 'High (header/footer)' },
   { color: '#2563eb', label: 'Normal' },
   { color: '#1c1c1c', border: '#333', label: 'None' },
   { color: '#06b6d4', label: 'Reader position', shape: 'triangle' as const },

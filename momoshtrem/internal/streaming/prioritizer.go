@@ -201,7 +201,7 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 	if p.lastReadaheadEnd > 0 {
 		downgradeEnd := min(p.lastReadaheadEnd, offset)
 		if p.lastUrgentStart < downgradeEnd {
-			downgraded := p.setPieceRangePriorityCount(p.lastUrgentStart, downgradeEnd, types.PiecePriorityNormal)
+			downgraded := p.setPieceRangePriorityCount(p.lastUrgentStart, downgradeEnd, types.PiecePriorityNone)
 			if downgraded > 0 && p.onDowngrade != nil {
 				p.onDowngrade(downgraded)
 			}
@@ -211,7 +211,7 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 	// Downgrade pieces from old range that are now beyond new readahead window.
 	// This handles backward seeks and forward seeks near end of file that shrink the window.
 	if p.lastReadaheadEnd > readaheadEnd {
-		downgraded := p.setPieceRangePriorityCount(readaheadEnd, p.lastReadaheadEnd, types.PiecePriorityNormal)
+		downgraded := p.setPieceRangePriorityCount(readaheadEnd, p.lastReadaheadEnd, types.PiecePriorityNone)
 		if downgraded > 0 && p.onDowngrade != nil {
 			p.onDowngrade(downgraded)
 		}

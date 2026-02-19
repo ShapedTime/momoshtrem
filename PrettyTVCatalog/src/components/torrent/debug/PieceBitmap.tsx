@@ -13,6 +13,7 @@ const COLORS: Record<string, string> = {
   now: '#ef4444',
   next: '#f97316',
   readahead: '#d97706',
+  high: '#a855f7',
   normal: '#2563eb',
   none: '#1c1c1c',
   reader: '#06b6d4',
@@ -31,6 +32,7 @@ function getPieceColor(piece: PieceState): string {
     case PiecePriority.Now: return COLORS.now;
     case PiecePriority.Next: return COLORS.next;
     case PiecePriority.Readahead: return COLORS.readahead;
+    case PiecePriority.High: return COLORS.high;
     case PiecePriority.Normal: return COLORS.normal;
     default: return COLORS.none;
   }
