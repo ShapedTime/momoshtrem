@@ -11,9 +11,16 @@ type Metrics struct {
 	StreamingOpenFiles    prometheus.Gauge
 
 	// Streaming performance diagnostics
-	StreamingSeeks              *prometheus.CounterVec // labels: direction=forward|backward
-	StreamingPiecesDowngraded   prometheus.Counter
-	StreamingSlowReads          prometheus.Counter
+	StreamingSeeks            *prometheus.CounterVec // labels: direction=forward|backward
+	StreamingPiecesDowngraded prometheus.Counter
+	StreamingSlowReads        prometheus.Counter
+
+	// Seek redundancy tracking (hypothesis 3: redundant WebDAV seeks)
+	StreamingSeekRedundant prometheus.Counter // Seeks where offset matched current reader position
+	StreamingSeekActual    prometheus.Counter // Seeks that actually moved the reader position
+
+	// Priority update frequency (hypotheses 2 & 3)
+	StreamingPriorityUpdates *prometheus.CounterVec // labels: type=initial|seek|seek_debounced|format
 }
 
 // New creates and registers streaming metrics with the given registry.
@@ -68,6 +75,24 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name:      "slow_reads_total",
 			Help:      "Reads that blocked over 500ms waiting for piece data.",
 		}),
+		StreamingSeekRedundant: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "seek_redundant_total",
+			Help:      "Seeks where offset matched current reader position (wasted work).",
+		}),
+		StreamingSeekActual: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "seek_actual_total",
+			Help:      "Seeks that actually moved the reader position.",
+		}),
+		StreamingPriorityUpdates: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "priority_updates_total",
+			Help:      "Priority update operations by type.",
+		}, []string{"type"}),
 	}
 
 	reg.MustRegister(
@@ -79,6 +104,9 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.StreamingSeeks,
 		m.StreamingPiecesDowngraded,
 		m.StreamingSlowReads,
+		m.StreamingSeekRedundant,
+		m.StreamingSeekActual,
+		m.StreamingPriorityUpdates,
 	)
 
 	return m

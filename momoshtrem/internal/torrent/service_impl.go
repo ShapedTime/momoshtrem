@@ -324,9 +324,11 @@ func (s *service) CollectStats() []FullStats {
 
 		var totalSize int64
 		var name string
+		var pieceLength int64
 		if info := t.Info(); info != nil {
 			totalSize = info.TotalLength()
 			name = info.Name
+			pieceLength = info.PieceLength
 		}
 
 		result = append(result, FullStats{
@@ -343,6 +345,8 @@ func (s *service) CollectStats() []FullStats {
 			ChunksReadWasted:  stats.ChunksReadWasted.Int64(),
 			PiecesDirtiedGood: stats.PiecesDirtiedGood.Int64(),
 			PiecesDirtiedBad:  stats.PiecesDirtiedBad.Int64(),
+			PieceLength:       pieceLength,
+			NumPieces:         t.NumPieces(),
 		})
 	}
 	return result

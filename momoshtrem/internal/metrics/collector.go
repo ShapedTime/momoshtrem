@@ -3,6 +3,7 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -10,8 +11,10 @@ import (
 // It polls torrent.Service.CollectStats() lazily on each Prometheus scrape
 // rather than maintaining duplicate state.
 type TorrentCollector struct {
-	service  torrent.Service
-	activity *torrent.ActivityManager // may be nil
+	service           torrent.Service
+	activity          *torrent.ActivityManager // may be nil
+	streamingCfg      streaming.Config
+	maxUnverifiedBytes int64
 
 	// Per-torrent descriptors (labels: info_hash, name)
 	sizeBytes        *prometheus.Desc
@@ -26,20 +29,29 @@ type TorrentCollector struct {
 	chunksWasted     *prometheus.Desc
 	piecesVerified   *prometheus.Desc
 	piecesFailed     *prometheus.Desc
+	pieceLength      *prometheus.Desc
+	piecesTotal      *prometheus.Desc
 
 	// Aggregate descriptors (no per-torrent labels)
 	torrentsLoaded *prometheus.Desc
 	torrentsActive *prometheus.Desc
 	torrentsIdle   *prometheus.Desc
+
+	// Config info gauges (static values, context for hypotheses)
+	configMaxUnverifiedBytes   *prometheus.Desc
+	configReaderReadaheadBytes *prometheus.Desc
+	configPrioritizerWindowBytes *prometheus.Desc
 }
 
 var torrentLabels = []string{"info_hash", "name"}
 
 // NewTorrentCollector creates a collector that scrapes torrent stats on demand.
-func NewTorrentCollector(svc torrent.Service, am *torrent.ActivityManager) *TorrentCollector {
+func NewTorrentCollector(svc torrent.Service, am *torrent.ActivityManager, sCfg streaming.Config, maxUnverifiedMB int64) *TorrentCollector {
 	return &TorrentCollector{
-		service:  svc,
-		activity: am,
+		service:            svc,
+		activity:           am,
+		streamingCfg:       sCfg,
+		maxUnverifiedBytes: maxUnverifiedMB * 1024 * 1024,
 
 		sizeBytes: prometheus.NewDesc(
 			"momoshtrem_torrent_size_bytes",
@@ -101,6 +113,16 @@ func NewTorrentCollector(svc torrent.Service, am *torrent.ActivityManager) *Torr
 			"Total pieces that failed hash verification.",
 			torrentLabels, nil,
 		),
+		pieceLength: prometheus.NewDesc(
+			"momoshtrem_torrent_piece_length_bytes",
+			"Piece size in bytes for the torrent.",
+			torrentLabels, nil,
+		),
+		piecesTotal: prometheus.NewDesc(
+			"momoshtrem_torrent_pieces_total",
+			"Total number of pieces in the torrent.",
+			torrentLabels, nil,
+		),
 
 		torrentsLoaded: prometheus.NewDesc(
 			"momoshtrem_torrents_loaded",
@@ -115,6 +137,22 @@ func NewTorrentCollector(svc torrent.Service, am *torrent.ActivityManager) *Torr
 		torrentsIdle: prometheus.NewDesc(
 			"momoshtrem_torrents_idle",
 			"Number of idle (paused) torrents.",
+			nil, nil,
+		),
+
+		configMaxUnverifiedBytes: prometheus.NewDesc(
+			"momoshtrem_config_max_unverified_bytes",
+			"Configured MaxUnverifiedBytes limit for the torrent client.",
+			nil, nil,
+		),
+		configReaderReadaheadBytes: prometheus.NewDesc(
+			"momoshtrem_config_reader_readahead_bytes",
+			"Anacrolix reader readahead (UrgentBufferBytes).",
+			nil, nil,
+		),
+		configPrioritizerWindowBytes: prometheus.NewDesc(
+			"momoshtrem_config_prioritizer_window_bytes",
+			"Prioritizer total window (UrgentBufferBytes + ReadaheadBytes).",
 			nil, nil,
 		),
 	}
@@ -134,9 +172,14 @@ func (c *TorrentCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.chunksWasted
 	ch <- c.piecesVerified
 	ch <- c.piecesFailed
+	ch <- c.pieceLength
+	ch <- c.piecesTotal
 	ch <- c.torrentsLoaded
 	ch <- c.torrentsActive
 	ch <- c.torrentsIdle
+	ch <- c.configMaxUnverifiedBytes
+	ch <- c.configReaderReadaheadBytes
+	ch <- c.configPrioritizerWindowBytes
 }
 
 // Collect implements prometheus.Collector.
@@ -163,6 +206,8 @@ func (c *TorrentCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.chunksWasted, prometheus.CounterValue, float64(s.ChunksReadWasted), labels...)
 		ch <- prometheus.MustNewConstMetric(c.piecesVerified, prometheus.CounterValue, float64(s.PiecesDirtiedGood), labels...)
 		ch <- prometheus.MustNewConstMetric(c.piecesFailed, prometheus.CounterValue, float64(s.PiecesDirtiedBad), labels...)
+		ch <- prometheus.MustNewConstMetric(c.pieceLength, prometheus.GaugeValue, float64(s.PieceLength), labels...)
+		ch <- prometheus.MustNewConstMetric(c.piecesTotal, prometheus.GaugeValue, float64(s.NumPieces), labels...)
 	}
 
 	// Aggregate metrics
@@ -180,4 +225,9 @@ func (c *TorrentCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.torrentsActive, prometheus.GaugeValue, 0)
 		ch <- prometheus.MustNewConstMetric(c.torrentsIdle, prometheus.GaugeValue, 0)
 	}
+
+	// Config info gauges (static values exposed for Grafana context)
+	ch <- prometheus.MustNewConstMetric(c.configMaxUnverifiedBytes, prometheus.GaugeValue, float64(c.maxUnverifiedBytes))
+	ch <- prometheus.MustNewConstMetric(c.configReaderReadaheadBytes, prometheus.GaugeValue, float64(c.streamingCfg.UrgentBufferBytes))
+	ch <- prometheus.MustNewConstMetric(c.configPrioritizerWindowBytes, prometheus.GaugeValue, float64(c.streamingCfg.UrgentBufferBytes+c.streamingCfg.ReadaheadBytes))
 }

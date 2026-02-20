@@ -210,7 +210,7 @@ func main() {
 		streamingMetrics := metrics.New(reg)
 		libraryFS.SetMetrics(streamingMetrics)
 
-		torrentCollector := metrics.NewTorrentCollector(torrentService, activityManager)
+		torrentCollector := metrics.NewTorrentCollector(torrentService, activityManager, streamingCfg, cfg.Torrent.MaxUnverifiedMB)
 		reg.MustRegister(torrentCollector)
 
 		metricsServer = metrics.NewServer(cfg.Metrics.Port, reg)

@@ -49,8 +49,9 @@ type PriorityReader struct {
 // PriorityCallbacks holds optional callbacks for streaming performance metrics.
 // Using callbacks avoids coupling the streaming package to the metrics package.
 type PriorityCallbacks struct {
-	OnSeek      func(forward bool) // Called on each non-debounced seek
-	OnDowngrade func(count int)    // Called with number of pieces downgraded
+	OnSeek           func(forward bool)     // Called on each non-debounced seek
+	OnDowngrade      func(count int)        // Called with number of pieces downgraded
+	OnPriorityUpdate func(updateType string) // Called on each priority update (initial, seek, seek_debounced, format)
 }
 
 // Snapshot returns a point-in-time snapshot of the reader's position.
@@ -91,6 +92,7 @@ func NewPriorityReader(
 	if callbacks != nil && prioritizer != nil {
 		prioritizer.onSeek = callbacks.OnSeek
 		prioritizer.onDowngrade = callbacks.OnDowngrade
+		prioritizer.onPriorityUpdate = callbacks.OnPriorityUpdate
 	}
 	prioritizer.InitialPrioritize()
 

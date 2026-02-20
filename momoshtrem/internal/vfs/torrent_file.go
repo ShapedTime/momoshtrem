@@ -109,6 +109,9 @@ type TorrentFile struct {
 	// Track if this is the first read (for activation wait)
 	firstRead bool
 
+	// Track reader position to detect redundant seeks (hypothesis 3)
+	readerPos int64
+
 	// pendingRead is non-nil when a timed-out read goroutine is still
 	// running. We drain it before spawning a new goroutine, bounding
 	// the leak to at most one goroutine per TorrentFile.
@@ -174,6 +177,9 @@ func (f *TorrentFile) ensureReader() {
 			},
 			OnDowngrade: func(count int) {
 				f.metrics.StreamingPiecesDowngraded.Add(float64(count))
+			},
+			OnPriorityUpdate: func(updateType string) {
+				f.metrics.StreamingPriorityUpdates.WithLabelValues(updateType).Inc()
 			},
 		}
 	}
@@ -336,6 +342,10 @@ func (f *TorrentFile) readAtLeast(buf []byte, min int) (n int, err error) {
 // requested offset, then reads at least min bytes.
 // Draining before seeking prevents blocking on the anacrolix reader's
 // internal mutex (which a timed-out goroutine may still hold).
+//
+// Tracks redundant vs actual seeks: if the offset matches our tracked
+// reader position and no pending goroutine exists, the Seek is skipped
+// (it would be a no-op). This both measures and fixes hypothesis 3.
 func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int, err error) {
 	if len(buf) < min {
 		return 0, io.ErrShortBuffer
@@ -345,7 +355,9 @@ func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int,
 	defer cancel()
 
 	// Drain pending goroutine BEFORE seeking.
+	drained := false
 	if f.pendingRead != nil {
+		drained = true
 		select {
 		case r := <-f.pendingRead:
 			returnBuffer(r.pooled)
@@ -355,9 +367,23 @@ func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int,
 		}
 	}
 
-	// Safe to seek — no goroutine is using the anacrolix reader.
-	if _, err := f.reader.Seek(off, io.SeekStart); err != nil {
-		return 0, err
+	// Track redundant vs actual seeks.
+	// If offset matches tracked position and no pending goroutine was drained,
+	// skip the Seek call entirely (it would be a no-op in anacrolix).
+	// After a drain, the anacrolix reader may have advanced past readerPos,
+	// so we must always re-seek even if the offset appears to match.
+	if off == f.readerPos && !drained {
+		if f.metrics != nil {
+			f.metrics.StreamingSeekRedundant.Inc()
+		}
+	} else {
+		if f.metrics != nil {
+			f.metrics.StreamingSeekActual.Inc()
+		}
+		// Safe to seek — no goroutine is using the anacrolix reader.
+		if _, err := f.reader.Seek(off, io.SeekStart); err != nil {
+			return 0, err
+		}
 	}
 
 	// Read loop
@@ -366,6 +392,9 @@ func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int,
 		nn, err = f.readContext(ctx, buf[n:])
 		n += nn
 	}
+
+	// Track position after reads
+	f.readerPos = off + int64(n)
 
 	if n >= min {
 		err = nil

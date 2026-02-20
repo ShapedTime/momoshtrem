@@ -40,8 +40,9 @@ type Prioritizer struct {
 	lastReadaheadEnd int64
 
 	// Metrics callbacks (nil-safe)
-	onSeek      func(forward bool) // called on each non-debounced seek
-	onDowngrade func(count int)    // called with number of pieces downgraded
+	onSeek           func(forward bool)     // called on each non-debounced seek
+	onDowngrade      func(count int)        // called with number of pieces downgraded
+	onPriorityUpdate func(updateType string) // called on each priority update
 
 	log *slog.Logger
 }
@@ -120,6 +121,11 @@ func (p *Prioritizer) InitialPrioritize() {
 	}
 
 	p.initialized = true
+
+	if p.onPriorityUpdate != nil {
+		p.onPriorityUpdate("initial")
+	}
+
 	p.log.Debug("initial prioritization complete",
 		"header_bytes", headerEnd,
 		"footer_bytes", min(p.cfg.FooterPriorityBytes, p.fileLength),
@@ -146,6 +152,10 @@ func (p *Prioritizer) SetFormatInfo(info *FormatInfo) {
 			"offset", info.MoovOffset,
 			"size", info.MoovSize,
 		)
+	}
+
+	if p.onPriorityUpdate != nil {
+		p.onPriorityUpdate("format")
 	}
 }
 
@@ -179,6 +189,9 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 			diff = -diff
 		}
 		if diff < p.pieceLength {
+			if p.onPriorityUpdate != nil {
+				p.onPriorityUpdate("seek_debounced")
+			}
 			return
 		}
 	}
@@ -229,6 +242,10 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 	p.lastUrgentStart = offset
 	p.lastUrgentEnd = urgentEnd
 	p.lastReadaheadEnd = readaheadEnd
+
+	if p.onPriorityUpdate != nil {
+		p.onPriorityUpdate("seek")
+	}
 
 	p.log.Debug("updated seek priorities",
 		"offset", offset,

@@ -56,6 +56,8 @@ type FullStats struct {
 	ChunksReadWasted  int64 // Wasted chunks received
 	PiecesDirtiedGood int64 // Pieces that passed hash verification
 	PiecesDirtiedBad  int64 // Pieces that failed hash verification
+	PieceLength       int64 // Piece size in bytes
+	NumPieces         int   // Total piece count
 }
 
 // DebugInfo contains detailed piece-level information for debugging torrent streaming.
