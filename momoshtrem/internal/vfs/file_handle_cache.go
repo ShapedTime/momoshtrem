@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/common"
+	"github.com/shapedtime/momoshtrem/internal/metrics"
 )
 
 // fileHandleKey uniquely identifies a torrent file for caching.
@@ -31,6 +32,7 @@ type fileHandleCache struct {
 	mu          sync.Mutex
 	entries     map[fileHandleKey]*fileHandleCacheEntry
 	gracePeriod time.Duration
+	metrics     *metrics.Metrics
 }
 
 func newFileHandleCache(gracePeriod time.Duration) *fileHandleCache {
@@ -47,6 +49,9 @@ func (c *fileHandleCache) getOrCreate(key fileHandleKey) *CachedFileHandle {
 	entry, ok := c.entries[key]
 	if !ok {
 		c.mu.Unlock()
+		if c.metrics != nil {
+			c.metrics.StreamingCacheOps.WithLabelValues("miss").Inc()
+		}
 		return nil
 	}
 
@@ -57,6 +62,9 @@ func (c *fileHandleCache) getOrCreate(key fileHandleKey) *CachedFileHandle {
 	if entry.graceTimer != nil {
 		entry.graceTimer.Stop()
 		entry.graceTimer = nil
+		if c.metrics != nil {
+			c.metrics.StreamingCacheOps.WithLabelValues("grace_cancel").Inc()
+		}
 		slog.Debug("file handle cache: grace period cancelled",
 			"info_hash", key.infoHash,
 			"file_path", key.filePath,
@@ -67,6 +75,9 @@ func (c *fileHandleCache) getOrCreate(key fileHandleKey) *CachedFileHandle {
 	tf := entry.tf
 	entry.mu.Unlock()
 
+	if c.metrics != nil {
+		c.metrics.StreamingCacheOps.WithLabelValues("hit").Inc()
+	}
 	slog.Debug("file handle cache hit",
 		"info_hash", key.infoHash,
 		"file_path", key.filePath,
@@ -154,6 +165,9 @@ func (c *fileHandleCache) decRef(key fileHandleKey) {
 	}
 
 	// refCount == 0: start grace timer
+	if c.metrics != nil {
+		c.metrics.StreamingCacheOps.WithLabelValues("grace_start").Inc()
+	}
 	slog.Debug("file handle cache: grace period started",
 		"info_hash", key.infoHash,
 		"file_path", key.filePath,
@@ -191,6 +205,9 @@ func (c *fileHandleCache) evict(key fileHandleKey) {
 	entry.mu.Unlock()
 	c.mu.Unlock()
 
+	if c.metrics != nil {
+		c.metrics.StreamingCacheOps.WithLabelValues("evict").Inc()
+	}
 	slog.Debug("file handle cache: evicted",
 		"info_hash", key.infoHash,
 		"file_path", key.filePath,

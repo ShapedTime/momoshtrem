@@ -122,6 +122,10 @@ type TorrentFile struct {
 
 	// Reader tracking for debug endpoint (optional)
 	readerTracker *streaming.ReaderTracker
+
+	// First-byte latency tracking
+	openedAt          time.Time
+	firstByteRecorded bool
 }
 
 // NewTorrentFile creates a new TorrentFile.
@@ -150,6 +154,7 @@ func NewTorrentFile(
 		firstRead:         true,
 		metrics:           m,
 		readerTracker:     readerTracker,
+		openedAt:          time.Now(),
 	}
 }
 
@@ -303,7 +308,12 @@ func (f *TorrentFile) waitForFirstAccess() {
 			activationTimeout = 500 * time.Millisecond
 		}
 
-		if err := f.waitForActivation(f.hash, activationTimeout); err != nil {
+		start := time.Now()
+		err := f.waitForActivation(f.hash, activationTimeout)
+		if f.metrics != nil {
+			f.metrics.StreamingActivationWait.Observe(time.Since(start).Seconds())
+		}
+		if err != nil {
 			// Log but don't fail - proceed with read attempt anyway
 			// The torrent may have some local data or may connect soon
 			slog.Debug("activation wait timed out, proceeding with read", "hash", f.hash)
@@ -358,11 +368,18 @@ func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int,
 	drained := false
 	if f.pendingRead != nil {
 		drained = true
+		drainStart := time.Now()
 		select {
 		case r := <-f.pendingRead:
+			if f.metrics != nil {
+				f.metrics.StreamingDrainWait.Observe(time.Since(drainStart).Seconds())
+			}
 			returnBuffer(r.pooled)
 			f.pendingRead = nil
 		case <-ctx.Done():
+			if f.metrics != nil {
+				f.metrics.StreamingDrainWait.Observe(time.Since(drainStart).Seconds())
+			}
 			return 0, ctx.Err()
 		}
 	}
@@ -421,11 +438,18 @@ func (f *TorrentFile) seekAndReadAtLeast(off int64, buf []byte, min int) (n int,
 func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 	// Drain a pending goroutine from a previous timeout.
 	if f.pendingRead != nil {
+		drainStart := time.Now()
 		select {
 		case r := <-f.pendingRead:
+			if f.metrics != nil {
+				f.metrics.StreamingDrainWait.Observe(time.Since(drainStart).Seconds())
+			}
 			returnBuffer(r.pooled)
 			f.pendingRead = nil
 		case <-ctx.Done():
+			if f.metrics != nil {
+				f.metrics.StreamingDrainWait.Observe(time.Since(drainStart).Seconds())
+			}
 			return 0, ctx.Err()
 		}
 	}
@@ -440,6 +464,9 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 
 	done := make(chan readResult, 1)
 
+	if f.metrics != nil {
+		f.metrics.StreamingBlockedReads.Inc()
+	}
 	go func() {
 		n, err := f.reader.Read(buf)
 		done <- readResult{n: n, err: err, pooled: pooled}
@@ -448,6 +475,7 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 	select {
 	case r := <-done:
 		if f.metrics != nil {
+			f.metrics.StreamingBlockedReads.Dec()
 			elapsed := time.Since(start)
 			f.metrics.StreamingReadDuration.Observe(elapsed.Seconds())
 			f.metrics.StreamingReads.Inc()
@@ -455,12 +483,17 @@ func (f *TorrentFile) readContext(ctx context.Context, p []byte) (int, error) {
 			if elapsed > 500*time.Millisecond {
 				f.metrics.StreamingSlowReads.Inc()
 			}
+			if r.n > 0 && !f.firstByteRecorded {
+				f.firstByteRecorded = true
+				f.metrics.StreamingFirstByte.Observe(time.Since(f.openedAt).Seconds())
+			}
 		}
 		copy(p[:r.n], buf[:r.n])
 		returnBuffer(r.pooled)
 		return r.n, r.err
 	case <-ctx.Done():
 		if f.metrics != nil {
+			f.metrics.StreamingBlockedReads.Dec()
 			f.metrics.StreamingReadTimeouts.Inc()
 		}
 		f.pendingRead = done

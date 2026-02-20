@@ -21,6 +21,18 @@ type Metrics struct {
 
 	// Priority update frequency (hypotheses 2 & 3)
 	StreamingPriorityUpdates *prometheus.CounterVec // labels: type=initial|seek|seek_debounced|format
+
+	// Stall analysis metrics
+	StreamingActivationWait prometheus.Histogram   // How long waitForFirstAccess blocks
+	StreamingDrainWait      prometheus.Histogram   // How long draining a timed-out goroutine takes
+	StreamingBlockedReads   prometheus.Gauge       // Number of reads currently blocked on piece data
+	StreamingFirstByte      prometheus.Histogram   // Time from file open to first byte served
+	StreamingCacheOps       *prometheus.CounterVec // labels: operation=hit|miss|grace_start|grace_cancel|evict
+
+	// WebDAV layer metrics
+	WebDAVRequestDuration *prometheus.HistogramVec // labels: method
+	WebDAVRequestsInFlight *prometheus.GaugeVec    // labels: method
+	WebDAVResponseBytes   *prometheus.CounterVec   // labels: method
 }
 
 // New creates and registers streaming metrics with the given registry.
@@ -49,7 +61,7 @@ func New(reg prometheus.Registerer) *Metrics {
 			Subsystem: "streaming",
 			Name:      "read_duration_seconds",
 			Help:      "Duration of streaming read operations.",
-			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 180, 300},
 		}),
 		StreamingOpenFiles: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "momoshtrem",
@@ -93,6 +105,62 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name:      "priority_updates_total",
 			Help:      "Priority update operations by type.",
 		}, []string{"type"}),
+
+		// Stall analysis metrics
+		StreamingActivationWait: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "activation_wait_seconds",
+			Help:      "How long waitForFirstAccess blocks waiting for peers.",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		}),
+		StreamingDrainWait: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "drain_wait_seconds",
+			Help:      "How long draining a timed-out read goroutine takes.",
+			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120},
+		}),
+		StreamingBlockedReads: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "blocked_reads",
+			Help:      "Number of reads currently blocked on piece data.",
+		}),
+		StreamingFirstByte: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "first_byte_seconds",
+			Help:      "Time from file open to first byte served.",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 180, 300},
+		}),
+		StreamingCacheOps: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "streaming",
+			Name:      "cache_operations_total",
+			Help:      "File handle cache operations by type.",
+		}, []string{"operation"}),
+
+		// WebDAV layer metrics
+		WebDAVRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "webdav",
+			Name:      "request_duration_seconds",
+			Help:      "End-to-end HTTP request duration by method.",
+			Buckets:   []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
+		}, []string{"method"}),
+		WebDAVRequestsInFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "webdav",
+			Name:      "requests_inflight",
+			Help:      "Concurrent WebDAV requests by method.",
+		}, []string{"method"}),
+		WebDAVResponseBytes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "momoshtrem",
+			Subsystem: "webdav",
+			Name:      "response_bytes_total",
+			Help:      "Bytes served per WebDAV method.",
+		}, []string{"method"}),
 	}
 
 	reg.MustRegister(
@@ -107,6 +175,14 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.StreamingSeekRedundant,
 		m.StreamingSeekActual,
 		m.StreamingPriorityUpdates,
+		m.StreamingActivationWait,
+		m.StreamingDrainWait,
+		m.StreamingBlockedReads,
+		m.StreamingFirstByte,
+		m.StreamingCacheOps,
+		m.WebDAVRequestDuration,
+		m.WebDAVRequestsInFlight,
+		m.WebDAVResponseBytes,
 	)
 
 	return m

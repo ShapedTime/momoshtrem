@@ -200,6 +200,7 @@ func main() {
 
 	// Initialize Prometheus metrics (optional)
 	var metricsServer *metrics.Server
+	var streamingMetrics *metrics.Metrics
 	if cfg.Metrics.Enabled {
 		reg := prometheus.NewRegistry()
 		reg.MustRegister(
@@ -207,7 +208,7 @@ func main() {
 			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		)
 
-		streamingMetrics := metrics.New(reg)
+		streamingMetrics = metrics.New(reg)
 		libraryFS.SetMetrics(streamingMetrics)
 
 		torrentCollector := metrics.NewTorrentCollector(torrentService, activityManager, streamingCfg, cfg.Torrent.MaxUnverifiedMB)
@@ -261,6 +262,9 @@ func main() {
 	// Validate WebDAV auth config and create server
 	webdav.ValidateConfig(cfg.Server.WebDAVAuth)
 	webdavServer := webdav.NewServer(libraryFS, cfg.Server.WebDAVAuth)
+	if streamingMetrics != nil {
+		webdavServer.SetMetrics(streamingMetrics)
+	}
 
 	// Start HTTP servers
 	httpServer := &http.Server{

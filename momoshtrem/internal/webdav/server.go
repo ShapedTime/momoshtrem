@@ -10,11 +10,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/net/webdav"
 
 	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/config"
+	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
@@ -23,6 +25,7 @@ type Server struct {
 	fs      *vfs.LibraryFS
 	handler *webdav.Handler
 	authCfg config.WebDAVAuthConfig
+	metrics *metrics.Metrics
 }
 
 // NewServer creates a new WebDAV server
@@ -52,9 +55,46 @@ func NewServer(libraryFS *vfs.LibraryFS, authCfg config.WebDAVAuthConfig) *Serve
 	return s
 }
 
-// Handler returns the HTTP handler wrapped with authentication middleware
+// SetMetrics configures Prometheus metrics for the WebDAV server.
+func (s *Server) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
+}
+
+// Handler returns the HTTP handler wrapped with authentication and metrics middleware.
 func (s *Server) Handler() http.Handler {
-	return NewAuthMiddleware(s.handler, s.authCfg)
+	var h http.Handler = s.handler
+	if s.metrics != nil {
+		h = s.metricsMiddleware(h)
+	}
+	return NewAuthMiddleware(h, s.authCfg)
+}
+
+// metricsMiddleware wraps an http.Handler with WebDAV request metrics.
+func (s *Server) metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.Method
+		s.metrics.WebDAVRequestsInFlight.WithLabelValues(method).Inc()
+		defer s.metrics.WebDAVRequestsInFlight.WithLabelValues(method).Dec()
+
+		start := time.Now()
+		bw := &byteCountResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(bw, r)
+
+		s.metrics.WebDAVRequestDuration.WithLabelValues(method).Observe(time.Since(start).Seconds())
+		s.metrics.WebDAVResponseBytes.WithLabelValues(method).Add(float64(bw.bytes))
+	})
+}
+
+// byteCountResponseWriter wraps http.ResponseWriter to count bytes written.
+type byteCountResponseWriter struct {
+	http.ResponseWriter
+	bytes int64
+}
+
+func (w *byteCountResponseWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += int64(n)
+	return n, err
 }
 
 // webdavFS adapts LibraryFS to webdav.FileSystem

@@ -190,6 +190,9 @@ func (fs *LibraryFS) SetMetrics(m *metrics.Metrics) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	fs.metrics = m
+	if fs.fileCache != nil {
+		fs.fileCache.metrics = m
+	}
 	slog.Info("VFS metrics configured")
 }
 
