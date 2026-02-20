@@ -30,8 +30,9 @@ type PriorityReader struct {
 	openedAt time.Time
 
 	// Format detection state (async)
-	formatDetecting sync.Once
-	formatInfo      *FormatInfo
+	formatDetecting   sync.Once
+	formatInfo        *FormatInfo
+	bytesReadForDetect int64 // cumulative bytes read; triggers detection at threshold
 
 	// Lifecycle
 	closed bool
@@ -134,7 +135,6 @@ func (r *PriorityReader) Read(p []byte) (n int, err error) {
 		return 0, io.ErrClosedPipe
 	}
 	r.markActivity()
-	r.startFormatDetection()
 	r.mu.Unlock()
 
 	// Read WITHOUT holding the mutex. This can block for a long time
@@ -144,6 +144,7 @@ func (r *PriorityReader) Read(p []byte) (n int, err error) {
 
 	r.mu.Lock()
 	r.pos += int64(n)
+	r.maybeStartFormatDetection(n)
 	r.mu.Unlock()
 
 	return n, err
@@ -156,7 +157,6 @@ func (r *PriorityReader) ReadAt(p []byte, off int64) (n int, err error) {
 	defer r.mu.Unlock()
 
 	r.markActivity()
-	r.startFormatDetection()
 
 	// Update priorities if position changed significantly
 	if off != r.pos {
@@ -169,6 +169,7 @@ func (r *PriorityReader) ReadAt(p []byte, off int64) (n int, err error) {
 	// Read fully (ReadAt semantics require reading exactly len(p) bytes)
 	n, err = io.ReadFull(r.reader, p)
 	r.pos = off + int64(n)
+	r.maybeStartFormatDetection(n)
 
 	return n, err
 }
@@ -239,12 +240,22 @@ func (r *PriorityReader) SetResponsive() {
 	r.reader.SetResponsive()
 }
 
-// startFormatDetection triggers async format detection on first read.
-// Format detection reads header bytes to identify MP4/MKV structure.
-func (r *PriorityReader) startFormatDetection() {
-	r.formatDetecting.Do(func() {
-		go r.detectFormat()
-	})
+// formatDetectionThreshold is the cumulative bytes a reader must have read
+// before format detection is triggered. Short-lived probe readers (Infuse
+// checking header/footer, ~2s) typically read < 512KB and close before
+// reaching this threshold, avoiding wasted detection goroutines.
+const formatDetectionThreshold = 1 << 20 // 1 MB
+
+// maybeStartFormatDetection triggers async format detection once the reader
+// has accumulated enough bytes, indicating actual streaming rather than a
+// short-lived format probe.
+func (r *PriorityReader) maybeStartFormatDetection(justRead int) {
+	r.bytesReadForDetect += int64(justRead)
+	if r.bytesReadForDetect >= formatDetectionThreshold {
+		r.formatDetecting.Do(func() {
+			go r.detectFormat()
+		})
+	}
 }
 
 // detectFormat performs format detection in background.

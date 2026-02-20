@@ -82,9 +82,6 @@ type LibraryFS struct {
 	// Reader tracking for debug endpoint (optional)
 	readerTracker *streaming.ReaderTracker
 
-	// File handle cache for WebDAV streaming (prevents duplicate readers)
-	fileCache *fileHandleCache
-
 	// Cached tree structure
 	tree       *DirectoryTree
 	rebuilding sync.Mutex // Coordinates rebuild operations to prevent concurrent rebuilds
@@ -158,7 +155,6 @@ func (fs *LibraryFS) SetTorrentService(
 	fs.onActivity = onActivity
 	fs.waitForActivation = waitForActivation
 	fs.streamingCfg = streamingCfg
-	fs.fileCache = newFileHandleCache(60 * time.Second)
 	slog.Info("VFS torrent service configured",
 		"read_timeout_seconds", readTimeout.Seconds(),
 		"header_priority_mb", streamingCfg.HeaderPriorityBytes/(1024*1024),
@@ -190,9 +186,6 @@ func (fs *LibraryFS) SetMetrics(m *metrics.Metrics) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	fs.metrics = m
-	if fs.fileCache != nil {
-		fs.fileCache.metrics = m
-	}
 	slog.Info("VFS metrics configured")
 }
 
@@ -201,6 +194,24 @@ func (fs *LibraryFS) SetReaderTracker(rt *streaming.ReaderTracker) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	fs.readerTracker = rt
+}
+
+// Stat returns file metadata without creating a TorrentFile.
+// This avoids the overhead of Open() → openTorrentFile() → Close() for
+// WebDAV PROPFIND/HEAD requests that only need name/size/isDir.
+func (fs *LibraryFS) Stat(filepath string) (os.FileInfo, error) {
+	fs.ensureTree()
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	filepath = common.CleanPath(filepath)
+
+	entry, exists := fs.tree.pathMap[filepath]
+	if !exists {
+		return nil, os.ErrNotExist
+	}
+
+	return common.NewFileInfo(entry.Name(), entry.Size(), entry.IsDir(), time.Now()), nil
 }
 
 // Open returns a file handle for reading
@@ -240,22 +251,14 @@ func (fs *LibraryFS) Open(filepath string) (File, error) {
 	}
 }
 
-// openTorrentFile returns a cached or new TorrentFile for streaming.
-// The file handle cache ensures that multiple WebDAV opens for the same
-// torrent file share a single TorrentFile and PriorityReader, preventing
-// competing readers that split bandwidth and corrupt piece priorities.
+// openTorrentFile creates a new TorrentFile for streaming.
+// Each WebDAV connection gets its own reader — multiple anacrolix readers
+// on the same torrent share piece storage and deduplicate piece requests,
+// so parallel readers at different positions (header + footer probing)
+// are more efficient than a single reader thrashing between positions.
 func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 	assignment := pf.assignment
-	key := fileHandleKey{infoHash: assignment.InfoHash, filePath: assignment.FilePath}
 
-	// Try cache first
-	if fs.fileCache != nil {
-		if handle := fs.fileCache.getOrCreate(key); handle != nil {
-			return handle, nil
-		}
-	}
-
-	// Cache miss — create a new TorrentFile
 	_, err := fs.torrentService.GetOrAddTorrent(assignment.MagnetURI)
 	if err != nil {
 		slog.Error("Failed to load torrent for file",
@@ -276,7 +279,7 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		return nil, err
 	}
 
-	tf := NewTorrentFile(
+	return NewTorrentFile(
 		handle,
 		pf.name,
 		assignment.InfoHash,
@@ -286,12 +289,7 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		fs.streamingCfg,
 		fs.metrics,
 		fs.readerTracker,
-	)
-
-	if fs.fileCache != nil {
-		return fs.fileCache.put(key, tf), nil
-	}
-	return tf, nil
+	), nil
 }
 
 // openTorrentSubtitleFile creates a TorrentFile for streaming a subtitle from a torrent.
@@ -517,14 +515,11 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 	return tree
 }
 
-// InvalidateFileHandles closes all cached file handles for a torrent.
-// This should be called before removing a torrent to ensure readers are
-// cleaned up and piece priorities are reset.
-func (fs *LibraryFS) InvalidateFileHandles(infoHash string) {
-	if fs.fileCache != nil {
-		fs.fileCache.invalidate(infoHash)
-	}
-}
+// InvalidateFileHandles is a no-op retained for the TreeUpdater interface.
+// With per-connection readers (no shared cache), there are no cached handles
+// to invalidate — each reader is owned by its HTTP request and closed when
+// the request completes.
+func (fs *LibraryFS) InvalidateFileHandles(infoHash string) {}
 
 // InvalidateTree forces an immediate tree rebuild.
 // This is used as a fallback when targeted updates aren't possible (e.g., subtitles added).

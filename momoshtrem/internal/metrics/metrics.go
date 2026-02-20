@@ -27,7 +27,9 @@ type Metrics struct {
 	StreamingDrainWait      prometheus.Histogram   // How long draining a timed-out goroutine takes
 	StreamingBlockedReads   prometheus.Gauge       // Number of reads currently blocked on piece data
 	StreamingFirstByte      prometheus.Histogram   // Time from file open to first byte served
-	StreamingCacheOps       *prometheus.CounterVec // labels: operation=hit|miss|grace_start|grace_cancel|evict
+	// Deprecated: file handle cache was removed (per-connection readers now).
+	// Kept registered for Prometheus/Grafana compatibility — no longer incremented.
+	StreamingCacheOps *prometheus.CounterVec // labels: operation=hit|miss|grace_start|grace_cancel|evict
 
 	// WebDAV layer metrics
 	WebDAVRequestDuration *prometheus.HistogramVec // labels: method

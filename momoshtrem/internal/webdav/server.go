@@ -135,15 +135,7 @@ func (wfs *webdavFS) Rename(ctx context.Context, oldName, newName string) error 
 }
 
 func (wfs *webdavFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
-	name = common.CleanPath(name)
-
-	file, err := wfs.fs.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	return file.Stat()
+	return wfs.fs.Stat(name)
 }
 
 // webdavFile adapts vfs.File to webdav.File
