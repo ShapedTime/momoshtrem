@@ -207,24 +207,25 @@ func (p *Prioritizer) UpdateForSeek(offset int64) {
 	urgentEnd := min(offset+p.cfg.UrgentBufferBytes, p.fileLength)
 	readaheadEnd := min(urgentEnd+p.cfg.ReadaheadBytes, p.fileLength)
 
-	// Downgrade pieces from previous ranges that are now behind the cursor.
-	// Only downgrade pieces strictly before the new urgent start — the player
-	// has already consumed them and won't seek back (and if it does, they
-	// get re-prioritized immediately).
+	// Downgrade only completed pieces from previous ranges that are now behind
+	// the cursor. Incomplete pieces keep their priority so the torrent client
+	// continues downloading them proactively, avoiding micro-stalls when the
+	// reader reaches them.
 	if p.lastReadaheadEnd > 0 {
 		downgradeEnd := min(p.lastReadaheadEnd, offset)
 		if p.lastUrgentStart < downgradeEnd {
-			downgraded := p.setPieceRangePriorityCount(p.lastUrgentStart, downgradeEnd, types.PiecePriorityNone)
+			downgraded := p.downgradeCompletedPieces(p.lastUrgentStart, downgradeEnd)
 			if downgraded > 0 && p.onDowngrade != nil {
 				p.onDowngrade(downgraded)
 			}
 		}
 	}
 
-	// Downgrade pieces from old range that are now beyond new readahead window.
-	// This handles backward seeks and forward seeks near end of file that shrink the window.
+	// Downgrade only completed pieces from old range that are now beyond new
+	// readahead window. Incomplete pieces retain priority so they finish
+	// downloading rather than stalling.
 	if p.lastReadaheadEnd > readaheadEnd {
-		downgraded := p.setPieceRangePriorityCount(readaheadEnd, p.lastReadaheadEnd, types.PiecePriorityNone)
+		downgraded := p.downgradeCompletedPieces(readaheadEnd, p.lastReadaheadEnd)
 		if downgraded > 0 && p.onDowngrade != nil {
 			p.onDowngrade(downgraded)
 		}
@@ -289,6 +290,39 @@ func (p *Prioritizer) setPieceRangePriorityCount(startByte, endByte int64, prior
 		piece := p.t.Piece(i)
 		piece.SetPriority(priority)
 		count++
+	}
+	return count
+}
+
+// downgradeCompletedPieces sets PiecePriorityNone only for completed pieces
+// in the given file-relative byte range. Incomplete pieces are left at their
+// current priority so the torrent client continues downloading them, avoiding
+// micro-stalls when the reader reaches those positions.
+func (p *Prioritizer) downgradeCompletedPieces(startByte, endByte int64) int {
+	if startByte >= endByte {
+		return 0
+	}
+
+	absStart := p.fileOffset + startByte
+	absEnd := p.fileOffset + endByte
+
+	startPiece := p.byteToPiece(absStart)
+	endPiece := p.byteToPiece(absEnd-1) + 1
+
+	if startPiece < p.beginPiece {
+		startPiece = p.beginPiece
+	}
+	if endPiece > p.endPiece {
+		endPiece = p.endPiece
+	}
+
+	count := 0
+	for i := startPiece; i < endPiece; i++ {
+		piece := p.t.Piece(i)
+		if piece.State().Completion.Complete {
+			piece.SetPriority(types.PiecePriorityNone)
+			count++
+		}
 	}
 	return count
 }
