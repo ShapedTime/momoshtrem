@@ -1,4 +1,8 @@
-momoshtrem/momoshtrem
+# Compiled binary
+momoshtrem
+
+# Runtime data
 data/
 
+# Local config (use config.yaml.example as template)
 config.yaml

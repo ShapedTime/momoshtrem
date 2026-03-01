@@ -1,4 +1,33 @@
-.playwright-mcp
+# Environment files
 .env
-.github
+.env.*
+!.env.example
+
+# Caddy (contains deployment-specific config)
+Caddyfile
+
+# Playwright MCP
+.playwright-mcp/
+
+# Go binaries
 momoshtrem/momoshtrem
+
+# Data directories
+data/
+*.db
+*.bolt.db
+
+# macOS
+.DS_Store
+
+# GitHub (if using private workflows)
+.github/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Proxmox/deployment notes (personal)
+proxmox-installation.md

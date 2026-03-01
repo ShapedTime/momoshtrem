@@ -5,7 +5,7 @@ services:
     ports:
       - 9117:9117
     volumes:
-      - /mnt/data/3/jackett:/config
+      - ${JACKETT_DATA:-./data/jackett}:/config
     environment:
       - PUID=1000
       - PGID=1000
@@ -20,7 +20,7 @@ services:
       POSTGRES_USER: momoshtrem
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - /mnt/data/3/momoshtrem/pgdata:/var/lib/postgresql/data
+      - ${MOMOSHTREM_PGDATA:-./data/pgdata}:/var/lib/postgresql/data
     expose:
       - "5432"
     restart: unless-stopped
@@ -57,8 +57,8 @@ services:
       - "36911"
       - "9090"
     volumes:
-      - /mnt/data/3/momoshtrem/config:/config
-      - /mnt/data/3/momoshtrem/data:/data
+      - ${MOMOSHTREM_CONFIG:-./data/momoshtrem/config}:/config
+      - ${MOMOSHTREM_DATA:-./data/momoshtrem/data}:/data
     environment:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}

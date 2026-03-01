@@ -109,7 +109,7 @@ func DefaultConfig() *Config {
 		},
 		Database: DatabaseConfig{
 			Path: "./data/momoshtrem.db",
-			URL:  "postgres://momoshtrem:momoshtrem@localhost:5432/momoshtrem?sslmode=disable",
+			URL:  "", // Set via DATABASE_URL env var or config.yaml
 		},
 		Torrent: TorrentConfig{
 			MetadataFolder:       "./data/torrents",

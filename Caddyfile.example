@@ -1,0 +1,52 @@
+# Caddy configuration for momoshtrem WebDAV
+# Copy this file to Caddyfile and fill in your values:
+#   cp Caddyfile.example Caddyfile
+
+{
+    # Use internal CA for self-signed certificates
+    local_certs
+}
+
+# WebDAV endpoint for Infuse/VLC (port 36911)
+your-domain.example.com:36911 {
+    tls internal
+
+    # HTTP Basic Authentication
+    # Generate password hash with:
+    #   docker run --rm caddy:2-alpine caddy hash-password --plaintext "YourStrongPassword"
+    basicauth * {
+        your-username YOUR_BCRYPT_HASH_HERE
+    }
+
+    reverse_proxy momoshtrem:36911
+
+    log {
+        output stdout
+    }
+}
+
+# Web UI (port 3000)
+your-domain.example.com:3000 {
+    tls internal
+
+    reverse_proxy prettytvcatalog:3000
+
+    log {
+        output stdout
+    }
+}
+
+# Prometheus metrics (LAN only)
+# Replace with your local hostname or IP
+http://localhost:9090 {
+    reverse_proxy momoshtrem:9090
+    @denied not remote_ip 192.168.0.0/24
+    abort @denied
+}
+
+# pgAdmin (LAN only, optional)
+# http://localhost:5050 {
+#     reverse_proxy pgadmin:80
+#     @denied not remote_ip 192.168.0.0/24
+#     abort @denied
+# }
