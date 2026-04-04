@@ -524,9 +524,13 @@ func (fs *LibraryFS) InvalidateFileHandles(infoHash string) {}
 // InvalidateTree forces an immediate tree rebuild.
 // This is used as a fallback when targeted updates aren't possible (e.g., subtitles added).
 func (fs *LibraryFS) InvalidateTree() {
-	slog.Debug("VFS tree invalidation requested")
-	// Delete stale cache - rebuildTree will create a new one
+	slog.Info("VFS tree invalidation requested")
 	fs.DeleteCache()
+	// Clear the in-memory tree so rebuildTree() will actually rebuild
+	// (its guard checks fs.tree != nil and returns early otherwise).
+	fs.mu.Lock()
+	fs.tree = nil
+	fs.mu.Unlock()
 	fs.rebuildTree()
 }
 
@@ -534,9 +538,9 @@ func (fs *LibraryFS) InvalidateTree() {
 // If the tree hasn't been built yet, this is a no-op.
 func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.TorrentAssignment) {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	if fs.tree == nil {
+		fs.mu.Unlock()
 		return // Tree not built yet, will be included on first build
 	}
 
@@ -546,6 +550,7 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 
 	moviesDir, ok := fs.tree.pathMap[MoviesPath].(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		slog.Error("Movies directory not found in tree")
 		return
 	}
@@ -570,6 +575,7 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 	// Add video file
 	movieDir, ok := fs.tree.pathMap[folderPath].(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		slog.Error("Movie directory not found after creation", "path", folderPath)
 		return
 	}
@@ -581,16 +587,19 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 	movieDir.children[fileName] = videoFile
 	fs.tree.pathMap[filePath] = videoFile
 
+	fs.mu.Unlock()
+
 	slog.Debug("Added movie to VFS tree", "path", filePath)
+	fs.saveTreeToCache()
 }
 
 // RemoveMovieFromTree removes a movie folder and its contents from the VFS tree.
 // If the tree hasn't been built yet, this is a no-op.
 func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	if fs.tree == nil {
+		fs.mu.Unlock()
 		return
 	}
 
@@ -599,6 +608,7 @@ func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
 
 	movieDir, exists := fs.tree.pathMap[folderPath]
 	if !exists {
+		fs.mu.Unlock()
 		return // Already removed or never existed
 	}
 
@@ -617,21 +627,25 @@ func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
 		delete(moviesDir.children, folderName)
 	}
 
+	fs.mu.Unlock()
+
 	slog.Debug("Removed movie from VFS tree", "path", folderPath)
+	fs.saveTreeToCache()
 }
 
 // AddEpisodesToTree adds episodes to the VFS tree, creating show/season folders as needed.
 // If the tree hasn't been built yet, this is a no-op.
 func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	if fs.tree == nil || len(episodes) == 0 {
+		fs.mu.Unlock()
 		return
 	}
 
 	tvDir, ok := fs.tree.pathMap[TVShowsPath].(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		slog.Error("TV Shows directory not found in tree")
 		return
 	}
@@ -680,20 +694,24 @@ func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
 
 		slog.Debug("Added episode to VFS tree", "path", filePath)
 	}
+
+	fs.mu.Unlock()
+	fs.saveTreeToCache()
 }
 
 // RemoveEpisodeFromTree removes an episode file and cleans up empty parent folders.
 // If the tree hasn't been built yet, this is a no-op.
 func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seasonNumber int, episodeNumber int) {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	if fs.tree == nil {
+		fs.mu.Unlock()
 		return
 	}
 
 	tvDir, ok := fs.tree.pathMap[TVShowsPath].(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		return
 	}
 
@@ -702,10 +720,12 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 
 	showDirEntry, exists := fs.tree.pathMap[showPath]
 	if !exists {
+		fs.mu.Unlock()
 		return
 	}
 	showDir, ok := showDirEntry.(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		return
 	}
 
@@ -714,10 +734,12 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 
 	seasonDirEntry, exists := fs.tree.pathMap[seasonPath]
 	if !exists {
+		fs.mu.Unlock()
 		return
 	}
 	seasonDir, ok := seasonDirEntry.(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		return
 	}
 
@@ -733,6 +755,7 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 	}
 
 	if fileNameToRemove == "" {
+		fs.mu.Unlock()
 		return // File not found
 	}
 
@@ -753,20 +776,24 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 			delete(tvDir.children, showFolderName)
 		}
 	}
+
+	fs.mu.Unlock()
+	fs.saveTreeToCache()
 }
 
 // RemoveShowFromTree removes an entire show subtree from the VFS tree.
 // If the tree hasn't been built yet, this is a no-op.
 func (fs *LibraryFS) RemoveShowFromTree(title string, year int) {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	if fs.tree == nil {
+		fs.mu.Unlock()
 		return
 	}
 
 	tvDir, ok := fs.tree.pathMap[TVShowsPath].(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		return
 	}
 
@@ -775,10 +802,12 @@ func (fs *LibraryFS) RemoveShowFromTree(title string, year int) {
 
 	showDirEntry, exists := fs.tree.pathMap[showPath]
 	if !exists {
+		fs.mu.Unlock()
 		return
 	}
 	showDir, ok := showDirEntry.(*VirtualDir)
 	if !ok {
+		fs.mu.Unlock()
 		return
 	}
 
@@ -797,7 +826,10 @@ func (fs *LibraryFS) RemoveShowFromTree(title string, year int) {
 	delete(fs.tree.pathMap, showPath)
 	delete(tvDir.children, showFolderName)
 
+	fs.mu.Unlock()
+
 	slog.Debug("Removed show from VFS tree", "path", showPath)
+	fs.saveTreeToCache()
 }
 
 // VirtualDir represents a directory in the VFS
