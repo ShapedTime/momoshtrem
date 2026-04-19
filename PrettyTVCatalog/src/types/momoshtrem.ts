@@ -32,7 +32,15 @@ export interface LibraryShow {
 export interface LibrarySeason {
   id: number;
   season_number: number;
-  episodes: LibraryEpisode[];
+  /** Optional - backend omits empty episode lists (Go `omitempty`). */
+  episodes?: LibraryEpisode[];
+}
+
+export interface RefreshShowResult {
+  show: LibraryShow;
+  seasons_added: number;
+  episodes_added: number;
+  season_errors?: string[];
 }
 
 export interface LibraryEpisode {

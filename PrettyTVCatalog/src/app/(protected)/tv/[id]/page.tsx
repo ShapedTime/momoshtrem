@@ -9,7 +9,7 @@ import { TorrentSearchModal } from '@/components/torrent';
 import { SubtitleSearchModal } from '@/components/subtitle';
 import type { TorrentSearchContext } from '@/types/jackett';
 import type { SubtitleSearchContext } from '@/types/subtitle';
-import type { LibraryStatus, LibraryShow } from '@/types/momoshtrem';
+import type { LibraryStatus, LibraryShow, RefreshShowResult } from '@/types/momoshtrem';
 import { extractYear, formatReleaseDate } from '@/lib/utils';
 import {
   MediaDetails,
@@ -87,25 +87,66 @@ export default function TVShowPage() {
   }, [libraryStatus]);
 
   // Fetch library show data when in library
+  const fetchLibraryShow = useCallback(async () => {
+    if (!libraryId) {
+      setLibraryShow(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/library/shows/${libraryId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLibraryShow(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch library show:', err);
+    }
+  }, [libraryId]);
+
   useEffect(() => {
-    const fetchLibraryShow = async () => {
-      if (!libraryId) {
-        setLibraryShow(null);
+    fetchLibraryShow();
+  }, [fetchLibraryShow]);
+
+  // Refresh-from-TMDB state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+
+  // Auto-dismiss refresh message after 5s so stale feedback doesn't linger.
+  useEffect(() => {
+    if (!refreshMessage) return;
+    const timer = setTimeout(() => setRefreshMessage(null), 5000);
+    return () => clearTimeout(timer);
+  }, [refreshMessage]);
+
+  const handleRefreshFromTMDB = useCallback(async () => {
+    if (!libraryId) return;
+    setIsRefreshing(true);
+    setRefreshMessage(null);
+    try {
+      const res = await fetch(`/api/library/shows/${libraryId}/refresh`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        setRefreshMessage(err.error ?? 'Refresh failed');
         return;
       }
-
-      try {
-        const res = await fetch(`/api/library/shows/${libraryId}`);
-        if (res.ok) {
-          const data = await res.json();
-          setLibraryShow(data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch library show:', err);
+      const result: RefreshShowResult = await res.json();
+      setLibraryShow(result.show);
+      if (result.seasons_added === 0 && result.episodes_added === 0) {
+        setRefreshMessage('Already up to date');
+      } else {
+        setRefreshMessage(
+          `Added ${result.seasons_added} season(s), ${result.episodes_added} episode(s)`
+        );
       }
-    };
-
-    fetchLibraryShow();
+    } catch (err) {
+      console.error('Failed to refresh show:', err);
+      setRefreshMessage('Refresh failed');
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [libraryId]);
 
   // Handler for library status changes
@@ -227,7 +268,7 @@ export default function TVShowPage() {
     }
 
     const map = new Map<number, EpisodeAssignmentInfo>();
-    for (const ep of librarySeason.episodes) {
+    for (const ep of librarySeason.episodes ?? []) {
       if (ep.has_assignment && ep.assignment) {
         map.set(ep.episode_number, {
           episodeId: ep.id,
@@ -248,20 +289,13 @@ export default function TVShowPage() {
       });
 
       if (res.ok) {
-        // Refresh library show data to update assignments
-        if (libraryId) {
-          const showRes = await fetch(`/api/library/shows/${libraryId}`);
-          if (showRes.ok) {
-            const data = await showRes.json();
-            setLibraryShow(data);
-          }
-        }
+        await fetchLibraryShow();
         refreshTorrents();
       }
     } catch (err) {
       console.error('Failed to unassign episode:', err);
     }
-  }, [libraryId, refreshTorrents]);
+  }, [fetchLibraryShow, refreshTorrents]);
 
   // Invalid ID state
   if (!showId || isNaN(showId)) {
@@ -330,6 +364,21 @@ export default function TVShowPage() {
             onSeasonChange={setSelectedSeason}
             disabled={seasonLoading}
           />
+        )}
+
+        {libraryId && (
+          <div className="flex items-center gap-3 py-2">
+            <Button
+              variant="secondary"
+              onClick={handleRefreshFromTMDB}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? 'Refreshing…' : 'Refresh from TMDB'}
+            </Button>
+            {refreshMessage && (
+              <span className="text-sm text-text-secondary">{refreshMessage}</span>
+            )}
+          </div>
         )}
 
         {/* Episode List */}

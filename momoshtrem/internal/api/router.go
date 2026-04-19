@@ -149,6 +149,7 @@ func (s *Server) setupRoutes() {
 	api.GET("/shows/:id", s.getShow)
 	api.DELETE("/shows/:id", s.deleteShow)
 	api.POST("/shows/:id/assign-torrent", s.assignShowTorrent) // Auto-detect episodes
+	api.POST("/shows/:id/refresh", s.refreshShow)              // Re-fetch seasons/episodes from TMDB
 	api.GET("/shows/recently-aired", s.getRecentlyAiredEpisodes)
 	api.POST("/shows/sync-air-dates", s.triggerAirDateSync)
 

@@ -7,6 +7,7 @@ import type {
   ShowAssignmentResponse,
   MomoshtremError,
   RecentlyAiredResponse,
+  RefreshShowResult,
 } from '@/types/momoshtrem';
 import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
 import type { TorrentDebugInfo } from '@/types/torrent-debug';
@@ -207,6 +208,19 @@ class MomoshtremClient {
       '/api/shows',
       { tmdb_id: tmdbId },
       'add show to library'
+    );
+  }
+
+  /**
+   * Re-fetch seasons and episodes for a show from TMDB, upserting missing rows.
+   * Existing torrent assignments are preserved.
+   */
+  async refreshShow(id: number): Promise<RefreshShowResult> {
+    return this.request<RefreshShowResult>(
+      'POST',
+      `/api/shows/${id}/refresh`,
+      undefined,
+      'refresh show from TMDB'
     );
   }
 

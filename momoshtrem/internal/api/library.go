@@ -76,6 +76,14 @@ type MovieAssignmentResponse struct {
 	Error      string              `json:"error,omitempty"`
 }
 
+// Refresh response
+type RefreshShowResponse struct {
+	Show          ShowResponse `json:"show"`
+	SeasonsAdded  int          `json:"seasons_added"`
+	EpisodesAdded int          `json:"episodes_added"`
+	SeasonErrors  []string     `json:"season_errors,omitempty"`
+}
+
 // Show assignment response
 type ShowAssignmentResponse struct {
 	Success   bool                        `json:"success"`
@@ -400,20 +408,62 @@ func (s *Server) getShow(c *gin.Context) {
 		return
 	}
 
-	// Load assignments for episodes
+	if err := s.loadEpisodeAssignments(show); err != nil {
+		errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for episode")
+		return
+	}
+
+	c.JSON(http.StatusOK, toShowResponse(show))
+}
+
+func (s *Server) refreshShow(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+
+	result, err := s.showService.Refresh(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, library.ErrShowNotFound) {
+			errorResponse(c, http.StatusNotFound, "Show not found")
+			return
+		}
+		errorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	seasonErrors := make([]string, 0, len(result.SeasonErrors))
+	for _, se := range result.SeasonErrors {
+		slog.Warn("Season refresh error", "show_id", id, "error", se.Error())
+		seasonErrors = append(seasonErrors, se.Error())
+	}
+
+	if err := s.loadEpisodeAssignments(result.Show); err != nil {
+		errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for episode")
+		return
+	}
+
+	c.JSON(http.StatusOK, RefreshShowResponse{
+		Show:          toShowResponse(result.Show),
+		SeasonsAdded:  result.SeasonsAdded,
+		EpisodesAdded: result.EpisodesAdded,
+		SeasonErrors:  seasonErrors,
+	})
+}
+
+// loadEpisodeAssignments populates the Assignment field on every episode.
+func (s *Server) loadEpisodeAssignments(show *library.Show) error {
 	for i := range show.Seasons {
 		for j := range show.Seasons[i].Episodes {
 			ep := &show.Seasons[i].Episodes[j]
 			assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, ep.ID)
 			if err != nil {
-				errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for episode")
-				return
+				return err
 			}
 			ep.Assignment = assignment
 		}
 	}
-
-	c.JSON(http.StatusOK, toShowResponse(show))
+	return nil
 }
 
 func (s *Server) deleteShow(c *gin.Context) {

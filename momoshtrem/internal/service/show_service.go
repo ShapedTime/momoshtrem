@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -21,9 +24,10 @@ var _ TMDBClient = (*tmdb.Client)(nil)
 
 // ShowService manages show lifecycle operations.
 type ShowService struct {
-	showRepo   *library.ShowRepository
-	tmdbClient TMDBClient
-	log        *slog.Logger
+	showRepo     *library.ShowRepository
+	tmdbClient   TMDBClient
+	log          *slog.Logger
+	refreshGroup singleflight.Group // Dedup concurrent Refresh calls by show ID
 }
 
 // NewShowService creates a new ShowService.
@@ -108,7 +112,7 @@ func (s *ShowService) Create(ctx context.Context, input CreateShowInput) (*Creat
 
 	// 5. Create seasons and episodes
 	for _, seasonNum := range seasonsToAdd {
-		if err := s.createSeason(ctx, show.ID, input.TMDBID, seasonNum); err != nil {
+		if _, _, err := s.createSeason(ctx, show.ID, input.TMDBID, seasonNum); err != nil {
 			result.SeasonErrors = append(result.SeasonErrors, SeasonError{
 				SeasonNumber: seasonNum,
 				Err:          err,
@@ -131,25 +135,135 @@ func (s *ShowService) Create(ctx context.Context, input CreateShowInput) (*Creat
 	return result, nil
 }
 
-// createSeason creates a season and its episodes.
-func (s *ShowService) createSeason(ctx context.Context, showID int64, tmdbID int, seasonNum int) error {
-	// Create season record
+// RefreshShowResult contains the result of refreshing a show from TMDB.
+type RefreshShowResult struct {
+	Show          *library.Show
+	SeasonsAdded  int
+	EpisodesAdded int
+	SeasonErrors  []SeasonError
+}
+
+// Refresh re-fetches a show's seasons and episodes from TMDB, upserting any
+// missing records. Existing seasons, episodes, and torrent assignments are
+// preserved; episode names are updated if TMDB has changed them.
+//
+// Concurrent calls for the same show are deduplicated via singleflight:
+// callers arriving while a refresh is in progress share its result instead
+// of triggering parallel TMDB fetches and duplicate upserts.
+func (s *ShowService) Refresh(ctx context.Context, showID int64) (*RefreshShowResult, error) {
+	key := strconv.FormatInt(showID, 10)
+	v, err, _ := s.refreshGroup.Do(key, func() (any, error) {
+		return s.doRefresh(ctx, showID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*RefreshShowResult), nil
+}
+
+func (s *ShowService) doRefresh(ctx context.Context, showID int64) (*RefreshShowResult, error) {
+	result := &RefreshShowResult{}
+
+	show, err := s.showRepo.GetByID(showID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load show: %w", err)
+	}
+	if show == nil {
+		return nil, library.ErrShowNotFound
+	}
+
+	tmdbShow, err := s.tmdbClient.GetShowDetails(show.TMDBID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch show from TMDB: %w", err)
+	}
+
+	for _, tmdbSeason := range tmdbShow.Seasons {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if tmdbSeason.SeasonNumber <= 0 {
+			continue // Skip specials
+		}
+
+		seasonCreated, episodesAdded, err := s.createSeason(ctx, show.ID, show.TMDBID, tmdbSeason.SeasonNumber)
+		if err != nil {
+			result.SeasonErrors = append(result.SeasonErrors, SeasonError{
+				SeasonNumber: tmdbSeason.SeasonNumber,
+				Err:          err,
+			})
+			s.log.Warn("Failed to refresh season",
+				"show_id", show.ID,
+				"season", tmdbSeason.SeasonNumber,
+				"error", err,
+			)
+			continue
+		}
+		if seasonCreated {
+			result.SeasonsAdded++
+		}
+		result.EpisodesAdded += episodesAdded
+	}
+
+	// Reload with full hierarchy. If this fails after successful mutations,
+	// surface the counts with the basic show rather than discarding progress;
+	// the client can re-fetch the show to get the nested seasons/episodes.
+	reloaded, err := s.showRepo.GetWithSeasonsAndEpisodes(show.ID)
+	if err != nil {
+		s.log.Error("Failed to reload show after refresh; returning partial result",
+			"show_id", show.ID,
+			"seasons_added", result.SeasonsAdded,
+			"episodes_added", result.EpisodesAdded,
+			"error", err,
+		)
+		result.Show = show
+		result.SeasonErrors = append(result.SeasonErrors, SeasonError{
+			SeasonNumber: 0,
+			Err:          fmt.Errorf("reload after refresh failed: %w", err),
+		})
+		return result, nil
+	}
+	result.Show = reloaded
+	return result, nil
+}
+
+// createSeason upserts a season and its episodes from TMDB.
+// Returns whether the season row was newly created and the number of episode
+// numbers that did not previously exist for the season. Safe to call on an
+// existing season — underlying repo methods use ON CONFLICT DO UPDATE.
+func (s *ShowService) createSeason(ctx context.Context, showID int64, tmdbID int, seasonNum int) (seasonCreated bool, episodesAdded int, err error) {
+	existingSeason, err := s.showRepo.GetSeason(showID, seasonNum)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to check existing season: %w", err)
+	}
+
+	var existingEpisodeNums map[int]struct{}
+	if existingSeason != nil {
+		existing, err := s.showRepo.GetEpisodes(existingSeason.ID)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to load existing episodes: %w", err)
+		}
+		existingEpisodeNums = make(map[int]struct{}, len(existing))
+		for _, ep := range existing {
+			existingEpisodeNums[ep.EpisodeNumber] = struct{}{}
+		}
+	}
+
 	season := &library.Season{
 		ShowID:       showID,
 		SeasonNumber: seasonNum,
 	}
 	if err := s.showRepo.CreateSeason(season); err != nil {
-		return fmt.Errorf("failed to create season record: %w", err)
+		return false, 0, fmt.Errorf("failed to create season record: %w", err)
 	}
+	seasonCreated = existingSeason == nil
 
-	// Fetch episodes from TMDB
 	tmdbSeason, err := s.tmdbClient.GetSeason(tmdbID, seasonNum)
 	if err != nil {
-		return fmt.Errorf("failed to fetch season from TMDB: %w", err)
+		return seasonCreated, 0, fmt.Errorf("failed to fetch season from TMDB: %w", err)
 	}
 
-	// Create episode records
 	for _, ep := range tmdbSeason.Episodes {
+		_, had := existingEpisodeNums[ep.EpisodeNumber]
 		episode := &library.Episode{
 			SeasonID:      season.ID,
 			EpisodeNumber: ep.EpisodeNumber,
@@ -161,9 +275,12 @@ func (s *ShowService) createSeason(ctx context.Context, showID int64, tmdbID int
 				"episode", ep.EpisodeNumber,
 				"error", err,
 			)
-			// Continue with other episodes
+			continue
+		}
+		if !had {
+			episodesAdded++
 		}
 	}
 
-	return nil
+	return seasonCreated, episodesAdded, nil
 }
