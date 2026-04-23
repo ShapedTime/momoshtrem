@@ -521,6 +521,26 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 // the request completes.
 func (fs *LibraryFS) InvalidateFileHandles(infoHash string) {}
 
+// ensureTreeForMutation guarantees the in-memory tree reflects current DB
+// state before a targeted mutation runs. If the tree hasn't been loaded yet,
+// it rebuilds from the DB (bypassing the on-disk cache, which may be stale)
+// and returns true to signal the caller that the targeted update is now
+// redundant — the rebuild already captured the row the mutation is about
+// to add or remove, because callers write to the DB before invoking the
+// tree updater.
+//
+// Must be called without holding fs.mu; rebuildTree acquires it internally.
+func (fs *LibraryFS) ensureTreeForMutation() (rebuilt bool) {
+	fs.mu.RLock()
+	loaded := fs.tree != nil
+	fs.mu.RUnlock()
+	if loaded {
+		return false
+	}
+	fs.rebuildTree()
+	return true
+}
+
 // InvalidateTree forces an immediate tree rebuild.
 // This is used as a fallback when targeted updates aren't possible (e.g., subtitles added).
 func (fs *LibraryFS) InvalidateTree() {
@@ -535,13 +555,18 @@ func (fs *LibraryFS) InvalidateTree() {
 }
 
 // AddMovieToTree adds a movie with its assignment to the VFS tree.
-// If the tree hasn't been built yet, this is a no-op.
+// If the tree hasn't been built yet, rebuild from DB (which already contains
+// the assignment) instead of no-opping.
 func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.TorrentAssignment) {
+	if fs.ensureTreeForMutation() {
+		return
+	}
+
 	fs.mu.Lock()
 
 	if fs.tree == nil {
 		fs.mu.Unlock()
-		return // Tree not built yet, will be included on first build
+		return
 	}
 
 	// Build paths
@@ -594,8 +619,13 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 }
 
 // RemoveMovieFromTree removes a movie folder and its contents from the VFS tree.
-// If the tree hasn't been built yet, this is a no-op.
+// If the tree hasn't been built yet, rebuild from DB (which no longer has the
+// active assignment) instead of no-opping.
 func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
+	if fs.ensureTreeForMutation() {
+		return
+	}
+
 	fs.mu.Lock()
 
 	if fs.tree == nil {
@@ -634,11 +664,19 @@ func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
 }
 
 // AddEpisodesToTree adds episodes to the VFS tree, creating show/season folders as needed.
-// If the tree hasn't been built yet, this is a no-op.
+// If the tree hasn't been built yet, rebuild from DB (which already contains
+// the assignments) instead of no-opping.
 func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
+	if len(episodes) == 0 {
+		return
+	}
+	if fs.ensureTreeForMutation() {
+		return
+	}
+
 	fs.mu.Lock()
 
-	if fs.tree == nil || len(episodes) == 0 {
+	if fs.tree == nil {
 		fs.mu.Unlock()
 		return
 	}
@@ -700,8 +738,13 @@ func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
 }
 
 // RemoveEpisodeFromTree removes an episode file and cleans up empty parent folders.
-// If the tree hasn't been built yet, this is a no-op.
+// If the tree hasn't been built yet, rebuild from DB (which no longer has the
+// active assignment) instead of no-opping.
 func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seasonNumber int, episodeNumber int) {
+	if fs.ensureTreeForMutation() {
+		return
+	}
+
 	fs.mu.Lock()
 
 	if fs.tree == nil {
@@ -782,8 +825,13 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 }
 
 // RemoveShowFromTree removes an entire show subtree from the VFS tree.
-// If the tree hasn't been built yet, this is a no-op.
+// If the tree hasn't been built yet, rebuild from DB (which no longer has the
+// show's active assignments) instead of no-opping.
 func (fs *LibraryFS) RemoveShowFromTree(title string, year int) {
+	if fs.ensureTreeForMutation() {
+		return
+	}
+
 	fs.mu.Lock()
 
 	if fs.tree == nil {
