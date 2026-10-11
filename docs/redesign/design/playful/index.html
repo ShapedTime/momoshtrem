@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>momoshtrem redesign</title>
+<title>momoshtrem design kit</title>
 <meta name="description" content="Direction B, Playful cat-forward: identity, design system, every screen and three clickable flows.">
 <link rel="icon" href="brand/logo/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/css/fonts.css">
@@ -98,10 +98,10 @@
       <div class="lb peach"><img src="brand/logo/mark-flat.svg" alt="Mark without shadow, on peach"><span class="lb-label">Mark · flat, on peach</span></div>
       <div class="lb ink"><img src="brand/logo/mark.svg" alt="Mark on dark"><span class="lb-label">Mark · on espresso</span></div>
       <div class="lb cream"><img src="brand/logo/mark-mono.svg" alt="Monochrome mark"><span class="lb-label">Monochrome</span></div>
-      <div class="lb cream wide" style="grid-column:span 2"><img src="brand/logo/lockup.svg" alt="Lockup"><span class="lb-label">Lockup</span></div>
-      <div class="lb ink wide" style="grid-column:span 2"><img src="brand/logo/lockup-dark.svg" alt="Lockup on dark"><span class="lb-label">Lockup · dark</span></div>
-      <div class="lb matcha wide" style="grid-column:span 2"><img src="brand/logo/lockup-mono.svg" alt="Monochrome lockup"><span class="lb-label">Lockup · mono</span></div>
-      <div class="lb cream wide" style="grid-column:span 2"><img src="brand/logo/wordmark.svg" alt="Wordmark"><span class="lb-label">Wordmark</span></div>
+      <div class="lb cream wide" data-span="2"><img src="brand/logo/lockup.svg" alt="Lockup"><span class="lb-label">Lockup</span></div>
+      <div class="lb ink wide" data-span="2"><img src="brand/logo/lockup-dark.svg" alt="Lockup on dark"><span class="lb-label">Lockup · dark</span></div>
+      <div class="lb matcha wide" data-span="2"><img src="brand/logo/lockup-mono.svg" alt="Monochrome lockup"><span class="lb-label">Lockup · mono</span></div>
+      <div class="lb cream wide" data-span="2"><img src="brand/logo/wordmark.svg" alt="Wordmark"><span class="lb-label">Wordmark</span></div>
     </div>
     <div class="h-grid c2" style="margin-top:16px">
       <div class="h-card">
@@ -127,8 +127,7 @@
     <div class="h-card" style="margin-top:16px">
       <h4>Use it well</h4>
       <p><b>Clear space</b>: the height of one antenna knob around the mark. <b>Minimum size</b>: the full mark from 40 px; below that use the favicon artwork. <b>Never</b> recolour the cat, put the mark on busy artwork, or capitalise the name. In the app the lockup sits on the top bar; the mark alone is the PWA and home-screen icon.</p>
-      <div class="dl-list">
-        <a class="chip outline" href="brand/logo/mark.svg" download>mark.svg</a><a class="chip outline" href="brand/logo/mark-mono.svg" download>mark-mono.svg</a><a class="chip outline" href="brand/logo/lockup.svg" download>lockup.svg</a><a class="chip outline" href="brand/logo/wordmark.svg" download>wordmark.svg</a><a class="chip outline" href="brand/png/app-icon-1024.png" download>app-icon-1024.png</a><a class="chip outline" href="brand/png/apple-touch-icon-180.png" download>apple-touch-icon-180.png</a><a class="chip outline" href="brand/png/maskable-512.png" download>maskable-512.png</a><a class="chip outline" href="brand/png/favicon.ico" download>favicon.ico</a><a class="chip outline" href="brand/logo/favicon.svg" download>favicon.svg</a>
+      <p class="h-cap">Files (in the repo, <code>docs/redesign/design/playful/</code>): <code>brand/logo/</code> mark, mark-flat, mark-mono, wordmark, lockup, lockup-dark, lockup-mono, app-icon, maskable, favicon (SVG) · <code>brand/png/</code> app-icon-1024, apple-touch-icon-180, maskable-512/192, icon-512/192, favicon-16/32/48, favicon.ico.</p>
       </div>
     </div>
 
@@ -187,7 +186,7 @@
   <section class="h-section" id="screens">
     <p class="h-kicker">03 · Screens</p>
     <h2 class="h-h2">Every screen, every width</h2>
-    <p class="h-p">These frames are the real responsive prototype at 390, 768 and 1440 px, not static pictures. Pick a screen and a state; switch themes. Anything you can tap in a frame works. Static PNG exports of the same frames are in <a href="exports/">exports/</a>.</p>
+    <p class="h-p">These frames are the real responsive prototype at 390, 768 and 1440 px, not static pictures. Pick a screen and a state; switch themes. Anything you can tap in a frame works. Static PNG exports of every frame are in <code>exports/</code> in the repo.</p>
     <div class="viewer" id="viewer"></div>
   </section>
 

@@ -10,7 +10,8 @@
   // ------------------------------------------------------------------ theme toggle
   const setTheme = (t) => { root.dataset.theme = t; document.querySelectorAll('[data-hub-theme]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.hubTheme === t)); try { localStorage.setItem('momo-hub-theme', t); } catch (e) { /* storage blocked */ } };
   let saved = null; try { saved = localStorage.getItem('momo-hub-theme'); } catch (e) { /* storage blocked */ }
-  setTheme(saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  // An explicit theme already on <html> (set by the host viewer) wins; then the saved choice; then the OS.
+  setTheme(root.dataset.theme || saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   document.addEventListener('click', (e) => { const b = e.target.closest('[data-hub-theme]'); if (b) setTheme(b.dataset.hubTheme); });
 
   const pair = (title, fn, o = {}) => `<div class="theme-pair">${['light', 'dark'].map((t) => `<div class="panel" data-theme="${t}"><div class="panel-h"><span>${title}</span><span>${t}</span></div>${fn(t)}</div>`).join('')}</div>`;
@@ -153,8 +154,8 @@
     const scr = SCR[vs.i];
     const hash = hashFor(scr, vs.s);
     const themes = vs.theme === 'both' ? ['light', 'dark'] : [vs.theme];
-    const deskW = Math.min(($('#viewer').clientWidth || 1000) - (innerWidth >= 1280 ? 274 : 0), 1100);
-    const ds = Math.max(0.3, deskW / 1440);
+    const deskW = Math.min(($('#viewer').clientWidth || 1000) - (innerWidth >= 1280 ? 274 : 0) - 4, 1100);
+    const ds = Math.min(0.8, deskW / 1440);
     $('#viewer').innerHTML = `<div class="v-list" role="group" aria-label="Screens">${SCR.map((s, i) => `<button type="button" aria-pressed="${i === vs.i}" data-v="${i}"><span>${String(i + 1).padStart(2, '0')}</span>${s.n}</button>`).join('')}</div>
       <div class="v-main">
         <div class="v-head"><div><p class="h-kicker">Screen ${vs.i + 1} of ${SCR.length}${scr.key ? ' · key screen' : ''}</p><h3>${scr.n}</h3></div>${U.seg([['both', 'Both themes'], ['light', 'Light'], ['dark', 'Dark']], vs.theme, { label: 'Theme', act: 'noop' }).replace(/data-act="noop"/g, 'data-vt')}</div>
@@ -182,7 +183,7 @@
   function renderProtos() {
     const f = FL[pv.i];
     const w = $('#protos').clientWidth || 1000;
-    const scale = f.device === 'phone' ? 0.9 : Math.min(0.62, (w - (innerWidth >= 1024 ? 360 : 0)) / 1440);
+    const scale = f.device === 'phone' ? Math.min(0.9, (w - 18) / 390) : Math.min(0.62, (w - (innerWidth >= 1024 ? 360 : 0)) / 1440);
     const [W, H] = sizes[f.device];
     const src = `app.html?flow=${f.n}&theme=${root.dataset.theme}${f.device === 'phone' ? '&safe=1' : ''}${f.start}`;
     $('#protos').innerHTML = `<div class="v-controls">${FL.map((x, i) => `<button type="button" class="chip ${i === pv.i ? 'on' : ''}" aria-pressed="${i === pv.i}" data-pv="${i}">Flow ${x.n} · ${x.title}</button>`).join('')}</div>
@@ -257,7 +258,7 @@
       ['Sign in', '429 with <code>retry_after</code>', 'Rate-limit countdown.'],
     ])}</tbody></table></div>
     <h3 class="h-h3">Files</h3>
-    <div class="dl-list"><a class="chip outline" href="tokens/tokens.css">tokens/tokens.css</a><a class="chip outline" href="tokens/theme.css">tokens/theme.css (Tailwind v4)</a><a class="chip outline" href="tokens/tokens.json">tokens/tokens.json</a><a class="chip outline" href="tokens/CONTRAST.md">tokens/CONTRAST.md</a><a class="chip outline" href="HANDOFF.md">HANDOFF.md</a><a class="chip outline" href="brand/">brand/</a><a class="chip outline" href="exports/">exports/ (PNG)</a></div>`;
+    <div class="dl-list"><a class="chip outline" href="tokens/tokens.css">tokens/tokens.css</a><a class="chip outline" href="tokens/theme.css">tokens/theme.css (Tailwind v4)</a><a class="chip outline" href="tokens/tokens.json">tokens/tokens.json</a><a class="chip outline" href="tokens/CONTRAST.md">tokens/CONTRAST.md</a><a class="chip outline" href="HANDOFF.md">HANDOFF.md</a><span class="chip outline">brand/ (in the repo)</span><span class="chip outline">exports/ (PNG, in the repo)</span></div>`;
 
   // nav highlight
   const links = [...document.querySelectorAll('.h-nav a')];
