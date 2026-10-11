@@ -18,11 +18,11 @@
 .ask-rail-h { margin: var(--sp-4) 0 0 var(--sp-3); }
 .ask-new { justify-content: flex-start; }
 .ask-threads { display: flex; flex-direction: column; gap: 2px; }
-.ask-threads a { display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; padding: 0 var(--sp-3); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--t-small); }
-.ask-threads a svg { color: var(--text-3); flex-shrink: 0; }
+.ask-threads a { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 2px var(--sp-3); min-height: 52px; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--t-small); line-height: 1.35; }
+.ask-threads a svg { color: var(--text-3); margin-top: 2px; }
+.ask-threads a .t-small { grid-column: 2; font-size: 12px; }
 .ask-threads a:hover { background: var(--surface-1); color: var(--text-1); }
 .ask-threads a[aria-current="page"] { background: var(--surface-2); color: var(--text-1); box-shadow: inset 2px 0 0 var(--accent); }
-.ask-threads a .t-small { flex-shrink: 0; }
 .ask-budget { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-4); border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--line-1); }
 .ask-budget a { text-decoration: underline; text-decoration-color: var(--line-3); text-underline-offset: 3px; align-self: flex-start; min-height: 24px; display: inline-flex; align-items: center; }
 .ask-hist-sheet .ask-budget { margin-top: var(--sp-2); }
@@ -122,8 +122,6 @@
   .ask-composer { position: sticky; padding: var(--sp-4) var(--sp-10) var(--sp-5); }
 }
 
-/* Prototype state switcher sits above the composer here */
-.ask-screen .proto-states { bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
-@media (min-width: 1024px) { .ask-screen .proto-states { bottom: 16px; } }
 
 @media (prefers-reduced-motion: reduce) { .ask-card.is-new { animation: none; } }
+@media (max-width: 359px) { .ask-bar-new { display: none; } }

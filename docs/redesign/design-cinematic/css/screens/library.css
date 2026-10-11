@@ -11,12 +11,13 @@
 .lib-chips .fchip svg { color: var(--st-review); }
 .lib-chips .fchip[data-review="1"][aria-pressed="false"] { border-color: var(--st-review-line); }
 .lib-viewbar { grid-area: view; display: flex; align-items: center; gap: var(--sp-2); justify-self: end; }
-.lib-count { grid-area: count; font-variant-numeric: tabular-nums; }
+.lib-count { grid-area: count; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 359px) { .lib-count { visibility: hidden; } }
 .lib-sort { position: relative; display: flex; align-items: center; }
 .lib-sort > svg { position: absolute; left: 12px; color: var(--text-3); pointer-events: none; }
 .lib-sort select { padding-left: 36px; height: 44px; width: auto; min-width: 0; font-size: var(--t-small); font-weight: var(--w-medium); background-color: var(--surface-1); }
 .lib-viewbar .seg button { min-width: 44px; display: grid; place-items: center; }
-.lib-tools--skel { display: flex; flex-direction: column; gap: var(--sp-3); }
+.lib-tools--skel { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; overflow: hidden; }
 .lib-tools--skel .row { overflow: hidden; }
 @media (min-width: 640px) {
   .lib-tools { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "search view" "chips chips"; }
@@ -26,8 +27,8 @@
 }
 @media (min-width: 1024px) {
   .lib-body { gap: var(--sp-6); }
-  .lib-tools { grid-template-columns: minmax(0, 1fr) 320px auto; grid-template-areas: "chips search view"; column-gap: var(--sp-4); }
-  .lib-search { max-width: none; }
+  .lib-tools { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "search view" "chips chips"; column-gap: var(--sp-4); }
+  .lib-search { max-width: 400px; }
 }
 
 /* ---- Grid card: title + status always visible (touch first) ---------------- */
@@ -105,3 +106,4 @@
 .lib-calm-art { position: relative; }
 .lib-calm-art .art { color: var(--surface-3); }
 .lib-calm-check { position: absolute; right: -4px; bottom: 8px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--st-ready); color: var(--ink-1); box-shadow: 0 0 0 4px var(--bg); }
+@media (min-width: 1440px) { .lib-grid { --poster-min: 164px; } }

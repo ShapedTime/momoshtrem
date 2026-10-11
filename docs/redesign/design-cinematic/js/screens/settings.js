@@ -108,7 +108,7 @@
     const total = spend.reduce((a, s) => a + s[1], 0);
     return `${card('Personal picks', `
         ${row('Write picks automatically', 'Noir reads your Trakt history, checks what\'s new and writes 4–6 shelves.', sw('sw-recs', true, 'Write picks automatically'))}
-        ${row('Schedule', 'Next run tonight at 03:00 · last run took 41 s and cost $0.36', ui.seg([['nightly', 'Nightly · 03:00'], ['weekly', 'Weekly · Sun'], ['manual', 'Manual']], 'nightly', 'aria-label="Recommendation schedule"'), { stack: true })}
+        ${row('Schedule', 'Nightly runs at 03:00, weekly on Sunday. Next run tonight; the last one took 41 s and cost $0.36.', ui.seg([['nightly', 'Nightly'], ['weekly', 'Weekly'], ['manual', 'Manual']], 'nightly', 'aria-label="Recommendation schedule"'), { stack: true })}
         <div class="set-row set-row--stack"><div class="set-row-text"><span class="set-row-label" id="model-l">Model</span><span class="help">Used for picks and Ask momoshtrem.</span></div>
           <div class="set-models" role="radiogroup" aria-labelledby="model-l">
             <label class="set-model"><input type="radio" name="model" value="opus" checked><span class="box"><span class="row between gap-2"><strong>Opus 5.5</strong><span class="chip chip--accent">Deeper</span></span><span class="t-small c-2">Sharper reasons, reads more of your history.</span><span class="t-small c-3 t-num">≈ $0.36 a run</span></span></label>

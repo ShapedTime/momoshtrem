@@ -172,3 +172,5 @@ a.act-now:hover { border-color: rgb(242 179 61 / 0.6); }
 
 #act-paused .progress > span { background: var(--text-3); }
 .act-body .banner > .grow { flex: 1 1 200px; }
+@media (max-width: 379px) { .td-actions { grid-template-columns: minmax(0, 1fr); } }
+@media (min-width: 640px) and (max-width: 1023px) { .act-col-side .act-list, .act-groups > .act-group .act-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -73,7 +73,7 @@
   const userMsg = (text) => `<div class="msg msg--me"><p>${esc(text)}</p></div>`;
   const step = (s, st, n) => `<div class="step ${st === 'done' ? 'is-done' : st === 'active' ? 'is-active' : ''}" data-step="${n}"><span class="ic">${st === 'done' ? icon('check', { size: 14, stroke: 2.5 }) : ''}</span><span>${st === 'done' ? s[1] : s[0]}</span>${st === 'done' && s[2] ? `<span class="detail">${esc(s[2])}</span>` : ''}</div>`;
   const stepsLive = (steps, done, active) => steps.map((s, i) => step(s, i < done ? 'done' : i === active ? 'active' : 'pending', i)).join('');
-  const trace = (steps, secs) => `<details class="ask-trace"><summary>${icon('checkCheck', { size: 15 })}<span>${steps.length === 4 ? 'Read your history, searched the web and TMDB' : 'Re-ranked your picks'} · ${secs} s</span>${icon('chevronDown', { size: 15, cls: 'chev' })}</summary><div class="steps">${steps.map((s, i) => step(s, 'done', i)).join('')}</div></details>`;
+  const trace = (steps, secs) => `<details class="ask-trace"><summary>${icon('checkCheck', { size: 15 })}<span>${steps.length === 4 ? 'History, web and TMDB checked' : 'Re-ranked your picks'} · ${secs} s</span>${icon('chevronDown', { size: 15, cls: 'chev' })}</summary><div class="steps">${steps.map((s, i) => step(s, 'done', i)).join('')}</div></details>`;
 
   const inLib = (t) => (t.id === 'goodplace' ? app.state.goodplace === 'added' : t.lib && t.lib !== 'none');
   function cardActions(t) {
@@ -146,7 +146,7 @@
   }
 
   const budget = (err) => `<div class="ask-budget"><div class="row between t-small"><span class="c-2">AI this month</span><span class="t-num ${err ? 'c-1' : 'c-2'}">${err ? '$5.00' : '$1.84'} of $5.00</span></div>${ui.progress(err ? 100 : 37, err ? 'accent' : 'accent')}<a class="t-small c-3" href="#/settings?section=ai">Settings › AI</a></div>`;
-  const threadList = (cur) => `<ul class="ask-threads">${D.askThreads.map((t) => `<li><a href="#/ask/${t.id}" ${cur === t.id ? 'aria-current="page"' : ''}>${icon('message', { size: 16 })}<span class="grow clamp-1">${esc(t.title)}</span><span class="t-small c-3">${esc(t.when)}</span></a></li>`).join('')}</ul>`;
+  const threadList = (cur) => `<ul class="ask-threads">${D.askThreads.map((t) => `<li><a href="#/ask/${t.id}" ${cur === t.id ? 'aria-current="page"' : ''}>${icon('message', { size: 16 })}<span class="clamp-2">${esc(t.title)}</span><span class="t-small c-3">${esc(t.when)}</span></a></li>`).join('')}</ul>`;
 
   // ---- route ----------------------------------------------------------------
   function view(p) {
@@ -170,7 +170,7 @@
         <a class="btn btn-ghost btn-icon" href="#/home" aria-label="Back to For You">${icon('chevronLeft', { size: 24 })}</a>
         <div class="ask-bar-title">${brand.avatar(28)}<div class="stack"><span class="w-semibold">Ask momoshtrem</span><span class="t-small c-3">${err ? 'Paused until Nov 1' : 'Noir · knows your Trakt'}</span></div></div>
         <button class="btn btn-ghost btn-icon" data-act="ask-history" aria-label="Past conversations">${icon('history', { size: 22 })}</button>
-        <a class="btn btn-ghost btn-icon" href="#/ask" aria-label="New conversation">${icon('plus', { size: 22 })}</a>
+        <a class="btn btn-ghost btn-icon ask-bar-new" href="#/ask" aria-label="New conversation">${icon('plus', { size: 22 })}</a>
       </header>
       <div class="ask-layout">
         <aside class="ask-rail desk-only" aria-label="Conversations">
@@ -278,12 +278,13 @@
     if (state === 'stream') {
       const turn = log.querySelector('[data-stream]');
       stream(turn, set, STEPS, token, () => {
+        const ps = root.querySelector('.proto-states');
+        if (ps) { ps.querySelector('summary span').textContent = 'State: Results'; ps.querySelectorAll('a').forEach((a) => a.setAttribute('aria-current', String(/state=results/.test(a.getAttribute('href'))))); }
         const th = threadFor(q);
         try { history.replaceState(null, '', th ? `#/ask/${th.id}` : `#/ask?q=${encodeURIComponent(q)}&done=1`); } catch (e) { /* sandbox */ }
       });
     }
     if (state === 'empty' && window.matchMedia('(min-width: 1024px)').matches) setTimeout(() => input.focus({ preventScroll: true }), 50);
-    if (state !== 'empty') setTimeout(() => scrollEnd(log, false), 30);
   }
 
   function scrollEnd(log, smooth) {

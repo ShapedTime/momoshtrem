@@ -77,7 +77,7 @@
   function posterBadge(r) {
     // Only states that want attention get a badge; "ready" lives in the status line below.
     if (r.review) return ui.pill('review', 'Review', { onArt: true });
-    if (r.streaming) return ui.pill('streaming', 'Live', { onArt: true });
+    if (r.streaming) return ui.pill('streaming', 'Playing', { onArt: true });
     if (r.dl != null) return ui.pill('downloading', `${r.dl}%`, { onArt: true, pct: r.dl });
     if (r.noTorrent) return ui.pill('needs_torrent', 'No torrent', { onArt: true });
     return '';
@@ -120,12 +120,12 @@
   function listRow(r) {
     const t = r.t, href = `#/title/${t.type}/${t.id}`;
     const wp = watchPct(r);
-    const pills = [r.review ? ui.pill('review', `${r.review} to review`) : '', r.streaming ? ui.pill('streaming', 'Streaming') : '', r.dl != null && !r.streaming ? ui.pill('downloading', `${r.dl}%`, { pct: r.dl }) : '', r.noTorrent ? ui.pill('needs_torrent', 'No torrent') : ''].filter(Boolean).join('');
+    const pills = [r.review ? ui.pill('review', `${r.review} to review`) : '', r.streaming ? ui.pill('streaming', 'Streaming') : '', r.tv && r.dl != null && !r.streaming ? ui.pill('downloading', `${r.dl}%`, { pct: r.dl }) : ''].filter(Boolean).join('');
     return `<li class="lrow" data-id="${t.id}">
       <a href="${href}" class="lrow-thumb" aria-hidden="true" tabindex="-1">${ui.poster(t.id)}</a>
       <div class="lrow-title">
         <a href="${href}" class="name">${esc(t.title)}</a>
-        <span class="sub">${r.tv ? 'Show' : 'Movie'} · ${t.year}<span class="xs-inline"> · ${fmtSize(r.size)}</span></span>
+        <span class="sub">${r.tv ? 'Show' : 'Movie'} · ${t.year}${r.size ? `<span class="xs-inline"> · ${fmtSize(r.size)}</span>` : ''}</span>
       </div>
       <div class="lrow-status">${readyLine(r)}${pills ? `<span class="lrow-pills">${pills}</span>` : ''}</div>
       <div class="lrow-watch"><span class="t-small c-2">${esc(watchLine(r))}</span>${wp > 0 ? ui.progress(wp, 'watched') : ''}</div>
@@ -238,7 +238,15 @@
       if (S.q && !end) wrap.insertAdjacentHTML('beforeend', `<span class="input-end"><button class="btn btn-ghost btn-sm btn-icon" data-act="lib-clear" aria-label="Clear search">${icon('x', { size: 16 })}</button></span>`);
       if (!S.q && end) end.remove();
     }
+    revealChip();
     syncURL();
+  }
+  // Keep the active filter chip in view on the phone's scrollable chip row
+  function revealChip() {
+    const row = document.querySelector('[data-lib-chips]'); if (!row || row.scrollWidth <= row.clientWidth) return;
+    const on = row.querySelector('[aria-pressed="true"]'); if (!on) return;
+    const l = on.offsetLeft - row.offsetLeft, r = l + on.offsetWidth;
+    if (l < row.scrollLeft || r > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, r - row.clientWidth + 24);
   }
 
   app.route('/library', (p) => {
@@ -248,6 +256,7 @@
       title: 'Library', tab: 'library',
       html: `<div class="lib-page">${pageHTML(state)}</div>`,
       mount(main) {
+        requestAnimationFrame(revealChip);
         main.addEventListener('input', (e) => { if (e.target.matches('[data-lib-q]')) { S.q = e.target.value; paint({ search: true }); } });
         main.addEventListener('change', (e) => { if (e.target.matches('[data-lib-sort]')) { S.sort = e.target.value; paint(); } });
         main.addEventListener('click', (e) => {

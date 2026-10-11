@@ -514,6 +514,8 @@
     fbmenu: (b) => app.openSheet('feedback', { id: b.closest('.pcard')?.dataset.id }),
     removed: () => { app.close(); app.toast('removed'); },
     'remove-torrent': () => app.openDialog('remove-torrent'),
+    pause: (b) => { b.dataset.act = 'resume'; b.innerHTML = `${icon('play', { size: 15 })}Resume`; app.toast(null, { kind: 'info', title: 'Paused', icon: 'pause' }); },
+    resume: (b) => { b.dataset.act = 'pause'; b.innerHTML = `${icon('pause', { size: 15 })}Pause`; app.toast(null, { kind: 'info', title: 'Resumed', icon: 'play' }); },
     'trakt-off': () => { app.close(); app.state.trakt = 'off'; app.save(); app.toast('trakt-off'); render(location.hash || '#/settings'); },
     find: (b) => app.openSheet('torrent', { show: b.dataset.show, se: b.dataset.se }),
     'find-goodplace': () => app.openSheet('torrent', { show: 'goodplace', scope: 'season', season: '1' }),
