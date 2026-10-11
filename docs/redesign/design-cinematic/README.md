@@ -28,4 +28,7 @@ To regenerate the PNGs:
 ```bash
 cd docs/redesign/design-cinematic
 PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node tools/export-screens.mjs   # or: npm i -D playwright
+python3 tools/optimize-pngs.py   # 256-colour quantise, ~7× smaller
 ```
+
+The exports run with reduced motion and checks for horizontal overflow and JS errors in every state. The current set is 171 PNGs, all clean.

@@ -8,7 +8,7 @@ Design exploration **A** from `docs/redesign/design-prompt-cinematic.md` (PLAN.m
 | `system.html` | Design system: logo, Noir, colour, type, spacing, elevation, motion, icons, every component with its states |
 | `screens.html` | Every screen and state at 390 / 768 / 1440, rendered live |
 | `prototype.html` | The whole prototype (hash routes, see §7) |
-| `screens/*.png` | Static exports of every screen/state (regenerate with `node tools/export-screens.mjs`) |
+| `screens/<screen>/<state>-<width>.png` | 171 static exports of every screen and state (regenerate with `tools/export-screens.mjs` and `tools/optimize-pngs.py`) |
 | `css/tokens.css` | **Tokens** as CSS custom properties: colour incl. status, type, spacing, radii, elevation, blur, motion, z-index |
 | `tokens/theme.css` | Tailwind v4 CSS-first `@theme inline` mapping of those tokens |
 | `css/ui.css` | Component styles (1:1 with the inventory in §3) |

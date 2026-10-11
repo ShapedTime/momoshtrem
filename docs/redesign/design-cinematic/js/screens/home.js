@@ -5,7 +5,7 @@
   const esc = ui.esc;
 
   const PICKS = [
-    { id: 'pastlives', kicker: 'Tonight\'s pick', reason: 'You gave Perfect Days a 9 and finished Aftersun twice. A quiet, devastating 1 h 46 m, and it fits before midnight.' },
+    { id: 'pastlives', kicker: 'Tonight\'s pick', reason: 'You gave Perfect Days a 9 and finished Aftersun twice. A quiet, devastating 1\u00a0h\u00a046\u00a0m, and it fits before midnight.' },
     { id: 'pluribus', kicker: 'New for you', reason: 'Vince Gilligan\'s new series, and sci-fi with a dry sense of humour is your highest-rated corner of Trakt.' },
     { id: 'dune2', kicker: 'Ready in Infuse', reason: 'Already downloaded in 2160p Dolby Vision. You stopped Part One with 20 minutes left in 2022.' },
   ];
