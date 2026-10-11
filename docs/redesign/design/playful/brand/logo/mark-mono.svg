@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" style="color:#2A1C16" aria-label="momoshtrem">
+<title>momoshtrem</title>
+<defs><mask id="mk3-k"><rect width="512" height="512" fill="#fff"/><rect x="76" y="186" width="278" height="232" rx="54" fill="#000"/><g fill="#000"><rect x="384" y="198" width="54" height="104" rx="10"/></g><circle cx="411" cy="343" r="15" fill="#000"/><circle cx="411" cy="396" r="22" fill="#000"/></mask></defs>
+<g stroke="currentColor" stroke-width="17" stroke-linecap="round"><path d="M 252 160 L 214 62"/><path d="M 268 160 L 306 50"/></g>
+<circle cx="211" cy="56" r="19" fill="currentColor" mask="url(#mk3-k)"/><circle cx="309" cy="44" r="21" fill="currentColor" mask="url(#mk3-k)"/>
+<rect x="38" y="152" width="430" height="300" rx="66" fill="currentColor" mask="url(#mk3-k)"/>
+<g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"><path d="M 396 214 L 426 250 M 426 214 L 396 250 M 396 252 L 426 288 M 426 252 L 396 288"/></g>
+<circle cx="411" cy="343" r="7" fill="currentColor"/><circle cx="411" cy="396" r="12" fill="currentColor"/>
+<clipPath id="mk3-scr"><rect x="76" y="186" width="278" height="232" rx="54"/></clipPath>
+<g clip-path="url(#mk3-scr)"><path d="M 144.8 285.3 C 143.7 261.5 144.8 239.9 148.0 220.5 Q 150.2 202.1 164.2 210.8 L 192.3 238.8 Q 215.0 232.4 237.7 238.8 L 265.8 210.8 Q 279.8 202.1 282.0 220.5 C 285.2 239.9 286.3 261.5 285.2 285.3 C 286.3 306.9 289.5 317.7 296.0 330.6 C 311.1 369.5 321.9 419.2 326.2 430 L 103.8 430 C 108.1 419.2 118.9 369.5 134.0 330.6 C 140.5 317.7 143.7 306.9 144.8 285.3 Z" fill="currentColor"/>
+<path d="M 154.5 228.0 Q 155.6 215.1 164.2 220.5 L 184.8 241.0 Q 168.6 243.2 154.5 251.8 Z" fill="currentColor"/>
+<path d="M 275.5 228.0 Q 274.4 215.1 265.8 220.5 L 245.2 241.0 Q 261.4 243.2 275.5 251.8 Z" fill="currentColor"/></g>
+</svg>
