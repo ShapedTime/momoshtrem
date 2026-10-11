@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>momoshtrem design system</title>
+<link rel="icon" href="assets/logo/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500&family=Bebas+Neue&family=Cormorant+Garamond:wght@600&display=swap">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/ui.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/screens/torrent.css">
+<style>
+  /* Design-system page layout: left index on desktop, single column on phone */
+  .ds { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-10); padding-block: var(--sp-8) var(--sp-24); }
+  @media (min-width: 1024px) { .ds { grid-template-columns: 200px minmax(0, 1fr); gap: var(--sp-12); } }
+  .ds-nav { display: none; }
+  @media (min-width: 1024px) { .ds-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: var(--sp-8); align-self: start; font-size: var(--t-small); } .ds-nav a { padding: 6px 10px; border-radius: var(--r-sm); color: var(--text-2); } .ds-nav a:hover { background: var(--surface-1); color: var(--text-1); } .ds-nav .t-micro { margin: var(--sp-4) 10px var(--sp-1); color: var(--text-3); } }
+  .ds-main { display: flex; flex-direction: column; gap: var(--sp-20); min-width: 0; }
+  .ds-sec { display: flex; flex-direction: column; gap: var(--sp-6); scroll-margin-top: var(--sp-8); }
+  .ds-sec > header { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 70ch; }
+  .ds-sec > header p { color: var(--text-2); }
+  .ds-h { font-size: var(--t-title-1); line-height: var(--lh-title-1); letter-spacing: var(--tr-title-1); font-weight: var(--w-semibold); }
+  .ds-sub { font-size: var(--t-title-3); font-weight: var(--w-semibold); letter-spacing: -0.015em; }
+  .ds-grid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--min, 220px)), 1fr)); }
+  .ds-card { background: var(--surface-1); border: 1px solid var(--line-1); border-radius: var(--r-lg); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+  .ds-label { font-size: 12px; color: var(--text-3); font-family: var(--font-mono); overflow-wrap: anywhere; }
+  .ds-row { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+  .ds-stage { padding: var(--sp-6); border-radius: var(--r-lg); background: var(--ink-1); border: 1px dashed var(--line-2); display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; overflow: hidden; }
+  .ds-table { width: 100%; border-collapse: collapse; font-size: var(--t-small); }
+  .ds-table th, .ds-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line-1); vertical-align: middle; }
+  .ds-table th { color: var(--text-3); font-weight: var(--w-medium); }
+  .ds-scroll { overflow-x: auto; }
+  /* forced states for documentation */
+  .btn-primary.is-hover { background: var(--accent-hover); } .btn-secondary.is-hover { background: var(--surface-3); border-color: var(--line-3); } .btn-ghost.is-hover { background: var(--surface-2); color: var(--text-1); } .btn-glass.is-hover { background: rgb(255 255 255 / 0.16); } .btn-danger-quiet.is-hover { background: var(--st-error-bg); }
+  .btn.is-active { transform: scale(0.98); } .btn-primary.is-active { background: var(--accent-press); }
+  .is-focus { box-shadow: var(--focus-ring) !important; }
+  .input.is-focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(242 179 61 / 0.22) !important; }
+  .swatch { display: flex; flex-direction: column; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line-1); background: var(--surface-1); }
+  .swatch i { height: 72px; display: block; }
+  .swatch div { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  .swatch b { font-size: var(--t-small); }
+  .acc-compare { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+  @media (min-width: 768px) { .acc-compare { grid-template-columns: 1fr 1fr; } }
+  .acc-demo { --a: var(--accent); --ai: var(--accent-ink); --as: var(--accent-soft); --at: var(--accent-text); padding: var(--sp-5); border-radius: var(--r-lg); background: radial-gradient(80% 100% at 0 0, color-mix(in srgb, var(--a) 14%, transparent), transparent 70%), var(--surface-1); border: 1px solid var(--line-1); display: flex; flex-direction: column; gap: var(--sp-4); }
+  .acc-demo.lav { --a: var(--alt-lavender); --ai: var(--alt-lavender-ink); --as: rgb(183 166 255 / 0.14); --at: #cbbfff; }
+  .acc-demo .b { background: var(--a); color: var(--ai); }
+  .acc-demo .f { background: var(--as); color: var(--at); border-color: color-mix(in srgb, var(--a) 40%, transparent); }
+  .acc-demo .eyes path { fill: var(--a); }
+  .logo-tile { display: grid; place-items: center; aspect-ratio: 1; border-radius: var(--r-lg); background: var(--ink-1); border: 1px solid var(--line-1); padding: var(--sp-6); }
+  .logo-tile.light { background: #f4f2ee; }
+  .logo-tile img { width: 100%; height: 100%; object-fit: contain; }
+  .type-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); padding: var(--sp-4) 0; border-bottom: 1px solid var(--line-1); }
+  @media (min-width: 768px) { .type-row { grid-template-columns: 200px minmax(0, 1fr); align-items: baseline; } }
+  .bar { height: 12px; border-radius: 3px; background: var(--accent); opacity: 0.7; }
+  .ease-demo { position: relative; height: 40px; border-radius: var(--r-sm); background: var(--ink-1); border: 1px solid var(--line-1); overflow: hidden; }
+  .ease-demo i { position: absolute; left: 4px; top: 4px; width: 30px; height: 30px; border-radius: 8px; background: var(--accent); }
+  .ds-motion:hover .ease-demo i, .ds-motion:focus-within .ease-demo i { transform: translateX(calc(var(--w, 260px) - 38px)); }
+  .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: var(--sp-2); }
+  .icon-grid div { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 6px; border-radius: var(--r-md); background: var(--surface-1); font-size: 11px; color: var(--text-3); text-align: center; overflow-wrap: anywhere; }
+  .icon-grid svg { color: var(--text-1); }
+  .static-sheet { position: relative; inset: auto; transform: none; width: 100%; max-height: none; animation: none; border-radius: var(--r-2xl); border: 1px solid var(--line-2); }
+  .static-palette { position: relative; left: auto; top: auto; transform: none; width: 100%; max-height: none; animation: none; }
+  .static-dialog { position: relative; left: auto; top: auto; transform: none; animation: none; }
+  .static-bar { position: relative !important; display: grid !important; }
+  .static-top { position: relative !important; display: flex !important; border-radius: var(--r-lg); }
+  .hero-mini { position: relative; border-radius: var(--r-lg); overflow: hidden; height: 220px; display: flex; align-items: flex-end; padding: var(--sp-5); isolation: isolate; }
+  .hero-mini .hero-bg { position: absolute; inset: 0; z-index: -2; } .hero-mini .hero-bg svg { width: 100%; height: 100%; }
+  .hero-mini .sc { position: absolute; inset: 0; z-index: -1; background: var(--scrim-bottom); }
+  .ds-hero { padding: var(--sp-16) 0 var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-5); }
+  .contrast { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="ds-hero">
+    <div id="lockup"></div>
+    <h1 class="t-display" style="max-width:18ch">Design system · Cinematic dark</h1>
+    <p class="t-body-l c-2" style="max-width:62ch">The concierge and control room for a personal media library. Artwork carries the colour; the chrome recedes. One amber accent, the colour of a cat's eyes in the dark. Every token and component below is the same code the prototype runs on.</p>
+    <div class="row gap-2 wrap"><a class="btn btn-primary" href="prototype.html">Open the prototype</a><a class="btn btn-secondary" href="screens.html">All screens</a><a class="btn btn-ghost" href="index.html">Overview</a></div>
+  </header>
+
+  <div class="ds">
+    <nav class="ds-nav" aria-label="Sections">
+      <span class="t-micro">Brand</span><a href="#logo">Logo</a><a href="#mascot">Noir, the cat</a>
+      <span class="t-micro">Foundations</span><a href="#color">Colour</a><a href="#accent">Accent decision</a><a href="#status">Status</a><a href="#type">Typography</a><a href="#space">Spacing &amp; radii</a><a href="#elev">Elevation &amp; blur</a><a href="#motion">Motion</a><a href="#icons">Iconography</a>
+      <span class="t-micro">Components</span><a href="#buttons">Buttons</a><a href="#inputs">Inputs</a><a href="#chips">Chips</a><a href="#seg">Segmented &amp; tabs</a><a href="#pills">Status pills</a><a href="#cards">Cards</a><a href="#overlays">Sheets &amp; dialogs</a><a href="#toasts">Toasts</a><a href="#feedback">Loading, empty, error</a><a href="#progress">Progress</a><a href="#palette">Command palette</a><a href="#nav">Navigation</a>
+    </nav>
+
+    <main class="ds-main" id="ds"></main>
+  </div>
+</div>
+<div id="overlays"></div><div class="toast-region" id="toasts"></div>
+<script src="js/icons.js"></script>
+<script src="js/art.js"></script>
+<script src="js/brand.js"></script>
+<script src="js/data.js"></script>
+<script src="js/core.js"></script>
+<script src="js/system-page.js"></script>
+</body>
+</html>

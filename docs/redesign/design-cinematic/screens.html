@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>momoshtrem screens</title>
+<link rel="icon" href="assets/logo/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/ui.css">
+<style>
+  /* Screen gallery: each screen, each state, at 390 / 768 / 1440, rendered live from the prototype */
+  body { padding-block: var(--sp-10) var(--sp-24); }
+  .wrap { padding-inline: var(--gutter); max-width: 1680px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-16); }
+  .top { display: flex; flex-direction: column; gap: var(--sp-4); }
+  .toc { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .scr { display: flex; flex-direction: column; gap: var(--sp-4); scroll-margin-top: var(--sp-6); }
+  .scr header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); }
+  .scr header .stack { min-width: 0; }
+  .states { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .frames { display: flex; gap: var(--sp-6); align-items: flex-start; overflow-x: auto; padding-bottom: var(--sp-3); }
+  .frame { display: flex; flex-direction: column; gap: var(--sp-2); flex-shrink: 0; }
+  .frame .cap { display: flex; justify-content: space-between; gap: var(--sp-3); font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .frame .cap a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-3); }
+  .vp { position: relative; overflow: hidden; border-radius: 18px; border: 1px solid var(--line-2); background: var(--ink-1); box-shadow: var(--e-3); }
+  .vp iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: var(--ink-1); }
+  .vp.phone { border-radius: 28px; }
+  .job { color: var(--text-2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a href="index.html" class="row gap-3" id="brand"></a>
+    <h1 class="t-display">Screens</h1>
+    <p class="t-body-l c-2" style="max-width:66ch">Every screen and state at phone (390), tablet (768, key screens) and desktop (1440). Each frame is the live prototype; open one to click around. Static PNG exports of the same frames are in <code class="t-mono">screens/</code> in the repo.</p>
+    <nav class="toc" id="toc" aria-label="Screens"></nav>
+  </header>
+  <div id="list" class="stack gap-16"></div>
+</div>
+<script src="js/icons.js"></script>
+<script src="js/brand.js"></script>
+<script src="js/manifest.js"></script>
+<script>
+  (function () {
+    const { screens } = MS.manifest;
+    document.getElementById('brand').innerHTML = MS.brand.lockup(28);
+    document.getElementById('toc').innerHTML = screens.map((s) => `<a class="fchip" href="#${s.id}">${s.title}</a>`).join('');
+    const SIZES = [['phone', 390, 844, 0.62], ['tablet', 768, 1024, 0.5], ['desktop', 1440, 900, 0.56]];
+    const frame = (route, [kind, w, h, k]) => `<div class="frame"><div class="cap"><span>${w} × ${h}</span><a href="prototype.html#${route}" target="_blank" rel="noopener">Open</a></div>
+      <div class="vp ${kind}" style="width:${Math.round(w * k)}px;height:${Math.round(h * k)}px"><iframe loading="lazy" title="${kind} ${route}" width="${w}" height="${h}" style="transform:scale(${k})" src="prototype.html?embed=1#${route}"></iframe></div></div>`;
+    const render = (s, key) => {
+      const st = s.states.find((x) => x.key === key) || s.states[0];
+      const sizes = SIZES.filter(([kind]) => kind !== 'tablet' || s.tablet);
+      return sizes.map((sz) => frame(st.route, sz)).join('');
+    };
+    document.getElementById('list').innerHTML = screens.map((s) => `<section class="scr" id="${s.id}" aria-labelledby="${s.id}-h">
+      <header><div class="stack gap-1"><h2 class="t-title-1" id="${s.id}-h">${s.title}</h2><p class="job">${s.job}</p></div>
+      <div class="states" role="tablist" aria-label="${s.title} states">${s.states.map((x, i) => `<button class="fchip" role="tab" aria-pressed="${i === 0}" data-s="${s.id}" data-k="${x.key}">${x.label}</button>`).join('')}</div></header>
+      <div class="frames" data-frames="${s.id}">${render(s)}</div></section>`).join('');
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-k]'); if (!b) return;
+      const s = screens.find((x) => x.id === b.dataset.s);
+      b.parentElement.querySelectorAll('[data-k]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+      document.querySelector(`[data-frames="${s.id}"]`).innerHTML = render(s, b.dataset.k);
+    });
+  })();
+</script>
+</body>
+</html>

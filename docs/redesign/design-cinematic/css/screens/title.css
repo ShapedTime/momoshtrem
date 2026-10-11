@@ -1,0 +1,73 @@
+/* Movie + show detail */
+.detail-hero .eyebrow { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--t-small); font-weight: var(--w-medium); }
+.detail-hero .credit { color: var(--text-3); }
+.detail-hero .overview { font-size: var(--t-body); }
+@media (min-width: 1024px) { .detail-hero .overview { font-size: var(--t-body-l); -webkit-line-clamp: 4; line-clamp: 4; } }
+.trakt-line { display: inline-flex; align-items: center; gap: 8px; color: var(--accent-text); font-size: var(--t-small); font-weight: var(--w-medium); }
+.why-card { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: rgb(11 13 18 / 0.55); border: 1px solid var(--glass-line); backdrop-filter: blur(var(--blur-md)); -webkit-backdrop-filter: blur(var(--blur-md)); max-width: 62ch; font-size: var(--t-small); color: var(--text-1); line-height: 1.5; }
+.why-card .t-micro { display: inline-block; margin-bottom: 2px; }
+
+/* Primary panel content */
+.primary-panel .pp-title { font-size: var(--t-title-3); font-weight: var(--w-semibold); letter-spacing: -0.015em; }
+.primary-panel .ready-head { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.primary-panel .ready-head > svg { width: 36px; height: 36px; padding: 9px; border-radius: 50%; background: var(--st-ready); color: #04140d; flex-shrink: 0; }
+.primary-panel .ready-head .pp-title { color: var(--st-ready); }
+@media (max-width: 1023px) { .primary-panel .desk-pp { display: none; } }
+
+/* Phone thumb-reach dock (sits above the tab bar) */
+.action-dock { position: fixed; z-index: var(--z-sticky); left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--gutter); background: linear-gradient(180deg, rgb(11 13 18 / 0), rgb(11 13 18 / 0.92) 30%); }
+.action-dock .btn { box-shadow: var(--e-3); }
+@media (max-width: 1023px) { .main.has-hero { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 96px); } }
+
+/* Trailer */
+.trailer { display: block; }
+.trailer .play { position: absolute; z-index: 2; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; display: grid; place-items: center; background: rgb(255 255 255 / 0.16); border: 1px solid rgb(255 255 255 / 0.25); backdrop-filter: blur(var(--blur-md)); -webkit-backdrop-filter: blur(var(--blur-md)); transition: transform var(--d-base) var(--ease-out); }
+.trailer .play svg { margin-left: 4px; }
+.trailer:hover .play { transform: scale(1.06); }
+.trailer .tl { position: absolute; z-index: 2; left: 12px; bottom: 10px; font-size: var(--t-small); color: var(--text-1); text-shadow: 0 1px 8px rgb(0 0 0 / 0.8); }
+@media (min-width: 1024px) { .trailer { max-width: 720px; } }
+
+/* Torrent now + facts */
+.facts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.facts-grid > div { display: flex; flex-direction: column; gap: 2px; }
+@media (min-width: 640px) { .facts-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.facts-list { margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-4); }
+.facts-list > div { display: flex; justify-content: space-between; gap: var(--sp-4); padding: 10px 0; border-bottom: 1px solid var(--line-1); font-size: var(--t-small); }
+.facts-list > div:last-child { border-bottom: 0; }
+.facts-list dt { color: var(--text-3); }
+.facts-list dd { margin: 0; text-align: right; color: var(--text-1); }
+
+/* Subtitles */
+.subs .panel-head { padding-bottom: var(--sp-2); }
+.subs .lang { width: 36px; height: 28px; border-radius: var(--r-xs); display: grid; place-items: center; background: var(--surface-3); font-size: 12px; font-weight: var(--w-semibold); color: var(--text-2); flex-shrink: 0; }
+.sub-result { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-md); background: var(--ink-1); border: 1px solid var(--line-1); }
+.sub-result > .stack { flex: 1; }
+
+/* Episodes */
+.tabs a[role="tab"] { position: relative; min-height: 44px; padding: 0 var(--sp-3); font-size: var(--t-body); font-weight: var(--w-medium); color: var(--text-3); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[role="tab"]:hover { color: var(--text-1); }
+.tabs a[role="tab"][aria-selected="true"] { color: var(--text-1); }
+.tabs a[role="tab"][aria-selected="true"]::after { content: ""; position: absolute; left: var(--sp-3); right: var(--sp-3); bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+.tabs a[role="tab"] .n { color: var(--text-3); font-size: var(--t-small); font-variant-numeric: tabular-nums; }
+.ep-tools { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
+.ep-tools-right { margin-left: auto; }
+.jump { width: 190px; }
+.jump .input { height: 40px; font-size: 15px; }
+@media (max-width: 639px) { .ep-tools-right { width: 100%; } .jump { flex: 1; width: auto; } }
+.show-earlier { color: var(--text-3); }
+.virt-note { display: flex; align-items: center; gap: 6px; padding: var(--sp-2) var(--sp-3); }
+.eprow.flash { animation: flash 1.6s var(--ease-out); }
+@keyframes flash { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+@media (max-width: 639px) {
+  .eprow .end .pill span { display: none; }           /* icon-only pill on very narrow rows… */
+  .eprow .end .pill { padding: 0 6px; }
+  .eprow .end .pill--downloading span, .eprow .end .pill--upcoming span { display: inline; } /* …but keep % and dates */
+  .eprow--rich { grid-template-columns: 104px minmax(0, 1fr) auto; }
+}
+@media (min-width: 400px) and (max-width: 639px) { .eprow .end .pill span { display: inline; } }
+
+/* Show settings radios */
+.fs { border: 0; padding: 0; margin: 0; }
+.radio-card { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--surface-1); cursor: pointer; }
+.radio-card input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); flex-shrink: 0; }
+.radio-card:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }

@@ -1,0 +1,188 @@
+/* ==========================================================================
+   momoshtrem · Cinematic dark · design tokens
+   Source of truth for colour, type, spacing, radii, elevation, blur, motion
+   and z-index. Dark only. Plain CSS custom properties; the Tailwind v4
+   `@theme` mapping lives in ../tokens/theme.css.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Neutrals: near-black with a cool (blue-violet) bias ------------- */
+  --ink-0: #06070a;          /* deepest: behind sheets, letterbox */
+  --ink-1: #0b0d12;          /* app canvas */
+  --ink-2: #11141b;          /* surface 1: cards, rows */
+  --ink-3: #171b24;          /* surface 2: raised, inputs */
+  --ink-4: #1f2430;          /* surface 3: hover, selected */
+  --ink-5: #2a303d;          /* surface 4: pressed, tracks */
+
+  --bg: var(--ink-1);
+  --surface-1: var(--ink-2);
+  --surface-2: var(--ink-3);
+  --surface-3: var(--ink-4);
+  --surface-4: var(--ink-5);
+
+  --line-1: rgb(176 190 226 / 0.07);  /* hairline dividers */
+  --line-2: rgb(176 190 226 / 0.12);  /* card borders, inputs */
+  --line-3: rgb(176 190 226 / 0.22);  /* hover borders, strong dividers */
+
+  --text-1: #eef0f5;         /* primary, 17.1:1 on --bg */
+  --text-2: #aab0bf;         /* secondary, 9.0:1 on --bg */
+  --text-3: #7d8598;         /* tertiary/meta, 5.3:1 on --bg, 4.7:1 on --surface-2 */
+  --text-4: #555c6c;         /* disabled, decorative only */
+
+  /* ---- Glass ----------------------------------------------------------- */
+  --glass-bg: rgb(17 20 27 / 0.62);
+  --glass-bg-strong: rgb(13 15 21 / 0.84);
+  --glass-line: rgb(255 255 255 / 0.08);
+  --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.06);
+
+  /* ---- Accent: "cat-eye" amber (committed) ----------------------------- */
+  --accent: #f2b33d;          /* fills: primary button, focus, selection */
+  --accent-hover: #ffc457;
+  --accent-press: #d99a26;
+  --accent-ink: #1b1305;      /* text/icons on an accent fill, 9.9:1 */
+  --accent-text: #f6c364;     /* accent-coloured text on dark, 12:1 */
+  --accent-soft: rgb(242 179 61 / 0.14);
+  --accent-line: rgb(242 179 61 / 0.38);
+  --accent-glow: 0 0 0 1px rgb(242 179 61 / 0.35), 0 0 28px rgb(242 179 61 / 0.28);
+
+  /* Alternative explored, not adopted: luminous lavender */
+  --alt-lavender: #b7a6ff;
+  --alt-lavender-ink: #150f2e;
+
+  /* ---- Semantic status (tuned for dark; always paired with icon + label) */
+  --st-ready: #52d6a0;        --st-ready-bg: rgb(82 214 160 / 0.13);   --st-ready-line: rgb(82 214 160 / 0.32);
+  --st-downloading: #6cb8ff;  --st-downloading-bg: rgb(108 184 255 / 0.13); --st-downloading-line: rgb(108 184 255 / 0.32);
+  --st-missing: #9aa2b3;      --st-missing-bg: rgb(154 162 179 / 0.10); --st-missing-line: rgb(154 162 179 / 0.30);
+  --st-review: #c3a6ff;       --st-review-bg: rgb(195 166 255 / 0.13);  --st-review-line: rgb(195 166 255 / 0.34);
+  --st-watched: #d3d7e0;      --st-watched-bg: rgb(211 215 224 / 0.09); --st-watched-line: rgb(211 215 224 / 0.22);
+  --st-upcoming: #9fb2d6;     --st-upcoming-bg: rgb(159 178 214 / 0.10); --st-upcoming-line: rgb(159 178 214 / 0.26);
+  --st-warning: #ff9d5c;      --st-warning-bg: rgb(255 157 92 / 0.13);  --st-warning-line: rgb(255 157 92 / 0.34);
+  --st-error: #ff6f6f;        --st-error-bg: rgb(255 111 111 / 0.13);   --st-error-line: rgb(255 111 111 / 0.34);
+  --st-info: var(--st-upcoming);
+
+  /* ---- Scrims over artwork --------------------------------------------- */
+  --scrim-bottom: linear-gradient(180deg, rgb(11 13 18 / 0) 0%, rgb(11 13 18 / 0.55) 45%, var(--ink-1) 100%);
+  --scrim-left: linear-gradient(90deg, rgb(11 13 18 / 0.92) 0%, rgb(11 13 18 / 0.6) 38%, rgb(11 13 18 / 0) 70%);
+  --scrim-top: linear-gradient(180deg, rgb(6 7 10 / 0.7) 0%, rgb(6 7 10 / 0) 100%);
+  --scrim-card: linear-gradient(180deg, rgb(6 7 10 / 0) 40%, rgb(6 7 10 / 0.88) 100%);
+
+  /* ---- Type ------------------------------------------------------------ */
+  --font-sans: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* size / line-height / tracking / weight */
+  --t-display-xl: 4rem;     --lh-display-xl: 0.98; --tr-display-xl: -0.04em;   /* 64 desktop hero */
+  --t-display: 3rem;        --lh-display: 1.02;    --tr-display: -0.035em;     /* 48 */
+  --t-title-1: 2.125rem;    --lh-title-1: 1.08;    --tr-title-1: -0.03em;      /* 34 phone large title */
+  --t-title-2: 1.5rem;      --lh-title-2: 1.18;    --tr-title-2: -0.022em;     /* 24 section */
+  --t-title-3: 1.1875rem;   --lh-title-3: 1.26;    --tr-title-3: -0.015em;     /* 19 card/sheet title */
+  --t-body-l: 1.0625rem;    --lh-body-l: 1.55;     /* 17 */
+  --t-body: 0.9375rem;      --lh-body: 1.55;       /* 15 default */
+  --t-small: 0.8125rem;     --lh-small: 1.45;      /* 13 meta */
+  --t-micro: 0.6875rem;     --lh-micro: 1.3;  --tr-micro: 0.08em;   /* 11 uppercase labels */
+  --t-mono: 0.8125rem;      --lh-mono: 1.5;        /* 13 release names, paths */
+
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+
+  /* ---- Spacing (4 px base) --------------------------------------------- */
+  --sp-0: 0;
+  --sp-0-5: 2px;
+  --sp-1: 4px;
+  --sp-1-5: 6px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+  --sp-24: 96px;
+
+  /* Layout */
+  --gutter: 16px;            /* page side margin: 16 phone, 24 tablet, 40 desktop */
+  --col-gap: 12px;
+  --content-max: 1600px;
+  --topbar-h: 64px;
+  --tabbar-h: 56px;          /* + env(safe-area-inset-bottom) */
+  --tap: 44px;               /* minimum touch target */
+  --poster-min: 104px;       /* grid track minimum; 140 tablet, 168 desktop */
+
+  /* ---- Radii ----------------------------------------------------------- */
+  --r-xs: 6px;    /* chips inside rows, kbd */
+  --r-sm: 8px;    /* inputs, small buttons */
+  --r-md: 12px;   /* buttons, cards, posters */
+  --r-lg: 16px;   /* panels, release cards */
+  --r-xl: 22px;   /* dialogs, hero poster */
+  --r-2xl: 28px;  /* sheets (top corners) */
+  --r-pill: 999px;
+
+  /* ---- Elevation ------------------------------------------------------- */
+  --e-0: none;
+  --e-1: 0 1px 2px rgb(0 0 0 / 0.45);
+  --e-2: 0 10px 28px -10px rgb(0 0 0 / 0.65), 0 2px 6px rgb(0 0 0 / 0.35);
+  --e-3: 0 24px 60px -18px rgb(0 0 0 / 0.75), 0 6px 16px rgb(0 0 0 / 0.4);
+  --e-4: 0 40px 100px -20px rgb(0 0 0 / 0.85), 0 10px 30px rgb(0 0 0 / 0.5);
+  --e-lift: 0 18px 40px -14px rgb(0 0 0 / 0.8), 0 0 0 1px rgb(255 255 255 / 0.06);
+
+  /* ---- Blur ------------------------------------------------------------ */
+  --blur-sm: 8px;
+  --blur-md: 16px;
+  --blur-lg: 28px;
+  --blur-xl: 60px;           /* ambient hero glow */
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --d-instant: 80ms;    /* press states */
+  --d-fast: 140ms;      /* hover, chip toggle */
+  --d-base: 220ms;      /* popovers, tabs */
+  --d-slow: 360ms;      /* sheets, dialogs */
+  --d-slower: 560ms;    /* page crossfade, shared-element */
+  --d-cinematic: 900ms; /* hero backdrop crossfade */
+  --d-ambient: 3200ms;  /* loader blink cycle */
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);        /* entrances */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);         /* exits */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);    /* crossfades */
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);     /* iOS-like sheet */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);  /* small confirmations */
+
+  /* ---- Z-index --------------------------------------------------------- */
+  --z-base: 0;
+  --z-raised: 1;
+  --z-sticky: 10;
+  --z-topbar: 20;
+  --z-tabbar: 30;
+  --z-scrim: 40;
+  --z-sheet: 50;
+  --z-sheet-nested: 55;
+  --z-palette: 60;
+  --z-dialog: 65;
+  --z-toast: 70;
+  --z-tooltip: 80;
+
+  /* ---- Focus ----------------------------------------------------------- */
+  --focus-ring: 0 0 0 2px var(--ink-1), 0 0 0 4px var(--accent);
+}
+
+@media (min-width: 640px) {
+  :root { --gutter: 24px; --col-gap: 16px; --poster-min: 140px; }
+}
+@media (min-width: 1024px) {
+  :root { --gutter: 40px; --col-gap: 20px; --poster-min: 168px; }
+}
+@media (min-width: 1440px) {
+  :root { --gutter: 56px; --col-gap: 24px; --poster-min: 184px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-fast: 0ms; --d-base: 0ms; --d-slow: 120ms; --d-slower: 160ms; --d-cinematic: 200ms;
+  }
+}

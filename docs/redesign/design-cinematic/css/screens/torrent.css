@@ -1,0 +1,38 @@
+/* Torrent search sheet */
+.ts-head { gap: var(--sp-3); }
+.ts-form { display: flex; gap: var(--sp-2); }
+.ts-form .input { height: 48px; font-size: 16px; }
+.ts-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+@media (max-width: 639px) { .ts-chips .xs-hide { display: none; } .ts-sortbtn { padding: 0 10px; } }
+.ts-body { display: flex; flex-direction: column; gap: var(--sp-4); }
+.ts-status { display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); }
+.ts-also { color: var(--text-3); }
+.ts-sub { margin-top: var(--sp-2); }
+.ts-restored { display: flex; align-items: center; gap: 6px; }
+.ts-pager { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 0 var(--sp-6); }
+.ts-pager .btn { min-width: 200px; }
+.ts-searching { display: flex; flex-direction: column; gap: var(--sp-5); }
+.ts-indexers { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2); border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--line-1); }
+.ts-indexers li { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-2); font-size: var(--t-small); }
+.ts-indexers li > svg { color: var(--st-ready); }
+.mini-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: spin 0.8s linear infinite; }
+.ts-fgroup { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.ts-sheet .release .actions { flex-wrap: wrap; }
+/* Phone: release actions in one row; Add never stretches. Desktop: stacked column on the right */
+.release .actions .btn { flex: 0 0 auto; }
+@media (min-width: 1024px) {
+  .ts-sheet .release { grid-template-columns: minmax(0, 1fr) 132px; }
+  .ts-sheet .release .actions .spacer { display: none; }
+  .ts-sheet .release .actions .btn-icon { align-self: flex-end; }
+}
+
+/* Inspect */
+.insp-list { display: flex; flex-direction: column; gap: 2px; }
+.insp-list li { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-3); border-radius: var(--r-md); background: var(--surface-1); min-width: 0; }
+.insp-list .insp-to { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-small); color: var(--text-2); flex-wrap: wrap; }
+.insp-list .insp-to b { color: var(--st-ready); font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
+.insp-list .insp-to.review { color: var(--st-review); }
+.insp-list li.is-ignored { opacity: 0.6; }
+
+.release .btn-magnet .lbl { display: none; }
+@media (min-width: 1024px) { .ts-sheet .release .actions .btn-magnet { width: auto; align-self: stretch; padding: 0 12px; color: var(--text-3); } .ts-sheet .release .actions .btn-magnet .lbl { display: inline; font-weight: 500; } }
