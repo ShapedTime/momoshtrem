@@ -102,3 +102,5 @@ JACKETT_API_KEY=...           # From Jackett dashboard
 APP_PASSWORD=...              # Frontend auth
 OPENSUBTITLES_API_KEY=...     # Optional: subtitles
 ```
+
+Keep in mind that you're not working in the actual server but rather in a local development environment.
