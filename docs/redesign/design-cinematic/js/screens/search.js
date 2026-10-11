@@ -277,7 +277,7 @@
 
   MS.palette = (q = '') => `<div class="palette ms-pal" role="dialog" aria-modal="true" aria-label="Search and quick actions">
       <div class="p-input">${icon('search', { size: 20, cls: 'c-3' })}
-        <input type="text" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" aria-label="Search titles, your library, or run an action" placeholder="Search titles, your library or actions…" value="${esc(q)}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go">
+        <input type="text" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" aria-label="Search titles, your library, or run an action" placeholder="Search or jump to…" value="${esc(q)}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go">
         <button type="button" class="btn btn-ghost btn-sm p-cancel" data-act="close">Cancel</button>
       </div>
       <div class="p-body" id="pal-list" role="listbox" aria-label="Results">${palBody(q)}</div>
