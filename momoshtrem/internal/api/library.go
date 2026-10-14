@@ -579,14 +579,6 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// Status handler
-
-func (s *Server) getStatus(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-	})
-}
-
 // Helper functions
 
 func toMovieResponse(movie *library.Movie, assignment *library.TorrentAssignment) MovieResponse {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
+	"github.com/shapedtime/momoshtrem/internal/status"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -29,7 +31,12 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/webdav"
 )
 
+// version is set at build time with -ldflags "-X main.version=<version>".
+var version = "dev"
+
 func main() {
+	startedAt := time.Now()
+
 	// Parse command line flags
 	configPath := flag.String("config", "config.yaml", "Path to configuration file")
 	flag.Parse()
@@ -40,14 +47,20 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	slog.Info("Starting momoshtrem", "config", *configPath)
+	slog.Info("Starting momoshtrem", "version", version, "config", *configPath)
 
-	// Load configuration
+	// Load configuration (defaults → config file if present → env)
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	apiOpts := api.Options{
+		APIToken:           cfg.Server.APIToken,
+		CORSAllowedOrigins: cfg.Server.CORSAllowedOrigins,
+	}
+	api.ValidateOptions(apiOpts)
 
 	// Ensure required directories exist
 	if err := cfg.EnsureDirectories(); err != nil {
@@ -62,13 +75,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	slog.Info("Database initialized", "host", "postgres")
+	slog.Info("Database initialized",
+		"driver", "postgres",
+		"host", dsnHost(cfg.Database.URL),
+		"from_env", os.Getenv("DATABASE_URL") != "",
+	)
 
 	// Initialize repositories
 	movieRepo := library.NewMovieRepository(db)
 	showRepo := library.NewShowRepository(db)
 	assignmentRepo := library.NewAssignmentRepository(db)
 	syncMetaRepo := library.NewSyncMetadataRepository(db)
+	settingsRepo := library.NewSettingsRepository(db)
 
 	// Initialize TMDB client
 	var tmdbClient *tmdb.Client
@@ -223,8 +241,37 @@ func main() {
 		slog.Info("Prometheus metrics enabled", "port", cfg.Metrics.Port)
 	}
 
+	// System status: probes behind small interfaces, cached and throttled
+	webdavPublicURL := cfg.Server.WebDAVPublicURL
+	if webdavPublicURL == "" {
+		webdavPublicURL = fmt.Sprintf("http://localhost:%d/", cfg.Server.WebDAVPort)
+	}
+	statusOpts := status.Options{
+		Version:   version,
+		StartedAt: startedAt,
+		DB:        db,
+		WebDAV: status.WebDAVInfo{
+			URL:         webdavPublicURL,
+			Port:        cfg.Server.WebDAVPort,
+			AuthEnabled: cfg.Server.WebDAVAuth.Enabled,
+			Username:    cfg.Server.WebDAVAuth.Username,
+		},
+		ActiveReaders:           readerTracker.Count,
+		TraktConfigured:         cfg.Trakt.ClientID != "" && cfg.Trakt.ClientSecret != "",
+		AIConfigured:            cfg.AI.AnthropicAPIKey != "",
+		OpenSubtitlesConfigured: cfg.OpenSubtitles.APIKey != "",
+	}
+	if cfg.Jackett.URL != "" && cfg.Jackett.APIKey != "" {
+		statusOpts.Jackett = status.JackettProber(&http.Client{}, cfg.Jackett.URL, cfg.Jackett.APIKey)
+	}
+	if cfg.TMDB.APIKey != "" {
+		statusOpts.TMDB = tmdbClient.Ping
+	}
+	apiOpts.Status = status.NewService(statusOpts)
+	apiOpts.Settings = settingsRepo
+
 	// Initialize servers with torrent service and tree updater
-	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS)
+	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS, apiOpts)
 	apiServer.SetReaderTracker(readerTracker)
 
 	// Initialize air date sync service
@@ -293,8 +340,10 @@ func main() {
 	}()
 
 	slog.Info("momoshtrem is ready",
+		"version", version,
 		"api_url", fmt.Sprintf("http://localhost:%d/api", cfg.Server.HTTPPort),
-		"webdav_url", fmt.Sprintf("http://localhost:%d", cfg.Server.WebDAVPort),
+		"api_token_required", cfg.Server.APIToken != "",
+		"webdav_url", webdavPublicURL,
 		"webdav_auth_enabled", cfg.Server.WebDAVAuth.Enabled,
 	)
 
@@ -343,4 +392,14 @@ func main() {
 	torrentClient.Close()
 
 	slog.Info("momoshtrem stopped")
+}
+
+// dsnHost returns the host of a postgres:// URL for logging, without the
+// credentials. Key/value DSNs are reported as "unknown".
+func dsnHost(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Host == "" {
+		return "unknown"
+	}
+	return u.Host
 }

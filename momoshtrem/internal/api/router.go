@@ -23,17 +23,34 @@ type Server struct {
 	showRepo        *library.ShowRepository
 	assignmentRepo  *library.AssignmentRepository
 	tmdbClient      *tmdb.Client
-	torrentService  torrent.Service       // Optional: nil until Stage 2 implementation
+	torrentService  torrent.Service // Optional: nil until Stage 2 implementation
 	identifier      *identify.Identifier
-	treeUpdater     vfs.TreeUpdater       // Optional: updates VFS tree on assignment changes
-	subtitleService *subtitle.Service     // Optional: subtitle search/download service
-	airDateSync     *airdate.SyncService  // Optional: air date sync service
+	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
+	subtitleService *subtitle.Service    // Optional: subtitle search/download service
+	airDateSync     *airdate.SyncService // Optional: air date sync service
 
 	readerTracker *streaming.ReaderTracker // Optional: tracks active readers for debug endpoint
+
+	opts Options
 
 	// Business logic services
 	showService           *service.ShowService
 	showAssignmentService *service.ShowAssignmentService
+}
+
+// Options holds settings that must be known before routes are registered:
+// Gin middleware added after route registration doesn't apply to them.
+type Options struct {
+	// APIToken is required in the X-Momoshtrem-Token header on every /api
+	// route. Empty disables the check.
+	APIToken string
+	// CORSAllowedOrigins are the browser origins allowed to call the API.
+	// Empty sends no CORS headers.
+	CORSAllowedOrigins []string
+	// Status serves GET /api/status. Nil makes the endpoint return 503.
+	Status StatusReporter
+	// Settings is the app_settings store, for the settings routes (B4, R2).
+	Settings *library.SettingsRepository
 }
 
 // NewServer creates a new API server
@@ -43,7 +60,8 @@ func NewServer(
 	assignmentRepo *library.AssignmentRepository,
 	tmdbClient *tmdb.Client,
 	torrentService torrent.Service, // Can be nil until Stage 2
-	treeUpdater vfs.TreeUpdater,    // Optional: updates VFS tree on assignment changes
+	treeUpdater vfs.TreeUpdater, // Optional: updates VFS tree on assignment changes
+	opts Options,
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -58,6 +76,7 @@ func NewServer(
 		torrentService: torrentService,
 		identifier:     identifier,
 		treeUpdater:    treeUpdater,
+		opts:           opts,
 	}
 
 	// Initialize business logic services
@@ -117,18 +136,20 @@ func (s *Server) setupMiddleware() {
 		)
 	})
 
-	// CORS for development
-	s.router.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	// CORS allowlist. Runs before the token check so preflights get a 204.
+	if cors := corsMiddleware(s.opts.CORSAllowedOrigins); cors != nil {
+		s.router.Use(cors)
+	}
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusOK)
-			return
-		}
+	// Shared-secret auth for /api
+	if auth := tokenMiddleware(s.opts.APIToken); auth != nil {
+		s.router.Use(auth)
+	}
 
-		c.Next()
+	// JSON errors for unknown routes. Global middleware also wraps NoRoute,
+	// so unknown /api paths need the token too.
+	s.router.NoRoute(func(c *gin.Context) {
+		errorResponse(c, http.StatusNotFound, "route not found")
 	})
 }
 
@@ -178,9 +199,4 @@ func (s *Server) setupRoutes() {
 // Handler returns the HTTP handler
 func (s *Server) Handler() http.Handler {
 	return s.router
-}
-
-// Error response helper
-func errorResponse(c *gin.Context, status int, message string) {
-	c.JSON(status, gin.H{"error": message})
 }
