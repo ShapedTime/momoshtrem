@@ -11,9 +11,15 @@ test.skip(!process.env.SCREENSHOTS, 'Set SCREENSHOTS=1 to capture PR screenshots
 
 const OUT = path.resolve(__dirname, '../../docs/screenshots/v2');
 
-async function shoot(page: Page, testInfo: TestInfo, name: string) {
+async function shoot(page: Page, testInfo: TestInfo, name: string, { fullPage = false } = {}) {
   const width = testInfo.project.name === 'mobile' ? 390 : 1440;
   await page.evaluate(() => document.fonts.ready);
+  if (fullPage) {
+    // A viewport as tall as the page, so fixed parts (dock, tab bar) sit at the bottom as in the design exports
+    const height = await page.evaluate(() => document.documentElement.scrollHeight);
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(300);
+  }
   await page.screenshot({ path: path.join(OUT, `${name}-${width}.png`), animations: 'disabled' });
 }
 
@@ -113,5 +119,36 @@ test.describe('system states and settings', () => {
     await signIn(page, '/library');
     await page.getByText('Can’t reach momoshtrem').waitFor();
     await shoot(page, testInfo, 'system/banner');
+  });
+});
+
+test.describe('movie page', () => {
+  for (const [state, tmdbId, panel] of [
+    ['none', 666277, 'Not in your library'],
+    ['needs_torrent', 1054867, 'In your library · no torrent yet'],
+    ['downloading', 157336, 'Downloading'],
+  ] as const) {
+    test(state, async ({ page }, testInfo) => {
+      await signIn(page, `/movie/${tmdbId}`);
+      await page.getByRole('heading', { name: panel }).waitFor();
+      await shoot(page, testInfo, `movie/${state}`, { fullPage: true });
+    });
+  }
+
+  test('ready', async ({ page }, testInfo) => {
+    await signIn(page, '/movie/693134');
+    const subtitles = page.getByRole('region', { name: 'Subtitles' });
+    await subtitles.getByRole('button', { name: 'Search' }).click();
+    await subtitles.getByRole('list', { name: 'Azerbaijani subtitles on OpenSubtitles' }).waitFor();
+    await shoot(page, testInfo, 'movie/ready', { fullPage: true });
+  });
+
+  test('how to play', async ({ page }, testInfo) => {
+    await signIn(page, '/movie/693134');
+    await page.getByRole('heading', { name: 'Ready in Infuse' }).waitFor();
+    await page.getByRole('button', { name: testInfo.project.name === 'mobile' ? 'Play in Infuse' : 'How to play in Infuse' }).click();
+    await page.getByLabel('WebDAV path of this title').waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'movie/howto');
   });
 });

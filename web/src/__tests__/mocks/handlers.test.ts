@@ -190,6 +190,22 @@ describe('the mock library keeps what the page changed', () => {
     expect(stored.map((s) => `${s.language_code}:${s.match}`)).toEqual(['en:exact_release', 'ru:exact_release', 'az:same_source']);
   });
 
+  it('assigns a torrent from the legacy search, which starts it downloading', async () => {
+    const search = await (await fetch('/api/jackett/search?q=One%20Battle%20After%20Another%202025')).json();
+    expect(search.results).toHaveLength(3);
+    const added = await fetch('/api/library/add-torrent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ magnet_uri: search.results[0].magnetUri, media_type: 'movie', tmdb_id: 1054867 }),
+    });
+    expect(added.status).toBe(201);
+    expect((await titlesApi.get('movie', 1054867)).library).toMatchObject({
+      availability_stage: 'downloading',
+      torrent: { release_name: 'One.Battle.After.Another.2025.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX', state: 'active' },
+      download: { pct: 0, eta_seconds: null },
+    });
+  });
+
   it('keeps subtitles that came with the torrent', async () => {
     await expect(subtitlesApi.remove('movie', 1, 1)).rejects.toMatchObject({ status: 409, code: 'conflict' });
   });

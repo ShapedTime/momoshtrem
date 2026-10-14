@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   TrendingResults,
   SearchResult,
-  MovieDetails,
   TVShowDetails,
   SeasonDetails,
   Genre,
@@ -227,16 +226,6 @@ export function useSearch(): UseSearchResult {
   }, []);
 
   return { ...state, search, clearResults };
-}
-
-// ============================================
-// useMovie
-// ============================================
-
-const buildMovieUrl = (id: number) => `/api/tmdb/movie/${id}`;
-
-export function useMovie(id: number | null): FetchState<MovieDetails> {
-  return useFetchOnId<MovieDetails>(id, buildMovieUrl, 'movie');
 }
 
 // ============================================

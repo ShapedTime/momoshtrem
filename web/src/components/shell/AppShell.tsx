@@ -2,6 +2,7 @@
 
 import { type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { ConnectionBanner } from '@/components/system/ConnectionBanner';
+import { cx } from '@/lib/utils/cx';
 import { CommandPalette } from './CommandPalette';
 import { PageTransition } from './PageTransition';
 import { PhoneBar } from './PhoneBar';
@@ -52,8 +53,9 @@ export function AppShell({ username, children }: { username: string; children: R
         Skip to content
       </a>
       <TopBar username={username} overArt={overArt} activeCount={activeCount} />
-      <PhoneBar username={username} />
-      <main id="main" tabIndex={-1} className="main outline-none">
+      {/* Hero pages draw their own phone bar (Back, More) over the artwork */}
+      {!overArt && <PhoneBar username={username} />}
+      <main id="main" tabIndex={-1} className={cx('main outline-none', overArt && 'has-hero')}>
         <ConnectionBanner />
         <PageTransition>{children}</PageTransition>
       </main>

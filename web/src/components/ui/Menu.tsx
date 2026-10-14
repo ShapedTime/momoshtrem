@@ -30,10 +30,12 @@ interface MenuItemProps extends Omit<ComponentProps<typeof DropdownMenu.Item>, '
   danger?: boolean;
   /** Navigate instead of running onSelect. */
   href?: string;
+  /** `href` is another site: open it in a new tab. */
+  external?: boolean;
   children: ReactNode;
 }
 
-export function MenuItem({ icon, hint, danger, href, className, children, ...props }: MenuItemProps) {
+export function MenuItem({ icon, hint, danger, href, external, className, children, ...props }: MenuItemProps) {
   const content = (
     <>
       {icon}
@@ -45,7 +47,13 @@ export function MenuItem({ icon, hint, danger, href, className, children, ...pro
   if (href) {
     return (
       <DropdownMenu.Item asChild className={classes} {...props}>
-        <Link href={href}>{content}</Link>
+        {external ? (
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {content}
+          </a>
+        ) : (
+          <Link href={href}>{content}</Link>
+        )}
       </DropdownMenu.Item>
     );
   }

@@ -86,7 +86,9 @@ defined. Every surface (cards, rows, panels, Activity, Settings) uses
 
 `ready` · `ready_infuse` · `downloading` · `partial` · `needs_torrent` · `missing` ·
 `not_in_library` · `airs_on` · `upcoming` · `needs_review` · `watched` · `streaming` ·
-`paused` · `idle` · `ok` · `unreachable` · `not_configured` · `warning` · `error`
+`paused` · `idle` · `ok` · `unreachable` · `not_configured` · `warning` · `error`;
+torrents: `healthy` · `no_seeders` · `added`; subtitle matches: `match_exact` ·
+`match_same_source` · `match_different_timing` · `match_unknown`
 
 On narrow cards, pass a short `label` the design uses, for example "No torrent" or
 "Review"; the tone and icon stay the same. If a new state is needed, add it

@@ -16,11 +16,17 @@ export function useShell(): ShellContextValue {
   return shell;
 }
 
-/** Call from a page with a full-bleed hero (HANDOFF §4.2). */
-export function useOverArt() {
+/**
+ * Call from a page with a full-bleed hero (HANDOFF §4.2): the main area
+ * slides under the top bar, which starts transparent, and the shell's phone
+ * bar steps aside for the page's own. Pass `false` while the hero isn't shown
+ * (an error or not-found view).
+ */
+export function useOverArt(enabled = true) {
   const { setOverArt } = useShell();
   useEffect(() => {
+    if (!enabled) return;
     setOverArt(true);
     return () => setOverArt(false);
-  }, [setOverArt]);
+  }, [setOverArt, enabled]);
 }

@@ -63,6 +63,15 @@ export const STATUS = {
   not_configured: { tone: 'neutral', label: 'Not set up', icon: CircleDashed },
   warning: { tone: 'warning', label: 'Warning', icon: TriangleAlert },
   error: { tone: 'error', label: 'Error', icon: TriangleAlert },
+  // Torrents
+  healthy: { tone: 'ready', label: 'Healthy', icon: Check },
+  no_seeders: { tone: 'warning', label: 'No seeders', icon: TriangleAlert },
+  added: { tone: 'ready', label: 'Added', icon: Check },
+  // How well a subtitle fits the release (B7)
+  match_exact: { tone: 'ready', label: 'Exact release', icon: Check },
+  match_same_source: { tone: 'neutral', label: 'Same source', icon: Check },
+  match_different_timing: { tone: 'warning', label: 'Different cut timing', icon: TriangleAlert },
+  match_unknown: { tone: 'neutral', label: 'Match unknown', icon: CircleDashed },
 } as const satisfies Record<string, StatusDefinition>;
 
 export type StatusKey = keyof typeof STATUS;
