@@ -43,9 +43,9 @@ export const SHEETS: Record<string, SheetDefinition> = {
     title: 'Play it in Infuse',
     description: 'momoshtrem gets things ready; Infuse on your Apple TV streams them over WebDAV.',
     size: 'narrow',
-    // `path`: a title's WebDAV path, for a "find it here" step
-    params: ['path'],
-    render: (params) => <InfuseSetupSheet path={params.get('path')} />,
+    // A title's WebDAV path and URL, for a "find it here" step (infuseSetupParams)
+    params: ['path', 'url'],
+    render: (params) => <InfuseSetupSheet path={params.get('path')} url={params.get('url')} />,
   },
 };
 

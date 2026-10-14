@@ -13,8 +13,10 @@ import { defaultSubtitleLanguage } from '@/lib/title/subtitles';
  * Everything the SubtitlesPanel shows and does for one movie or episode:
  * the stored list, a one-language OpenSubtitles search, Get and Remove.
  * `id` is the library id; null keeps every query off (nothing assigned yet).
+ * `releaseKey` identifies the assigned release (e.g. its info hash): a new
+ * one clears the search, whose match grades were for the old release.
  */
-export function useItemSubtitles(type: SubtitleItemType, id: number | null): SubtitlesPanelProps {
+export function useItemSubtitles(type: SubtitleItemType, id: number | null, releaseKey: string | null = null): SubtitlesPanelProps {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
@@ -24,8 +26,15 @@ export function useItemSubtitles(type: SubtitleItemType, id: number | null): Sub
   const stored = storedQuery.data?.items;
 
   const [chosen, setChosen] = useState<string | null>(null);
-  const language = chosen ?? defaultSubtitleLanguage(stored ?? []);
   const [searched, setSearched] = useState<string | null>(null);
+  // Once searched, the picker stays on that language: Get adds it to the stored list, which moves the default on
+  const language = chosen ?? searched ?? defaultSubtitleLanguage(stored ?? []);
+
+  const [searchedRelease, setSearchedRelease] = useState(releaseKey);
+  if (releaseKey !== searchedRelease) {
+    setSearchedRelease(releaseKey);
+    setSearched(null);
+  }
   const searchQuery = useQuery({ ...subtitleSearchQuery(type, itemId, searched ? [searched] : []), enabled: id !== null && searched !== null });
 
   const refetchStored = () => queryClient.invalidateQueries({ queryKey: subtitleKeys.item(type, itemId) });

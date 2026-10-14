@@ -86,18 +86,21 @@ test.describe('movie page', () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(DUNE_URL);
 
     await page.getByRole('button', { name: testInfo.project.name === 'mobile' ? 'Play in Infuse' : 'How to play in Infuse' }).click();
-    await expect(page).toHaveURL(/[?&]sheet=infuse-setup/);
+    await expect(page).toHaveURL(/[?&]sheet=infuse-setup&path=.+&url=https%3A/);
     await expect(page.getByRole('dialog', { name: 'Play it in Infuse' })).toBeVisible();
   });
 
-  test('How to play opens from the URL with this title’s path', async ({ page }) => {
+  test('How to play opens from the URL with this title’s path, and copies the server’s URL', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await signIn(page, '/movie/693134');
-    await page.goto(`/movie/693134?sheet=infuse-setup&path=${encodeURIComponent(DUNE_PATH)}`);
+    await page.goto(`/movie/693134?sheet=infuse-setup&path=${encodeURIComponent(DUNE_PATH)}&url=${encodeURIComponent(DUNE_URL)}`);
     const sheet = page.getByRole('dialog', { name: 'Play it in Infuse' });
     await expect(sheet.getByLabel('WebDAV address')).toBeVisible();
     await expect(sheet).toContainText('Movies › Dune- Part Two (2024)');
     await expect(sheet.getByLabel('WebDAV path of this title')).toHaveText(DUNE_PATH);
     await expectNoA11yViolations(page);
+    await sheet.getByRole('button', { name: 'Copy' }).last().click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(DUNE_URL);
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
     await expect(page).toHaveURL(/\/movie\/693134$/);

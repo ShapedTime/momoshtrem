@@ -17,4 +17,5 @@ export { WatchStateLine, OnTraktCard } from './WatchState';
 export { WhyCard } from './WhyCard';
 export { TitleMoreMenu } from './TitleMoreMenu';
 export { ClampedText } from './ClampedText';
+export { BackButton } from './BackButton';
 export { TitleDetailSkeleton, TitleLoadError, isTitleNotFound } from './TitleStates';

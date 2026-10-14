@@ -4,17 +4,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useConfirm, useToast } from '@/components/ui';
 import type { MediaType, Title } from '@/lib/api/contract';
-import { libraryKeys, titleKeys, titleQuery, titlesApi } from '@/lib/api/endpoints';
+import { libraryKeys, subtitleKeys, titleKeys, titleQuery, titlesApi } from '@/lib/api/endpoints';
 import { removeConsequence } from '@/lib/title/facts';
 
 /** How often a downloading title refreshes its progress (paused in hidden tabs). */
 const DOWNLOAD_POLL_MS = 5000;
 
+/** `refetchInterval` for a title: every 5 s while it's downloading, otherwise not at all. */
+export const pollWhileDownloading = (title: Title | undefined): number | false =>
+  title?.library.availability_stage === 'downloading' ? DOWNLOAD_POLL_MS : false;
+
 /** A title page's data: polls while the title is downloading, so progress and the stage move on their own. */
 export function useTitle(mediaType: MediaType, tmdbId: number) {
   return useQuery({
     ...titleQuery(mediaType, tmdbId),
-    refetchInterval: (query) => (query.state.data?.library.availability_stage === 'downloading' ? DOWNLOAD_POLL_MS : false),
+    refetchInterval: (query) => pollWhileDownloading(query.state.data),
   });
 }
 
@@ -80,7 +84,10 @@ export function useTitleActions(title: Title) {
       });
       if (confirmed) remove.mutate(libraryId);
     },
-    /** After torrent search adds or replaces a torrent. */
+    /** After torrent search closes. */
     refetch,
+    /** After torrent search assigns a torrent: subtitle matches were graded against the old release. */
+    torrentChanged: () =>
+      Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: subtitleKeys.all })]),
   };
 }

@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { NotFoundView } from '@/components/system/NotFoundView';
+import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useOverArt } from '@/components/shell/ShellContext';
 import { TorrentSearchModal } from '@/components/torrent';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
@@ -44,7 +45,7 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
   const [search, setSearch] = useState<TorrentSearchContext | null>(null);
   const { library } = movie;
   const ready = library.availability_stage === 'ready';
-  const subtitles = useItemSubtitles('movie', ready ? library.library_id : null);
+  const subtitles = useItemSubtitles('movie', ready ? library.library_id : null, library.torrent?.info_hash ?? null);
   const copy = primaryActionFor(movie);
   useDocumentTitle(movie.title);
 
@@ -52,7 +53,7 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
   const onAction = (intent: StageIntent) => {
     if (intent === 'add') actions.add();
     else if (intent === 'find') findTorrent();
-    else if (intent === 'how_to_play') sheets.open('infuse-setup', library.webdav_path ? { path: library.webdav_path } : {});
+    else if (intent === 'how_to_play') sheets.open('infuse-setup', infuseSetupParams({ path: library.webdav_path, url: library.webdav_url }));
   };
   const busy = actions.adding ? 'add' : null;
 
@@ -88,7 +89,7 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
             setSearch(null);
             void actions.refetch();
           }}
-          onAdded={() => void actions.refetch()}
+          onAdded={() => void actions.torrentChanged()}
         />
       )}
     </>

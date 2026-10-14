@@ -11,17 +11,20 @@ function libraryTrail(path: string): string {
   return folders.join(' › ');
 }
 
-/** The server's WebDAV address plus an escaped path: the URL of one title. */
-function webdavUrl(base: string, path: string): string {
-  return base.replace(/\/+$/, '') + path.split('/').map(encodeURIComponent).join('/');
+/**
+ * `?sheet=infuse-setup` params for one title: its WebDAV path, and the URL
+ * the server built for it (`webdav_url`), which is what Copy copies.
+ */
+export function infuseSetupParams({ path, url }: { path: string | null; url: string | null }): Record<string, string> {
+  return { ...(path ? { path } : {}), ...(path && url ? { url } : {}) };
 }
 
 /**
  * "Play it in Infuse": the three steps and the WebDAV address (from /status).
  * With a title's `path`, the last step says where that title is and offers
- * its own URL.
+ * its `url` (or the path, when there's no URL).
  */
-export function InfuseSetupSheet({ path }: { path?: string | null }) {
+export function InfuseSetupSheet({ path, url }: { path?: string | null; url?: string | null }) {
   const { data, isPending, isError } = useQuery(statusQuery());
   return (
     <ol className="howto-steps">
@@ -68,7 +71,7 @@ export function InfuseSetupSheet({ path }: { path?: string | null }) {
               {libraryTrail(path)}. It appears after Infuse’s next library refresh (pull down to refresh).
             </p>
             <CopyField
-              value={data ? webdavUrl(data.webdav.url, path) : path}
+              value={url ?? path}
               label="WebDAV path of this title"
               hint="Open it in Infuse › Add files › WebDAV"
             >

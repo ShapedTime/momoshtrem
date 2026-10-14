@@ -4,7 +4,7 @@ import { Download, RefreshCw, X } from 'lucide-react';
 import { Banner, Button, Chip, IconButton, LoadingRegion, ReleaseName, Select, Skeleton, StatusPill } from '@/components/ui';
 import type { Subtitle, SubtitleCandidate } from '@/lib/api/contract';
 import { STATUS } from '@/lib/status';
-import { formatNumber, languageName, plural } from '@/lib/title/format';
+import { languageName, plural } from '@/lib/title/format';
 import { isStored, matchStatus, SUBTITLE_LANGUAGES } from '@/lib/title/subtitles';
 
 export type SubtitleSearchState =

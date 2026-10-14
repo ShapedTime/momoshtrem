@@ -1,15 +1,15 @@
 'use client';
 
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import { type CSSProperties, type ReactNode, useId, useState } from 'react';
-import { ChevronLeft, Film, Star, Tv } from 'lucide-react';
-import { IconButton, Media } from '@/components/ui';
+import { Film, Star, Tv } from 'lucide-react';
+import { Media } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import type { Title } from '@/lib/api/contract';
 import { creditLine } from '@/lib/title/facts';
 import { formatRuntime, formatYears } from '@/lib/title/format';
 import { cx } from '@/lib/utils/cx';
+import { BackButton } from './BackButton';
 import { ClampedText } from './ClampedText';
 import { WatchStateLine } from './WatchState';
 import { WhyCard } from './WhyCard';
@@ -45,15 +45,6 @@ function metaParts(title: Title): Array<{ key: string; node: ReactNode }> {
   if (title.genres.length) parts.push({ key: 'genres', node: title.genres.join(', ') });
   if (isShow && title.status) parts.push({ key: 'status', node: title.status });
   return parts;
-}
-
-function BackButton() {
-  const router = useRouter();
-  return (
-    <IconButton variant="glass" aria-label="Back" onClick={() => (window.history.length > 1 ? router.back() : router.push('/'))}>
-      <ChevronLeft size={22} aria-hidden="true" />
-    </IconButton>
-  );
 }
 
 /** The backdrop crossfades in over the ambient glow once it loads (HANDOFF §4.3). */
