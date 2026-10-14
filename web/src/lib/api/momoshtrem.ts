@@ -6,16 +6,10 @@ import type {
   MovieAssignmentResponse,
   ShowAssignmentResponse,
   RecentlyAiredResponse,
-  RefreshShowResult,
 } from '@/types/momoshtrem';
 import { parseMomoshtremError } from '@/types/momoshtrem';
 import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
 import type { TorrentDebugInfo } from '@/types/torrent-debug';
-import type {
-  SubtitleSearchResult,
-  Subtitle,
-  DownloadSubtitleRequest,
-} from '@/types/subtitle';
 
 /** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
 export const TOKEN_HEADER = 'X-Momoshtrem-Token';
@@ -173,18 +167,6 @@ class MomoshtremClient {
   }
 
   /**
-   * Get a single movie by library ID.
-   */
-  async getMovie(id: number): Promise<LibraryMovie> {
-    return this.request<LibraryMovie>(
-      'GET',
-      `/api/movies/${id}`,
-      undefined,
-      'get movie'
-    );
-  }
-
-  /**
    * Delete a movie from the library.
    */
   async deleteMovie(id: number): Promise<void> {
@@ -213,18 +195,6 @@ class MomoshtremClient {
     );
   }
 
-  /**
-   * Unassign torrent from a movie.
-   */
-  async unassignMovie(id: number): Promise<void> {
-    await this.request<void>(
-      'DELETE',
-      `/api/movies/${id}/assign`,
-      undefined,
-      'unassign movie torrent'
-    );
-  }
-
   // ============================================================================
   // Shows API
   // ============================================================================
@@ -239,19 +209,6 @@ class MomoshtremClient {
       '/api/shows',
       { tmdb_id: tmdbId },
       'add show to library'
-    );
-  }
-
-  /**
-   * Re-fetch seasons and episodes for a show from TMDB, upserting missing rows.
-   * Existing torrent assignments are preserved.
-   */
-  async refreshShow(id: number): Promise<RefreshShowResult> {
-    return this.request<RefreshShowResult>(
-      'POST',
-      `/api/shows/${id}/refresh`,
-      undefined,
-      'refresh show from TMDB'
     );
   }
 
@@ -334,17 +291,6 @@ class MomoshtremClient {
     if (!show) return null;
     // Fetch full show data including seasons
     return this.getShow(show.id);
-  }
-
-  /**
-   * Get combined library (movies and shows).
-   */
-  async getLibrary(): Promise<{ movies: LibraryMovie[]; shows: LibraryShow[] }> {
-    const [movies, shows] = await Promise.all([
-      this.getMovies(),
-      this.getShows(),
-    ]);
-    return { movies, shows };
   }
 
   // ============================================================================
@@ -456,18 +402,6 @@ class MomoshtremClient {
   }
 
   /**
-   * Get detailed status for a specific torrent.
-   */
-  async getTorrentStatus(infoHash: string): Promise<TorrentStatus> {
-    return this.request<TorrentStatus>(
-      'GET',
-      `/api/torrents/${infoHash}`,
-      undefined,
-      'get torrent status'
-    );
-  }
-
-  /**
    * Remove a torrent.
    * @param infoHash - The torrent info hash
    * @param deleteData - If true, also deletes downloaded data
@@ -506,18 +440,6 @@ class MomoshtremClient {
     );
   }
 
-  /**
-   * Unassign torrent from a specific episode.
-   */
-  async unassignEpisodeTorrent(episodeId: number): Promise<void> {
-    await this.request<void>(
-      'DELETE',
-      `/api/episodes/${episodeId}/assign`,
-      undefined,
-      'unassign episode torrent'
-    );
-  }
-
   // ============================================================================
   // Torrent Debug API
   // ============================================================================
@@ -531,93 +453,6 @@ class MomoshtremClient {
       `/api/torrents/${infoHash}/debug`,
       undefined,
       'get torrent debug info'
-    );
-  }
-
-  // ============================================================================
-  // Subtitles API
-  // ============================================================================
-
-  /**
-   * Search for subtitles on OpenSubtitles.
-   */
-  async searchSubtitles(
-    tmdbId: number,
-    type: 'movie' | 'episode',
-    languages: string[],
-    season?: number,
-    episode?: number
-  ): Promise<SubtitleSearchResult[]> {
-    const params = new URLSearchParams({
-      tmdb_id: tmdbId.toString(),
-      type,
-      languages: languages.join(','),
-    });
-
-    if (type === 'episode') {
-      if (season) params.set('season', season.toString());
-      if (episode) params.set('episode', episode.toString());
-    }
-
-    const result = await this.request<{ results: SubtitleSearchResult[] }>(
-      'GET',
-      `/api/subtitles/search?${params}`,
-      undefined,
-      'search subtitles'
-    );
-    return result.results || [];
-  }
-
-  /**
-   * Download and save a subtitle from OpenSubtitles.
-   */
-  async downloadSubtitle(params: DownloadSubtitleRequest): Promise<Subtitle> {
-    const result = await this.request<{ subtitle: Subtitle }>(
-      'POST',
-      '/api/subtitles/download',
-      params,
-      'download subtitle'
-    );
-    return result.subtitle;
-  }
-
-  /**
-   * Get all subtitles for a movie.
-   */
-  async getMovieSubtitles(movieId: number): Promise<Subtitle[]> {
-    // Since #4 the backend answers {items} (PLAN §6) without file_size.
-    const result = await this.request<{ items: Subtitle[] }>(
-      'GET',
-      `/api/movies/${movieId}/subtitles`,
-      undefined,
-      'get movie subtitles'
-    );
-    return (result.items || []).map((s) => ({ ...s, file_size: s.file_size ?? 0 }));
-  }
-
-  /**
-   * Get all subtitles for an episode.
-   */
-  async getEpisodeSubtitles(episodeId: number): Promise<Subtitle[]> {
-    // Since #4 the backend answers {items} (PLAN §6) without file_size.
-    const result = await this.request<{ items: Subtitle[] }>(
-      'GET',
-      `/api/episodes/${episodeId}/subtitles`,
-      undefined,
-      'get episode subtitles'
-    );
-    return (result.items || []).map((s) => ({ ...s, file_size: s.file_size ?? 0 }));
-  }
-
-  /**
-   * Delete a subtitle.
-   */
-  async deleteSubtitle(subtitleId: number): Promise<void> {
-    await this.request<void>(
-      'DELETE',
-      `/api/subtitles/${subtitleId}`,
-      undefined,
-      'delete subtitle'
     );
   }
 

@@ -65,11 +65,11 @@ describe('MomoshtremClient', () => {
     async function errorFor(init: FakeResponseInit): Promise<APIError> {
       fetchMock.mockResolvedValue(fakeResponse(init));
       try {
-        await new MomoshtremClient().getMovie(1);
+        await new MomoshtremClient().getMovies();
       } catch (error) {
         return error as APIError;
       }
-      throw new Error('expected getMovie to throw');
+      throw new Error('expected getMovies to throw');
     }
 
     it.each([401, 403])(
@@ -109,7 +109,7 @@ describe('MomoshtremClient', () => {
       const error = await errorFor({ status: 500, statusText: 'Internal Server Error' });
 
       expect(error.statusCode).toBe(500);
-      expect(error.message).toBe('Failed to get movie: Internal Server Error');
+      expect(error.message).toBe('Failed to get movies: Internal Server Error');
     });
   });
 });
