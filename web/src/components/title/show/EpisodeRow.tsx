@@ -83,6 +83,8 @@ export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFi
     <li
       ref={ref}
       id={episodeRowId(episode)}
+      // Focusable from script only: a jump or an expanded run moves focus here, so Tab goes on from this row
+      tabIndex={-1}
       className={cx('eprow', rich && 'eprow--rich', isNext && 'is-next', episode.state === 'watched' && 'is-watched', flash && 'flash')}
       style={style}
       data-index={position?.index}

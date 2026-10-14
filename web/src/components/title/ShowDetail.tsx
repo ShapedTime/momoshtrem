@@ -12,7 +12,7 @@ import { DOWNLOAD_POLL_MS, useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
 import { seasonQuery, titleKeys } from '@/lib/api/endpoints';
 import { useSheet } from '@/lib/sheets/useSheet';
-import { selectedSeason } from '@/lib/title/episodes';
+import { type JumpDestination, selectedSeason } from '@/lib/title/episodes';
 import { titleFacts } from '@/lib/title/facts';
 import { legacySearchContext } from '@/lib/title/legacy-search';
 import { primaryActionFor, type StageIntent } from '@/lib/title/stage-copy';
@@ -28,6 +28,19 @@ import { TitleMoreMenu } from './TitleMoreMenu';
 import { isTitleNotFound, TitleDetailSkeleton, TitleLoadError } from './TitleStates';
 import { TrailerCard } from './TrailerCard';
 import { OnTraktCard } from './WatchState';
+
+/** `?ep=` (an in-season number) or `?abs=` (an absolute one) for the selected season: where a cross-season jump lands. */
+function jumpFromUrl(params: URLSearchParams, season: number | null): JumpDestination | null {
+  const digits = (key: string) => {
+    const value = params.get(key);
+    return value !== null && /^\d+$/.test(value) ? Number(value) : null;
+  };
+  if (season === null) return null;
+  const absolute = digits('abs');
+  if (absolute !== null) return { season, absolute };
+  const episode = digits('ep');
+  return episode === null ? null : { season, episode };
+}
 
 /**
  * The selected season, polled while one of its episodes downloads. When a
@@ -68,8 +81,7 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
   useDocumentTitle(show.title);
 
   const view: EpisodeView = searchParams.get('view') === 'rich' ? 'rich' : 'compact';
-  const ep = searchParams.get('ep');
-  const initialEpisode = ep !== null && /^\d+$/.test(ep) ? Number(ep) : null;
+  const initialTarget = jumpFromUrl(searchParams, seasonNumber);
 
   /** Replace some query params (null removes one), keeping the rest and the scroll position. */
   const setParams = useCallback(
@@ -84,13 +96,14 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
     },
     [pathname, router, searchParams]
   );
-  const changeSeason = (next: number) => setParams({ season: String(next), ep: null });
+  const changeSeason = (next: number) => setParams({ season: String(next), ep: null, abs: null });
 
-  // `?ep=` is a one-off: once its season shows (and scrolled there), drop it so a refetch doesn't scroll again
+  // `?ep=`/`?abs=` are one-offs: once their season shows (and scrolled there), drop them so a refetch doesn't scroll again
   const seasonShown = season.status === 'success';
+  const hasTarget = initialTarget !== null;
   useEffect(() => {
-    if (initialEpisode !== null && seasonShown) setParams({ ep: null });
-  }, [initialEpisode, seasonShown, setParams]);
+    if (hasTarget && seasonShown) setParams({ ep: null, abs: null });
+  }, [hasTarget, seasonShown, setParams]);
   const findEpisode = (episode: EpisodeSummary) =>
     openLegacySearch(legacySearchContext(show, { season: episode.season_number, episode: episode.episode_number }));
 
@@ -125,8 +138,14 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
             onOpenEpisode={(episode) => sheets.open('episode', episodeSheetParams(show, episode))}
             view={view}
             onViewChange={(next) => setParams({ view: next === 'rich' ? 'rich' : null })}
-            onJumpToSeason={(number, episode) => setParams({ season: String(number), ep: String(episode) })}
-            initialEpisode={initialEpisode}
+            onJumpToSeason={(destination) =>
+              setParams({
+                season: String(destination.season),
+                ep: destination.episode === undefined ? null : String(destination.episode),
+                abs: destination.absolute === undefined ? null : String(destination.absolute),
+              })
+            }
+            initialTarget={initialTarget}
           />
           <CastRow cast={show.cast} />
           <TrailerCard youtubeKey={show.trailer_youtube_key} backdropPath={show.backdrop_path} titleName={show.title} />

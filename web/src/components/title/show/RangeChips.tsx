@@ -1,16 +1,18 @@
-import type { EpisodeRange } from '@/lib/api/contract';
+import type { EpisodeOrdering, EpisodeRange } from '@/lib/api/contract';
 import { rangeLabel } from '@/lib/title/episodes';
 import { cx } from '@/lib/utils/cx';
 
 interface RangeChipsProps {
   ranges: EpisodeRange[];
+  /** The rows' ordering: arcs show absolute numbers only where the rows do. */
+  ordering: EpisodeOrdering;
   /** The pressed chip: the frontier's, then wherever you jumped. */
   active: number | null;
   onSelect: (range: EpisodeRange, index: number) => void;
 }
 
 /** Story arcs or blocks of ~10 in a long season; each jumps to its first episode and says how many are missing. */
-export function RangeChips({ ranges, active, onSelect }: RangeChipsProps) {
+export function RangeChips({ ranges, ordering, active, onSelect }: RangeChipsProps) {
   if (!ranges.length) return null;
   return (
     <div className="ep-range" role="group" aria-label="Episode ranges">
@@ -22,7 +24,7 @@ export function RangeChips({ ranges, active, onSelect }: RangeChipsProps) {
           aria-pressed={index === active}
           onClick={() => onSelect(range, index)}
         >
-          {rangeLabel(range)}
+          {rangeLabel(range, ordering)}
           {range.missing > 0 && <span className="n">{range.missing} missing</span>}
         </button>
       ))}

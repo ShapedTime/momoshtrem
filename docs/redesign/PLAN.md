@@ -280,7 +280,13 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
 - `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item.
-- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=&page_size=` (50 by default, max 200): items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading). `status=watching` and `status=needs_review` stay empty until B5 and B2; until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
+- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=added|title|last_watched|size&q=&page=&page_size=` (50 by default, max 200) → `Paginated<LibraryItem>`. Replaces the per-item TMDB calls. Types: `web/src/lib/api/contract/library.ts`.
+  ```
+  LibraryItem { id, media_type, tmdb_id, title, year, poster_path, availability_stage,
+                episodes_total, episodes_ready, episodes_watched,   // shows; null for movies
+                needs_review, size_bytes, added_at, last_watched_at }
+  ```
+  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` is 0 and `last_watched_at` null until B2 and B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading). `status=watching` and `status=needs_review` stay empty until B5 and B2; until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
 - `GET /shows/{id}/episode-groups`: `{items: [{id, name, type, group_count, episode_count}]}`, TMDB episode groups for the ordering picker.
 - Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata: no cast, crew, overview or similar titles); `503 unavailable` without a TMDB key, library titles included.

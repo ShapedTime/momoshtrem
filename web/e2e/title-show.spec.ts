@@ -109,20 +109,24 @@ test.describe('show page', () => {
     await signIn(page, '/tv/209867');
     const options = page.getByRole('button', { name: /^S01E28 options/ });
     const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again' });
+    // Right after a sheet closes the router may still be settling its Back and drop a push: retry the open
+    const openSheet = () =>
+      expect(async () => {
+        await options.click();
+        await expect(sheet).toBeVisible({ timeout: 2000 });
+      }).toPass();
 
-    await options.click();
-    await expect(sheet).toBeVisible();
+    await openSheet();
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
     await expect(page).toHaveURL(/\/tv\/209867$/);
 
-    await options.click();
-    await expect(sheet).toBeVisible();
+    await openSheet();
     await page.goBack();
     await expect(sheet).toBeHidden();
     await expect(page).toHaveURL(/\/tv\/209867$/);
 
-    await options.click();
+    await openSheet();
     await sheet.getByRole('button', { name: 'Replace torrent' }).click();
     await expect(sheet).toBeHidden();
     const search = page.getByRole('dialog', { name: `Search: ${FRIEREN} S01E28` });
@@ -188,6 +192,10 @@ test.describe('show page', () => {
     await expect(row).toContainText('#1100 · S22E15');
     await expect(row).toHaveClass(/flash/);
     await expect(row).toBeInViewport();
+    // Focus moves to the row, so Tab carries on from episode 15, not the field
+    await expect(row).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(row.getByRole('button', { name: /^S22E15 options/ })).toBeFocused();
 
     await jump.fill('5000');
     await jump.press('Enter');
@@ -200,7 +208,17 @@ test.describe('show page', () => {
     const far = page.locator('#ep-109');
     await expect(far).toContainText('#1000 · S21E109');
     await expect(far).toBeInViewport();
-    await expect(page).not.toHaveURL(/[?&]ep=/);
+    await expect(far).toBeFocused();
+    await expect(page).not.toHaveURL(/[?&](ep|abs)=/);
+  });
+
+  test('a deep link to an absolute number lands on its row', async ({ page }) => {
+    await signIn(page, '/tv/37854?season=21&abs=1047');
+    const row = page.locator('#ep-156');
+    await expect(row).toContainText('#1047 · S21E156');
+    await expect(row).toBeInViewport();
+    await expect(row).toBeFocused();
+    await expect(page).toHaveURL(/\?season=21$/);
   });
 
   test('range chips jump, and the watched run expands in place', async ({ page }) => {
@@ -212,11 +230,14 @@ test.describe('show page', () => {
     await chips.getByRole('button', { name: '11–20' }).click();
     await expect(chips.getByRole('button', { name: '11–20' })).toHaveAttribute('aria-pressed', 'true');
     await expect(list.locator('#ep-11')).toBeInViewport();
+    await expect(list.locator('#ep-11')).toBeFocused();
     await expect(list.getByRole('listitem')).toHaveCount(38);
 
     await page.goto('/tv/209867');
     await page.getByRole('button', { name: 'Show episodes 1–25 (all watched)' }).click();
     await expect(page.getByRole('button', { name: /Show episodes/ })).toHaveCount(0);
+    // The button is gone: focus goes to the first row it brought back, not the page
+    await expect(list.locator('#ep-1')).toBeFocused();
     await expect(list.getByRole('listitem')).toHaveCount(38);
     await expect(list.locator('#ep-1')).toContainText('The Journey’s End');
   });

@@ -8,7 +8,8 @@ import { type JumpTarget, parseJump } from '@/lib/title/episodes';
 interface JumpToEpisodeProps {
   /** How to read the input (parseJump's context). */
   context: Parameters<typeof parseJump>[1];
-  onJump: (target: Extract<JumpTarget, { ok: true }>) => void;
+  /** Go there; a hint when there's no such row after all (an absolute number the season skips). */
+  onJump: (target: Extract<JumpTarget, { ok: true }>) => string | null;
 }
 
 /** "Jump to episode": 29, 1100 or S02E05; Enter goes there, anything else gets a hint. */
@@ -23,15 +24,17 @@ export function JumpToEpisode({ context, onJump }: JumpToEpisodeProps) {
       setHint(target.hint);
       return;
     }
-    setHint(null);
-    onJump(target);
+    setHint(onJump(target));
   };
 
+  // A text field, not numeric: the iPhone number pad can't type S02E05
   return (
     <form className="jump" onSubmit={submit} role="search" aria-label="Jump to episode">
       <Input
-        inputMode="numeric"
         enterKeyHint="go"
+        autoCapitalize="characters"
+        autoCorrect="off"
+        spellCheck={false}
         autoComplete="off"
         placeholder="Jump to episode"
         aria-label="Jump to episode number"

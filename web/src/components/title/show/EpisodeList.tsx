@@ -6,10 +6,20 @@ import type { EpisodeOrdering, EpisodeSummary } from '@/lib/api/contract';
 import { shouldVirtualize } from '@/lib/title/episodes';
 import { EpisodeRow, type EpisodeRowProps, episodeRowId } from './EpisodeRow';
 
+export interface ScrollToEpisodeOptions {
+  /** Scroll it to the middle of the screen (default). Off when it's already where the user looks. */
+  scroll?: boolean;
+  /** A short amber flash (default). */
+  flash?: boolean;
+}
+
 /** What the section can ask of the list. */
 export interface EpisodeListHandle {
-  /** Scroll an in-season episode number into view and flash it; false when it isn't in the list. */
-  scrollToEpisode: (episodeNumber: number) => boolean;
+  /**
+   * Bring an in-season episode into view, flash it and move focus to it, so
+   * Tab carries on from that row; false when it isn't in the list.
+   */
+  scrollToEpisode: (episodeNumber: number, options?: ScrollToEpisodeOptions) => boolean;
 }
 
 interface EpisodeListProps extends Pick<EpisodeRowProps, 'onFind' | 'onOpen'> {
@@ -43,6 +53,16 @@ function rowProps(props: RowProps, episode: EpisodeSummary, flashId: number | nu
 }
 
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Focus a row without scrolling to it again. A virtualised row may only
+ * render a few frames after the scroll, so keep trying briefly.
+ */
+function focusRow(episode: EpisodeSummary, frames = 12) {
+  const row = document.getElementById(episodeRowId(episode));
+  if (row) row.focus({ preventScroll: true });
+  else if (frames > 0) window.requestAnimationFrame(() => focusRow(episode, frames - 1));
+}
 
 /**
  * Rows above `VIRTUALIZE_ABOVE` (60) go through the window virtualiser: only
@@ -82,13 +102,16 @@ function VirtualRows({ episodes, label, flashId, onFlash, listRef, ...props }: V
   });
 
   useImperativeHandle(listRef, () => ({
-    scrollToEpisode: (episodeNumber) => {
+    scrollToEpisode: (episodeNumber, { scroll = true, flash = true } = {}) => {
       const index = episodes.findIndex((episode) => episode.episode_number === episodeNumber);
       if (index < 0) return false;
       // Next frame: the list's offset (scrollMargin) is measured after the first render.
       // Instant, because smooth scrolling can't land precisely on rows of measured height.
-      window.requestAnimationFrame(() => virtualizer.scrollToIndex(index, { align: 'center' }));
-      onFlash(episodes[index].id);
+      window.requestAnimationFrame(() => {
+        if (scroll) virtualizer.scrollToIndex(index, { align: 'center' });
+        focusRow(episodes[index]);
+      });
+      if (flash) onFlash(episodes[index].id);
       return true;
     },
   }));
@@ -133,12 +156,13 @@ export function EpisodeList({ label, episodes, ref, ...props }: EpisodeListProps
   useImperativeHandle(
     virtual ? undefined : ref,
     () => ({
-      scrollToEpisode: (episodeNumber) => {
+      scrollToEpisode: (episodeNumber, { scroll = true, flash: flashRow = true } = {}) => {
         const episode = episodes.find((e) => e.episode_number === episodeNumber);
         const row = episode && document.getElementById(episodeRowId(episode));
         if (!episode || !row) return false;
-        row.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-        flash(episode.id);
+        if (scroll) row.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+        row.focus({ preventScroll: true });
+        if (flashRow) flash(episode.id);
         return true;
       },
     }),

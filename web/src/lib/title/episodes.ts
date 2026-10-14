@@ -75,10 +75,18 @@ export const shouldVirtualize = (rows: number) => rows > VIRTUALIZE_ABOVE;
 /** Jump to episode and range chips show for seasons longer than this (or with absolute numbering). */
 export const LONG_SEASON = 20;
 
-/** Range chip text: "Egghead · 1086–1155" for an arc (absolute numbers when known), the block label ("21–28") otherwise. */
-export function rangeLabel(range: EpisodeRange): string {
+/** Where absolute numbers mean something to the user: the rows show them under these orderings. */
+const showsAbsolute = (ordering: EpisodeOrdering) => ordering === 'absolute' || ordering === 'episode_group';
+
+/**
+ * Range chip text: an arc with its numbers ("Egghead · 1086–1115", absolute
+ * under absolute or episode-group ordering, as the rows read), a block by its
+ * label ("21–28").
+ */
+export function rangeLabel(range: EpisodeRange, ordering: EpisodeOrdering): string {
   if (range.kind === 'block') return range.label;
-  const [from, to] = range.absolute_from !== null && range.absolute_to !== null ? [range.absolute_from, range.absolute_to] : [range.from, range.to];
+  const absolute = showsAbsolute(ordering) && range.absolute_from !== null && range.absolute_to !== null;
+  const [from, to] = absolute ? [range.absolute_from, range.absolute_to] : [range.from, range.to];
   return `${range.label} · ${from}–${to}`;
 }
 
@@ -88,18 +96,10 @@ export function rangeIndexFor(ranges: EpisodeRange[], episodeNumber: number): nu
   return index < 0 ? null : index;
 }
 
-/** The chip pressed when a season opens: the one holding the frontier, else the next-up row. */
-export function defaultRangeIndex(
-  ranges: EpisodeRange[],
-  show: Pick<ShowTitle, 'library'>,
-  seasonNumber: number,
-  episodes: EpisodeSummary[]
-): number | null {
+/** The chip pressed when a season opens: the one holding the frontier (which is also the next-up row). */
+export function defaultRangeIndex(ranges: EpisodeRange[], show: Pick<ShowTitle, 'library'>, seasonNumber: number): number | null {
   const missing = show.library.missing;
-  if (missing && missing.season_number === seasonNumber) return rangeIndexFor(ranges, missing.from);
-  const nextId = nextUpEpisodeId(show, seasonNumber, episodes);
-  const next = episodes.find((episode) => episode.id === nextId);
-  return next ? rangeIndexFor(ranges, next.episode_number) : null;
+  return missing && missing.season_number === seasonNumber ? rangeIndexFor(ranges, missing.from) : null;
 }
 
 /**
@@ -114,7 +114,14 @@ export function earlierWatched(episodes: EpisodeSummary[]): { count: number; fro
   return { count: run, from: episodes[0].episode_number, to: episodes[run - 1].episode_number };
 }
 
-export type JumpTarget = { ok: true; season: number; episode: number } | { ok: false; hint: string };
+/**
+ * Where a jump goes: an in-season episode number, or an absolute number to
+ * look up among the season's episodes once they load (absolute numbers
+ * needn't be contiguous: gaps, reordered groups).
+ */
+export type JumpDestination = { season: number; episode: number; absolute?: undefined } | { season: number; absolute: number; episode?: undefined };
+
+export type JumpTarget = ({ ok: true } & JumpDestination) | { ok: false; hint: string };
 
 interface JumpContext {
   ordering: EpisodeOrdering;
@@ -124,16 +131,17 @@ interface JumpContext {
 
 const JUMP_HELP = 'Type an episode number, like 29, 1100 or S02E05.';
 
-/** The regular season whose absolute numbers hold `n`. */
+/** The regular season whose absolute range holds `n`. */
 function seasonByAbsolute(n: number, seasons: JumpContext['seasons']) {
   return seasons.find((s) => s.season_number > 0 && s.absolute_from !== null && s.absolute_to !== null && n >= s.absolute_from && n <= s.absolute_to);
 }
 
 /**
  * What "Jump to episode" means (pure; never throws): `S02E05`; an in-season
- * number ("29"); or an absolute number ("1100"), mapped to its season
- * through each season's absolute range. Absolute numbers win with absolute
- * ordering; otherwise they're the fallback for a number past the season's end.
+ * number ("29"); or an absolute number ("1100"), whose season is the one
+ * whose absolute range holds it. Absolute numbers win with absolute ordering;
+ * otherwise they're the fallback for a number past the season's end. From
+ * Specials, absolute numbers still find their regular season.
  */
 export function parseJump(input: string, { ordering, seasons, currentSeason }: JumpContext): JumpTarget {
   const text = input.trim();
@@ -153,10 +161,18 @@ export function parseJump(input: string, { ordering, seasons, currentSeason }: J
   const n = Number(text.replace('#', ''));
   const current = seasons.find((s) => s.season_number === currentSeason);
   const inSeason = current && n >= 1 && n <= current.episodes_total ? { ok: true as const, season: currentSeason, episode: n } : null;
-  const byAbsolute = currentSeason === 0 ? undefined : seasonByAbsolute(n, seasons);
-  const absolute = byAbsolute?.absolute_from != null ? { ok: true as const, season: byAbsolute.season_number, episode: n - byAbsolute.absolute_from + 1 } : null;
+  const byAbsolute = seasonByAbsolute(n, seasons);
+  const absolute = byAbsolute ? { ok: true as const, season: byAbsolute.season_number, absolute: n } : null;
 
   const target = ordering === 'absolute' ? (absolute ?? inSeason) : (inSeason ?? absolute);
   if (target) return target;
   return { ok: false, hint: current ? `${seasonLabel(current)} has ${current.episodes_total} episodes.` : JUMP_HELP };
+}
+
+/** The in-season episode number a destination lands on among the season's episodes, or null when there's none. */
+export function resolveJump(destination: JumpDestination, episodes: Pick<EpisodeSummary, 'episode_number' | 'absolute_number'>[]): number | null {
+  if (destination.absolute !== undefined) {
+    return episodes.find((episode) => episode.absolute_number === destination.absolute)?.episode_number ?? null;
+  }
+  return episodes.some((episode) => episode.episode_number === destination.episode) ? destination.episode : null;
 }
