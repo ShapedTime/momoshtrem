@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { LibraryMovie } from '@/types/momoshtrem';
 
 interface RouteParams {
@@ -15,7 +16,7 @@ interface RouteParams {
 export async function GET(
   _request: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse<LibraryMovie | { error: string }>> {
+): Promise<NextResponse<LibraryMovie | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 
@@ -53,7 +54,7 @@ export async function GET(
 export async function DELETE(
   _request: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse<{ success: boolean } | { error: string }>> {
+): Promise<NextResponse<{ success: boolean } | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

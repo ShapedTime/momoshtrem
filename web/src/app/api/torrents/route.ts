@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { TorrentStatus } from '@/types/torrent';
 
 /**
  * GET /api/torrents
  * List all active torrents with their status.
  */
-export async function GET(): Promise<NextResponse<{ torrents: TorrentStatus[] } | { error: string }>> {
+export async function GET(): Promise<NextResponse<{ torrents: TorrentStatus[] } | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

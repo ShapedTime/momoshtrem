@@ -5,8 +5,9 @@ import { BACKEND_AUTH_CODE, BACKEND_AUTH_MESSAGE, TOKEN_HEADER } from './momosht
 
 /**
  * Top-level path segments of the PLAN §6 contract that the browser may reach
- * through /api/*. Anything else 404s here, so the proxy never exposes more of
- * the backend than the contract.
+ * through /api/*. Anything else 404s here. The allowlist is by first segment
+ * only, so older backend routes under these prefixes are reachable too (still
+ * behind the session check).
  */
 export const BACKEND_PREFIXES = new Set([
   'titles',

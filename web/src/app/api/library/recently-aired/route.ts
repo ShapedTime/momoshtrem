@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { RecentlyAiredResponse } from '@/types/momoshtrem';
 
 /**
@@ -12,7 +13,7 @@ import type { RecentlyAiredResponse } from '@/types/momoshtrem';
  */
 export async function GET(
   request: NextRequest
-): Promise<NextResponse<RecentlyAiredResponse | { error: string }>> {
+): Promise<NextResponse<RecentlyAiredResponse | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

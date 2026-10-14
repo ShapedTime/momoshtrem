@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { tmdbClient } from '@/lib/api/tmdb';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { SearchResult } from '@/types/tmdb';
 
 export async function GET(
   request: NextRequest
-): Promise<NextResponse<SearchResult[] | { error: string }>> {
+): Promise<NextResponse<SearchResult[] | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

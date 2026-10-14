@@ -55,6 +55,11 @@ test.describe('sign in', () => {
     await expect(page.locator('input[name="redirect"]')).toHaveValue('/');
   });
 
+  test('never redirects off-site through dot segments', async ({ page }) => {
+    await page.goto('/login?redirect=%2F..%2F%2Fevil.example');
+    await expect(page.locator('input[name="redirect"]')).toHaveValue('/');
+  });
+
   test('a signed-in visit to /login goes straight to the destination', async ({ page }) => {
     await signIn(page);
     await page.goto('/login?redirect=%2Fdev%2Fui');

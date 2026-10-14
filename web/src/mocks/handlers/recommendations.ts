@@ -1,4 +1,5 @@
 import { http, HttpResponse } from 'msw';
+import type { AskThreadSummary } from '@/lib/api/contract';
 import { ASK_EVENTS, REC_HOME, REC_RUN, THREADS, thread } from '../fixtures/recommendations';
 import { accepted, latency } from './util';
 
@@ -9,7 +10,7 @@ export const recommendationsHandlers = [
   }),
   http.post('*/api/recommendations/refresh', () => accepted({ run_id: REC_RUN.id })),
   http.get('*/api/recommendations/runs/:id', () => HttpResponse.json(REC_RUN)),
-  http.get('*/api/recommendations/threads', () => HttpResponse.json({ items: THREADS })),
+  http.get('*/api/recommendations/threads', () => HttpResponse.json<{ items: AskThreadSummary[] }>({ items: THREADS })),
   http.get('*/api/recommendations/threads/:id', ({ params }) => HttpResponse.json(thread(Number(params.id)))),
   http.post('*/api/recommendations/feedback', () => new HttpResponse(null, { status: 204 })),
   // Ask streams Server-Sent Events: status → item → text deltas → done

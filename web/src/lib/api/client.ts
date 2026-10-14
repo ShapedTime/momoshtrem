@@ -88,11 +88,16 @@ export async function apiJson<T>(input: string, init?: RequestInit & { json?: un
   return body as T;
 }
 
-/** Same derivation as the backend's internal/api/errors.go. */
+/**
+ * Same derivation as the backend's internal/api/errors.go, plus 502
+ * `bad_gateway`, the web proxy's own code.
+ */
 function statusCode(status: number): string {
   switch (status) {
     case 400:
       return 'bad_request';
+    case 401:
+      return 'unauthorized';
     case 403:
       return 'forbidden';
     case 404:
@@ -110,7 +115,7 @@ function statusCode(status: number): string {
     case 504:
       return 'timeout';
     default:
-      return status >= 500 ? 'internal_error' : 'error';
+      return status >= 500 ? 'internal_error' : 'bad_request';
   }
 }
 

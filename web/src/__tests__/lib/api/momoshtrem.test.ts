@@ -87,7 +87,7 @@ describe('MomoshtremClient', () => {
       }
     );
 
-    it('reads the message from the structured error shape', async () => {
+    it('reads the code and message from the structured error shape', async () => {
       const error = await errorFor({
         status: 404,
         body: { error: { code: 'not_found', message: 'Movie not found' } },
@@ -95,7 +95,7 @@ describe('MomoshtremClient', () => {
 
       expect(error.statusCode).toBe(404);
       expect(error.message).toBe('Movie not found');
-      expect(error.code).toBe('API_ERROR');
+      expect(error.code).toBe('not_found');
     });
 
     it('still reads the legacy string error shape', async () => {

@@ -75,6 +75,11 @@ describe('apiJson', () => {
     await expect(apiJson('/api/library/movies')).rejects.toMatchObject({ status: 500, code: 'internal_error', message: 'Failed to fetch movies' });
   });
 
+  it('derives the code from the status like the backend when the body has none', async () => {
+    respond(418);
+    await expect(apiJson('/api/x')).rejects.toMatchObject({ status: 418, code: 'bad_request' });
+  });
+
   it('resolves 204 to undefined', async () => {
     respond(204);
     await expect(apiJson('/api/x', { method: 'DELETE' })).resolves.toBeUndefined();

@@ -6,10 +6,15 @@ import { SESSION_COOKIE_NAME } from '@/config/auth';
 
 const env = process.env;
 
-function formRequest(fields: Record<string, string>, { json = false, xff = '203.0.113.5' } = {}) {
+function formRequest(fields: Record<string, string>, { json = false, xff = '203.0.113.5', site = '' } = {}) {
   return new NextRequest('http://localhost:3000/api/auth', {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': xff, ...(json ? { accept: 'application/json' } : {}) },
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-forwarded-for': xff,
+      ...(json ? { accept: 'application/json' } : {}),
+      ...(site ? { 'sec-fetch-site': site } : {}),
+    },
     body: new URLSearchParams(fields).toString(),
   });
 }
@@ -77,6 +82,16 @@ describe('POST /api/auth (JS-enhanced, JSON)', () => {
     // A different client isn't affected
     const other = await POST(formRequest({ username: 'teymur', password: 'correct horse' }, { json: true, xff: '198.51.100.1' }));
     expect(other.status).toBe(200);
+  });
+
+  it('refuses cross-site posts before counting them as failures', async () => {
+    for (let i = 0; i < 3; i++) {
+      const response = await POST(formRequest({ username: 'teymur', password: 'x' }, { json: true, site: 'cross-site' }));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: { code: 'forbidden', message: expect.any(String) } });
+    }
+    const sameOrigin = await POST(formRequest({ username: 'teymur', password: 'x' }, { json: true, site: 'same-origin' }));
+    expect(await sameOrigin.json()).toMatchObject({ error: { code: 'invalid_credentials' }, remaining_attempts: 2 });
   });
 });
 
