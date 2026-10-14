@@ -12,3 +12,10 @@ export const notFound = (message = 'Not found') => apiError(404, 'not_found', me
 export const noContent = () => new HttpResponse(null, { status: 204 });
 
 export const accepted = (body: JobAccepted | RunAccepted) => HttpResponse.json(body, { status: 202 });
+
+/** For request-body guards: a JSON object whose fields can be checked one by one. */
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** The request's JSON body, or undefined when it isn't JSON. */
+export const jsonBody = (request: Request): Promise<unknown> => request.json().catch(() => undefined);

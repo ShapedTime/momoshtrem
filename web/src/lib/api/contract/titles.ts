@@ -52,6 +52,9 @@ export interface MissingRun {
   /** In-season episode numbers. */
   from: number;
   to: number;
+  /** Null without absolute numbers; with them, "Find episodes 1122–1123" needs only the title. */
+  absolute_from: number | null;
+  absolute_to: number | null;
   count: number;
 }
 
@@ -70,7 +73,7 @@ export interface TitleLibraryState {
   needs_review: number;
   /** The assignment job to review (B2/#5). */
   review_job_id: number | null;
-  /** Shows: aired regular episodes, and how many of them have a file. Null for movies. */
+  /** Shows: aired regular episodes, and how many of them have a file. Null for movies and while not in the library. */
   episodes_total: number | null;
   episodes_ready: number | null;
   /** Shows: what "Find episodes 29–38" offers. */
@@ -135,6 +138,7 @@ export interface MovieTitle extends TitleBase {
 export interface SeasonSummary {
   season_number: number;
   name: string;
+  /** Every episode TMDB lists, upcoming ones included. */
   episodes_total: number;
   /** Episodes with a file (ready, watched or downloading). */
   ready: number;
@@ -187,6 +191,7 @@ export interface ShowTitle extends TitleBase {
   media_type: 'tv';
   status: string | null;
   is_anime: boolean;
+  /** Set to `absolute` when the show is added as anime, else `aired`. */
   episode_ordering: EpisodeOrdering;
   episode_group_id: string | null;
   include_specials: boolean;

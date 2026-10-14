@@ -95,12 +95,36 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
 });
 
 describe('the mock library keeps what the page changed', () => {
-  it('walks a movie from not in the library to needs a torrent and back', async () => {
+  it('walks a movie from not in the library to needs a torrent and back, in /library too', async () => {
+    const listed = async () => (await libraryApi.list({ type: 'movie' })).items.map((item) => item.tmdb_id);
     expect((await titlesApi.get('movie', 666277)).library.availability_stage).toBe('none');
+    expect(await listed()).not.toContain(666277);
     const added = await titlesApi.addMovie(666277);
     expect((await titlesApi.get('movie', 666277)).library).toMatchObject({ library_id: added.id, availability_stage: 'needs_torrent', webdav_path: null });
+    expect(await listed()).toContain(666277);
     await titlesApi.removeMovie(added.id);
     expect((await titlesApi.get('movie', 666277)).library.availability_stage).toBe('none');
+    expect(await listed()).not.toContain(666277);
+  });
+
+  it('answers 400 bad_request for a TMDB id it doesn’t know, as the legacy backend does', async () => {
+    await expect(titlesApi.addShow(1)).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+  });
+
+  it('opens each show on its default season and orders anime by absolute number', async () => {
+    const shows = await Promise.all([209867, 57243, 37854, 95396].map((id) => titlesApi.get('tv', id)));
+    expect(shows.map((show) => show.media_type === 'tv' && [show.default_season, show.episode_ordering])).toEqual([
+      [1, 'absolute'],
+      [4, 'aired'],
+      [22, 'absolute'],
+      [2, 'aired'],
+    ]);
+  });
+
+  it('promises no finish time while downloading', async () => {
+    const titles = await Promise.all([titlesApi.get('movie', 157336), titlesApi.get('tv', 247767)]);
+    expect(titles.map((title) => title.library.availability_stage)).toEqual(['downloading', 'downloading']);
+    expect(titles.map((title) => title.library.download?.eta_seconds)).toEqual([null, null]);
   });
 
   it('gives a ready movie a path Infuse can open, until its torrent is unassigned', async () => {
@@ -116,7 +140,7 @@ describe('the mock library keeps what the page changed', () => {
   it('reports Frieren’s frontier, files to review and season blocks', async () => {
     expect((await titlesApi.get('tv', 209867)).library).toMatchObject({
       availability_stage: 'needs_torrent',
-      missing: { season_number: 1, from: 29, to: 38, count: 10 },
+      missing: { season_number: 1, from: 29, to: 38, absolute_from: 29, absolute_to: 38, count: 10 },
       needs_review: 2,
       review_job_id: 101,
     });
@@ -131,6 +155,14 @@ describe('the mock library keeps what the page changed', () => {
     expect((await titlesApi.get('tv', 95396)).library).toMatchObject({
       availability_stage: 'needs_torrent',
       missing: { season_number: 2, from: 9, to: 9, count: 1 },
+    });
+  });
+
+  it('gives the missing run absolute numbers, so the hero can offer #1121 from the title alone', async () => {
+    await titlesApi.unassignEpisode(122036); // One Piece S22E36 (#1121); E37–E38 haven't aired
+    expect((await titlesApi.get('tv', 37854)).library).toMatchObject({
+      availability_stage: 'needs_torrent',
+      missing: { season_number: 22, from: 36, to: 36, absolute_from: 1121, absolute_to: 1121, count: 1 },
     });
   });
 
@@ -160,6 +192,15 @@ describe('the mock library keeps what the page changed', () => {
 
   it('keeps subtitles that came with the torrent', async () => {
     await expect(subtitlesApi.remove('movie', 1, 1)).rejects.toMatchObject({ status: 409, code: 'conflict' });
+  });
+
+  it('drops torrent subtitles and stops ranking once the file is unassigned', async () => {
+    await titlesApi.unassignMovie(1);
+    const search = await subtitlesApi.search('movie', 1, ['az']);
+    expect(search.release_name).toBeNull();
+    expect(new Set(search.items.map((item) => item.match))).toEqual(new Set(['unknown']));
+    const { items: stored } = await subtitlesApi.list('movie', 1);
+    expect(stored.map((s) => `${s.language_code}:${s.source}:${s.match}`)).toEqual(['ru:opensubtitles:unknown']);
   });
 });
 

@@ -73,6 +73,8 @@ export interface ShowSeed extends TitleSeed {
   episode_run_time: number;
   review_job_id?: number;
   seeders?: number;
+  /** The release the episodes' files came from (one per show here; subtitles rank against it). */
+  release?: string;
   seasons: SeasonSeed[];
 }
 
@@ -125,6 +127,7 @@ const DOCTOR_WHO = [
 export const SHOWS: Record<number, ShowSeed> = {
   209867: {
     key: 0,
+    release: '[SubsPlease] Sousou no Frieren (01-28) (1080p) [Batch]',
     color: '#2f8f7f',
     vote_average: 8.9,
     vote_count: 512,
@@ -176,6 +179,7 @@ export const SHOWS: Record<number, ShowSeed> = {
   },
   37854: {
     key: 1,
+    release: 'One.Piece.S22.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG',
     color: '#b5532a',
     vote_average: 8.7,
     vote_count: 4870,
@@ -235,6 +239,7 @@ export const SHOWS: Record<number, ShowSeed> = {
   },
   57243: {
     key: 2,
+    release: 'Doctor.Who.2005.S01-S04.1080p.BluRay.x264-SHORTBREHD',
     color: '#1f4f8f',
     vote_average: 7.5,
     vote_count: 3120,
@@ -295,6 +300,7 @@ export const SHOWS: Record<number, ShowSeed> = {
   },
   95396: {
     key: 3,
+    release: 'Severance.S02.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX',
     color: '#2c5a6b',
     vote_average: 8.4,
     vote_count: 2310,
@@ -351,6 +357,7 @@ export const SHOWS: Record<number, ShowSeed> = {
   },
   82728: {
     key: 4,
+    release: 'Bluey.S03.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb',
     color: '#3d7fc4',
     vote_average: 8.7,
     vote_count: 410,
@@ -374,6 +381,7 @@ export const SHOWS: Record<number, ShowSeed> = {
   },
   247767: {
     key: 5,
+    release: 'The.Studio.2025.S01.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.H.265-FLUX',
     color: '#8a5a2b',
     vote_average: 7.9,
     vote_count: 220,
@@ -473,7 +481,7 @@ export const MOVIES: Record<number, MovieSeed> = {
       resolution: '2160p',
       source: 'WEB-DL',
       added_at: iso(12),
-      state: 'idle',
+      state: 'not_loaded',
       seeders: null,
     },
   },

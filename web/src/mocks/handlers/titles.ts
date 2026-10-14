@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { AddTitleResult, EpisodeGroup, ShowSettingsPatch } from '@/lib/api/contract';
+import type { AddTitleResult, ClassifierMode, EpisodeGroup, EpisodeOrdering, ShowSettingsPatch } from '@/lib/api/contract';
 import { findTitle } from '../fixtures/catalog';
 import {
   addToLibrary,
@@ -11,7 +11,7 @@ import {
   type MockLibrary,
   seedLibrary,
 } from '../fixtures/titles';
-import { apiError, latency, noContent, notFound } from './util';
+import { apiError, isRecord, jsonBody, latency, noContent, notFound } from './util';
 
 /** This page's library: adds, removes, unassigns and settings stick until a reload. */
 let library: MockLibrary = seedLibrary();
@@ -33,6 +33,21 @@ const MEDIA = [
   ['tv', 'shows'],
 ] as const;
 
+const ORDERINGS: EpisodeOrdering[] = ['aired', 'absolute', 'episode_group'];
+const CLASSIFIER_MODES: ClassifierMode[] = ['auto', 'rules_only', 'ai_always'];
+
+const isAddRequest = (body: unknown): body is { tmdb_id: number } => isRecord(body) && typeof body.tmdb_id === 'number';
+
+function isSettingsPatch(body: unknown): body is ShowSettingsPatch {
+  return (
+    isRecord(body) &&
+    (body.episode_ordering === undefined || ORDERINGS.some((ordering) => ordering === body.episode_ordering)) &&
+    (body.episode_group_id === undefined || body.episode_group_id === null || typeof body.episode_group_id === 'string') &&
+    (body.include_specials === undefined || typeof body.include_specials === 'boolean') &&
+    (body.classifier_mode === undefined || CLASSIFIER_MODES.some((mode) => mode === body.classifier_mode))
+  );
+}
+
 export const titlesHandlers = [
   http.get('*/api/titles/:mediaType/:tmdbId', async ({ params }) => {
     await latency();
@@ -50,13 +65,15 @@ export const titlesHandlers = [
   }),
   ...MEDIA.flatMap(([mediaType, path]) => [
     http.post(`*/api/${path}`, async ({ request }) => {
-      const { tmdb_id } = (await request.json()) as { tmdb_id: number };
-      const entry = findTitle(mediaType, Number(tmdb_id));
-      if (!entry) return notFound('No such title on TMDB');
+      const body = await jsonBody(request);
+      if (!isAddRequest(body)) return apiError(400, 'bad_request', 'Send {tmdb_id}.');
+      // As the legacy backend: an id TMDB doesn't know is a bad request.
+      const entry = findTitle(mediaType, body.tmdb_id);
+      if (!entry) return apiError(400, 'bad_request', 'TMDB has no such title.');
       const existing = library.get(libraryKey(mediaType, entry.tmdb_id));
       const row = existing ?? addToLibrary(library, entry);
-      const body: AddTitleResult = { id: row.library_id, tmdb_id: entry.tmdb_id, title: entry.title, year: entry.year };
-      return HttpResponse.json(body, { status: existing ? 200 : 201 });
+      const added: AddTitleResult = { id: row.library_id, tmdb_id: entry.tmdb_id, title: entry.title, year: entry.year };
+      return HttpResponse.json(added, { status: existing ? 200 : 201 });
     }),
     http.delete(`*/api/${path}/:id`, ({ params }) => {
       const found = findByLibraryId(library, mediaType, Number(params.id));
@@ -86,7 +103,15 @@ export const titlesHandlers = [
   http.patch('*/api/shows/:id', async ({ params, request }) => {
     const found = findByLibraryId(library, 'tv', Number(params.id));
     if (!found) return notFound('No such show');
-    const settings = { ...found.row.settings, ...((await request.json()) as ShowSettingsPatch) };
+    const patch = await jsonBody(request);
+    if (!isSettingsPatch(patch)) return apiError(422, 'validation_error', 'Unknown ordering, classifier mode or field type.');
+    const current = found.row.settings;
+    const settings = {
+      episode_ordering: patch.episode_ordering ?? current.episode_ordering,
+      episode_group_id: patch.episode_group_id === undefined ? current.episode_group_id : patch.episode_group_id,
+      include_specials: patch.include_specials ?? current.include_specials,
+      classifier_mode: patch.classifier_mode ?? current.classifier_mode,
+    };
     if (settings.episode_ordering === 'episode_group' && !EPISODE_GROUPS.some((group) => group.id === settings.episode_group_id)) {
       return apiError(422, 'validation_error', 'Pick an episode group for this ordering.');
     }

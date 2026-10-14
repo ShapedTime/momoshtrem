@@ -1,12 +1,11 @@
-import type { LibraryItem, MediaType } from '@/lib/api/contract';
+import type { LibraryItem } from '@/lib/api/contract';
 import { buildTitle, type MockLibrary } from './titles';
 
 /** GET /library rows for what the page's library holds, newest first (same stages as the title pages). */
 export function libraryItems(library: MockLibrary): LibraryItem[] {
-  return [...library]
-    .flatMap(([key, row]): LibraryItem[] => {
-      const [mediaType, tmdbId] = key.split(':');
-      const title = buildTitle(mediaType as MediaType, Number(tmdbId), library);
+  return [...library.values()]
+    .flatMap((row): LibraryItem[] => {
+      const title = buildTitle(row.media_type, row.tmdb_id, library);
       if (!title) return [];
       const { library: state, watch_state } = title;
       return [

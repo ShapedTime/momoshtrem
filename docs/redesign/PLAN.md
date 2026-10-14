@@ -175,7 +175,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - IDs and names: `imdb_id`, `tvdb_id`, `original_name`.
   - Origin: `original_language`, `origin_country text[]`, `is_anime bool`.
   - Artwork and status: `poster_path`, `backdrop_path`, `status`, `genres jsonb`.
-  - Episode ordering: `episode_ordering` (CHECK `aired`|`absolute`|`episode_group`, default `aired`) and `episode_group_id`.
+  - Episode ordering: `episode_ordering` (CHECK `aired`|`absolute`|`episode_group`, default `aired`) and `episode_group_id`. Creating a show sets `absolute` when `is_anime` (the Animation genre plus a `ja` language or `JP` origin, or TMDB keyword 210024); everything else gets `aired`.
   - Matching options: `include_specials bool default true` and `classifier_mode` (CHECK `auto`|`rules_only`|`ai_always`).
   - `metadata_updated_at`.
 - `seasons`: allow `season_number = 0`; add `name` and `poster_path`.
@@ -243,15 +243,17 @@ Migration numbers are reserved per task so parallel branches don't collide.
                 seasons: [SeasonSummary],    // Specials (season 0) last; left out while include_specials is off
                 default_season               // the season to open; null when there are none
   SeasonSummary { season_number, name, episodes_total, ready, missing, needs_review, upcoming,
-                  absolute_from, absolute_to }   // not in library: only episodes_total, the rest 0/null
+                  absolute_from, absolute_to }   // episodes_total includes upcoming;
+                                                 // not in library: only episodes_total, the rest 0/null
   TitleLibraryState {
     in_library, library_id, added_at,        // library_id and added_at are null when not in the library
     availability_stage: none|needs_torrent|downloading|ready,
     webdav_path, webdav_url,                 // null until something is assigned (the VFS hides empty titles)
     download: {pct, speed_bps, eta_seconds, seeders} | null,   // shows: combined over the downloading episodes
     needs_review, review_job_id,             // review_job_id is filled by B2/#5
-    episodes_total, episodes_ready,          // shows: aired regular episodes, and those with a file
-    missing: {season_number, from, to, count} | null,   // shows: the first frontier run (below)
+    episodes_total, episodes_ready,          // shows: aired regular episodes, and those with a file;
+                                             // null for movies and while not in the library
+    missing: {season_number, from, to, absolute_from, absolute_to, count} | null,   // shows: the first frontier run (below)
     torrent: {info_hash, release_name, file_name, size_bytes, resolution, source, added_at,
               state: active|idle|not_loaded, seeders} | null   // movies; seeders null unless loaded
   }
@@ -275,7 +277,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - The **frontier** (until B5 knows what was watched): aired regular episodes after the last assigned one. Specials never count, nor do gaps before the last assigned episode. `missing` is its first run, within one season.
   - Episode: `ready` or `downloading` when assigned; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown. `watched` (B5) and `needs_review` (B2) fill in later.
   - `default_season`: the frontier's season, else the latest season with a file, else the first regular season.
-- `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
+- `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
 - `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item.
 - `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=&page_size=` (50 by default, max 200): items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls. `status=watching` and `status=needs_review` stay empty until B5 and B2.

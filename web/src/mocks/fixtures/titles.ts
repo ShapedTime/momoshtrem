@@ -10,6 +10,7 @@ import type {
   ShowSettingsPatch,
   ShowTitle,
   SimilarTitle,
+  SubtitleItemType,
   Timestamp,
   Title,
   TitleLibraryState,
@@ -32,6 +33,8 @@ type ShowSettings = Required<ShowSettingsPatch>;
 
 /** One title in the mock library. */
 export interface MockLibraryEntry {
+  media_type: MediaType;
+  tmdb_id: number;
   library_id: number;
   added_at: Timestamp;
   /** False for a title added this session, or a movie whose torrent was unassigned: nothing has a file. */
@@ -46,7 +49,6 @@ export interface MockLibraryEntry {
 export type MockLibrary = Map<string, MockLibraryEntry>;
 
 export const libraryKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`;
-
 
 // ---- Paths (the backend's VFS layout) -----------------------------------------
 
@@ -85,6 +87,8 @@ export function seedLibrary(): MockLibrary {
       const entry = findTitle(mediaType, Number(tmdbId));
       if (!seed.library || !entry) continue;
       library.set(libraryKey(mediaType, entry.tmdb_id), {
+        media_type: mediaType,
+        tmdb_id: entry.tmdb_id,
         library_id: seed.library.id,
         added_at: iso(seed.library.added_days_ago),
         files: true,
@@ -98,8 +102,10 @@ export function seedLibrary(): MockLibrary {
 
 /** A title just added: in the library, nothing assigned. */
 export function addToLibrary(library: MockLibrary, entry: CatalogEntry): MockLibraryEntry {
-  const ids = [...library].filter(([key]) => key.startsWith(`${entry.media_type}:`)).map(([, row]) => row.library_id);
+  const ids = [...library.values()].filter((row) => row.media_type === entry.media_type).map((row) => row.library_id);
   const row: MockLibraryEntry = {
+    media_type: entry.media_type,
+    tmdb_id: entry.tmdb_id,
     library_id: Math.max(0, ...ids) + 1,
     added_at: new Date().toISOString(),
     files: false,
@@ -112,12 +118,9 @@ export function addToLibrary(library: MockLibrary, entry: CatalogEntry): MockLib
 
 /** The catalog entry and library row for a library id (`/movies/{id}`, `/shows/{id}`). */
 export function findByLibraryId(library: MockLibrary, mediaType: MediaType, id: number) {
-  for (const [key, row] of library) {
-    const [type, tmdbId] = key.split(':');
-    const entry = findTitle(type as MediaType, Number(tmdbId));
-    if (type === mediaType && row.library_id === id && entry) return { key, row, entry };
-  }
-  return undefined;
+  const row = [...library.values()].find((r) => r.media_type === mediaType && r.library_id === id);
+  const entry = row && findTitle(row.media_type, row.tmdb_id);
+  return row && entry ? { key: libraryKey(row.media_type, row.tmdb_id), row, entry } : undefined;
 }
 
 const episodeIdFor = (key: number, season: number, episode: number) => key * 100_000 + season * 1000 + episode;
@@ -255,7 +258,14 @@ function frontierRun(seasons: BuiltSeason[]): MissingRun | null {
   if (start < 0) return null;
   let end = start;
   while (rest[end + 1]?.state === 'missing' && rest[end + 1].season_number === rest[start].season_number) end++;
-  return { season_number: rest[start].season_number, from: rest[start].episode_number, to: rest[end].episode_number, count: end - start + 1 };
+  return {
+    season_number: rest[start].season_number,
+    from: rest[start].episode_number,
+    to: rest[end].episode_number,
+    absolute_from: rest[start].absolute_number,
+    absolute_to: rest[end].absolute_number,
+    count: end - start + 1,
+  };
 }
 
 function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry | undefined, seasons: BuiltSeason[]): TitleLibraryState {
@@ -409,4 +419,20 @@ export function buildSeason(tmdbId: number, seasonNumber: number, library: MockL
   if (!entry || !show) return undefined;
   const season = buildSeasons(entry, show, library.get(libraryKey('tv', tmdbId))).find((s) => s.seed.n === seasonNumber);
   return season && { season_number: season.seed.n, name: season.seed.name, episodes: season.episodes, ranges: ranges(season) };
+}
+
+/**
+ * The release a movie's or episode's file came from, for ranking subtitles:
+ * null while it has no file, undefined when the library doesn't have the item.
+ */
+export function itemRelease(library: MockLibrary, type: SubtitleItemType, id: number): string | null | undefined {
+  if (type === 'movie') {
+    const found = findByLibraryId(library, 'movie', id);
+    if (!found) return undefined;
+    return found.row.files ? (MOVIES[found.entry.tmdb_id]?.torrent?.release_name ?? null) : null;
+  }
+  const episode = findEpisode(id);
+  if (!episode || !library.has(libraryKey('tv', episode.tmdbId))) return undefined;
+  const state = buildSeason(episode.tmdbId, episode.season, library)?.episodes.find((e) => e.id === id)?.state;
+  return state && hasFile(state) ? (SHOWS[episode.tmdbId].release ?? null) : null;
 }
