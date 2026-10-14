@@ -8,13 +8,7 @@ import { CatAvatar, MarkMono } from '@/components/brand';
 import { Button, Kbd, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Sheet } from '@/components/ui';
 import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 import { useShell } from './ShellContext';
-
-/** Sign out: end the session, drop every cached query, then a full navigation. */
-async function signOut(clearCache: () => void) {
-  await fetch('/api/auth', { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined);
-  clearCache();
-  window.location.assign('/login');
-}
+import { signOut } from './signOut';
 
 function MenuHeader({ username }: { username: string }) {
   return (

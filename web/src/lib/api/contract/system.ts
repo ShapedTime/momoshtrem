@@ -20,4 +20,14 @@ export interface SystemStatus {
   trakt: { configured: boolean; connected: boolean };
   ai: { configured: boolean; mtd_cost_usd: number | null };
   opensubtitles: { configured: boolean };
+  /** Added by the web app's /api/status route. */
+  web?: { version: string };
+}
+
+/** Body of the web's 503 when the backend can't be reached. */
+export interface BackendUnreachableBody {
+  error: { code: 'backend_unreachable'; message: string };
+  web: { version: string };
+  /** Whether WebDAV still answers (it runs in the same process, so usually not). */
+  webdav: { reachable: boolean };
 }

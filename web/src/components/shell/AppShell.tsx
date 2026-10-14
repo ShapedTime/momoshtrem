@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { ConnectionBanner } from '@/components/system/ConnectionBanner';
 import { CommandPalette } from './CommandPalette';
 import { PageTransition } from './PageTransition';
 import { PhoneBar } from './PhoneBar';
@@ -51,6 +52,7 @@ export function AppShell({ username, children }: { username: string; children: R
       <TopBar username={username} overArt={overArt} activeCount={activeCount} />
       <PhoneBar username={username} />
       <main id="main" tabIndex={-1} className="main outline-none">
+        <ConnectionBanner />
         <PageTransition>{children}</PageTransition>
       </main>
       <TabBar activeCount={activeCount} />

@@ -1,0 +1,30 @@
+import { EmptyState, Panel } from '@/components/ui';
+import type { SectionId } from './sections';
+
+const COPY: Partial<Record<SectionId, { title: string; body: string }>> = {
+  trakt: {
+    title: 'Trakt sync is on its way',
+    body: 'Connect once and momoshtrem knows which episode is next for every show you watch. Read-only.',
+  },
+  ai: {
+    title: 'AI picks are on their way',
+    body: 'Noir will write nightly picks from your history and answer “Ask momoshtrem”, within a monthly budget you set.',
+  },
+  quality: {
+    title: 'Quality profiles are on their way',
+    body: 'Tell torrent search which resolutions, codecs and sizes count as the best match.',
+  },
+};
+
+/** Sections whose features haven't shipped yet say so plainly. */
+export function PlaceholderSection({ id }: { id: SectionId }) {
+  const copy = COPY[id];
+  if (!copy) return null;
+  return (
+    <Panel>
+      <EmptyState cat="sleep" title={copy.title} headingLevel="h3">
+        {copy.body}
+      </EmptyState>
+    </Panel>
+  );
+}

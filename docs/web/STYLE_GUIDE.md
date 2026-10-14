@@ -1,323 +1,161 @@
-# momoshtrem web - Frontend Style Guide
-
-## Design Philosophy
-
-Apple TV + Netflix inspired: **Cinematic, immersive, content-first**. The UI should disappear and let the media shine.
-
----
-
-## Color Palette
-
-```css
-/* Background layers (darkest to lightest) */
---bg-base:      #000000;    /* True black - video backgrounds */
---bg-primary:   #0a0a0a;    /* Main app background */
---bg-elevated:  #141414;    /* Cards, modals, dropdowns */
---bg-hover:     #1f1f1f;    /* Hover states */
---bg-active:    #292929;    /* Active/pressed states */
-
-/* Text */
---text-primary:   #ffffff;    /* Headings, important text */
---text-secondary: #b3b3b3;    /* Body text, descriptions */
---text-muted:     #666666;    /* Metadata, timestamps */
---text-disabled:  #404040;    /* Disabled states */
-
-/* Accent colors */
---accent-red:     #e50914;    /* Primary action (Netflix red) */
---accent-blue:    #0071e3;    /* Links, secondary actions */
---accent-green:   #46d369;    /* Success, available */
---accent-yellow:  #f5a623;    /* Warnings, ratings */
-
-/* Semantic */
---border:         #333333;    /* Subtle borders */
---focus-ring:     #0071e3;    /* Keyboard focus */
---overlay:        rgba(0, 0, 0, 0.7);  /* Modal overlays */
-```
-
----
-
-## Typography
-
-```css
-/* Font stack - system fonts for performance */
---font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-             'Helvetica Neue', Arial, sans-serif;
-
-/* Scale */
---text-xs:   0.75rem;   /* 12px - badges, metadata */
---text-sm:   0.875rem;  /* 14px - secondary text */
---text-base: 1rem;      /* 16px - body text */
---text-lg:   1.125rem;  /* 18px - emphasized body */
---text-xl:   1.25rem;   /* 20px - card titles */
---text-2xl:  1.5rem;    /* 24px - section headers */
---text-3xl:  2rem;      /* 32px - page titles */
---text-4xl:  2.5rem;    /* 40px - hero titles (mobile) */
---text-5xl:  3.5rem;    /* 56px - hero titles (desktop) */
-
-/* Weights */
---font-normal:   400;
---font-medium:   500;
---font-semibold: 600;
---font-bold:     700;
-
-/* Line heights */
---leading-tight:  1.2;   /* Headings */
---leading-normal: 1.5;   /* Body text */
---leading-relaxed: 1.7;  /* Long-form text */
-```
-
----
-
-## Spacing System
-
-Use 4px base unit. Consistent spacing creates visual rhythm.
-
-```css
---space-1:  0.25rem;   /* 4px */
---space-2:  0.5rem;    /* 8px */
---space-3:  0.75rem;   /* 12px */
---space-4:  1rem;      /* 16px */
---space-5:  1.25rem;   /* 20px */
---space-6:  1.5rem;    /* 24px */
---space-8:  2rem;      /* 32px */
---space-10: 2.5rem;    /* 40px */
---space-12: 3rem;      /* 48px */
---space-16: 4rem;      /* 64px */
-```
-
----
-
-## Responsive Breakpoints
-
-**Mobile-first approach.** Base styles are mobile, then enhance.
-
-```css
-/* Breakpoints */
---screen-sm:  640px;   /* Large phones, small tablets */
---screen-md:  768px;   /* Tablets */
---screen-lg:  1024px;  /* Small desktops, landscape tablets */
---screen-xl:  1280px;  /* Desktops */
---screen-2xl: 1536px;  /* Large desktops, TVs */
-
-/* Tailwind classes */
-sm:   /* >= 640px  */
-md:   /* >= 768px  */
-lg:   /* >= 1024px */
-xl:   /* >= 1280px */
-2xl:  /* >= 1536px */
-```
-
----
-
-## Component Patterns
-
-### Media Cards
-
-```
-Mobile (< 640px):      2-3 cards per row, 140px width
-Tablet (768px+):       4-5 cards per row, 160px width
-Desktop (1024px+):     5-6 cards per row, 180px width
-Large (1280px+):       6-7 cards per row, 200px width
-```
-
-```tsx
-// Card aspect ratio: 2:3 (standard poster)
-<div className="
-  w-[140px] sm:w-[160px] lg:w-[180px] xl:w-[200px]
-  aspect-[2/3]
-  rounded-md overflow-hidden
-  transition-transform duration-200
-  hover:scale-105 hover:z-10
-">
-```
-
-### Hero Banner
-
-```
-Mobile:   40vh height, text centered, smaller font
-Tablet:   50vh height, text left-aligned
-Desktop:  60vh height, max-height 700px
-```
-
-```tsx
-<section className="
-  relative h-[40vh] sm:h-[50vh] lg:h-[60vh] lg:max-h-[700px]
-  bg-gradient-to-t from-bg-primary via-transparent to-transparent
-">
-```
-
-### Carousels
-
-```
-Mobile:   Edge-to-edge, 16px padding, peek next card
-Tablet+:  Side margins, 24px gap between cards
-```
-
-```tsx
-<div className="
-  flex gap-3 sm:gap-4 lg:gap-6
-  overflow-x-auto snap-x snap-mandatory
-  px-4 sm:px-6 lg:px-12
-  scrollbar-hide
-">
-```
-
-### Buttons
-
-```
-Mobile:   Full width buttons, 48px min height (touch target)
-Desktop:  Auto width, 44px height
-```
-
-```tsx
-// Primary button
-<button className="
-  w-full sm:w-auto
-  h-12 sm:h-11
-  px-6 sm:px-8
-  bg-accent-red hover:bg-red-700
-  text-white font-semibold
-  rounded-md
-  transition-colors
-">
-
-// Secondary button
-<button className="
-  w-full sm:w-auto
-  h-12 sm:h-11
-  px-6 sm:px-8
-  bg-white/10 hover:bg-white/20
-  text-white font-medium
-  rounded-md border border-white/20
-  transition-colors
-">
-```
-
----
-
-## Layout Containers
-
-```tsx
-// Page container with responsive padding
-<main className="
-  px-4 sm:px-6 lg:px-12 xl:px-16
-  py-6 sm:py-8 lg:py-12
-  max-w-screen-2xl mx-auto
-">
-
-// Section with header
-<section className="mb-8 sm:mb-10 lg:mb-12">
-  <h2 className="
-    text-xl sm:text-2xl font-semibold mb-4 sm:mb-6
-  ">
-    Trending Now
-  </h2>
-  {/* content */}
-</section>
-```
-
----
-
-## Animation & Transitions
-
-Keep animations subtle and purposeful. Performance matters.
-
-```css
-/* Durations */
---duration-fast:   150ms;   /* Hover states */
---duration-normal: 200ms;   /* Most transitions */
---duration-slow:   300ms;   /* Complex animations */
-
-/* Easing */
---ease-default: cubic-bezier(0.4, 0, 0.2, 1);  /* ease-out */
---ease-bounce:  cubic-bezier(0.68, -0.55, 0.265, 1.55);
-```
-
-```tsx
-// Standard hover transition
-className="transition-all duration-200 ease-out"
-
-// Card scale on hover
-className="transition-transform duration-200 hover:scale-105"
-
-// Fade in
-className="animate-fade-in" // Define in tailwind.config.js
-```
-
----
-
-## Shadows & Elevation
-
-Minimal shadows. Use opacity and background shifts instead.
-
-```css
-/* Card shadows - only on hover/focus */
---shadow-card: 0 8px 16px rgba(0, 0, 0, 0.4);
---shadow-modal: 0 25px 50px rgba(0, 0, 0, 0.5);
---shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.3);
-```
-
----
-
-## Touch & Accessibility
-
-### Touch Targets
-- Minimum 44x44px on mobile
-- Minimum 48px height for buttons on mobile
-- Adequate spacing between interactive elements (8px minimum)
-
-### Focus States
-```tsx
-// Visible focus ring for keyboard navigation
-className="
-  focus:outline-none
-  focus-visible:ring-2
-  focus-visible:ring-accent-blue
-  focus-visible:ring-offset-2
-  focus-visible:ring-offset-bg-primary
-"
-```
-
-### Reduced Motion
-```tsx
-// Respect user preferences
-className="motion-reduce:transition-none motion-reduce:animate-none"
-```
-
----
-
-## Image Handling
-
-```tsx
-// Always use Next.js Image with responsive sizes
-<Image
-  src={posterUrl}
-  alt={title}
-  fill
-  sizes="(max-width: 640px) 140px, (max-width: 1024px) 160px, 200px"
-  className="object-cover"
-  placeholder="blur"
-  blurDataURL={blurPlaceholder}
-/>
-```
-
-### Image URLs (TMDB)
-```
-Poster:   https://image.tmdb.org/t/p/w500{path}
-Backdrop: https://image.tmdb.org/t/p/w1280{path}
-Profile:  https://image.tmdb.org/t/p/w185{path}
-```
-
----
-
-## Component Checklist
-
-Every component should:
-
-- [ ] Work on mobile (320px minimum width)
-- [ ] Have hover states for desktop
-- [ ] Have focus states for keyboard
-- [ ] Use semantic HTML elements
-- [ ] Include loading/skeleton state
-- [ ] Handle empty/error states
-- [ ] Respect reduced motion preferences
+# momoshtrem web: style guide
+
+How the UI looks and behaves. The **Cinematic dark** design in
+`docs/redesign/design-cinematic/` is the spec. `HANDOFF.md` explains it,
+`screens/` shows every screen and state, and `prototype.html` is clickable.
+This guide covers how that design is built in `web/`. The live component
+gallery is **`/dev/ui`** (dev server only).
+
+## 1. Principles
+
+- **Cinema lobby after dark.** Near-black surfaces with a cool bias. Glass only where chrome sits over artwork.
+- **One accent.** Cat-eye amber (`--accent`) marks *the next thing to do*. Use one primary button per view.
+- **Status is never colour alone.** Every state is an icon plus a word from the shared vocabulary (§5).
+- **Nothing hover-only.** Titles, actions and status are visible on touch.
+- **Calm, specific copy.** Say what happened, what's fine and what to do next. Noir (the cat) shows up for empty states and long waits, never when something important broke.
+- **Phone and laptop are equals.** Check every screen at 390 and 1440 px and make sure nothing scrolls sideways at 320 px.
+
+## 2. Tokens and Tailwind
+
+Raw tokens live in `src/styles/tokens.css`, ported from the design. The
+Tailwind v4 `@theme` in `src/app/globals.css` maps them to utilities. **Use
+tokens, never raw hex values or Tailwind's default palette.** The default
+palette only remains for legacy pages.
+
+| Need | Utilities / tokens |
+|---|---|
+| Surfaces | `bg-bg` (canvas), `bg-surface-1` (cards, rows), `bg-surface-2` (raised, inputs), `bg-surface-3` (hover), `bg-surface-4` (pressed, tracks), `bg-ink-0` (deepest) |
+| Lines | `border-line-1` (hairlines), `border-line-2` (cards, inputs), `border-line-3` (hover, strong) |
+| Text | `text-fg-1` primary, `text-fg-2` secondary, `text-fg-3` meta (AA on every surface), `text-fg-4` decorative only |
+| Accent | `bg-accent` / `text-accent-ink` (fills), `text-accent-text` (amber text), `bg-accent-soft`, `border-accent-line` |
+| Status | `text-ready`, `bg-ready-bg`, `border-ready-line`; likewise for `downloading`, `missing`, `review`, `watched`, `upcoming`, `warning` and `error` |
+| Type | `text-display`, `text-title-1/2/3`, `text-body-l`, `text-body`, `text-small`, `text-micro`, `text-mono`, or the `.t-*` classes (with clamp and balance) |
+| Radius | `rounded-xs` (6), `-sm` (8, inputs), `-md` (12, buttons, posters), `-lg` (16, panels), `-xl` (22, dialogs), `-2xl` (28, sheets) |
+| Elevation | `shadow-e1` … `shadow-e4`, `shadow-lift` (hover lift), `shadow-accent-glow` |
+| Motion | `ease-out` (enter), `ease-in` (exit), `ease-in-out` (crossfade), `ease-sheet`, `ease-spring`; durations via `duration-(--d-fast/base/slow/slower)` |
+| Layers | `z-(--z-topbar)`, `z-(--z-tabbar)`, `z-(--z-sheet)`, `z-(--z-dialog)`, `z-(--z-toast)` … |
+
+**Component classes.** `src/styles/components.css` holds the prototype's
+component classes, such as `.btn`, `.pill`, `.panel` and `.sheet`. They sit
+in `@layer components`, so a utility class always overrides them. Prefer the
+React primitive (§4) to the raw class.
+
+**Fonts.** Geist (UI) and Geist Mono (release names, paths, hashes) come from `next/font`.
+Use `.release-name` and `.path` for strings that must wrap only at separators.
+
+## 3. Layout
+
+| Range | Gutter | Navigation | Overlays | Poster track |
+|---|---|---|---|---|
+| 320–639 | 16 | Phone bar + bottom tab bar (56 + safe area) | Bottom sheet | 104 (exactly 3 columns ≤ 380) |
+| 640–1023 | 24 | Phone bar + tab bar | Centred bottom sheet (≤ 640) | 140 |
+| 1024–1439 | 40 | Glass top bar (64) | Right-hand panel (760; narrow 480) | 168 |
+| ≥ 1440 | 56 | Top bar | Right-hand panel | 184; content max 1600 |
+
+- **Page frame:** wrap content in `.page`, which adds gutters and a max width. The shell provides `<main id="main">`, so pages never render their own `<main>`.
+- **Grids** use fluid columns: `<PosterGrid>`, i.e. `repeat(auto-fill, minmax(var(--poster-min), 1fr))`. **Never give cards a fixed width.**
+- **Rails** (`<Rail>`) scroll inside their own container and bleed to the screen edge. The next card always peeks. Arrows appear only with a fine pointer.
+- **Breakpoints:** Tailwind `sm` = 640, `lg` = 1024, `xl` = 1440. `md` (768) is legacy and not part of the design.
+- **Safe areas:** anything fixed to an edge (tab bar, sheet foot, action dock) adds `env(safe-area-inset-*)`.
+
+## 4. Components
+
+All primitives live in `src/components/ui` (barrel: `@/components/ui`). The
+logo and Noir live in `src/components/brand`. See every state at `/dev/ui`.
+
+| Need | Use | Rules |
+|---|---|---|
+| Actions | `Button`, `IconButton`, `ButtonLink` | One `primary` per view. Solid `danger` only inside confirm dialogs; triggers are `danger-quiet` or icon buttons. `size="sm"` keeps a 44 px hit area. `loading` keeps the label width. Never forced full width (use `block` when you mean it). |
+| Text entry | `Input`, `SearchInput`, `Select`, `Textarea` | Text is 16 px or larger (no iOS zoom). Pass `label`, or `aria-label` without one. `error` sets `aria-invalid` and the message. |
+| Toggles | `Switch`, `FilterChip`, `SegmentedControl`, `Tabs` | A FilterChip always shows its facet count, dimmed at zero. SegmentedControl switches modes of the *same* content; Tabs switch *sibling* content (Specials last). |
+| Tags | `Chip` | Parsed attributes (2160p, DV, Season pack). Not interactive. |
+| Status | `StatusPill`, `Confidence`, `Progress`, `RingMeter`, `Steps` | Labels come from `lib/status.ts`. Long jobs show named `Steps`, never just a spinner. Indeterminate progress is for short waits only. |
+| Media | `Media`, `PosterCard`, `PosterGrid`, `Rail` | The title is always visible (2-line clamp). The placeholder is `surface-2`; images fade in. |
+| Containers | `Panel`, `ListRow`, `Banner` | A banner carries at most one action (an extra "Details" link is fine). |
+| Loading | `Skeleton`, `PosterSkeletons`, `WideSkeletons`, `LoadingRegion`, `Spinner` | Skeletons match the final layout's size. `LoadingRegion` waits 150 ms before showing them. |
+| Empty | `EmptyState` (`cat="sit|sleep|peek|blank"`) | One plain sentence about why it's empty, and the next step. |
+| Waiting | `Loader` (Noir's eyes) | Only while the user is actually waiting on a long job. |
+| Overlays | `Sheet`, `ConfirmDialog` / `useConfirm()`, `Menu`, `useToast()` | See §6. |
+| Copyable values | `CopyField` | Works on plain HTTP too (falls back from the Clipboard API). |
+
+## 5. Status vocabulary
+
+`src/lib/status.ts` is the **only** place status wording and icons are
+defined. Every surface (cards, rows, panels, Activity, Settings) uses
+`<StatusPill status="…">`.
+
+`ready` · `ready_infuse` · `downloading` · `partial` · `needs_torrent` · `missing` ·
+`not_in_library` · `airs_on` · `upcoming` · `needs_review` · `watched` · `streaming` ·
+`paused` · `idle` · `ok` · `unreachable` · `not_configured` · `warning` · `error`
+
+On narrow cards, pass a short `label` the design uses, for example "No torrent" or
+"Review"; the tone and icon stay the same. If a new state is needed, add it
+to the map and don't invent wording in a component.
+
+## 6. Interaction
+
+**Sheets** (`<Sheet>`):
+- Presentation follows the width (§3); see HANDOFF §4.1.
+- `size="full"` opens at full height immediately, so loading never moves it. Use it for search.
+- `nested` stacks a sheet on top, and Esc closes only the top one.
+- Opening a sheet moves focus into it, and closing returns focus to whatever opened it.
+- **URL-driven sheets:** register in `src/lib/sheets/registry.tsx` and open with `useSheet().open('name', params)`. Back closes them and they can be deep-linked (`?sheet=…`).
+
+**Feedback:**
+- **Toasts** show one at a time. Success and info leave after 5 s; errors and `sticky` "ready" moments stay. At most one action (Undo, Retry, How to play).
+- **Destructive actions** go behind a menu or quiet trigger, and are confirmed with `useConfirm()`. The confirmation says exactly what goes and what stays.
+- **Removal from a list** offers Undo for 10 s.
+
+**Keyboard and focus:**
+- ⌘K / Ctrl K / `/` open the command palette, and Esc closes the top overlay.
+- The focus ring is a 2 px canvas gap plus a 2 px amber ring.
+- Every icon-only button has an `aria-label`, and the skip link goes to `#main`.
+
+**Loading:**
+- Show nothing for 150 ms, then skeletons, then a 220 ms crossfade to content. Never a full-page spinner.
+- Polling uses TanStack `refetchInterval` (it pauses in hidden tabs), never `setInterval`.
+
+**Motion:**
+- Slow and eased (220–900 ms).
+- Under `prefers-reduced-motion`, transitions become 1 ms, view transitions and hover lifts are off, shimmer and blinking stop, and spinners become static rings.
+
+## 7. States every screen needs
+
+| State | Pattern |
+|---|---|
+| Loading | Skeletons the size of the content (`LoadingRegion`) |
+| Empty | `EmptyState` with the right cat and one next step |
+| Filtered to nothing | `EmptyState cat="peek"` naming the filters, with removable chips and "Clear all" |
+| Section failed | Inline `Banner tone="error"` with "Try again"; the rest of the page keeps working |
+| Backend down | Handled by the shell: `ConnectionBanner` → `/offline` (retries on its own, says honestly whether Infuse still plays) |
+| Device offline | Handled by the shell: "You're offline" banner |
+| Not found | `notFound()` → "Nothing here but the cat" inside the shell |
+| Crash | `error.tsx` → `ErrorView` (what failed, what's fine, Try again) |
+
+## 8. Copy
+
+- Sentence case everywhere. Contractions are fine ("isn't", "you're").
+- Name the thing: "Remove Severance from your library?", not "Are you sure?".
+- Errors explain the cause and the way forward: "Check that caps lock is off." Never blame the user.
+- Talk about Infuse and Apple TV by name; that's where people watch.
+- Don't promise what the system can't know. For example, the offline page only claims Infuse still plays when WebDAV actually answered.
+
+## 9. Building a screen
+
+1. **Contract:** types for its endpoints in `src/lib/api/contract/<domain>.ts`, matching PLAN.md §6. Change PLAN.md in the same PR if the contract changes.
+2. **Data:** calls and `queryOptions` in `src/lib/api/endpoints/<domain>.ts`, and fixtures and handlers in `src/mocks/` so the screen works in mock mode (`NEXT_PUBLIC_API_MOCKING=enabled npm run dev`) before the backend lands.
+3. **UI:** compose primitives. Screen-specific CSS can live next to the route (see `app/(auth)/login/auth.css`), in `@layer components`, ported from `docs/redesign/design-cinematic/css/screens/`.
+4. **Navigation:** update its entry in `src/lib/nav.ts` if it's a top-level destination.
+5. **Tests:** a Playwright spec for the main flow on both projects (390 phone, 1440 desktop), with `expectNoA11yViolations` and `expectNoHorizontalOverflow` (also at 320).
+6. **Screenshots:** add cases to `e2e/screenshots.spec.ts`, then run `SCREENSHOTS=1 npx playwright test screenshots && node scripts/optimize-screenshots.mjs` and link them in the PR.
+
+## 10. Checklist (PLAN.md §7 "Acceptance for every F task")
+
+- [ ] Matches the design at 390 and 1440 px; no horizontal overflow at 320 px.
+- [ ] Titles and actions visible without hover; touch targets ≥ 44 px.
+- [ ] Destructive actions quiet and confirmed.
+- [ ] Fluid grids (no fixed card widths in fixed tracks).
+- [ ] Loading, empty and error states in place.
+- [ ] Keyboard and screen-reader basics: labels, focus order, Esc, visible focus.
+- [ ] Reduced motion respected.
+- [ ] Playwright covers the main flow against the MSW mocks.
