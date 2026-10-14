@@ -2,13 +2,12 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Command, LogOut, Settings, Tv } from 'lucide-react';
 import { CatAvatar, MarkMono } from '@/components/brand';
 import { Button, Kbd, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Sheet } from '@/components/ui';
 import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 import { useShell } from './ShellContext';
-import { signOut } from './signOut';
+import { useSignOut } from './signOut';
 
 function MenuHeader({ username }: { username: string }) {
   return (
@@ -28,10 +27,9 @@ function MenuHeader({ username }: { username: string }) {
  */
 export function UserMenu({ username, className }: { username: string; className?: string }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
-  const queryClient = useQueryClient();
+  const signOut = useSignOut();
   const { openPalette } = useShell();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const clearCache = () => queryClient.clear();
 
   const triggerProps = {
     type: 'button' as const,
@@ -59,7 +57,7 @@ export function UserMenu({ username, className }: { username: string; className?
             Command palette
           </MenuItem>
           <MenuSeparator />
-          <MenuItem danger icon={<LogOut size={18} aria-hidden="true" />} onSelect={() => signOut(clearCache)}>
+          <MenuItem danger icon={<LogOut size={18} aria-hidden="true" />} onSelect={() => signOut()}>
             Log out
           </MenuItem>
         </MenuContent>
@@ -96,7 +94,7 @@ export function UserMenu({ username, className }: { username: string; className?
             <Kbd>⌘K</Kbd>
           </button>
         </nav>
-        <Button variant="danger-quiet" block className="mt-4" onClick={() => signOut(clearCache)}>
+        <Button variant="danger-quiet" block className="mt-4" onClick={() => signOut()}>
           <LogOut size={18} aria-hidden="true" /> Log out
         </Button>
       </Sheet>

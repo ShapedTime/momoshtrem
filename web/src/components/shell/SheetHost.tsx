@@ -1,13 +1,13 @@
 'use client';
 
 import { Sheet } from '@/components/ui';
-import { SHEETS } from '@/lib/sheets/registry';
+import { getSheet } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
 
 /** Renders whichever registered sheet `?sheet=` names (Back closes it). */
 export function SheetHost() {
   const { current, close, params } = useSheet();
-  const definition = current ? SHEETS[current] : undefined;
+  const definition = getSheet(current);
   if (!definition) return null;
   return (
     <Sheet

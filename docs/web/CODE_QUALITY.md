@@ -28,15 +28,21 @@ src/
 │   │   ├── tmdb.ts       # Server: TMDB
 │   │   └── jackett.ts    # Server: Jackett (moves to the backend in v2)
 │   ├── query/            # QueryClient defaults and <Providers>
+│   ├── sheets/           # URL-driven sheets: registry + useSheet (?sheet=…)
 │   ├── auth/             # Authentication logic
+│   ├── nav.ts            # The five top-level destinations (top bar, tab bar, palette)
 │   ├── status.ts         # The one status vocabulary
 │   └── utils/            # Pure utility functions
 │
 ├── components/           # React components (UI layer)
 │   ├── ui/               # Design-system primitives (gallery: /dev/ui)
 │   ├── brand/            # Logo and Noir
+│   ├── shell/            # App shell: top bar, tab bar, account menu, ⌘K palette, sheet host
+│   ├── system/           # Error, not found, offline view and connection banner
+│   ├── settings/         # Settings sections and system status
 │   └── <feature>/        # Feature components
 │
+├── styles/               # Design tokens and component classes (imported by app/globals.css)
 ├── mocks/                # MSW handlers + fixtures for every §6 endpoint
 ├── hooks/                # Custom React hooks
 ├── types/                # Legacy TypeScript interfaces (v2 types live in lib/api/contract)

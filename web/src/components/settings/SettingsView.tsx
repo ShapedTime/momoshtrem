@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
-import { signOut } from '@/components/shell/signOut';
+import { useSignOut } from '@/components/shell/signOut';
 import { statusQuery } from '@/lib/api/endpoints/system';
 import type { SystemStatus } from '@/lib/api/contract';
 import { cx } from '@/lib/utils/cx';
@@ -42,7 +42,7 @@ function navSummary(id: SectionId, status: SystemStatus | undefined, statusFaile
  */
 export function SettingsView() {
   const searchParams = useSearchParams();
-  const queryClient = useQueryClient();
+  const signOut = useSignOut();
   const requested = searchParams.get('section');
   const section = isSectionId(requested) ? requested : null;
   const active = section ?? DEFAULT_SECTION;
@@ -87,7 +87,7 @@ export function SettingsView() {
                           <span className="font-medium text-fg-1">{s.label}</span>
                           {summary.text && <span className="t-small truncate text-fg-3">{summary.text}</span>}
                         </span>
-                        {summary.attention && <span className="size-2 shrink-0 rounded-full bg-warning" aria-label="Needs attention" />}
+                        {summary.attention && <span className="size-2 shrink-0 rounded-full bg-warning" role="img" aria-label="Needs attention" />}
                         <ChevronRight size={18} className="shrink-0 text-fg-4 lg:hidden" aria-hidden="true" />
                       </Link>
                     </li>
@@ -99,7 +99,7 @@ export function SettingsView() {
           <button
             type="button"
             className="flex min-h-[60px] items-center gap-3 rounded-lg border border-line-1 bg-surface-1 px-3 text-left font-medium text-error lg:hidden"
-            onClick={() => signOut(() => queryClient.clear())}
+            onClick={() => signOut()}
           >
             <LogOut size={18} aria-hidden="true" /> Log out
           </button>

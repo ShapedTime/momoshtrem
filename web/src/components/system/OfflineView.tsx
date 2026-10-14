@@ -74,9 +74,19 @@ export function OfflineView() {
   const [now, setNow] = useState(() => Date.now());
   const [howToOpen, setHowToOpen] = useState(false);
   const busy = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const settle = useCallback(
     (outcome: CheckResult | 'ok', attemptNumber: number) => {
+      // A check that finishes after you've left mustn't pull you back
+      if (!mounted.current) return;
       if (outcome === 'ok') {
         router.replace(destination);
         return;
@@ -177,8 +187,10 @@ export function OfflineView() {
           <Button variant="primary" size="lg" className="min-w-[200px]" loading={checking} onClick={() => void runCheck()}>
             <RefreshCw size={18} aria-hidden="true" /> Retry now
           </Button>
-          <p className="t-small text-fg-3" role="status" aria-live="polite">
-            {checking ? 'Checking…' : `Trying again in ${secondsLeft} s · attempt ${attempt}`}
+          <p className="t-small text-fg-3">{checking ? 'Checking…' : `Trying again in ${secondsLeft} s · attempt ${attempt}`}</p>
+          {/* Announce each check and its outcome, not every tick of the countdown */}
+          <p className="sr-only" role="status" aria-live="polite">
+            {checking ? 'Checking…' : 'Still not answering. This page keeps trying on its own.'}
           </p>
         </div>
 

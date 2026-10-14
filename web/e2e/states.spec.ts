@@ -35,7 +35,12 @@ test.describe('settings', () => {
     }
     await expect(page.getByRole('status').filter({ hasText: 'All good' })).toBeVisible();
     await expect(services.getByText('Not connected').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Re-check' }).click();
+    const recheck = page.getByRole('button', { name: 'Re-check' });
+    const refreshed = page.waitForRequest((request) => request.url().endsWith('/api/status?refresh=1'));
+    await recheck.click();
+    await refreshed;
+    await expect(recheck).not.toHaveClass(/is-loading/);
+    await expect(page.getByRole('status').filter({ hasText: 'All good' })).toBeVisible();
     await expect(page.getByText(/Checked \d/)).toBeVisible();
   });
 

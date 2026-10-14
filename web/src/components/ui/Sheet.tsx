@@ -46,6 +46,11 @@ function sheetClass({ size = 'default', nested, className }: Pick<SheetProps, 's
   return cx('sheet', size === 'full' && 'sheet--full', size === 'narrow' && 'sheet--narrow', nested && 'sheet--nested', className);
 }
 
+/** Toasts render outside the sheet: tapping one (its ✕, Undo) mustn't close the sheet too. */
+function keepOpenForToasts(event: Event) {
+  if (event.target instanceof Element && event.target.closest('.toast-region')) event.preventDefault();
+}
+
 function SheetHead({ title, description, head, Title, Description, Close }: {
   title: ReactNode;
   description?: ReactNode;
@@ -79,7 +84,13 @@ function PanelSheet({ open, onOpenChange, title, description, size, nested, head
       <Dialog.Portal>
         {!nested && <Dialog.Overlay className="scrim" />}
         {/* Without a description, opt out of aria-describedby explicitly (Radix warns otherwise) */}
-        <Dialog.Content className={cx(sheetClass({ size, nested, className }), 'outline-none')} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
+        <Dialog.Content
+          className={cx(sheetClass({ size, nested, className }), 'outline-none')}
+          onPointerDownOutside={keepOpenForToasts}
+          onInteractOutside={keepOpenForToasts}
+          {...focus}
+          {...(description ? {} : { 'aria-describedby': undefined })}
+        >
           <SheetHead title={title} description={description} head={head} Title={Dialog.Title} Description={Dialog.Description} Close={Dialog.Close} />
           <div className="sheet-body">{children}</div>
           {footer && <div className="sheet-foot">{footer}</div>}
@@ -96,7 +107,13 @@ function DrawerSheet({ open, onOpenChange, title, description, size, nested, hea
     <Root open={open} onOpenChange={onOpenChange} handleOnly={size === 'full'} repositionInputs={false}>
       <Drawer.Portal>
         <Drawer.Overlay className="scrim" />
-        <Drawer.Content className={cx(sheetClass({ size, nested, className }), 'outline-none')} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
+        <Drawer.Content
+          className={cx(sheetClass({ size, nested, className }), 'outline-none')}
+          onPointerDownOutside={keepOpenForToasts}
+          onInteractOutside={keepOpenForToasts}
+          {...focus}
+          {...(description ? {} : { 'aria-describedby': undefined })}
+        >
           {/* Vaul injects unlayered handle styles, hence the important overrides */}
           <div className="grid h-5 shrink-0 place-items-center">
             <Drawer.Handle className="w-9! bg-surface-4! opacity-100!" />
