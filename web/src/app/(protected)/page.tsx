@@ -9,15 +9,16 @@ import {
   MediaCarousel,
   MediaCarouselSkeleton,
 } from '@/components/media';
-import { Button, AlertCircleIcon } from '@/components/ui';
+import { Button } from '@/components/ui';
 import { RecentlyAiredSection } from '@/components/library/RecentlyAiredSection';
 import { getRandomItem } from '@/lib/utils';
+import { CircleAlert } from 'lucide-react';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
       <div className="text-center max-w-md">
-        <AlertCircleIcon size={48} className="mx-auto mb-4 text-text-muted" />
+        <CircleAlert size={48} className="mx-auto mb-4 text-text-muted" />
         <h2 className="text-xl font-semibold text-white mb-2">
           Unable to load content
         </h2>

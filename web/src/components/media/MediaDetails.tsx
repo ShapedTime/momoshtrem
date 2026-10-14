@@ -1,9 +1,10 @@
 import Image from 'next/image';
 import { buildImageUrl } from '@/config/tmdb';
-import { Button, RatingBadge, FilmIcon } from '@/components/ui';
+import { Button, RatingBadge } from '@/components/ui';
 import { AddToLibraryButton, LibraryStatusBadge } from '@/components/library';
 import type { Genre } from '@/types/tmdb';
 import type { LibraryStatus } from '@/types/momoshtrem';
+import { Film } from 'lucide-react';
 
 interface MediaDetailsProps {
   title: string;
@@ -96,7 +97,7 @@ export function MediaDetails({
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-text-muted">
-                  <FilmIcon size={64} />
+                  <Film size={64} />
                 </div>
               )}
             </div>

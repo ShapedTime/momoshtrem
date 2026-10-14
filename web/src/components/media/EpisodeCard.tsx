@@ -1,10 +1,11 @@
 import Image from 'next/image';
 import { buildImageUrl } from '@/config/tmdb';
 import { formatRuntime } from '@/lib/utils';
-import { Button, FilmIcon, StarIcon } from '@/components/ui';
+import { Button } from '@/components/ui';
 import type { Episode } from '@/types/tmdb';
 import type { TorrentAssignment } from '@/types/momoshtrem';
 import { formatBytes, type TorrentStatus } from '@/types/torrent';
+import { Film, Star } from 'lucide-react';
 
 export interface EpisodeAssignmentInfo {
   episodeId: number;
@@ -89,7 +90,7 @@ export function EpisodeCard({
     if (!torrentStatus) return 'ring-1 ring-white/20';
     if (isPaused) return 'ring-2 ring-accent-yellow';
     if (isComplete) return 'ring-2 ring-accent-green';
-    if (isDownloading) return 'ring-2 ring-accent-blue';
+    if (isDownloading) return 'ring-2 ring-accent';
     return 'ring-1 ring-white/20';
   };
 
@@ -117,7 +118,7 @@ export function EpisodeCard({
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-text-muted">
-              <FilmIcon size={32} />
+              <Film size={32} />
             </div>
           )}
           {/* Episode number overlay */}
@@ -155,7 +156,7 @@ export function EpisodeCard({
               {runtime && <span>{runtime}</span>}
               {episode.voteAverage > 0 && (
                 <div className="flex items-center gap-1 text-accent-yellow">
-                  <StarIcon size={14} />
+                  <Star fill="currentColor" size={14} />
                   <span className="font-medium">{episode.voteAverage.toFixed(1)}</span>
                 </div>
               )}

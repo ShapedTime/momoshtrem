@@ -37,7 +37,7 @@ export function SubtitleSearchModal({
     useSubtitleSearch(context);
 
   // Toast notifications
-  const { showToast } = useToast();
+  const { toast } = useToast();
 
   // Local state
   const [selectedLanguages, setSelectedLanguages] = useState<SubtitleLanguageCode[]>(['en']);
@@ -95,18 +95,18 @@ export function SubtitleSearchModal({
         });
 
         if (subtitle) {
-          showToast('success', `Downloaded ${result.language_name} subtitles`);
+          toast({ tone: 'ready', title: `Downloaded ${result.language_name} subtitles` });
           refreshSubtitles();
         } else {
-          showToast('error', 'Failed to download subtitle');
+          toast({ tone: 'error', title: 'Failed to download subtitle' });
         }
       } catch {
-        showToast('error', 'Failed to download subtitle');
+        toast({ tone: 'error', title: 'Failed to download subtitle' });
       } finally {
         setIsDownloading(false);
       }
     },
-    [context.mediaType, context.itemId, downloadSubtitle, showToast, refreshSubtitles]
+    [context.mediaType, context.itemId, downloadSubtitle, toast, refreshSubtitles]
   );
 
   // Handle delete
@@ -114,13 +114,13 @@ export function SubtitleSearchModal({
     async (subtitleId: number): Promise<boolean> => {
       const success = await deleteSubtitle(subtitleId);
       if (success) {
-        showToast('success', 'Subtitle deleted');
+        toast({ tone: 'ready', title: 'Subtitle deleted' });
       } else {
-        showToast('error', 'Failed to delete subtitle');
+        toast({ tone: 'error', title: 'Failed to delete subtitle' });
       }
       return success;
     },
-    [deleteSubtitle, showToast]
+    [deleteSubtitle, toast]
   );
 
   // Handle close

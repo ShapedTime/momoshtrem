@@ -3,7 +3,8 @@ import Link from 'next/link';
 import type { SearchResult } from '@/types/tmdb';
 import { isMovie, getMediaTitle, getMediaReleaseYear } from '@/types/tmdb';
 import { buildImageUrl } from '@/config/tmdb';
-import { FilmIcon, RatingBadge } from '@/components/ui';
+import { RatingBadge } from '@/components/ui';
+import { Film } from 'lucide-react';
 
 interface MediaCardProps {
   media: SearchResult;
@@ -23,7 +24,7 @@ export function MediaCard({ media, priority = false }: MediaCardProps) {
         group relative block
         w-[140px] sm:w-[160px] lg:w-[180px] xl:w-[200px]
         flex-shrink-0
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
         focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
         rounded-md
       "
@@ -48,7 +49,7 @@ export function MediaCard({ media, priority = false }: MediaCardProps) {
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-text-muted">
-            <FilmIcon size={48} />
+            <Film size={48} />
           </div>
         )}
 

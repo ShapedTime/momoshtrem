@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { MenuIcon, XIcon } from '@/components/ui';
+import { Menu, X } from 'lucide-react';
 
 function SearchIcon() {
   return (
@@ -43,7 +43,7 @@ function NavLink({ href, active, children, onClick, mobile = false }: NavLinkPro
         className={`
           block w-full px-4 py-3 text-base font-medium
           transition-colors
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue focus-visible:ring-inset
+          focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset
           ${active
             ? 'text-white bg-bg-hover'
             : 'text-text-secondary hover:text-white hover:bg-bg-hover'
@@ -61,7 +61,7 @@ function NavLink({ href, active, children, onClick, mobile = false }: NavLinkPro
       aria-current={active ? 'page' : undefined}
       className={`
         text-sm font-medium transition-colors
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
         rounded-sm px-1 pb-1
         ${active
           ? 'text-white border-b-2 border-accent-blue'
@@ -150,7 +150,7 @@ export function Header() {
             className="
               text-xl sm:text-2xl font-bold text-white
               hover:text-text-secondary transition-colors
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
               rounded-md flex-shrink-0
             "
           >
@@ -197,7 +197,7 @@ export function Header() {
                   sm:hidden p-2 -m-2
                   text-text-secondary hover:text-white
                   transition-colors
-                  focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                  focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                   rounded-md
                 "
                 aria-label="Toggle search"
@@ -213,7 +213,7 @@ export function Header() {
                   flex-1 sm:flex-none
                   bg-bg-elevated border border-border rounded-md
                   px-3 h-10
-                  focus-within:ring-2 focus-within:ring-accent-blue focus-within:border-transparent
+                  focus-within:ring-2 focus-within:ring-accent focus-within:border-transparent
                   transition-all
                 `}
               >
@@ -241,7 +241,7 @@ export function Header() {
                 sm:hidden p-2 -m-2 ml-2
                 text-text-secondary hover:text-white
                 transition-colors
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                 rounded-md
                 min-w-[44px] min-h-[44px]
                 flex items-center justify-center
@@ -250,7 +250,7 @@ export function Header() {
               aria-expanded={isMobileMenuOpen}
               aria-controls="mobile-menu"
             >
-              <MenuIcon size={24} />
+              <Menu size={24} />
             </button>
           </div>
         </div>
@@ -294,14 +294,14 @@ export function Header() {
                   p-2 -m-2
                   text-text-secondary hover:text-white
                   transition-colors
-                  focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                  focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                   rounded-md
                   min-w-[44px] min-h-[44px]
                   flex items-center justify-center
                 "
                 aria-label="Close menu"
               >
-                <XIcon size={24} />
+                <X size={24} />
               </button>
             </div>
 

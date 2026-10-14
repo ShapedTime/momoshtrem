@@ -1,122 +1,102 @@
-import { render, screen, fireEvent } from '@testing-library/react';
-import { Button } from '@/components/ui/Button';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { Button, ButtonLink, IconButton } from '@/components/ui/Button';
 
 describe('Button', () => {
-  it('renders children correctly', () => {
-    render(<Button>Click me</Button>);
-    expect(screen.getByRole('button', { name: /click me/i })).toBeInTheDocument();
+  it('renders children and handles clicks', () => {
+    const onClick = jest.fn();
+    render(<Button onClick={onClick}>Find a torrent</Button>);
+    fireEvent.click(screen.getByRole('button', { name: 'Find a torrent' }));
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it('handles click events', () => {
-    const handleClick = jest.fn();
-    render(<Button onClick={handleClick}>Click me</Button>);
-
-    fireEvent.click(screen.getByRole('button'));
-    expect(handleClick).toHaveBeenCalledTimes(1);
+  it('defaults to a secondary, medium, non-submitting button', () => {
+    render(<Button>Subtitles</Button>);
+    const button = screen.getByRole('button');
+    expect(button).toHaveClass('btn', 'btn-secondary');
+    expect(button).not.toHaveClass('btn-sm', 'btn-lg', 'btn-block');
+    expect(button).toHaveAttribute('type', 'button');
   });
 
-  describe('variants', () => {
-    it('renders primary variant by default', () => {
-      render(<Button>Primary</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-accent-red');
-    });
-
-    it('renders secondary variant', () => {
-      render(<Button variant="secondary">Secondary</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-white/10');
-    });
-
-    it('renders ghost variant', () => {
-      render(<Button variant="ghost">Ghost</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('bg-transparent');
-    });
+  it.each([
+    ['primary', 'btn-primary'],
+    ['ghost', 'btn-ghost'],
+    ['glass', 'btn-glass'],
+    ['ready', 'btn-ready'],
+    ['danger', 'btn-danger'],
+    ['danger-quiet', 'btn-danger-quiet'],
+  ] as const)('applies the %s variant', (variant, className) => {
+    render(<Button variant={variant}>x</Button>);
+    expect(screen.getByRole('button')).toHaveClass(className);
   });
 
-  describe('sizes', () => {
-    it('renders medium size by default', () => {
-      render(<Button>Medium</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('h-11');
-    });
-
-    it('renders small size', () => {
-      render(<Button size="sm">Small</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('h-9');
-    });
-
-    it('renders large size', () => {
-      render(<Button size="lg">Large</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('h-12');
-    });
+  it('applies sizes and block width only when asked', () => {
+    const { rerender } = render(<Button size="sm">x</Button>);
+    expect(screen.getByRole('button')).toHaveClass('btn-sm');
+    rerender(
+      <Button size="lg" block>
+        x
+      </Button>
+    );
+    expect(screen.getByRole('button')).toHaveClass('btn-lg', 'btn-block');
   });
 
-  describe('loading state', () => {
-    it('shows spinner when loading', () => {
-      render(<Button isLoading>Loading</Button>);
-      const button = screen.getByRole('button');
-      // Spinner is an svg with animate-spin class
-      const spinner = button.querySelector('svg.animate-spin');
-      expect(spinner).toBeInTheDocument();
-    });
-
-    it('disables button when loading', () => {
-      render(<Button isLoading>Loading</Button>);
-      expect(screen.getByRole('button')).toBeDisabled();
-    });
-
-    it('does not trigger click when loading', () => {
-      const handleClick = jest.fn();
-      render(
-        <Button isLoading onClick={handleClick}>
-          Loading
-        </Button>
-      );
-
-      fireEvent.click(screen.getByRole('button'));
-      expect(handleClick).not.toHaveBeenCalled();
-    });
+  it('is busy but keeps its label while loading, and ignores clicks', () => {
+    const onClick = jest.fn();
+    render(
+      <Button loading onClick={onClick}>
+        Adding
+      </Button>
+    );
+    const button = screen.getByRole('button', { name: 'Adding' });
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(button).toHaveClass('is-loading');
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
   });
 
-  describe('disabled state', () => {
-    it('disables button when disabled prop is true', () => {
-      render(<Button disabled>Disabled</Button>);
-      expect(screen.getByRole('button')).toBeDisabled();
-    });
-
-    it('has disabled styling', () => {
-      render(<Button disabled>Disabled</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('disabled:opacity-50');
-    });
+  it('still accepts the deprecated isLoading prop', () => {
+    render(<Button isLoading>Saving</Button>);
+    expect(screen.getByRole('button')).toHaveAttribute('aria-busy', 'true');
   });
 
-  describe('accessibility', () => {
-    it('has focus-visible ring styles', () => {
-      render(<Button>Focus me</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('focus-visible:ring-2');
-    });
-
-    it('respects motion-reduce preference', () => {
-      render(<Button>No animation</Button>);
-      const button = screen.getByRole('button');
-      expect(button).toHaveClass('motion-reduce:transition-none');
-    });
+  it('can be disabled', () => {
+    render(<Button disabled>x</Button>);
+    expect(screen.getByRole('button')).toBeDisabled();
   });
 
-  it('forwards ref correctly', () => {
-    const ref = { current: null } as React.RefObject<HTMLButtonElement | null>;
-    render(<Button ref={ref}>Ref button</Button>);
-    expect(ref.current).toBeInstanceOf(HTMLButtonElement);
+  it('submits forms when typed as submit', () => {
+    const onSubmit = jest.fn((event: React.FormEvent) => event.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <Button type="submit">Sign in</Button>
+      </form>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(onSubmit).toHaveBeenCalled();
   });
+});
 
-  it('passes through additional props', () => {
-    render(<Button data-testid="custom-button">Props</Button>);
-    expect(screen.getByTestId('custom-button')).toBeInTheDocument();
+describe('IconButton', () => {
+  it('is square, ghost by default and named by aria-label', () => {
+    render(
+      <IconButton aria-label="Close">
+        <svg />
+      </IconButton>
+    );
+    const button = screen.getByRole('button', { name: 'Close' });
+    expect(button).toHaveClass('btn-icon', 'btn-ghost');
+  });
+});
+
+describe('ButtonLink', () => {
+  it('renders a link styled as a button', () => {
+    render(
+      <ButtonLink href="/library" variant="primary">
+        Browse
+      </ButtonLink>
+    );
+    const link = screen.getByRole('link', { name: 'Browse' });
+    expect(link).toHaveAttribute('href', '/library');
+    expect(link).toHaveClass('btn', 'btn-primary');
   });
 });

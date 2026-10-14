@@ -22,13 +22,14 @@ import {
   EpisodeListSkeleton,
   type EpisodeAssignmentInfo,
 } from '@/components/media';
-import { Button, AlertCircleIcon, Breadcrumb } from '@/components/ui';
+import { Button, Breadcrumb } from '@/components/ui';
+import { CircleAlert } from 'lucide-react';
 
 function ErrorState({ message }: { message: string }) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
       <div className="text-center max-w-md">
-        <AlertCircleIcon size={48} className="mx-auto mb-4 text-text-muted" />
+        <CircleAlert size={48} className="mx-auto mb-4 text-text-muted" />
         <h2 className="text-xl font-semibold text-white mb-2">
           Unable to load TV show
         </h2>

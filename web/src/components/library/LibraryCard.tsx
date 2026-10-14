@@ -105,7 +105,7 @@ function getTorrentBorderClasses(
   }
 
   // Downloading
-  return 'ring-2 ring-accent-blue shadow-lg shadow-accent-blue/20';
+  return 'ring-2 ring-accent shadow-lg shadow-accent-blue/20';
 }
 
 export function LibraryCard({ item, mediaType, posterPath, onRemove, torrentStatus }: LibraryCardProps) {
@@ -150,7 +150,7 @@ export function LibraryCard({ item, mediaType, posterPath, onRemove, torrentStat
           block
           w-[140px] sm:w-[160px] lg:w-[180px] xl:w-[200px]
           flex-shrink-0
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+          focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
           focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
           rounded-md
         "
@@ -193,7 +193,7 @@ export function LibraryCard({ item, mediaType, posterPath, onRemove, torrentStat
                 text-white
                 opacity-0 group-hover:opacity-100
                 transition-opacity duration-200 motion-reduce:transition-none
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
               "
               aria-label={`Remove ${item.title} from library`}
             >

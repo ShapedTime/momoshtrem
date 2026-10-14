@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { StatusPill } from '@/components/ui';
 import Link from 'next/link';
 import { TorrentProgress } from './TorrentProgress';
 import {
@@ -217,32 +218,9 @@ export function TorrentManagementCard({
 }
 
 function StatusBadge({ status }: { status: ReturnType<typeof getTorrentDisplayStatus> }) {
-  const configs = {
-    downloading: {
-      label: 'Downloading',
-      className: 'bg-accent-blue/20 text-accent-blue',
-    },
-    seeding: {
-      label: 'Seeding',
-      className: 'bg-accent-green/20 text-accent-green',
-    },
-    paused: {
-      label: 'Paused',
-      className: 'bg-accent-yellow/20 text-accent-yellow',
-    },
-    none: {
-      label: 'Unknown',
-      className: 'bg-bg-hover text-text-muted',
-    },
-  };
-
-  const config = configs[status];
-
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${config.className}`}>
-      {config.label}
-    </span>
-  );
+  // Shared status vocabulary (lib/status): seeding reads "Ready", unknown reads "Idle"
+  const key = status === 'seeding' ? 'ready' : status === 'none' ? 'idle' : status;
+  return <StatusPill status={key} />;
 }
 
 function PlayIcon() {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { StatusPill } from '@/components/ui';
 import { TorrentProgress } from './TorrentProgress';
 import { formatBytes, getTorrentDisplayStatus } from '@/types/torrent';
 import type { TorrentStatus } from '@/types/torrent';
@@ -160,33 +161,8 @@ export function TorrentInfoSection({
 
 function StatusBadge({ status }: { status: ReturnType<typeof getTorrentDisplayStatus> }) {
   if (status === 'none') return null;
-
-  const configs = {
-    downloading: {
-      label: 'Downloading',
-      className: 'bg-accent-blue/20 text-accent-blue',
-    },
-    seeding: {
-      label: 'Ready',
-      className: 'bg-accent-green/20 text-accent-green',
-    },
-    paused: {
-      label: 'Paused',
-      className: 'bg-accent-yellow/20 text-accent-yellow',
-    },
-    none: {
-      label: '',
-      className: '',
-    },
-  };
-
-  const config = configs[status];
-
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${config.className}`}>
-      {config.label}
-    </span>
-  );
+  // Shared status vocabulary (lib/status): a seeding torrent is "Ready" everywhere
+  return <StatusPill status={status === 'seeding' ? 'ready' : status} />;
 }
 
 function TorrentIcon() {

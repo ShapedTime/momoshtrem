@@ -130,7 +130,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'lg' }: ModalPr
             className="
               p-2 -m-2 text-text-secondary hover:text-white
               rounded-md transition-colors
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
             "
             aria-label="Close modal"
           >

@@ -1,7 +1,7 @@
 'use client';
 
 import type { MediaType, SortOption } from '@/types/tmdb';
-import { ChevronDownIcon } from '@/components/ui';
+import { ChevronDown } from 'lucide-react';
 
 interface SortOptionConfig {
   value: SortOption;
@@ -55,7 +55,7 @@ export function SortSelect({ mediaType, value, onChange }: SortSelectProps) {
           className="
             w-full appearance-none bg-bg-elevated border border-white/10 rounded-lg
             px-3 py-2 pr-10 text-sm text-white
-            focus:outline-none focus:ring-2 focus:ring-accent-blue focus:border-transparent
+            focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent
             cursor-pointer
           "
         >
@@ -65,7 +65,7 @@ export function SortSelect({ mediaType, value, onChange }: SortSelectProps) {
             </option>
           ))}
         </select>
-        <ChevronDownIcon
+        <ChevronDown
           size={16}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
         />

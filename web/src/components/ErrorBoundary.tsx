@@ -1,7 +1,8 @@
 'use client';
 
 import { Component, ReactNode } from 'react';
-import { Button, AlertCircleIcon } from '@/components/ui';
+import { Button } from '@/components/ui';
+import { CircleAlert } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -45,7 +46,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
           <div className="text-center max-w-md">
-            <AlertCircleIcon size={48} className="mx-auto mb-4 text-red-400" />
+            <CircleAlert size={48} className="mx-auto mb-4 text-red-400" />
             <h2 className="text-xl font-semibold text-white mb-2">
               Something went wrong
             </h2>

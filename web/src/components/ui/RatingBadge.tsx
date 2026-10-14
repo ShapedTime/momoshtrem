@@ -1,4 +1,4 @@
-import { StarIcon } from './Icons';
+import { Star } from 'lucide-react';
 
 type RatingBadgeVariant = 'card' | 'hero';
 
@@ -18,7 +18,7 @@ export function RatingBadge({ rating, variant = 'card' }: RatingBadgeProps) {
   if (variant === 'hero') {
     return (
       <div className="flex items-center gap-1 text-accent-yellow">
-        <StarIcon size={18} />
+        <Star size={18} fill="currentColor" aria-hidden="true" />
         <span className="font-semibold">{displayRating}</span>
       </div>
     );
