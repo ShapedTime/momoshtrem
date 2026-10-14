@@ -585,26 +585,28 @@ class MomoshtremClient {
    * Get all subtitles for a movie.
    */
   async getMovieSubtitles(movieId: number): Promise<Subtitle[]> {
-    const result = await this.request<{ subtitles: Subtitle[] }>(
+    // Since #4 the backend answers {items} (PLAN §6) without file_size.
+    const result = await this.request<{ items: Subtitle[] }>(
       'GET',
       `/api/movies/${movieId}/subtitles`,
       undefined,
       'get movie subtitles'
     );
-    return result.subtitles || [];
+    return (result.items || []).map((s) => ({ ...s, file_size: s.file_size ?? 0 }));
   }
 
   /**
    * Get all subtitles for an episode.
    */
   async getEpisodeSubtitles(episodeId: number): Promise<Subtitle[]> {
-    const result = await this.request<{ subtitles: Subtitle[] }>(
+    // Since #4 the backend answers {items} (PLAN §6) without file_size.
+    const result = await this.request<{ items: Subtitle[] }>(
       'GET',
       `/api/episodes/${episodeId}/subtitles`,
       undefined,
       'get episode subtitles'
     );
-    return result.subtitles || [];
+    return (result.items || []).map((s) => ({ ...s, file_size: s.file_size ?? 0 }));
   }
 
   /**
