@@ -108,6 +108,7 @@ func TestTitleRoutes_Status(t *testing.T) {
 		{"movie TMDB down", "GET", "/api/titles/movie/1", "", down, false, 502, CodeTMDBUnavailable},
 		{"movie no TMDB key", "GET", "/api/titles/movie/1", "", tmdbErr(tmdb.ErrNoAPIKey), false, 503, CodeUnavailable},
 		{"movie database error", "GET", "/api/titles/movie/1", "", errors.New("conn reset"), false, 500, CodeInternalError},
+		{"movie request canceled", "GET", "/api/titles/movie/1", "", fmt.Errorf("load movie: %w", context.Canceled), false, StatusClientClosedRequest, CodeClientClosed},
 		{"movie without catalog", "GET", "/api/titles/movie/1", "", nil, true, 503, CodeUnavailable},
 		{"unknown media type", "GET", "/api/titles/person/1", "", nil, false, 404, CodeNotFound},
 
@@ -120,6 +121,7 @@ func TestTitleRoutes_Status(t *testing.T) {
 		{"specials season", "GET", "/api/titles/tv/209867/seasons/0", "", nil, false, 200, ""},
 		{"season not in library", "GET", "/api/titles/tv/209867/seasons/1", "", catalog.ErrNotInLibrary, false, 404, CodeNotInLibrary},
 		{"season unknown", "GET", "/api/titles/tv/209867/seasons/9", "", catalog.ErrSeasonNotFound, false, 404, CodeNotFound},
+		{"season request canceled", "GET", "/api/titles/tv/209867/seasons/1", "", context.Canceled, false, StatusClientClosedRequest, CodeClientClosed},
 		{"season negative", "GET", "/api/titles/tv/209867/seasons/-1", "", nil, false, 400, CodeBadRequest},
 		{"season not a number", "GET", "/api/titles/tv/209867/seasons/one", "", nil, false, 400, CodeBadRequest},
 
@@ -143,6 +145,7 @@ func TestTitleRoutes_Status(t *testing.T) {
 		{"library bad page size", "GET", "/api/library?page_size=lots", "", nil, false, 400, CodeBadRequest},
 		{"library invalid filter", "GET", "/api/library?sort=rating", "", fmt.Errorf("%w: sort", catalog.ErrInvalidQuery), false, 400, CodeBadRequest},
 		{"library database error", "GET", "/api/library", "", errors.New("conn reset"), false, 500, CodeInternalError},
+		{"library request canceled", "GET", "/api/library", "", fmt.Errorf("list: %w", context.Canceled), false, StatusClientClosedRequest, CodeClientClosed},
 		{"library without catalog", "GET", "/api/library", "", nil, true, 503, CodeUnavailable},
 	}
 	for _, tt := range tests {

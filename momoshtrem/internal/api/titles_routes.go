@@ -192,6 +192,9 @@ func (s *Server) getEpisodeGroups(c *gin.Context) {
 // 404, invalid settings 422, unknown show 404).
 func catalogErrorResponse(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, context.Canceled):
+		// The browser moved on (a new season, a closed tab): nobody reads this answer
+		errorCodeResponse(c, StatusClientClosedRequest, CodeClientClosed, "The request was canceled")
 	case errors.Is(err, catalog.ErrNotInLibrary):
 		errorCodeResponse(c, http.StatusNotFound, CodeNotInLibrary, "Add the show to the library to see its episodes")
 	case errors.Is(err, catalog.ErrSeasonNotFound):

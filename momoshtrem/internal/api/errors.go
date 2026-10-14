@@ -20,7 +20,13 @@ const (
 	CodeTimeout         = "timeout"
 	// CodeTMDBUnavailable is a 502: TMDB failed and nothing was cached.
 	CodeTMDBUnavailable = "tmdb_unavailable"
+	// CodeClientClosed goes with StatusClientClosedRequest: the client went away first.
+	CodeClientClosed = "client_closed"
 )
+
+// StatusClientClosedRequest (nginx's 499) answers a request the client
+// canceled, so it isn't logged or counted as a server error.
+const StatusClientClosedRequest = 499
 
 // ErrorBody is the JSON shape of every API error response.
 type ErrorBody struct {

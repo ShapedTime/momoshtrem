@@ -98,12 +98,17 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
   );
   const changeSeason = (next: number) => setParams({ season: String(next), ep: null, abs: null });
 
-  // `?ep=`/`?abs=` are one-offs: once their season shows (and scrolled there), drop them so a refetch doesn't scroll again
+  // `?ep=`/`?abs=` are one-offs: once their season shows (and scrolled there), drop them so a refetch doesn't
+  // scroll again. Through the History API, which Next keeps in sync, so no navigation is in flight meanwhile.
   const seasonShown = season.status === 'success';
   const hasTarget = initialTarget !== null;
   useEffect(() => {
-    if (hasTarget && seasonShown) setParams({ ep: null, abs: null });
-  }, [hasTarget, seasonShown, setParams]);
+    if (!hasTarget || !seasonShown) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('ep');
+    url.searchParams.delete('abs');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [hasTarget, seasonShown]);
   const findEpisode = (episode: EpisodeSummary) =>
     openLegacySearch(legacySearchContext(show, { season: episode.season_number, episode: episode.episode_number }));
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type KeyboardEvent, useState } from 'react';
 import { Hash } from 'lucide-react';
 import { Input } from '@/components/ui';
 import { type JumpTarget, parseJump } from '@/lib/title/episodes';
@@ -17,7 +17,8 @@ export function JumpToEpisode({ context, onJump }: JumpToEpisodeProps) {
   const [value, setValue] = useState('');
   const [hint, setHint] = useState<string | null>(null);
 
-  const submit = (event: FormEvent) => {
+  const go = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
     event.preventDefault();
     const target = parseJump(value, context);
     if (!target.ok) {
@@ -27,9 +28,10 @@ export function JumpToEpisode({ context, onJump }: JumpToEpisodeProps) {
     setHint(onJump(target));
   };
 
-  // A text field, not numeric: the iPhone number pad can't type S02E05
+  // A text field, not numeric: the iPhone number pad can't type S02E05. Not a <form>: Enter is
+  // handled here, so nothing can ever submit natively (a GET reload) while the page re-renders.
   return (
-    <form className="jump" onSubmit={submit} role="search" aria-label="Jump to episode">
+    <div className="jump" role="search" aria-label="Jump to episode">
       <Input
         enterKeyHint="go"
         autoCapitalize="characters"
@@ -41,11 +43,12 @@ export function JumpToEpisode({ context, onJump }: JumpToEpisodeProps) {
         leadingIcon={<Hash size={16} aria-hidden="true" />}
         value={value}
         error={hint ?? undefined}
+        onKeyDown={go}
         onChange={(event) => {
           setValue(event.target.value);
           if (hint) setHint(null);
         }}
       />
-    </form>
+    </div>
   );
 }
