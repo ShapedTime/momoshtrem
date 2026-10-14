@@ -185,6 +185,16 @@ func TestExtractor_ComputesThenCaches(t *testing.T) {
 	}
 }
 
+// The default image client gives up after a few seconds, not the 10 s of a
+// general client, so a hung host trips the breaker soon.
+func TestNew_ShortImageTimeout(t *testing.T) {
+	e := New(newMemCache())
+	defer e.Close()
+	if got := e.http.Timeout; got <= 0 || got > 3*time.Second {
+		t.Errorf("image client timeout = %v, want at most 3s", got)
+	}
+}
+
 func TestExtractor_BudgetThenBackground(t *testing.T) {
 	srv := newImageServer(t, jpegBytes(t, color.RGBA{200, 0, 0, 255}), 150*time.Millisecond)
 	cache := newMemCache()

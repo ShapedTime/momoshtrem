@@ -30,6 +30,11 @@ const (
 	defaultBudget = 1500 * time.Millisecond
 	// computeTimeout bounds one background fetch, decode and store.
 	computeTimeout = 15 * time.Second
+	// fetchTimeout bounds one image request, body included. A w300 backdrop
+	// is tens of KB, so this is generous; keeping it short means a hung host
+	// trips the host-down breaker after one slow fetch instead of 10 s of
+	// cold title loads that each wait out the whole inline budget.
+	fetchTimeout = 3 * time.Second
 	// failureTTL is how long a failed fetch is remembered before retrying.
 	failureTTL = time.Hour
 	// hostDownFor is how long the image host counts as unreachable after a
@@ -105,7 +110,7 @@ func New(cache Cache, opts ...Option) *Extractor {
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &Extractor{
 		cache:   cache,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		http:    &http.Client{Timeout: fetchTimeout},
 		baseURL: DefaultBaseURL,
 		budget:  defaultBudget,
 		now:     time.Now,
