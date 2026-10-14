@@ -23,7 +23,7 @@ docker compose up -d
 ### Frontend Development
 
 ```bash
-cd PrettyTVCatalog
+cd web
 npm install
 npm run dev
 ```
@@ -45,7 +45,7 @@ The backend needs a PostgreSQL database and a TMDB API key. See `.env.example` f
 Each component has its own code quality guide:
 
 - **Go (momoshtrem):** [`docs/momoshtrem/CODE_QUALITY.md`](docs/momoshtrem/CODE_QUALITY.md) — interfaces, concurrency patterns, error handling
-- **TypeScript (PrettyTVCatalog):** [`docs/prettytvcatalog/CODE_QUALITY.md`](docs/prettytvcatalog/CODE_QUALITY.md) — architecture, strict mode, API patterns
+- **TypeScript (web):** [`docs/web/CODE_QUALITY.md`](docs/web/CODE_QUALITY.md) — architecture, strict mode, API patterns
 
 Key principles:
 

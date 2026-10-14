@@ -21,7 +21,7 @@ Labels: `v2` (redesign and features), `epic` (large, may be split), `in-progress
 
 Self-hosted media streaming stack for Apple TV with library management:
 - **momoshtrem** (Go): Library-first torrent streaming service with WebDAV
-- **PrettyTVCatalog** (Next.js): Frontend for browsing TMDB, managing library, searching torrents. Being renamed to `web/` (momoshtrem branding) in the v2 Foundation issue; update the paths in this file when that lands.
+- **web** (Next.js, package `momoshtrem-web`): the momoshtrem UI for browsing TMDB, managing the library and searching torrents. Lives in `web/`.
 - **Jackett**: Torrent indexer aggregator
 - **Postgres**: Library database
 
@@ -46,8 +46,8 @@ docker compose up -d
 docker compose up -d --build
 
 # Frontend
-cd PrettyTVCatalog && npm run dev
-cd PrettyTVCatalog && npm run lint && npx tsc --noEmit && npm test
+cd web && npm run dev
+cd web && npm run lint && npx tsc --noEmit && npm test
 
 # Go service (momoshtrem)
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
@@ -58,7 +58,7 @@ cd momoshtrem && go vet ./... && go test ./...
 
 ```
                     ┌─────────────────────────────────────────┐
-                    │          PrettyTVCatalog (:3000)        │
+                    │        web: momoshtrem UI (:3000)       │
                     │   Browse TMDB, manage library, search   │
                     └──────────────────┬──────────────────────┘
                                        │
@@ -102,8 +102,8 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 ## Code Quality
 
 **ALWAYS follow these standards:**
-- `docs/prettytvcatalog/CODE_QUALITY.md` - Architecture, TypeScript, error handling
-- `docs/prettytvcatalog/STYLE_GUIDE.md` - UI patterns, responsive design (superseded by the cinematic design for v2 UI work until it's rewritten)
+- `docs/web/CODE_QUALITY.md` - Architecture, TypeScript, error handling
+- `docs/web/STYLE_GUIDE.md` - UI patterns, responsive design (superseded by the cinematic design for v2 UI work until it's rewritten)
 - `docs/momoshtrem/CODE_QUALITY.md` - Go patterns, interfaces, concurrency
 
 **Key principles:**
@@ -122,7 +122,7 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/torrent/service.go` - Torrent service interface
 - `internal/streaming/prioritizer.go` - Piece prioritization
 
-**PrettyTVCatalog (Next.js):**
+**web (Next.js, `web/`):**
 - `src/lib/api/` - API clients (momoshtrem, jackett, tmdb)
 - `src/app/api/` - Next.js API routes
 - `src/types/` - TypeScript interfaces

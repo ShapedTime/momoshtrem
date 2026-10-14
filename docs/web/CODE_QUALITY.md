@@ -1,4 +1,4 @@
-# PrettyTVCatalog - Code Quality Guide
+# momoshtrem web - Code Quality Guide
 
 ## Core Principles
 

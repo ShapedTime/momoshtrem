@@ -134,7 +134,7 @@ export default function LoginPage() {
         {/* Logo/Title */}
         <div className="text-center mb-8">
           <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">
-            PrettyTVCatalog
+            momoshtrem
           </h1>
           <p className="text-neutral-400">Enter your password to continue</p>
         </div>
@@ -154,7 +154,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-neutral-600 text-sm mt-6">
-          Streaming powered by distribyted
+          momoshtrem · self-hosted
         </p>
       </div>
     </main>

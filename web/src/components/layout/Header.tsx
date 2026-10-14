@@ -154,7 +154,7 @@ export function Header() {
               rounded-md flex-shrink-0
             "
           >
-            PrettyTVCatalog
+            momoshtrem
           </Link>
 
           {/* Desktop Navigation */}

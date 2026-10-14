@@ -3,10 +3,10 @@ import type { NextRequest } from 'next/server';
 import { SESSION_COOKIE_NAME, PUBLIC_ROUTES, LOGIN_ROUTE } from '@/config/auth';
 import { verifySessionToken } from '@/lib/auth/session';
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip middleware for static files and public routes
+  // Skip the proxy for static files and public routes
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
