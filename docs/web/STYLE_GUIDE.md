@@ -134,7 +134,38 @@ to the map and don't invent wording in a component.
 | Not found | `notFound()` → "Nothing here but the cat" inside the shell |
 | Crash | `error.tsx` → `ErrorView` (what failed, what's fine, Try again) |
 
-## 8. Copy
+## 8. Detail pages
+
+The movie and show pages (`/movie/[id]`, `/tv/[id]`) share `components/title/`
+and the pure helpers in `lib/title/`. Build any page about one title from them.
+
+- **One state machine.** The server sends `library.availability_stage`; `primaryActionFor(title)`
+  (`lib/title/stage-copy.ts`) turns it into the panel's words and buttons:
+  Add to library → Find a torrent ("Find episodes 29–38") → Downloading → Ready in Infuse.
+  Never infer the stage on the client and never promise a finish time: downloading says it
+  streams now. `PrimaryPanel` shows the four steps, the hint and the copyable WebDAV path.
+- **Action dock.** Below 1024 px the panel's button moves to `ActionDock`, a thumb-reach bar
+  above the tab bar (plus Copy path once ready). Hero pages call `useOverArt()`: the main area
+  slides under the top bar and the page draws its own phone bar (Back, ⋯).
+- **Once ready,** the current torrent and the subtitles move to the top of the body.
+  Destructive actions (Remove from library, Remove file) sit in the ⋯ menu or a quiet button and
+  are confirmed with what goes and what stays.
+- **Episode rows** (`EpisodeRow`) are compact (60 px) or, with `?view=rich`, have a still
+  (92 px). Each state gets its pill from `lib/status.ts` and one action: find (missing), ⋯ for the
+  episode sheet (has a file), a chevron to the mapping review (needs review), nothing until it
+  airs. The first frontier episode is "Up next" with the amber rule. With absolute ordering a row
+  reads `#1100 · S22E15`, unless the absolute number is the in-season one.
+- **Long seasons** (HANDOFF §5.4):
+  - range chips from `SeasonDetail.ranges`, the frontier's pressed, each jumping to its start;
+  - Jump to episode, which reads `29`, `1100` or `S02E05` (`parseJump`) and switches `?season=` when needed;
+  - leading watched runs (10 or more) collapse into "Show episodes 1–20 (all watched)";
+  - seasons over 60 rows render through the window virtualiser (`@tanstack/react-virtual`).
+  Rows outside the window aren't in the DOM, so jump with `scrollToEpisode`, never by element id.
+- **URL state.** `?season=`, `?view=rich`, the sheets (`?sheet=episode&tmdb=&se=S01E05`,
+  `?sheet=show-settings&tmdb=`, `?sheet=infuse-setup&path=&url=`), and the one-off `?ep=` that a
+  cross-season jump scrolls to.
+
+## 9. Copy
 
 - Sentence case everywhere. Contractions are fine ("isn't", "you're").
 - Name the thing: "Remove Severance from your library?", not "Are you sure?".
@@ -142,7 +173,7 @@ to the map and don't invent wording in a component.
 - Talk about Infuse and Apple TV by name; that's where people watch.
 - Don't promise what the system can't know. For example, the offline page only claims Infuse still plays when WebDAV actually answered.
 
-## 9. Building a screen
+## 10. Building a screen
 
 1. **Contract:** types for its endpoints in `src/lib/api/contract/<domain>.ts`, matching PLAN.md §6. Change PLAN.md in the same PR if the contract changes.
 2. **Data:** calls and `queryOptions` in `src/lib/api/endpoints/<domain>.ts`, and fixtures and handlers in `src/mocks/` so the screen works in mock mode (`NEXT_PUBLIC_API_MOCKING=enabled npm run dev`) before the backend lands.
@@ -151,7 +182,7 @@ to the map and don't invent wording in a component.
 5. **Tests:** a Playwright spec for the main flow on both projects (390 phone, 1440 desktop), with `expectNoA11yViolations` and `expectNoHorizontalOverflow` (also at 320).
 6. **Screenshots:** add cases to `e2e/screenshots.spec.ts`, then run `SCREENSHOTS=1 npx playwright test screenshots && node scripts/optimize-screenshots.mjs` and link them in the PR.
 
-## 10. Checklist (PLAN.md §7 "Acceptance for every F task")
+## 11. Checklist (PLAN.md §7 "Acceptance for every F task")
 
 - [ ] Matches the design at 390 and 1440 px; no horizontal overflow at 320 px.
 - [ ] Titles and actions visible without hover; touch targets ≥ 44 px.
