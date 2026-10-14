@@ -57,6 +57,7 @@ Set `ssd=1` only if the storage is an SSD.
 - **Rule: keep the cap at or below 75% of the data disk.** The rest covers ext4 overhead and reserved blocks, the database and subtitles as they grow, and any local dumps #35 keeps.
 - With today's cap that gives 120 GiB, the same as the old disk, which ran at 81% used.
 - If either the cap or the disk size changes, change the other one too.
+- **Built at 70 GiB.** The VM was created with a 70 GiB data disk, which is grown to 120 GiB after cutover (§6). Until then the cap is 52 GiB (`global_cache_size: 53760`).
 
 ## 2. Before you create it: can the host run both VMs?
 
@@ -147,16 +148,16 @@ sudo lvextend -r -l +100%FREE ubuntu-vg/ubuntu-lv
 **On the Mac**, add an SSH alias for the temporary IP in `~/.ssh/config`, then copy the key across:
 
 ```
-Host momoshtrem-new
+Host momoshtrem-v2
   HostName <temporary-ip>
   User agha
 ```
 
 ```bash
-ssh-copy-id momoshtrem-new
+ssh-copy-id momoshtrem-v2
 ```
 
-At cutover, `momoshtrem-vm` moves to this VM and `momoshtrem-new` is removed (§6).
+At cutover, `momoshtrem-v2` moves to 192.168.0.81 (§6).
 
 **On the VM**, make SSH key-only. Keep a second session open until you have checked that you can log in:
 
@@ -187,7 +188,7 @@ snap list                          # no docker
 id agha                            # in sudo
 
 # On the Mac: password login must be refused
-ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password momoshtrem-new true
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password momoshtrem-v2 true
 # Permission denied (publickey).
 ```
 
@@ -202,9 +203,16 @@ Nothing else is installed or configured by hand. The rest belongs to:
 
 ## 6. Later changes to the VM
 
-These are part of the cutover (#42 §3). They're listed here because they change the VM or its neighbours.
+These happen at or after the cutover (#42 §3–4). They're listed here because they change the VM or its neighbours.
 
 - **The IP.** On the router, move the DHCP reservation for 192.168.0.81 to this VM's MAC once the old VM is shut down. Then reboot this VM so that it picks up the address.
-- **The SSH alias.** Point `momoshtrem-vm` at 192.168.0.81 again, remove the old host key with `ssh-keygen -R 192.168.0.81`, and delete `momoshtrem-new`.
+- **The SSH alias.** Point `momoshtrem-v2` at 192.168.0.81, and remove the old VM's host key for that address with `ssh-keygen -R 192.168.0.81`. `momoshtrem-vm` now reaches the new VM too; drop it once the old VM is deleted.
 - **RAM.** If the VM was built with less than 8 GiB (§2), shut it down, set 8192 MiB and start it again.
 - **The old VM.** Turn its **Start at boot** off once it's stopped. Otherwise a host reboot brings it back, with its own stack, until it's deleted.
+- **The data disk.** After the cutover, grow it from 70 to 120 GiB:
+  1. In Proxmox, **Hardware → Hard Disk (scsi1) → Disk Action → Resize**, and add 50 GiB.
+  2. On the VM, check with `lsblk` that the data disk is still `sdb`, then grow the partition and the filesystem while mounted:
+     ```bash
+     sudo growpart /dev/sdb 1 && sudo resize2fs /dev/sdb1
+     ```
+  3. Raise `global_cache_size` to 92160 in `config.yaml` and restart momoshtrem.
