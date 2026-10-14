@@ -83,6 +83,15 @@ export function validateEnvironment(): EnvConfig {
     );
   }
 
+  if (!process.env.APP_USERNAME) {
+    console.warn('[CONFIG] APP_USERNAME is not set; the sign-in username is "admin".');
+  }
+
+  const hops = process.env.TRUSTED_PROXY_HOPS;
+  if (hops !== undefined && !/^\d+$/.test(hops)) {
+    console.warn(`[CONFIG] TRUSTED_PROXY_HOPS must be a whole number (got "${hops}"); using 0.`);
+  }
+
   return {
     APP_PASSWORD: process.env.APP_PASSWORD!,
     TMDB_API_KEY: process.env.TMDB_API_KEY!,

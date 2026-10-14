@@ -1,216 +1,91 @@
 /**
- * In-memory rate limiting for authentication endpoints.
- * Protects against brute force password attacks.
+ * In-memory sign-in rate limiting (single instance; resets on restart).
  *
- * Note: This implementation resets on server restart.
- * For distributed deployments, consider using Redis or similar.
+ * Two limits:
+ * - per client: AUTH_MAX_ATTEMPTS failures within the window block that
+ *   client for AUTH_BLOCK_MINUTES;
+ * - global: AUTH_GLOBAL_MAX_FAILURES failures from anyone within the window
+ *   block every sign-in for the same time. That bounds guessing even when the
+ *   client address can be forged (see client-ip.ts).
  */
 
-import { NextRequest } from 'next/server';
+interface Limits {
+  maxAttempts: number;
+  globalMaxFailures: number;
+  windowMs: number;
+  blockMs: number;
+}
 
-// ============================================
-// Configuration
-// ============================================
+function envInt(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
-const RATE_LIMIT_CONFIG = {
-  /** Maximum failed attempts before blocking */
-  maxAttempts: 5,
-  /** Time window in milliseconds (15 minutes) */
-  windowMs: 15 * 60 * 1000,
-  /** How long to block after exceeding limit (15 minutes) */
-  blockDurationMs: 15 * 60 * 1000,
-} as const;
+function limits(): Limits {
+  return {
+    maxAttempts: envInt('AUTH_MAX_ATTEMPTS', 5),
+    globalMaxFailures: envInt('AUTH_GLOBAL_MAX_FAILURES', 30),
+    windowMs: envInt('AUTH_WINDOW_MINUTES', 15) * 60_000,
+    blockMs: envInt('AUTH_BLOCK_MINUTES', 15) * 60_000,
+  };
+}
 
-// ============================================
-// Types
-// ============================================
+interface Bucket {
+  failures: number[];
+  blockedUntil: number;
+}
 
-interface RateLimitEntry {
-  attempts: number;
-  firstAttemptAt: number;
-  blockedUntil: number | null;
+const clients = new Map<string, Bucket>();
+const global: Bucket = { failures: [], blockedUntil: 0 };
+
+function prune(bucket: Bucket, now: number, windowMs: number): void {
+  bucket.failures = bucket.failures.filter((at) => now - at < windowMs);
 }
 
 export interface RateLimitResult {
   allowed: boolean;
+  /** Failures left before this client is blocked. */
   remaining: number;
-  resetAt: number | null;
-  blockedUntil: number | null;
+  /** Seconds until sign-in is possible again (when not allowed). */
+  retryAfterSeconds: number;
 }
 
-// ============================================
-// In-Memory Store
-// ============================================
-
-const rateLimitStore = new Map<string, RateLimitEntry>();
-
-// Clean up old entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore.entries()) {
-    // Remove entries that are past their block period and window
-    if (
-      entry.blockedUntil &&
-      entry.blockedUntil < now &&
-      entry.firstAttemptAt + RATE_LIMIT_CONFIG.windowMs < now
-    ) {
-      rateLimitStore.delete(key);
-    } else if (
-      !entry.blockedUntil &&
-      entry.firstAttemptAt + RATE_LIMIT_CONFIG.windowMs < now
-    ) {
-      rateLimitStore.delete(key);
-    }
+export function checkRateLimit(key: string, now: number = Date.now()): RateLimitResult {
+  const { maxAttempts, windowMs } = limits();
+  const bucket = clients.get(key);
+  if (bucket) {
+    prune(bucket, now, windowMs);
+    if (bucket.failures.length === 0 && bucket.blockedUntil <= now) clients.delete(key);
   }
-}, 5 * 60 * 1000);
-
-// ============================================
-// Helper Functions
-// ============================================
-
-/**
- * Extract client IP address from request.
- * Handles X-Forwarded-For header for reverse proxy setups.
- */
-export function getClientIp(request: NextRequest): string {
-  // Check X-Forwarded-For header (set by reverse proxies like Caddy)
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    // Take the first IP in the chain (original client)
-    const ips = forwardedFor.split(',').map((ip) => ip.trim());
-    if (ips[0]) {
-      return ips[0];
-    }
+  const blockedUntil = Math.max(bucket?.blockedUntil ?? 0, global.blockedUntil);
+  if (blockedUntil > now) {
+    return { allowed: false, remaining: 0, retryAfterSeconds: Math.ceil((blockedUntil - now) / 1000) };
   }
-
-  // Check X-Real-IP header (alternative proxy header)
-  const realIp = request.headers.get('x-real-ip');
-  if (realIp) {
-    return realIp;
-  }
-
-  // Fallback to a generic identifier
-  return 'unknown';
+  return { allowed: true, remaining: maxAttempts - (bucket?.failures.length ?? 0), retryAfterSeconds: 0 };
 }
 
-// ============================================
-// Rate Limiting Functions
-// ============================================
-
-/**
- * Check if a request is allowed under rate limiting rules.
- * Does NOT increment the attempt counter - use recordFailedAttempt for that.
- *
- * @param identifier - Unique identifier for the client (usually IP)
- * @returns Rate limit check result
- */
-export function checkRateLimit(identifier: string): RateLimitResult {
-  const now = Date.now();
-  const entry = rateLimitStore.get(identifier);
-
-  // No previous attempts - allowed
-  if (!entry) {
-    return {
-      allowed: true,
-      remaining: RATE_LIMIT_CONFIG.maxAttempts,
-      resetAt: null,
-      blockedUntil: null,
-    };
-  }
-
-  // Currently blocked
-  if (entry.blockedUntil && entry.blockedUntil > now) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: entry.blockedUntil,
-      blockedUntil: entry.blockedUntil,
-    };
-  }
-
-  // Block period expired - reset the entry
-  if (entry.blockedUntil && entry.blockedUntil <= now) {
-    rateLimitStore.delete(identifier);
-    return {
-      allowed: true,
-      remaining: RATE_LIMIT_CONFIG.maxAttempts,
-      resetAt: null,
-      blockedUntil: null,
-    };
-  }
-
-  // Check if window has expired
-  const windowExpiry = entry.firstAttemptAt + RATE_LIMIT_CONFIG.windowMs;
-  if (windowExpiry < now) {
-    // Window expired - reset
-    rateLimitStore.delete(identifier);
-    return {
-      allowed: true,
-      remaining: RATE_LIMIT_CONFIG.maxAttempts,
-      resetAt: null,
-      blockedUntil: null,
-    };
-  }
-
-  // Within window - check remaining attempts
-  const remaining = Math.max(0, RATE_LIMIT_CONFIG.maxAttempts - entry.attempts);
-  return {
-    allowed: remaining > 0,
-    remaining,
-    resetAt: windowExpiry,
-    blockedUntil: null,
-  };
+/** Record a failed sign-in; the result says whether this failure triggered a block. */
+export function recordFailedAttempt(key: string, now: number = Date.now()): RateLimitResult {
+  const { maxAttempts, globalMaxFailures, windowMs, blockMs } = limits();
+  const bucket = clients.get(key) ?? { failures: [], blockedUntil: 0 };
+  prune(bucket, now, windowMs);
+  prune(global, now, windowMs);
+  bucket.failures.push(now);
+  global.failures.push(now);
+  if (bucket.failures.length >= maxAttempts) bucket.blockedUntil = now + blockMs;
+  if (global.failures.length >= globalMaxFailures) global.blockedUntil = now + blockMs;
+  clients.set(key, bucket);
+  return checkRateLimit(key, now);
 }
 
-/**
- * Record a failed authentication attempt.
- * Should be called after a failed login.
- *
- * @param identifier - Unique identifier for the client (usually IP)
- */
-export function recordFailedAttempt(identifier: string): void {
-  const now = Date.now();
-  const entry = rateLimitStore.get(identifier);
-
-  if (!entry) {
-    // First failed attempt
-    rateLimitStore.set(identifier, {
-      attempts: 1,
-      firstAttemptAt: now,
-      blockedUntil: null,
-    });
-    return;
-  }
-
-  // Check if window has expired
-  const windowExpiry = entry.firstAttemptAt + RATE_LIMIT_CONFIG.windowMs;
-  if (windowExpiry < now) {
-    // Start new window
-    rateLimitStore.set(identifier, {
-      attempts: 1,
-      firstAttemptAt: now,
-      blockedUntil: null,
-    });
-    return;
-  }
-
-  // Increment attempts
-  entry.attempts++;
-
-  // Check if we should block
-  if (entry.attempts >= RATE_LIMIT_CONFIG.maxAttempts) {
-    entry.blockedUntil = now + RATE_LIMIT_CONFIG.blockDurationMs;
-  }
-
-  rateLimitStore.set(identifier, entry);
+/** A successful sign-in clears that client's failures (not the global count). */
+export function clearRateLimit(key: string): void {
+  clients.delete(key);
 }
 
-/**
- * Clear rate limit entry for an identifier.
- * Should be called after a successful login.
- *
- * @param identifier - Unique identifier for the client (usually IP)
- */
-export function clearRateLimit(identifier: string): void {
-  rateLimitStore.delete(identifier);
+/** Tests only. */
+export function resetRateLimits(): void {
+  clients.clear();
+  global.failures = [];
+  global.blockedUntil = 0;
 }

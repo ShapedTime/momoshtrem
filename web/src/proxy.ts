@@ -1,49 +1,41 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { SESSION_COOKIE_NAME, PUBLIC_ROUTES, LOGIN_ROUTE } from '@/config/auth';
+import { LOGIN_ROUTE, PUBLIC_PATHS, PUBLIC_PREFIXES, SESSION_COOKIE_NAME } from '@/config/auth';
 import { verifySessionToken } from '@/lib/auth/session';
 
+function isPublic(pathname: string): boolean {
+  return PUBLIC_PATHS.has(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+/**
+ * Session gate for every route. Pages redirect to /login (keeping where you
+ * were going); API routes answer 401 JSON so client fetches can send you to
+ * /login instead of parsing an HTML redirect.
+ */
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
+  if (isPublic(pathname)) return NextResponse.next();
 
-  // Skip the proxy for static files and public routes
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon') ||
-    pathname.includes('.') ||
-    PUBLIC_ROUTES.some((route) => pathname.startsWith(route))
-  ) {
-    return NextResponse.next();
-  }
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const session = token ? await verifySessionToken(token) : null;
+  if (session?.authenticated) return NextResponse.next();
 
-  // Check for session cookie
-  const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-
-  if (!sessionToken) {
-    // No session, redirect to login
+  let response: NextResponse;
+  if (pathname.startsWith('/api/')) {
+    response = NextResponse.json(
+      { error: { code: 'unauthorized', message: 'Your session has ended. Sign in again.' } },
+      { status: 401 }
+    );
+  } else {
     const loginUrl = new URL(LOGIN_ROUTE, request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
+    loginUrl.searchParams.set('redirect', `${pathname}${search}`);
+    response = NextResponse.redirect(loginUrl);
   }
-
-  // Verify session token
-  const session = await verifySessionToken(sessionToken);
-
-  if (!session || !session.authenticated) {
-    // Invalid or expired session, redirect to login
-    const loginUrl = new URL(LOGIN_ROUTE, request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    const response = NextResponse.redirect(loginUrl);
-    // Clear invalid cookie
-    response.cookies.delete(SESSION_COOKIE_NAME);
-    return response;
-  }
-
-  // Session valid, continue
-  return NextResponse.next();
+  // Drop an expired or tampered cookie
+  if (token) response.cookies.delete(SESSION_COOKIE_NAME);
+  return response;
 }
 
 export const config = {
-  // Match all paths except static files
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import type { NextResponse } from 'next/server';
 import { SignJWT, jwtVerify } from 'jose';
 import type { SessionPayload } from '@/types/auth';
 import {
@@ -49,20 +50,23 @@ export async function verifySessionToken(
   }
 }
 
-// Set session cookie
-export async function setSessionCookie(token: string): Promise<void> {
-  const cookieStore = await cookies();
-  // Allow disabling secure cookies for local network HTTP deployments
-  const useSecureCookies =
-    process.env.SECURE_COOKIES !== 'false' &&
-    process.env.NODE_ENV === 'production';
-  cookieStore.set(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: useSecureCookies,
-    sameSite: 'lax',
-    maxAge: SESSION_DURATION_SECONDS,
-    path: '/',
-  });
+/** Cookie attributes shared by sign-in and sign-out. */
+function sessionCookieOptions() {
+  // SECURE_COOKIES=false allows plain-HTTP LAN deployments (until HTTPS lands, PLAN G4)
+  const secure = process.env.SECURE_COOKIES !== 'false' && process.env.NODE_ENV === 'production';
+  return { httpOnly: true, secure, sameSite: 'lax' as const, path: '/' };
+}
+
+/** Set the session cookie on a response (route handlers build their own response). */
+export function applySessionCookie(response: NextResponse, token: string): NextResponse {
+  response.cookies.set(SESSION_COOKIE_NAME, token, { ...sessionCookieOptions(), maxAge: SESSION_DURATION_SECONDS });
+  return response;
+}
+
+/** Expire the session cookie on a response. */
+export function clearSessionCookie(response: NextResponse): NextResponse {
+  response.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), maxAge: 0 });
+  return response;
 }
 
 // Get session from cookie
@@ -75,10 +79,4 @@ export async function getSession(): Promise<SessionPayload | null> {
   }
 
   return verifySessionToken(token);
-}
-
-// Clear session cookie
-export async function clearSession(): Promise<void> {
-  const cookieStore = await cookies();
-  cookieStore.delete(SESSION_COOKIE_NAME);
 }

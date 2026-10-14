@@ -43,6 +43,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Playwright runs its own dev server next to yours; `next dev` locks its
+  // build directory, so E2E uses a separate one (see playwright.config.ts).
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+  // The dev badge overlaps the tab bar and trips axe in E2E runs
+  ...(process.env.E2E === '1' ? { devIndicators: false as const } : {}),
   images: {
     remotePatterns: [
       {
