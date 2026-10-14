@@ -10,6 +10,7 @@ import { Kbd } from '@/components/ui';
 import { useRestoreFocus } from '@/hooks/useRestoreFocus';
 import { NAV } from '@/lib/nav';
 import { useSheet } from '@/lib/sheets/useSheet';
+import { signOut } from './signOut';
 
 interface PaletteProps {
   open: boolean;
@@ -76,11 +77,7 @@ export function CommandPalette({ open, onOpenChange, initialQuery = '' }: Palett
                   icon={LogOut}
                   label="Log out"
                   onSelect={() =>
-                    run(async () => {
-                      await fetch('/api/auth', { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined);
-                      queryClient.clear();
-                      window.location.assign('/login');
-                    })
+                    run(() => signOut(() => queryClient.clear()))
                   }
                 />
               </Command.Group>

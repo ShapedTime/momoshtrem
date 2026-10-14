@@ -105,7 +105,7 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 
 **ALWAYS follow these standards:**
 - `docs/web/CODE_QUALITY.md` - Architecture, TypeScript, error handling
-- `docs/web/STYLE_GUIDE.md` - UI patterns, responsive design (superseded by the cinematic design for v2 UI work until it's rewritten)
+- `docs/web/STYLE_GUIDE.md` - The cinematic design system in code: tokens, layout, components, states, copy (gallery: `/dev/ui`)
 - `docs/momoshtrem/CODE_QUALITY.md` - Go patterns, interfaces, concurrency
 
 **Key principles:**
@@ -125,9 +125,14 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/streaming/prioritizer.go` - Piece prioritization
 
 **web (Next.js, `web/`):**
-- `src/lib/api/` - API clients (momoshtrem, jackett, tmdb)
-- `src/app/api/` - Next.js API routes
-- `src/types/` - TypeScript interfaces
+- `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)
+- `src/components/shell/` - App shell: top bar, tab bar, account menu, ⌘K palette, URL-driven sheets
+- `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
+- `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
+- `src/lib/api/` - Server-side clients (momoshtrem, jackett, tmdb)
+- `src/mocks/` - MSW handlers and fixtures for every §6 endpoint (mock mode, Jest, Playwright)
+- `src/lib/status.ts` - The one status vocabulary
+- `e2e/` - Playwright specs (390 phone + 1440 desktop)
 
 ## Environment Variables
 

@@ -2,6 +2,7 @@ import {
   ArrowDown,
   Calendar,
   Check,
+  CircleDashed,
   CircleAlert,
   Clock,
   Layers,
@@ -13,6 +14,7 @@ import {
   Search,
   TriangleAlert,
   Tv,
+  WifiOff,
 } from 'lucide-react';
 
 /**
@@ -57,6 +59,8 @@ export const STATUS = {
   paused: { tone: 'neutral', label: 'Paused', icon: Pause },
   idle: { tone: 'neutral', label: 'Idle', icon: Clock },
   ok: { tone: 'ready', label: 'OK', icon: Check },
+  unreachable: { tone: 'error', label: 'Unreachable', icon: WifiOff },
+  not_configured: { tone: 'neutral', label: 'Not set up', icon: CircleDashed },
   warning: { tone: 'warning', label: 'Warning', icon: TriangleAlert },
   error: { tone: 'error', label: 'Error', icon: TriangleAlert },
 } as const satisfies Record<string, StatusDefinition>;

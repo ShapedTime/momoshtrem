@@ -72,3 +72,46 @@ test.describe('app shell', () => {
     await shoot(page, testInfo, 'shell/sheet');
   });
 });
+
+test.describe('system states and settings', () => {
+  test('settings playback', async ({ page }, testInfo) => {
+    await signIn(page, '/settings?section=playback');
+    await page.locator('code[aria-label="WebDAV address"]').waitFor();
+    await shoot(page, testInfo, 'settings/playback');
+  });
+
+  test('settings status', async ({ page }, testInfo) => {
+    await signIn(page, '/settings?section=status');
+    await page.getByRole('list', { name: 'Services' }).waitFor();
+    await shoot(page, testInfo, 'settings/status');
+  });
+
+  test('settings list (phone)', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile', 'Phone only');
+    await signIn(page, '/settings');
+    await page.getByText('WebDAV ready').waitFor();
+    await shoot(page, testInfo, 'settings/list');
+  });
+
+  test('not found', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await page.goto('/no/such/page');
+    await page.getByRole('heading', { name: 'Nothing here but the cat' }).waitFor();
+    await shoot(page, testInfo, 'system/notfound');
+  });
+
+  test('offline', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'backend-down'));
+    await signIn(page, '/library');
+    await page.goto('/offline?from=%2Flibrary');
+    await page.getByText(/Trying again in/).waitFor();
+    await shoot(page, testInfo, 'system/offline');
+  });
+
+  test('offline banner', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'backend-down'));
+    await signIn(page, '/library');
+    await page.getByText('Can’t reach momoshtrem').waitFor();
+    await shoot(page, testInfo, 'system/banner');
+  });
+});

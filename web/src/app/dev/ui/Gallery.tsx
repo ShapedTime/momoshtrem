@@ -389,7 +389,7 @@ export function Gallery() {
         </Rail>
       </Section>
 
-      <Section id="panels" title="Panels, rows and banners" subtitle="Banners carry one action at most.">
+      <Section id="panels" title="Panels, rows, banners and errors" subtitle="Banners carry one action at most. Errors are calm and specific: what failed, what still works, one way forward.">
         <Panel as="ul" aria-label="Rows">
           <ListRow as="li" leading={<Settings size={20} className="text-fg-3" aria-hidden="true" />} title="Settings" description="Integrations, AI and playback" trailing={<StatusPill status="ok" />} />
           <ListRow as="li" leading={<Tv size={20} className="text-fg-3" aria-hidden="true" />} title="Infuse & WebDAV" description="WebDAV ready" />
@@ -402,6 +402,11 @@ export function Gallery() {
           <Banner tone="warning" title="2 indexers timed out" action={<Button size="sm">Retry them</Button>}>
             Showing 27 results from Nyaa. TorrentLeech and The Pirate Bay didn’t answer within 8 s.
           </Banner>
+          <Panel padded>
+            <Banner tone="error" title="Couldn’t load episodes for Season 21" action={<Button size="sm">Try again</Button>}>
+              TMDB answered with an error. The rest of the page is fine.
+            </Banner>
+          </Panel>
           <Banner tone="review" title="3 files need review">
             The rest are mapped.
           </Banner>

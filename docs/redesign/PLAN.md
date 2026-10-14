@@ -336,6 +336,7 @@ Related endpoints:
   - Probes run concurrently with a 3 s timeout each. Results are cached for 30 s, and concurrent callers share one check. `?refresh=1` bypasses the cache at most once every 5 s.
   - It returns 200 even when a probe fails (the body says what's wrong) and 503 only when the database ping fails. The response never contains secrets.
   - Per-indexer health (`jackett.indexers`, HANDOFF §6) is added by B4.
+  - The web app's own `GET /api/status` (F1) adds `web: {version}`. When the backend can't be reached it answers `503 {error: {code: "backend_unreachable"}, web, webdav: {reachable}}`, probing WebDAV directly (`WEBDAV_INTERNAL_URL`, default: the API host on port 36911) so the offline page can say whether Infuse still plays.
 - `GET /torrents` (B6) merges torrents known from the DB but not loaded (`idle`) with live stats. It returns real `download_speed`/`upload_speed`, and each torrent links to its titles.
 
 ## 7. Phases and tasks
