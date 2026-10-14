@@ -1,5 +1,7 @@
 # Stage 1: Foundation
 
+> **Historical note:** this stage was built on SQLite. momoshtrem now uses **Postgres** (`DATABASE_URL`, embedded migrations in `internal/library/migrations/`). See [README.md](./README.md#configuration) for the current setup.
+
 **Goal**: Library management with WebDAV structure. No streaming yet - just the skeleton.
 
 **End state**: Add movies/shows via API → see folder structure in Infuse (empty until torrents assigned)

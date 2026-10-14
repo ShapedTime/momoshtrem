@@ -1,15 +1,53 @@
+# momoshtrem configuration
+#
+# This file is optional. Settings are layered: built-in defaults, then this
+# file (if present), then environment variables, which always win. A
+# container can run on env vars alone.
+#
+# Environment variables:
+#   DATABASE_URL              database.url (required)
+#   BACKEND_API_TOKEN         server.api_token
+#   CORS_ALLOWED_ORIGINS      server.cors_allowed_origins (comma-separated)
+#   WEBDAV_PUBLIC_URL         server.webdav_public_url
+#   WEBDAV_AUTH_ENABLED       server.webdav_auth.enabled (true/false)
+#   WEBDAV_USERNAME           server.webdav_auth.username
+#   WEBDAV_PASSWORD           server.webdav_auth.password
+#   TMDB_API_KEY              tmdb.api_key
+#   JACKETT_URL               jackett.url
+#   JACKETT_API_KEY           jackett.api_key
+#   OPENSUBTITLES_API_KEY     opensubtitles.api_key
+#   OPENSUBTITLES_USERNAME    opensubtitles.username
+#   OPENSUBTITLES_PASSWORD    opensubtitles.password
+#   ANTHROPIC_API_KEY         ai.anthropic_api_key
+#   TRAKT_CLIENT_ID           trakt.client_id
+#   TRAKT_CLIENT_SECRET       trakt.client_secret
+#   SECRET_KEY                security.secret_key
+#   METRICS_ENABLED           metrics.enabled (true/false)
+#   METRICS_PORT              metrics.port
+#
+# Prefer env vars for secrets.
+
 server:
   http_port: 4444
   webdav_port: 36911
+  # Shared secret required in the X-Momoshtrem-Token header on every /api
+  # request. Leave empty only for local development (startup warning).
+  # api_token: ""
+  # Browser origins allowed to call the REST API. Empty = no CORS headers
+  # (the web app calls the API server-to-server and doesn't need CORS).
+  # cors_allowed_origins: ["http://localhost:3000"]
+  # The WebDAV address Infuse uses, reported by /api/status.
+  # Defaults to http://localhost:<webdav_port>/
+  # webdav_public_url: "https://momoshtrem.duckdns.org:36911/"
   # WebDAV authentication (optional)
   # webdav_auth:
   #   enabled: true
   #   username: "webdav"
   #   password: "your-secure-password"
-  # Or use environment variables: WEBDAV_AUTH_ENABLED, WEBDAV_USERNAME, WEBDAV_PASSWORD
 
+# Postgres (required). Usually set via DATABASE_URL.
 database:
-  path: ./data/momoshtrem.db
+  url: postgres://momoshtrem:change-me@postgres:5432/momoshtrem?sslmode=disable
 
 torrent:
   metadata_folder: ./data/torrents
@@ -30,13 +68,36 @@ streaming:
   # footer_priority_bytes: 5242880   # 5MB (default)
 
 vfs:
-  tree_ttl: 86400  # 1 day in seconds (partial updates make long TTL safe)
+  cache_dir: ./data/cache   # Persistent VFS tree cache
 
 # Prometheus metrics (optional)
 metrics:
   enabled: true
   port: 9090
-# Or use environment variables: METRICS_ENABLED=true, METRICS_PORT=9090
 
 tmdb:
-  api_key: ""  # Set your TMDB API key here
+  api_key: ""  # Or TMDB_API_KEY
+
+# Torrent search (optional). Or JACKETT_URL / JACKETT_API_KEY.
+jackett:
+  url: http://jackett:9117
+  api_key: ""
+
+# Subtitle download (optional)
+# opensubtitles:
+#   api_key: ""
+#   username: ""
+#   password: ""
+
+# AI classifier and recommendations (optional; disabled when empty)
+# ai:
+#   anthropic_api_key: ""
+
+# Trakt, read-only (optional)
+# trakt:
+#   client_id: ""
+#   client_secret: ""
+
+# Encryption key for tokens at rest (needed once Trakt is connected)
+# security:
+#   secret_key: ""

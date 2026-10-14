@@ -8,7 +8,7 @@ Unlike distribyted (which builds VFS from torrents), momoshtrem builds VFS from 
 
 ```
 Traditional:  Torrent → VFS → WebDAV
-momoshtrem:   Library (SQLite) → VFS → Torrent files → WebDAV
+momoshtrem:   Library (Postgres) → VFS → Torrent files → WebDAV
 ```
 
 ## Design Decisions
@@ -16,9 +16,52 @@ momoshtrem:   Library (SQLite) → VFS → Torrent files → WebDAV
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Language | Go | Reuse anacrolix/torrent, familiar patterns |
-| Database | SQLite | Relational queries, single file, portable |
+| Database | Postgres | Relational queries, JSONB, concurrent access from background jobs. (Stages 1–3 were built on SQLite; `cmd/migrate-to-pg` moved the data.) |
 | VFS approach | Library-first | Structure driven by user's library, not torrent contents |
 | Metadata | On-demand from TMDB | Keep DB minimal, fetch when needed |
+
+## Configuration
+
+Settings are layered, and each layer overrides the one before:
+
+1. **Built-in defaults** (`internal/config/config.go`, `DefaultConfig`).
+2. **`config.yaml`**, if it exists (path from `-config`, `/config/config.yaml` in Docker). It's optional. See `momoshtrem/config.yaml.example`.
+3. **Environment variables**, which always apply, with or without a config file. An empty variable counts as unset.
+
+The service refuses to start without a database URL, and with an invalid `METRICS_PORT` or boolean value.
+
+| Env var | Config key | Notes |
+|---|---|---|
+| `DATABASE_URL` | `database.url` | **Required.** Postgres connection string. Migrations in `internal/library/migrations/` run at startup. |
+| `BACKEND_API_TOKEN` | `server.api_token` | Shared secret for the REST API (see below). |
+| `CORS_ALLOWED_ORIGINS` | `server.cors_allowed_origins` | Comma-separated browser origins. Empty sends no CORS headers. |
+| `WEBDAV_PUBLIC_URL` | `server.webdav_public_url` | The WebDAV address Infuse uses, shown by `/api/status`. Defaults to `http://localhost:<webdav_port>/`. |
+| `WEBDAV_AUTH_ENABLED`, `WEBDAV_USERNAME`, `WEBDAV_PASSWORD` | `server.webdav_auth.*` | Basic auth for WebDAV. |
+| `TMDB_API_KEY` | `tmdb.api_key` | Library metadata and air-date sync. |
+| `JACKETT_URL`, `JACKETT_API_KEY` | `jackett.*` | Torrent search (moving from web to the backend in B4). |
+| `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | `opensubtitles.*` | Subtitle download. |
+| `ANTHROPIC_API_KEY` | `ai.anthropic_api_key` | AI classifier and recommendations; disabled when unset. |
+| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. |
+| `SECRET_KEY` | `security.secret_key` | Encrypts Trakt tokens at rest. |
+| `METRICS_ENABLED`, `METRICS_PORT` | `metrics.*` | Prometheus endpoint. |
+
+Optional integrations that aren't configured are disabled, and `GET /api/status` reports them as `configured: false`.
+
+### REST API authentication
+
+When `BACKEND_API_TOKEN` is set, every `/api/*` request must send the same value in the `X-Momoshtrem-Token` header, or it gets a `401`. The web app sends it automatically when its own `BACKEND_API_TOKEN` matches, so set the variable on **both** services and restart both. Generate a value with `openssl rand -hex 32`.
+
+When the token is unset the API is open and the service logs a warning at startup. Only do this for local development.
+
+CORS is off unless `CORS_ALLOWED_ORIGINS` lists origins. The web app calls the API server-to-server, so it doesn't need CORS.
+
+### Errors and status
+
+Errors use one shape: `{"error": {"code": "not_found", "message": "Movie not found"}}`.
+
+`GET /api/status` reports the version, uptime, database health and size, the WebDAV URL, and whether Jackett and TMDB are reachable. Results are cached for 30 s, and `?refresh=1` forces a new check at most once every 5 s. It returns `503` only when the database is down.
+
+The Docker image stamps the version from the `VERSION` build arg (`MOMOSHTREM_VERSION` in compose).
 
 ## Implementation Stages
 
@@ -51,7 +94,7 @@ Piece prioritization for smooth playback. Seek-friendly buffering.
 └────────────────────────────┬────────────────────────────┘
                              │
 ┌────────────────────────────┴────────────────────────────┐
-│                   Library (SQLite)                       │
+│                   Library (Postgres)                     │
 │  movies, shows, seasons, episodes, torrent_assignments  │
 └────────────────────────────┬────────────────────────────┘
                              │

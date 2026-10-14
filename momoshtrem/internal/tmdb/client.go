@@ -1,8 +1,11 @@
 package tmdb
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -167,8 +170,19 @@ func (c *Client) SearchShows(query string) ([]Show, error) {
 	return result.Results, nil
 }
 
+// Ping checks that TMDB is reachable and accepts the API key.
+func (c *Client) Ping(ctx context.Context) error {
+	return c.getContext(ctx, baseURL+"/configuration", nil)
+}
+
 // get performs a GET request and decodes the response
 func (c *Client) get(endpoint string, v interface{}) error {
+	return c.getContext(context.Background(), endpoint, v)
+}
+
+// getContext performs a GET request and decodes the response into v.
+// A nil v discards the body.
+func (c *Client) getContext(ctx context.Context, endpoint string, v interface{}) error {
 	// Add API key
 	u, err := url.Parse(endpoint)
 	if err != nil {
@@ -179,17 +193,30 @@ func (c *Client) get(endpoint string, v interface{}) error {
 	q.Set("api_key", c.apiKey)
 	u.RawQuery = q.Encode()
 
-	resp, err := c.httpClient.Get(u.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return fmt.Errorf("failed to build request: %w", withoutURL(err))
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", withoutURL(err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("not found")
 	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("TMDB rejected the API key (HTTP 401)")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
+	if v == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
@@ -197,4 +224,14 @@ func (c *Client) get(endpoint string, v interface{}) error {
 	}
 
 	return nil
+}
+
+// withoutURL strips the request URL from transport errors, because the URL
+// carries the API key and these errors end up in logs and API responses.
+func withoutURL(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err
+	}
+	return err
 }

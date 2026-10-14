@@ -39,6 +39,17 @@ func (rt *ReaderTracker) Unregister(infoHash string, r *PriorityReader) {
 	}
 }
 
+// Count returns the number of active readers across all torrents.
+func (rt *ReaderTracker) Count() int {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	n := 0
+	for _, readers := range rt.readers {
+		n += len(readers)
+	}
+	return n
+}
+
 // GetReaders returns snapshots of active reader positions for a torrent.
 // Readers that are busy (mutex held during a blocking read) are still
 // included with their last known position.

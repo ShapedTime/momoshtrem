@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -137,6 +138,15 @@ func (db *DB) applyMigration(version int, content string) error {
 	}
 
 	return tx.Commit()
+}
+
+// SizeBytes returns the on-disk size of the current database.
+func (db *DB) SizeBytes(ctx context.Context) (int64, error) {
+	var size int64
+	if err := db.QueryRowContext(ctx, `SELECT pg_database_size(current_database())`).Scan(&size); err != nil {
+		return 0, fmt.Errorf("failed to get database size: %w", err)
+	}
+	return size, nil
 }
 
 // Close closes the database connection

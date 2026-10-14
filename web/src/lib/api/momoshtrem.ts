@@ -5,10 +5,10 @@ import type {
   LibraryShow,
   MovieAssignmentResponse,
   ShowAssignmentResponse,
-  MomoshtremError,
   RecentlyAiredResponse,
   RefreshShowResult,
 } from '@/types/momoshtrem';
+import { parseMomoshtremError } from '@/types/momoshtrem';
 import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
 import type { TorrentDebugInfo } from '@/types/torrent-debug';
 import type {
@@ -16,6 +16,15 @@ import type {
   Subtitle,
   DownloadSubtitleRequest,
 } from '@/types/subtitle';
+
+/** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
+const TOKEN_HEADER = 'X-Momoshtrem-Token';
+
+/** Error code for a backend that rejected the web app's API token. */
+export const BACKEND_AUTH_CODE = 'backend_auth';
+
+const BACKEND_AUTH_MESSAGE =
+  "momoshtrem rejected the web app's API token. Check BACKEND_API_TOKEN on both services.";
 
 /**
  * momoshtrem API client.
@@ -58,12 +67,35 @@ class MomoshtremClient {
   }
 
   /**
+   * Request headers, including the shared secret when configured.
+   */
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    // Read at call time (not module load) so runtime env changes apply.
+    const token = process.env.BACKEND_API_TOKEN;
+    if (token) {
+      headers[TOKEN_HEADER] = token;
+    }
+    return headers;
+  }
+
+  /**
    * Handle API errors consistently.
+   * A backend 401/403 means the web app's token was rejected, not that the
+   * user's session expired, so it becomes a 502: passing the 401 through
+   * would send the browser to the login page in a loop.
    */
   private async handleError(response: Response, operation: string): Promise<never> {
-    const data = (await response.json().catch(() => ({}))) as MomoshtremError;
+    if (response.status === 401 || response.status === 403) {
+      throw new APIError(BACKEND_AUTH_MESSAGE, 502, BACKEND_AUTH_CODE);
+    }
+
+    const body: unknown = await response.json().catch(() => null);
+    const parsed = parseMomoshtremError(body);
     throw new APIError(
-      data.error || `Failed to ${operation}: ${response.statusText}`,
+      parsed?.message || `Failed to ${operation}: ${response.statusText}`,
       response.status
     );
   }
@@ -82,9 +114,7 @@ class MomoshtremClient {
     try {
       const response = await this.fetchWithTimeout(url, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: this.buildHeaders(),
         body: body ? JSON.stringify(body) : undefined,
       });
 

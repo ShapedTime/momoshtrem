@@ -15,10 +15,12 @@ export class AppError extends Error {
 
 /**
  * Error for external API communication failures.
+ * `code` defaults to 'API_ERROR'; pass a specific one (e.g. 'backend_auth')
+ * when callers need to tell failures apart.
  */
 export class APIError extends AppError {
-  constructor(message: string, statusCode: number = 500) {
-    super(message, 'API_ERROR', statusCode);
+  constructor(message: string, statusCode: number = 500, code: string = 'API_ERROR') {
+    super(message, code, statusCode);
     this.name = 'APIError';
   }
 }

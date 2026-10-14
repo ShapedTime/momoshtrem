@@ -13,9 +13,10 @@
 
 ```
 internal/
-├── api/           # REST API (Gin handlers, routing)
-├── config/        # Configuration loading (YAML + env)
-├── library/       # Database layer (repositories, models)
+├── api/           # REST API (Gin handlers, routing, middleware)
+├── config/        # Configuration loading (defaults + YAML + env)
+├── library/       # Database layer (Postgres repositories, models, migrations)
+├── status/        # /api/status report and dependency probes
 ├── torrent/       # Torrent client wrapper & service
 ├── vfs/           # Virtual filesystem for WebDAV
 ├── webdav/        # WebDAV server wrapper
@@ -109,7 +110,7 @@ func (r *MovieRepository) Delete(id int64) error { ... }
 
 **Verify affected rows:**
 ```go
-result, err := r.db.Exec(`DELETE FROM movies WHERE id = ?`, id)
+result, err := r.db.Exec(`DELETE FROM movies WHERE id = $1`, id)
 affected, _ := result.RowsAffected()
 if affected == 0 {
     return fmt.Errorf("movie not found")
@@ -161,17 +162,43 @@ func (am *ActivityManager) idleCheckLoop() {
 
 ## Configuration
 
-**Hierarchy: Defaults → File → Environment**
+**Hierarchy: Defaults → File (optional) → Environment (always)**
 ```go
 func Load(path string) (*Config, error) {
     cfg := DefaultConfig()
-    yaml.Unmarshal(data, cfg)  // File overrides defaults
-    if env := os.Getenv("TMDB_API_KEY"); env != "" {
-        cfg.TMDB.APIKey = env  // Env overrides file
+    // The file is optional: a missing file is not an error...
+    if data, err := os.ReadFile(path); err == nil {
+        yaml.Unmarshal(data, cfg)  // File overrides defaults
     }
-    return cfg, nil
+    // ...and env overrides apply whether or not it exists.
+    if err := applyEnv(cfg); err != nil {
+        return nil, err            // e.g. METRICS_PORT=abc
+    }
+    return cfg, cfg.Validate()     // e.g. DATABASE_URL missing
 }
 ```
+
+- Every new setting gets a YAML key (snake_case) **and** an env var, both read in `applyEnv` with the `envString`/`envBool`/`envPort`/`envList` helpers. Add a case to `config_test.go`.
+- An empty env var means "unset". Invalid values are errors, never silently ignored.
+- Optional integrations (Jackett, Anthropic, Trakt, OpenSubtitles) are disabled when their keys are empty, and `/api/status` reports `configured: false`.
+- Cross-cutting API settings (token, CORS) go in `api.Options` and are passed to `NewServer`. Gin middleware added after routes are registered doesn't apply to them, so don't add setters for these.
+
+---
+
+## API Errors
+
+Every error response has the same shape:
+
+```json
+{"error": {"code": "not_found", "message": "Movie not found"}}
+```
+
+```go
+errorResponse(c, http.StatusNotFound, "Movie not found")            // code derived from status
+errorCodeResponse(c, http.StatusConflict, "already_assigned", "...") // explicit code
+```
+
+`errorResponse` derives the code from the status: 400 `bad_request`, 401 `unauthorized`, 403 `forbidden`, 404 `not_found`, 409 `conflict`, 422 `validation_error`, 429 `rate_limited`, 503 `unavailable`, 504 `timeout`, other 5xx `internal_error`. Use `errorCodeResponse` when a client needs to tell two errors with the same status apart. Messages are shown to users, so never put secrets in them, including URLs that carry API keys (strip `*url.Error`).
 
 ---
 
@@ -181,7 +208,7 @@ func Load(path string) (*Config, error) {
 ```go
 log := slog.With("component", "torrent-service")
 
-slog.Info("Database initialized", "path", cfg.Database.Path)
+slog.Info("Torrent storage initialized", "metadata_folder", cfg.Torrent.MetadataFolder)
 slog.Warn("TMDB API key not configured")
 slog.Error("Failed to load config", "error", err)
 ```

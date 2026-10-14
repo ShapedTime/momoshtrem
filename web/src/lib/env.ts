@@ -20,6 +20,7 @@ export interface EnvConfig {
   JACKETT_URL: string | undefined;
   JACKETT_API_KEY: string | undefined;
   MOMOSHTREM_URL: string | undefined;
+  BACKEND_API_TOKEN: string | undefined;
 }
 
 const REQUIRED_VARS = ['APP_PASSWORD', 'TMDB_API_KEY', 'SESSION_SECRET'] as const;
@@ -67,6 +68,14 @@ export function validateEnvironment(): EnvConfig {
     );
   }
 
+  if (!process.env.BACKEND_API_TOKEN) {
+    console.warn(
+      '[CONFIG] BACKEND_API_TOKEN is not set. momoshtrem rejects requests without ' +
+        'the X-Momoshtrem-Token header when its own BACKEND_API_TOKEN is set; ' +
+        'set the same value on both services.'
+    );
+  }
+
   // SESSION_SECRET validation - must be at least 32 chars
   if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 32) {
     console.warn(
@@ -81,6 +90,7 @@ export function validateEnvironment(): EnvConfig {
     JACKETT_URL: process.env.JACKETT_URL,
     JACKETT_API_KEY: process.env.JACKETT_API_KEY,
     MOMOSHTREM_URL: process.env.MOMOSHTREM_URL,
+    BACKEND_API_TOKEN: process.env.BACKEND_API_TOKEN,
   };
 }
 

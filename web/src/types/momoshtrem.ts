@@ -162,9 +162,35 @@ export interface LibraryItemStatus {
 // API Error Types
 // =============================================================================
 
-export interface MomoshtremError {
-  error: string;
-  code?: string;
+/**
+ * Error body returned by momoshtrem. Current backends send
+ * `{ error: { code, message } }`; older ones sent `{ error: "message" }`.
+ */
+export type MomoshtremError =
+  | { error: { code: string; message: string } }
+  | { error: string };
+
+/**
+ * Extract code and message from a momoshtrem error body of either shape.
+ * Returns null when the body isn't a recognisable error.
+ */
+export function parseMomoshtremError(
+  body: unknown
+): { code?: string; message: string } | null {
+  if (typeof body !== 'object' || body === null || !('error' in body)) {
+    return null;
+  }
+  const { error } = body as { error: unknown };
+  if (typeof error === 'string') {
+    return error ? { message: error } : null;
+  }
+  if (typeof error === 'object' && error !== null) {
+    const { code, message } = error as { code?: unknown; message?: unknown };
+    if (typeof message === 'string' && message) {
+      return { code: typeof code === 'string' ? code : undefined, message };
+    }
+  }
+  return null;
 }
 
 // =============================================================================

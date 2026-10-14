@@ -16,8 +16,11 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Version reported by /api/status (compose passes MOMOSHTREM_VERSION)
+ARG VERSION=dev
+
 # Build binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /momoshtrem ./cmd/momoshtrem
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION}" -o /momoshtrem ./cmd/momoshtrem
 
 #===============
 # Stage 2: Run
