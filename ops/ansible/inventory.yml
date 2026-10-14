@@ -1,0 +1,7 @@
+# One host. ansible_host is the Mac's SSH alias (docs/ops/VM.md §5), so the
+# address stays out of the repo and nothing here changes at cutover.
+all:
+  hosts:
+    momoshtrem:
+      ansible_host: momoshtrem-v2
+      ansible_user: agha

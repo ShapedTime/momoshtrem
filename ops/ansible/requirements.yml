@@ -1,0 +1,4 @@
+# Only needed with a bare ansible-core; the full `ansible` package ships these.
+collections:
+  - name: community.general # ufw
+    version: ">=9.0.0"

@@ -8,7 +8,7 @@ This page fixes three of the old VM's problems from the start:
 - its data disk was mounted by `/dev/sdb`;
 - it had no guest agent (AS-IS §1, §2).
 
-Docker, log caps, the firewall and the boot unit belong to Ansible (#34), not to this page.
+Docker, log caps, the firewall and the boot unit belong to Ansible (#34, [`HOST.md`](HOST.md)), not to this page.
 
 If the VM changes (RAM, a disk size, the cache cap), update this page in the same commit.
 
@@ -172,7 +172,7 @@ sudo sshd -t && sudo systemctl restart ssh
 
 The file is named `10-…` so that it wins over the `50-cloud-init.conf` the installer writes: sshd keeps the first value it reads.
 
-**Hand-off checks.** The playbook (#34) starts from this state. It checks it, but it never partitions or formats a disk.
+**Hand-off checks.** The playbook (#34) starts from this state. Its `handoff` step checks it and stops the run if anything is off, but it never partitions or formats a disk.
 
 ```bash
 # On the VM
@@ -196,7 +196,7 @@ Nothing else is installed or configured by hand. The rest belongs to:
 
 | What | Where |
 |---|---|
-| Packages, unattended upgrades, Docker and its log caps, journald cap, the guest agent package, ufw, the data folders, the boot unit | #34 |
+| Packages, unattended upgrades, Docker and its log caps, journald cap, the guest agent package, ufw, the data folders, the boot unit | #34, [`HOST.md`](HOST.md) |
 | Backups, the shared lock and the restore runbook | #35 |
 | The deploy agent and heartbeat | #38 |
 | `.env`, copying the data, the cutover | #42 |

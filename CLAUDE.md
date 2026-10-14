@@ -38,7 +38,7 @@ v2 is a redesign plus new features (Trakt, AI recommendations, episode mapping, 
 
 ## Ops track
 
-Server setup, CI/CD and backups are a separate track from v2: issues labelled `ops` (`gh issue list --label ops --state open`), epic #32. Read `docs/ops/PLAN.md` before any ops work: decisions (§2), state inventory (§5), rollback model (§6) and the deploy agent contract (§8). The repo is public, so secrets and the public hostname never go in it.
+Server setup, CI/CD and backups are a separate track from v2: issues labelled `ops` (`gh issue list --label ops --state open`), epic #32. Read `docs/ops/PLAN.md` before any ops work: decisions (§2), state inventory (§5), rollback model (§6) and the deploy agent contract (§8). The VM is configured by the Ansible playbook in `ops/ansible/` (runbook: `docs/ops/HOST.md`). The repo is public, so secrets and the public hostname never go in it.
 
 ## Commands
 

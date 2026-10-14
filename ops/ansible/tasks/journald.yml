@@ -1,0 +1,18 @@
+- name: Create the journald drop-in folder
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  register: journald_dropins
+
+- name: Cap the journal size
+  ansible.builtin.template:
+    src: journald-size.conf.j2
+    dest: /etc/systemd/journald.conf.d/10-size.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: not (ansible_check_mode and journald_dropins is changed)
+  notify: Restart journald

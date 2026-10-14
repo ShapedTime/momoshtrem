@@ -1,0 +1,55 @@
+# ufw guards host services only: SSH, from the LAN. Docker-published ports
+# bypass ufw (Docker writes its own iptables rules), so compose decides what
+# containers expose (#37).
+
+# A rule that shuts out the network this run comes from would lock SSH out
+# (recovery: the Proxmox console, docs/ops/HOST.md).
+- name: Read this SSH session's client address
+  ansible.builtin.command: printenv SSH_CLIENT
+  become: false
+  register: ssh_client
+  changed_when: false
+  check_mode: false
+
+- name: Check that this SSH session comes from the LAN
+  vars:
+    client_ip: "{{ ssh_client.stdout.split() | first }}"
+    client: "{{ client_ip.split('.') | map('int') | list }}"
+    net: "{{ (lan_cidr.split('/') | first).split('.') | map('int') | list }}"
+    lan_size: "{{ 2 ** (32 - (lan_cidr.split('/') | last | int)) }}"
+  ansible.builtin.assert:
+    that:
+      - client | length == 4
+      - >-
+        (client[0] * 16777216 + client[1] * 65536 + client[2] * 256 + client[3]) // (lan_size | int)
+        == (net[0] * 16777216 + net[1] * 65536 + net[2] * 256 + net[3]) // (lan_size | int)
+    fail_msg: >-
+      This run's SSH session comes from {{ client_ip }}, outside lan_cidr
+      ({{ lan_cidr }}). Enabling ufw would lock SSH out. Run from the LAN.
+    quiet: true
+
+- name: Set the default policies
+  community.general.ufw:
+    default: "{{ item.policy }}"
+    direction: "{{ item.direction }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+    - { direction: routed, policy: deny }
+
+- name: Allow SSH from the LAN
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: "{{ lan_cidr }}"
+    comment: SSH from the LAN
+
+- name: Set ufw logging
+  community.general.ufw:
+    logging: low
+
+# Last, once the SSH rule is in place.
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
