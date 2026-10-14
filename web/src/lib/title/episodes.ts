@@ -1,4 +1,4 @@
-import type { EpisodeOrdering, EpisodeSummary, SeasonSummary, ShowTitle } from '@/lib/api/contract';
+import type { EpisodeOrdering, EpisodeRange, EpisodeSummary, SeasonSummary, ShowTitle } from '@/lib/api/contract';
 
 /** Episode lists on show pages: codes, labels, the selected season and the next-up row. */
 
@@ -63,4 +63,116 @@ export function episodesSummary(show: Pick<ShowTitle, 'episode_ordering' | 'seas
     return `Absolute numbering · ${total.toLocaleString('en-US')} episodes · ${ready.toLocaleString('en-US')} ready`;
   }
   return `${ready.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ready`;
+}
+
+// ---- Long seasons (HANDOFF §5.4) -------------------------------------------------
+
+/** Seasons longer than this render through the window virtualiser. */
+export const VIRTUALIZE_ABOVE = 60;
+
+export const shouldVirtualize = (rows: number) => rows > VIRTUALIZE_ABOVE;
+
+/** Jump to episode and range chips show for seasons longer than this (or with absolute numbering). */
+export const LONG_SEASON = 20;
+
+/** Where absolute numbers mean something to the user: the rows show them under these orderings. */
+const showsAbsolute = (ordering: EpisodeOrdering) => ordering === 'absolute' || ordering === 'episode_group';
+
+/**
+ * Range chip text: an arc with its numbers ("Egghead · 1086–1115", absolute
+ * under absolute or episode-group ordering, as the rows read), a block by its
+ * label ("21–28").
+ */
+export function rangeLabel(range: EpisodeRange, ordering: EpisodeOrdering): string {
+  if (range.kind === 'block') return range.label;
+  const absolute = showsAbsolute(ordering) && range.absolute_from !== null && range.absolute_to !== null;
+  const [from, to] = absolute ? [range.absolute_from, range.absolute_to] : [range.from, range.to];
+  return `${range.label} · ${from}–${to}`;
+}
+
+/** Index of the range holding an in-season episode number, or null. */
+export function rangeIndexFor(ranges: EpisodeRange[], episodeNumber: number): number | null {
+  const index = ranges.findIndex((range) => episodeNumber >= range.from && episodeNumber <= range.to);
+  return index < 0 ? null : index;
+}
+
+/** The chip pressed when a season opens: the one holding the frontier (which is also the next-up row). */
+export function defaultRangeIndex(ranges: EpisodeRange[], show: Pick<ShowTitle, 'library'>, seasonNumber: number): number | null {
+  const missing = show.library.missing;
+  return missing && missing.season_number === seasonNumber ? rangeIndexFor(ranges, missing.from) : null;
+}
+
+/**
+ * Leading episodes that are all watched, collapsed into one row: only in
+ * seasons over 20 episodes, for a run of at least 10, and never the whole
+ * season (then there's nothing else to look at).
+ */
+export function earlierWatched(episodes: EpisodeSummary[]): { count: number; from: number; to: number } | null {
+  if (episodes.length <= LONG_SEASON) return null;
+  const run = episodes.findIndex((episode) => episode.state !== 'watched');
+  if (run < 10) return null;
+  return { count: run, from: episodes[0].episode_number, to: episodes[run - 1].episode_number };
+}
+
+/**
+ * Where a jump goes: an in-season episode number, or an absolute number to
+ * look up among the season's episodes once they load (absolute numbers
+ * needn't be contiguous: gaps, reordered groups).
+ */
+export type JumpDestination = { season: number; episode: number; absolute?: undefined } | { season: number; absolute: number; episode?: undefined };
+
+export type JumpTarget = ({ ok: true } & JumpDestination) | { ok: false; hint: string };
+
+interface JumpContext {
+  ordering: EpisodeOrdering;
+  seasons: Pick<SeasonSummary, 'season_number' | 'name' | 'episodes_total' | 'absolute_from' | 'absolute_to'>[];
+  currentSeason: number;
+}
+
+const JUMP_HELP = 'Type an episode number, like 29, 1100 or S02E05.';
+
+/** The regular season whose absolute range holds `n`. */
+function seasonByAbsolute(n: number, seasons: JumpContext['seasons']) {
+  return seasons.find((s) => s.season_number > 0 && s.absolute_from !== null && s.absolute_to !== null && n >= s.absolute_from && n <= s.absolute_to);
+}
+
+/**
+ * What "Jump to episode" means (pure; never throws): `S02E05`; an in-season
+ * number ("29"); or an absolute number ("1100"), whose season is the one
+ * whose absolute range holds it. Absolute numbers win with absolute ordering;
+ * otherwise they're the fallback for a number past the season's end. From
+ * Specials, absolute numbers still find their regular season.
+ */
+export function parseJump(input: string, { ordering, seasons, currentSeason }: JumpContext): JumpTarget {
+  const text = input.trim();
+  if (!text) return { ok: false, hint: JUMP_HELP };
+
+  const code = parseEpisodeCode(text);
+  if (code) {
+    const season = seasons.find((s) => s.season_number === code.season);
+    if (!season) return { ok: false, hint: `There’s no ${code.season === 0 ? 'Specials season' : `season ${code.season}`} here.` };
+    if (code.episode < 1 || code.episode > season.episodes_total) {
+      return { ok: false, hint: `${seasonLabel(season)} has ${season.episodes_total} episodes.` };
+    }
+    return { ok: true, season: code.season, episode: code.episode };
+  }
+
+  if (!/^#?\d{1,5}$/.test(text)) return { ok: false, hint: JUMP_HELP };
+  const n = Number(text.replace('#', ''));
+  const current = seasons.find((s) => s.season_number === currentSeason);
+  const inSeason = current && n >= 1 && n <= current.episodes_total ? { ok: true as const, season: currentSeason, episode: n } : null;
+  const byAbsolute = seasonByAbsolute(n, seasons);
+  const absolute = byAbsolute ? { ok: true as const, season: byAbsolute.season_number, absolute: n } : null;
+
+  const target = ordering === 'absolute' ? (absolute ?? inSeason) : (inSeason ?? absolute);
+  if (target) return target;
+  return { ok: false, hint: current ? `${seasonLabel(current)} has ${current.episodes_total} episodes.` : JUMP_HELP };
+}
+
+/** The in-season episode number a destination lands on among the season's episodes, or null when there's none. */
+export function resolveJump(destination: JumpDestination, episodes: Pick<EpisodeSummary, 'episode_number' | 'absolute_number'>[]): number | null {
+  if (destination.absolute !== undefined) {
+    return episodes.find((episode) => episode.absolute_number === destination.absolute)?.episode_number ?? null;
+  }
+  return episodes.some((episode) => episode.episode_number === destination.episode) ? destination.episode : null;
 }

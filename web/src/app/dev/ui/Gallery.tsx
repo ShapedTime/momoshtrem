@@ -61,9 +61,10 @@ import {
   WideSkeletons,
 } from '@/components/ui';
 import { PrimaryPanel } from '@/components/title';
+import { EpisodeRow } from '@/components/title/show';
 import { STATUS, type StatusKey } from '@/lib/status';
 import { primaryActionFor } from '@/lib/title/stage-copy';
-import { buildTitle } from '@/mocks/fixtures/titles';
+import { buildSeason, buildTitle } from '@/mocks/fixtures/titles';
 
 function Section({ id, title, subtitle, children }: { id: string; title: string; subtitle?: string; children: ReactNode }) {
   return (
@@ -129,6 +130,23 @@ const PANEL_STAGES = (
 ).flatMap(([label, tmdbId]) => {
   const title = buildTitle('movie', tmdbId);
   return title ? [[label, title] as const] : [];
+});
+
+/** One episode per state, from the mock fixtures. */
+const EPISODE_ROWS = (
+  [
+    ['watched', 209867, 1, 1, 'aired', false],
+    ['ready', 209867, 1, 28, 'aired', false],
+    ['downloading', 247767, 1, 0, 'aired', false],
+    ['missing, up next', 209867, 1, 29, 'aired', true],
+    ['needs review', 209867, 1, 26, 'aired', false],
+    ['upcoming, absolute', 37854, 22, 37, 'absolute', false],
+  ] as const
+).flatMap(([key, tmdbId, seasonNumber, episodeNumber, ordering, isNext]) => {
+  const episodes = buildSeason(tmdbId, seasonNumber)?.episodes ?? [];
+  // episodeNumber 0: the season's first downloading episode
+  const episode = episodeNumber === 0 ? episodes.find((e) => e.state === 'downloading') : episodes.find((e) => e.episode_number === episodeNumber);
+  return episode ? [[key, episode, ordering, isNext] as const] : [];
 });
 
 export function Gallery() {
@@ -439,6 +457,29 @@ export function Gallery() {
             </Frame>
           ))}
         </div>
+      </Section>
+
+      <Section id="episode-rows" title="Episode rows" subtitle="One compact 60 px row per state: the pill from lib/status.ts and the action that fits (find, options, review, or none until it airs). Up next gets the amber rule; absolute ordering shows #1100 · S22E15.">
+        <ol className="ep-list" aria-label="Episode rows">
+          {EPISODE_ROWS.map(([key, episode, ordering, isNext]) => (
+            <EpisodeRow
+              key={key}
+              episode={episode}
+              ordering={ordering}
+              isNext={isNext}
+              reviewHref="/mapping/101"
+              onFind={() => toast({ tone: 'info', title: 'Find a torrent' })}
+              onOpen={() => toast({ tone: 'info', title: 'Episode sheet' })}
+            />
+          ))}
+        </ol>
+        <Frame label="With stills (?view=rich)">
+          <ol className="ep-list" aria-label="Episode rows with stills">
+            {EPISODE_ROWS.slice(0, 2).map(([key, episode, ordering]) => (
+              <EpisodeRow key={key} episode={episode} ordering={ordering} rich onFind={() => undefined} onOpen={() => undefined} />
+            ))}
+          </ol>
+        </Frame>
       </Section>
 
       <Section id="loading" title="Skeletons and empty states" subtitle="Same box sizes as the content. Noir’s silhouette, one plain sentence, and the next step.">

@@ -54,6 +54,7 @@ cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx p
 # Go service (momoshtrem)
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 cd momoshtrem && go vet ./... && go test ./...
+docker compose run --rm momoshtrem backfill-metadata [--dry-run]   # fill TMDB metadata for titles added before #4 (never renames WebDAV paths)
 ```
 
 ## Architecture
@@ -87,6 +88,9 @@ The v2 target architecture is in PLAN.md §4.
 
 ### momoshtrem REST API (port 4444)
 ```
+GET  /api/titles/{movie|tv}/{tmdb_id}       # Title page: TMDB details, library state and availability stage
+GET  /api/titles/tv/{tmdb_id}/seasons/{n}   # One season's episodes and ranges
+GET  /api/library             # Library list with counts (filters, sort, search)
 POST /api/movies              # Add movie by TMDB ID
 POST /api/shows               # Add show by TMDB ID
 POST /api/movies/{id}/assign-torrent   # Assign torrent to movie
@@ -120,6 +124,11 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `cmd/momoshtrem/main.go` - Entry point
 - `internal/api/router.go` - REST API endpoints
 - `internal/library/` - Models, repositories, embedded migrations
+- `internal/catalog/` - Title pages, seasons and `/library`: availability stages, episode states, ranges, "more like this"
+- `internal/metadata/` - TMDB sync into the library (specials, absolute numbering, anime detection) and `backfill-metadata`
+- `internal/tmdb/` - TMDB client with retries, rate limit and the `tmdb_cache` cache
+- `internal/artwork/` - Backdrop dominant colour for the hero glow
+- `internal/subtitle/` - Subtitles: OpenSubtitles search ranked by release match, downloads, torrent subtitles
 - `internal/vfs/library_fs.go` - Virtual filesystem
 - `internal/torrent/service.go` - Torrent service interface
 - `internal/streaming/prioritizer.go` - Piece prioritization
@@ -127,6 +136,8 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 **web (Next.js, `web/`):**
 - `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)
 - `src/components/shell/` - App shell: top bar, tab bar, account menu, ⌘K palette, URL-driven sheets
+- `src/components/title/` - Movie and show pages: hero, primary panel and action dock, subtitles, episodes (`show/`: season tabs, rows, long-season tools, show settings and episode sheets)
+- `src/lib/title/` - Pure title helpers: stage copy (`primaryActionFor`), formats, facts, episodes (`parseJump`, ranges, next-up)
 - `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
 - `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
 - `src/lib/api/` - Server-side clients (momoshtrem, jackett, tmdb)

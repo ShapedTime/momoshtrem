@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import type { CSSProperties, Ref } from 'react';
 import { ChevronRight, EllipsisVertical, Search } from 'lucide-react';
-import { buttonClassName, IconButton, StatusPill } from '@/components/ui';
+import { buttonClassName, IconButton, Media, StatusPill } from '@/components/ui';
+import { buildImageUrl } from '@/config/tmdb';
 import type { EpisodeOrdering, EpisodeSummary } from '@/lib/api/contract';
 import { episodeCode, episodeLabel } from '@/lib/title/episodes';
 import { formatShortDate } from '@/lib/title/format';
@@ -17,6 +19,14 @@ export interface EpisodeRowProps {
   onFind: (episode: EpisodeSummary) => void;
   /** Has a file: the episode sheet (how to play, subtitles, replace, remove). */
   onOpen: (episode: EpisodeSummary) => void;
+  /** "With stills" density: a 16:9 still instead of the number (92 px rows). */
+  rich?: boolean;
+  /** Just jumped to: a short amber flash. */
+  flash?: boolean;
+  /** Virtualised lists: position, size and measuring. */
+  style?: CSSProperties;
+  position?: { index: number; of: number };
+  ref?: Ref<HTMLLIElement>;
 }
 
 /** DOM id of a row, for jump-to-episode (slice 6): "ep-29". */
@@ -37,7 +47,7 @@ function Pill({ episode }: { episode: EpisodeSummary }) {
  * One compact episode row (HANDOFF §5.4, 60 px): number, name, code and
  * runtime, a status pill, and the action that fits the state.
  */
-export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFind, onOpen }: EpisodeRowProps) {
+export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFind, onOpen, rich = false, flash = false, style, position, ref }: EpisodeRowProps) {
   const code = episodeCode(episode.season_number, episode.episode_number);
   const sub = [
     episodeLabel(episode, ordering),
@@ -70,14 +80,29 @@ export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFi
   }
 
   return (
-    <li id={episodeRowId(episode)} className={cx('eprow', isNext && 'is-next', episode.state === 'watched' && 'is-watched')}>
-      <span className="no" aria-hidden="true">
-        {episode.episode_number}
-      </span>
+    <li
+      ref={ref}
+      id={episodeRowId(episode)}
+      // Focusable from script only: a jump or an expanded run moves focus here, so Tab goes on from this row
+      tabIndex={-1}
+      className={cx('eprow', rich && 'eprow--rich', isNext && 'is-next', episode.state === 'watched' && 'is-watched', flash && 'flash')}
+      style={style}
+      data-index={position?.index}
+      aria-setsize={position?.of}
+      aria-posinset={position ? position.index + 1 : undefined}
+    >
+      {rich ? (
+        <Media shape="wide" src={buildImageUrl(episode.still_path, 'still', 'large')} alt="" sizes="136px" />
+      ) : (
+        <span className="no" aria-hidden="true">
+          {episode.episode_number}
+        </span>
+      )}
       <div className="info">
         {isNext && <span className="t-micro text-accent-text">Up next</span>}
         <span className="name" title={episode.name}>
           <span className="sr-only">{code}: </span>
+          {rich && <span className="t-num text-fg-3">{episode.episode_number}. </span>}
           {episode.name}
         </span>
         <span className="sub">{sub.join(' · ')}</span>
