@@ -1,23 +1,22 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import { NotFoundView } from '@/components/system/NotFoundView';
 import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useOverArt } from '@/components/shell/ShellContext';
-import { TorrentSearchModal } from '@/components/torrent';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
+import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { MovieTitle } from '@/lib/api/contract';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { titleFacts } from '@/lib/title/facts';
 import { legacySearchContext } from '@/lib/title/legacy-search';
 import { primaryActionFor, type StageIntent } from '@/lib/title/stage-copy';
-import type { TorrentSearchContext } from '@/types/jackett';
 import { ActionDock } from './ActionDock';
 import { CastRow } from './CastRow';
 import { CurrentTorrentPanel } from './CurrentTorrentPanel';
 import { DetailsAside } from './DetailsAside';
+import { LegacySearchHost } from './LegacySearchHost';
 import { MoreLikeThis } from './MoreLikeThis';
 import { PrimaryPanel } from './PrimaryPanel';
 import { SubtitlesPanel } from './SubtitlesPanel';
@@ -27,29 +26,16 @@ import { isTitleNotFound, TitleDetailSkeleton, TitleLoadError } from './TitleSta
 import { TrailerCard } from './TrailerCard';
 import { OnTraktCard } from './WatchState';
 
-/**
- * The browser tab names the title (the route's metadata only knows "Movie").
- * Next re-applies that metadata on every navigation, sheets' `?sheet=`
- * included, so this runs again whenever the URL's query changes.
- */
-function useDocumentTitle(name: string) {
-  const searchParams = useSearchParams();
-  useEffect(() => {
-    document.title = `${name} · momoshtrem`;
-  }, [name, searchParams]);
-}
-
 function MovieDetailView({ movie }: { movie: MovieTitle }) {
   const actions = useTitleActions(movie);
   const sheets = useSheet();
-  const [search, setSearch] = useState<TorrentSearchContext | null>(null);
   const { library } = movie;
   const ready = library.availability_stage === 'ready';
   const subtitles = useItemSubtitles('movie', ready ? library.library_id : null, library.torrent?.info_hash ?? null);
   const copy = primaryActionFor(movie);
   useDocumentTitle(movie.title);
 
-  const findTorrent = () => setSearch(legacySearchContext(movie));
+  const findTorrent = () => openLegacySearch(legacySearchContext(movie));
   const onAction = (intent: StageIntent) => {
     if (intent === 'add') actions.add();
     else if (intent === 'find') findTorrent();
@@ -80,18 +66,7 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
         </DetailsAside>
       </div>
       <ActionDock copy={copy} onAction={onAction} busy={busy} />
-      {/* The legacy search until the torrent search sheet (#6) */}
-      {search && (
-        <TorrentSearchModal
-          isOpen
-          context={search}
-          onClose={() => {
-            setSearch(null);
-            void actions.refetch();
-          }}
-          onAdded={() => void actions.torrentChanged()}
-        />
-      )}
+      <LegacySearchHost onAdded={() => void actions.torrentChanged()} onClose={() => void actions.refetch()} />
     </>
   );
 }

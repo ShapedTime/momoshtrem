@@ -1,11 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type {
-  LibraryMovie,
-  LibraryShow,
-  LibraryStatus,
-} from '@/types/momoshtrem';
+import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 import { apiFetch } from '@/lib/api/client';
 
 // ============================================================================
@@ -24,18 +20,6 @@ interface UseLibraryResult {
   shows: LibraryShow[];
   isLoading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
-}
-
-interface LibraryStatusState {
-  status: LibraryStatus;
-  libraryId?: number;
-  hasAssignment: boolean;
-  isLoading: boolean;
-  error: string | null;
-}
-
-interface UseLibraryStatusResult extends LibraryStatusState {
   refresh: () => Promise<void>;
 }
 
@@ -97,74 +81,6 @@ export function useLibrary(): UseLibraryResult {
     isLoading: state.isLoading,
     error: state.error,
     refresh: fetchLibrary,
-  };
-}
-
-// ============================================================================
-// useLibraryStatus Hook
-// ============================================================================
-
-/**
- * Hook for checking if a specific item is in the library.
- */
-export function useLibraryStatus(
-  mediaType: 'movie' | 'tv',
-  tmdbId: number
-): UseLibraryStatusResult {
-  const [state, setState] = useState<LibraryStatusState>({
-    status: 'not_in_library',
-    hasAssignment: false,
-    isLoading: true,
-    error: null,
-  });
-
-  const fetchStatus = useCallback(async () => {
-    if (!tmdbId) {
-      setState({
-        status: 'not_in_library',
-        hasAssignment: false,
-        isLoading: false,
-        error: null,
-      });
-      return;
-    }
-
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-    try {
-      const response = await apiFetch(
-        `/api/library/status?media_type=${mediaType}&tmdb_id=${tmdbId}`
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to check library status');
-      }
-
-      const data = await response.json();
-
-      setState({
-        status: data.status,
-        libraryId: data.library_id,
-        hasAssignment: data.has_assignment,
-        isLoading: false,
-        error: null,
-      });
-    } catch (error) {
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to check status',
-      }));
-    }
-  }, [mediaType, tmdbId]);
-
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
-
-  return {
-    ...state,
-    refresh: fetchStatus,
   };
 }
 

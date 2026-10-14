@@ -152,3 +152,26 @@ test.describe('movie page', () => {
     await shoot(page, testInfo, 'movie/howto');
   });
 });
+
+test.describe('show page', () => {
+  for (const [state, path, ready] of [
+    ['frieren', '/tv/209867', 'Episodes 29–38 have no torrent'],
+    ['severance', '/tv/95396', 'Ready in Infuse'],
+    ['specials', '/tv/57243?season=0', 'Ready in Infuse'],
+    ['not-in-library', '/tv/66573', 'Not in your library'],
+  ] as const) {
+    test(state, async ({ page }, testInfo) => {
+      await signIn(page, path);
+      await page.getByRole('heading', { name: ready }).waitFor();
+      if (state !== 'not-in-library') await page.locator('.ep-list').waitFor();
+      await shoot(page, testInfo, `show/${state}`, { fullPage: true });
+    });
+  }
+
+  test('settings', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/209867?sheet=show-settings&tmdb=209867');
+    await page.getByRole('radio', { name: /Absolute \(anime\)/ }).waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'show/settings');
+  });
+});

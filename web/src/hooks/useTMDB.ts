@@ -4,8 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   TrendingResults,
   SearchResult,
-  TVShowDetails,
-  SeasonDetails,
   Genre,
   MediaType,
   DiscoverResults,
@@ -44,67 +42,6 @@ async function fetchAPI<T>(url: string, signal?: AbortSignal): Promise<T> {
   }
 
   return response.json() as Promise<T>;
-}
-
-// ============================================
-// Generic Hook for ID-based fetching
-// ============================================
-
-/**
- * Generic hook for fetching data based on an ID.
- * Handles loading state, errors, and request cancellation.
- */
-function useFetchOnId<T>(
-  id: number | null,
-  urlBuilder: (id: number) => string,
-  resourceName: string
-): FetchState<T> {
-  const [state, setState] = useState<FetchState<T>>({
-    data: null,
-    isLoading: !!id,
-    error: null,
-  });
-
-  useEffect(() => {
-    if (!id) {
-      setState({ data: null, isLoading: false, error: null });
-      return;
-    }
-
-    // Capture non-null id for the closure
-    const currentId = id;
-    const abortController = new AbortController();
-
-    async function fetchData() {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-      try {
-        const data = await fetchAPI<T>(urlBuilder(currentId), abortController.signal);
-        setState({ data, isLoading: false, error: null });
-      } catch (error) {
-        // Don't update state if request was aborted
-        if (error instanceof Error && error.name === 'AbortError') {
-          return;
-        }
-        setState({
-          data: null,
-          isLoading: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : `Failed to fetch ${resourceName}`,
-        });
-      }
-    }
-
-    fetchData();
-
-    return () => {
-      abortController.abort();
-    };
-  }, [id, urlBuilder, resourceName]);
-
-  return state;
 }
 
 // ============================================
@@ -226,70 +163,6 @@ export function useSearch(): UseSearchResult {
   }, []);
 
   return { ...state, search, clearResults };
-}
-
-// ============================================
-// useTVShow
-// ============================================
-
-const buildTVShowUrl = (id: number) => `/api/tmdb/tv/${id}`;
-
-export function useTVShow(id: number | null): FetchState<TVShowDetails> {
-  return useFetchOnId<TVShowDetails>(id, buildTVShowUrl, 'TV show');
-}
-
-// ============================================
-// useSeason
-// ============================================
-
-export function useSeason(
-  showId: number | null,
-  seasonNumber: number | null
-): FetchState<SeasonDetails> {
-  const [state, setState] = useState<FetchState<SeasonDetails>>({
-    data: null,
-    isLoading: !!(showId && seasonNumber !== null),
-    error: null,
-  });
-
-  useEffect(() => {
-    if (!showId || seasonNumber === null) {
-      setState({ data: null, isLoading: false, error: null });
-      return;
-    }
-
-    const abortController = new AbortController();
-
-    async function fetchSeason() {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-      try {
-        const data = await fetchAPI<SeasonDetails>(
-          `/api/tmdb/tv/${showId}/season/${seasonNumber}`,
-          abortController.signal
-        );
-        setState({ data, isLoading: false, error: null });
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          return;
-        }
-        setState({
-          data: null,
-          isLoading: false,
-          error:
-            error instanceof Error ? error.message : 'Failed to fetch season',
-        });
-      }
-    }
-
-    fetchSeason();
-
-    return () => {
-      abortController.abort();
-    };
-  }, [showId, seasonNumber]);
-
-  return state;
 }
 
 // ============================================

@@ -32,7 +32,6 @@ export function titleFacts(title: Title): TitleFact[] {
           ['Seasons', String(title.seasons.filter((season) => season.season_number > 0).length)],
           ['Status', title.status],
           ['Episode ordering', ORDERING[title.episode_ordering]],
-          ['Original language', title.original_language && languageName(title.original_language)],
           ['TMDB', rating(title)],
         ];
   return facts.flatMap(([label, value]) => (value ? [{ label, value }] : []));
