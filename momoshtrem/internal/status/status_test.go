@@ -38,11 +38,16 @@ type fakeDB struct {
 	pingErr error
 	sizeErr error
 	size    int64
+	block   bool // ping waits for the context to end
 	pings   atomic.Int32
 }
 
-func (f *fakeDB) PingContext(context.Context) error {
+func (f *fakeDB) PingContext(ctx context.Context) error {
 	f.pings.Add(1)
+	if f.block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return f.pingErr
 }
 
@@ -209,9 +214,9 @@ func TestReport_ProbesTimeOutConcurrently(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	const timeout = 50 * time.Millisecond
+	const timeout = 100 * time.Millisecond
 	svc := NewService(Options{
-		DB:           &fakeDB{},
+		DB:           &fakeDB{block: true},
 		Jackett:      blocked,
 		TMDB:         blocked,
 		ProbeTimeout: timeout,
@@ -226,9 +231,14 @@ func TestReport_ProbesTimeOutConcurrently(t *testing.T) {
 			t.Errorf("%s = %+v, want a timeout error", name, p)
 		}
 	}
-	// Run in parallel: two blocked probes take one timeout, not two.
+	if r.DB.OK || !strings.Contains(r.DB.Error, "timed out") {
+		t.Errorf("db = %+v, want a timeout error", r.DB)
+	}
+	// Run in parallel: three blocked checks take about one timeout, not the
+	// three of a serial run. The bound leaves a full timeout of slack for
+	// -race and loaded CI.
 	if elapsed >= 2*timeout {
-		t.Errorf("checks took %s, want < %s (probes should run concurrently)", elapsed, 2*timeout)
+		t.Errorf("checks took %s, want < %s (checks should run concurrently)", elapsed, 2*timeout)
 	}
 }
 
@@ -269,6 +279,37 @@ func TestReport_CachingAndRefreshThrottle(t *testing.T) {
 
 	clock.Advance(time.Second)
 	check("cache expires at TTL", false, 3)
+}
+
+func TestReport_DBDownCachedBriefly(t *testing.T) {
+	clock := newFakeClock()
+	db := &fakeDB{pingErr: errors.New("connection refused")}
+	svc := NewService(Options{DB: db, Now: clock.Now})
+	ctx := context.Background()
+
+	if r := svc.Report(ctx, false); r.DB.OK {
+		t.Fatalf("db = %+v, want down", r.DB)
+	}
+
+	clock.Advance(RefreshMinInterval - time.Second)
+	svc.Report(ctx, false)
+	if got := db.pings.Load(); got != 1 {
+		t.Fatalf("db pings = %d, want 1 (a fresh outage report is still cached)", got)
+	}
+
+	// The database comes back: it shows after RefreshMinInterval, not CacheTTL.
+	db.pingErr = nil
+	clock.Advance(time.Second)
+	if r := svc.Report(ctx, false); !r.DB.OK {
+		t.Fatalf("db = %+v, want recovered after %s", r.DB, RefreshMinInterval)
+	}
+
+	// A healthy report goes back to the normal TTL.
+	clock.Advance(RefreshMinInterval)
+	svc.Report(ctx, false)
+	if got := db.pings.Load(); got != 2 {
+		t.Errorf("db pings = %d, want 2 (healthy report cached for CacheTTL)", got)
+	}
 }
 
 func TestReport_LiveFieldsNotCached(t *testing.T) {

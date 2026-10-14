@@ -9,4 +9,5 @@ var (
 	ErrInvalidMagnet             = errors.New("invalid magnet URI")
 	ErrTorrentServiceUnavailable = errors.New("torrent service not available")
 	ErrNoVideoFiles              = errors.New("no video files found in torrent")
+	ErrTMDBFetch                 = errors.New("failed to fetch from TMDB")
 )

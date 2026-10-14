@@ -158,6 +158,7 @@ func TestLoad_CORSAllowedOrigins(t *testing.T) {
 		{"single", "https://a.example", "", []string{"https://a.example"}},
 		{"trimmed and empty entries dropped", " https://a.example , ,http://localhost:3000,", "", []string{"https://a.example", "http://localhost:3000"}},
 		{"trailing slash stripped", "https://a.example/", "", []string{"https://a.example"}},
+		{"lowercased", "HTTPS://A.Example:8443", "", []string{"https://a.example:8443"}},
 		{"env replaces file list", "https://env.example", `["https://file.example", "https://other.example"]`, []string{"https://env.example"}},
 		{"file list normalised", "", `[" https://file.example/ ", ""]`, []string{"https://file.example"}},
 	}
@@ -176,6 +177,101 @@ func TestLoad_CORSAllowedOrigins(t *testing.T) {
 			}
 			if !reflect.DeepEqual(cfg.Server.CORSAllowedOrigins, tt.want) {
 				t.Errorf("CORSAllowedOrigins = %#v, want %#v", cfg.Server.CORSAllowedOrigins, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidCORSOrigins(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		file string
+	}{
+		{"wildcard", "*", ""},
+		{"wildcard among others", "https://a.example,*", ""},
+		{"no scheme", "a.example", ""},
+		{"host and port without scheme", "localhost:3000", ""},
+		{"unsupported scheme", "ftp://a.example", ""},
+		{"path", "https://a.example/app", ""},
+		{"query", "https://a.example?x=1", ""},
+		{"fragment", "https://a.example#top", ""},
+		{"userinfo", "https://user@a.example", ""},
+		{"no host", "https://", ""},
+		{"wildcard in file", "", `["*"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			t.Setenv("CORS_ALLOWED_ORIGINS", tt.env)
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, "server:\n  cors_allowed_origins: "+tt.file+"\n")
+			}
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS") {
+				t.Fatalf("Load: want a CORS_ALLOWED_ORIGINS error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_PortRanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		wantErr string // "" means valid
+	}{
+		{"defaults are valid", "", ""},
+		{"http port zero", "server:\n  http_port: 0\n", "server.http_port"},
+		{"webdav port too high", "server:\n  webdav_port: 70000\n", "server.webdav_port"},
+		{"metrics port checked when enabled", "metrics:\n  enabled: true\n  port: -1\n", "metrics.port"},
+		{"metrics port ignored when disabled", "metrics:\n  enabled: false\n  port: 0\n", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, tt.file)
+			}
+			_, err := Load(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Load: want an error naming %s, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestLoad_EnvStringsTrimmed(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"surrounding whitespace trimmed", " abc \n", "abc"},
+		{"whitespace only counts as unset", " \t\n", "file-token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			t.Setenv("BACKEND_API_TOKEN", tt.env)
+			path := writeConfig(t, "server:\n  api_token: file-token\n")
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Server.APIToken != tt.want {
+				t.Errorf("Server.APIToken = %q, want %q", cfg.Server.APIToken, tt.want)
 			}
 		})
 	}
