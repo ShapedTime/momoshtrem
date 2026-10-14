@@ -28,33 +28,35 @@ jest.mock('next/image', () => ({
   },
 }));
 
-// jsdom gaps that Radix, Vaul and the media-query hook rely on
-if (!window.matchMedia) {
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }),
-  });
-}
+// jsdom gaps that Radix, Vaul and the media-query hook rely on (skipped in node-environment tests)
+if (typeof window !== 'undefined') {
+  if (!window.matchMedia) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+  }
 
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-if (!('ResizeObserver' in window)) {
-  Object.defineProperty(window, 'ResizeObserver', { writable: true, value: ResizeObserverStub });
-}
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  if (!('ResizeObserver' in window)) {
+    Object.defineProperty(window, 'ResizeObserver', { writable: true, value: ResizeObserverStub });
+  }
 
-Element.prototype.scrollIntoView ??= function scrollIntoView() {};
-Element.prototype.hasPointerCapture ??= () => false;
-Element.prototype.releasePointerCapture ??= () => {};
-Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.scrollIntoView ??= function scrollIntoView() {};
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.releasePointerCapture ??= () => {};
+  Element.prototype.setPointerCapture ??= () => {};
+}

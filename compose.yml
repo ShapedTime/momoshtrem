@@ -106,7 +106,9 @@ services:
     ports:
       - 3000:3000
     environment:
+      - APP_USERNAME=${APP_USERNAME:-}
       - APP_PASSWORD=${APP_PASSWORD}
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-0}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - JACKETT_URL=http://jackett:9117
       - JACKETT_API_KEY=${JACKETT_API_KEY}

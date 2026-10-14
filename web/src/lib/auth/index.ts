@@ -1,8 +1,9 @@
 export {
   createSessionToken,
   verifySessionToken,
-  setSessionCookie,
   getSession,
-  clearSession,
+  applySessionCookie,
+  clearSessionCookie,
 } from './session';
-export { verifyPassword } from './password';
+export { verifyCredentials, getConfiguredUsername } from './credentials';
+export { safeRedirect } from './redirect';

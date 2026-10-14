@@ -48,6 +48,7 @@ docker compose up -d --build
 # Frontend
 cd web && npm run dev
 cd web && npm run lint && npx tsc --noEmit && npm test
+cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx playwright install chromium)
 
 # Go service (momoshtrem)
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
@@ -132,7 +133,8 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 ```env
 TMDB_API_KEY=...              # themoviedb.org
 JACKETT_API_KEY=...           # From Jackett dashboard
-APP_PASSWORD=...              # Frontend auth
+APP_USERNAME=...              # Sign-in username (defaults to admin)
+APP_PASSWORD=...              # Sign-in password
 OPENSUBTITLES_API_KEY=...     # Optional: subtitles
 DATABASE_URL=...              # Postgres (momoshtrem)
 ```
