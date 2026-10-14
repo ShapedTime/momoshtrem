@@ -13,6 +13,8 @@ export interface LibraryParams {
   sort?: LibrarySort;
   q?: string;
   page?: number;
+  /** 50 by default, max 200. */
+  page_size?: number;
 }
 
 /** One row of GET /library (a Paginated<LibraryItem>). */

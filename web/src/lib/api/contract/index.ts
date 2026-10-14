@@ -1,5 +1,6 @@
 export * from './common';
 export * from './titles';
+export * from './subtitles';
 export * from './library';
 export * from './assignment';
 export * from './search';

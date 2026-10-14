@@ -4,8 +4,9 @@ import { libraryHandlers } from './library';
 import { recommendationsHandlers } from './recommendations';
 import { searchHandlers } from './search';
 import { settingsHandlers } from './settings';
+import { resetMockSubtitles, subtitlesHandlers } from './subtitles';
 import { systemHandlers } from './system';
-import { titlesHandlers } from './titles';
+import { resetMockLibrary, titlesHandlers } from './titles';
 import { torrentsHandlers } from './torrents';
 import { traktHandlers } from './trakt';
 
@@ -16,6 +17,7 @@ import { traktHandlers } from './trakt';
  */
 export const handlers = [
   ...titlesHandlers,
+  ...subtitlesHandlers,
   ...libraryHandlers,
   ...assignmentHandlers,
   ...searchHandlers,
@@ -26,3 +28,9 @@ export const handlers = [
   ...torrentsHandlers,
   ...legacyHandlers,
 ];
+
+/** Tests: forget what earlier requests changed (the library and stored subtitles live per page). */
+export function resetMockState(): void {
+  resetMockLibrary();
+  resetMockSubtitles();
+}
