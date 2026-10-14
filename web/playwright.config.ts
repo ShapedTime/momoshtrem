@@ -35,6 +35,8 @@ export default defineConfig({
     timeout: 180_000,
     env: {
       E2E: '1',
+      // Every /api call is answered by MSW fixtures (src/mocks), so pages render deterministically
+      NEXT_PUBLIC_API_MOCKING: 'enabled',
       NEXT_DIST_DIR: '.next-e2e',
       APP_USERNAME: 'e2e',
       APP_PASSWORD: 'e2e-password',

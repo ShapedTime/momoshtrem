@@ -29,15 +29,23 @@ describe('apiFetch', () => {
 
   it('redirects only once for a burst of 401s', async () => {
     stubWindow('/library');
-    respond(401);
+    respond(401, { error: { code: 'unauthorized', message: 'Your session has ended.' } });
     await Promise.allSettled([apiFetch('/api/a'), apiFetch('/api/b'), apiFetch('/api/c')]);
     expect(assign).toHaveBeenCalledTimes(1);
   });
 
   it('never redirects from the login page itself', async () => {
     stubWindow('/login');
-    respond(401);
+    respond(401, { error: { code: 'unauthorized', message: 'Your session has ended.' } });
     await expect(apiFetch('/api/x')).rejects.toBeInstanceOf(ApiError);
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('treats an upstream 401 (a rejected API key) as an ordinary error, not a lost session', async () => {
+    stubWindow('/search');
+    respond(401, { error: 'TMDB API request failed: Request failed with status code 401' });
+    const response = await apiFetch('/api/tmdb/search?q=x');
+    expect(response.status).toBe(401);
     expect(assign).not.toHaveBeenCalled();
   });
 

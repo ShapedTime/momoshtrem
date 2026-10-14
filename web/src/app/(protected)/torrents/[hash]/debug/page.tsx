@@ -20,7 +20,7 @@ export default function TorrentDebugPage({ params }: PageProps) {
 
   if (isLoading && !data) {
     return (
-      <main className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
+      <div className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
         <div className="animate-pulse space-y-6">
           <div className="h-8 bg-bg-elevated rounded w-1/3" />
           <div className="grid grid-cols-6 gap-3">
@@ -30,13 +30,13 @@ export default function TorrentDebugPage({ params }: PageProps) {
           </div>
           <div className="h-64 bg-bg-elevated rounded-lg" />
         </div>
-      </main>
+      </div>
     );
   }
 
   if (error && !data) {
     return (
-      <main className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
+      <div className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
         <div className="text-center py-16">
           <p className="text-accent-red mb-4">{error}</p>
           <Link
@@ -46,7 +46,7 @@ export default function TorrentDebugPage({ params }: PageProps) {
             Back to Torrents
           </Link>
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -55,7 +55,7 @@ export default function TorrentDebugPage({ params }: PageProps) {
   const pieces = data.pieces ? decodePieces(data.pieces) : [];
 
   return (
-    <main className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12 space-y-8">
+    <div className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12 space-y-8">
       {/* Header */}
       <header>
         <div className="flex items-center gap-3 mb-2">
@@ -117,6 +117,6 @@ export default function TorrentDebugPage({ params }: PageProps) {
           <FileProgressTable files={data.files} />
         </div>
       </section>
-    </main>
+    </div>
   );
 }

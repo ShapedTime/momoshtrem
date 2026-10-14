@@ -3,16 +3,18 @@
 import { type ReactNode, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MockProvider } from '@/components/dev/MockProvider';
-import { ToastProvider } from '@/components/ui';
+import { ConfirmProvider, ToastProvider } from '@/components/ui';
 import { makeQueryClient } from './client';
 
-/** Client-side app providers: mock mode (dev), TanStack Query and toasts. */
+/** Client-side app providers: mock mode (dev), TanStack Query, toasts and confirm dialogs. */
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(makeQueryClient);
   return (
     <MockProvider>
       <QueryClientProvider client={queryClient}>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </ToastProvider>
       </QueryClientProvider>
     </MockProvider>
   );

@@ -23,6 +23,7 @@ import {
   Chip,
   Confidence,
   ConfirmDialog,
+  CopyField,
   EmptyState,
   FilterChip,
   IconButton,
@@ -55,6 +56,7 @@ import {
   Switch,
   Tabs,
   Textarea,
+  useConfirm,
   useToast,
   WideSkeletons,
 } from '@/components/ui';
@@ -115,6 +117,7 @@ const TYPE_SCALE = [
 
 export function Gallery() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [sheet, setSheet] = useState<'none' | 'default' | 'narrow' | 'full'>('none');
   const [nested, setNested] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -391,6 +394,7 @@ export function Gallery() {
           <ListRow as="li" leading={<Settings size={20} className="text-fg-3" aria-hidden="true" />} title="Settings" description="Integrations, AI and playback" trailing={<StatusPill status="ok" />} />
           <ListRow as="li" leading={<Tv size={20} className="text-fg-3" aria-hidden="true" />} title="Infuse & WebDAV" description="WebDAV ready" />
         </Panel>
+        <CopyField value="https://momoshtrem.duckdns.org:36911/" label="WebDAV address" hint="Paste it into Infuse › Add share › WebDAV" />
         <div className="flex flex-col gap-3">
           <Banner tone="error" title="Can’t reach momoshtrem" icon={WifiOff} action={<Button size="sm">Retry</Button>}>
             Showing what it said at 21:42. Infuse can still play ready titles.
@@ -456,6 +460,18 @@ export function Gallery() {
           <Button onClick={() => setSheet('full')}>Full-height sheet</Button>
           <Button variant="danger-quiet" onClick={() => setConfirmOpen(true)}>
             <Trash2 size={16} aria-hidden="true" /> Remove
+          </Button>
+          <Button
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Remove this torrent?',
+                description: 'Infuse will no longer be able to play Severance · Season 2. The show stays in your library.',
+                confirmLabel: 'Remove torrent',
+              });
+              toast({ tone: 'info', title: ok ? 'Confirmed' : 'Cancelled' });
+            }}
+          >
+            useConfirm()
           </Button>
           <Menu>
             <MenuTrigger asChild>

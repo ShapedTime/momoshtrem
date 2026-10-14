@@ -48,6 +48,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || '.next',
   // The dev badge overlaps the tab bar and trips axe in E2E runs
   ...(process.env.E2E === '1' ? { devIndicators: false as const } : {}),
+  // Page crossfades via React <ViewTransition> (components/shell/PageTransition.tsx)
+  experimental: { viewTransition: true },
   images: {
     remotePatterns: [
       {

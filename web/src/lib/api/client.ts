@@ -48,15 +48,20 @@ function redirectToLogin(): void {
 }
 
 /**
- * Drop-in `fetch` for `/api/*`. A 401 (the proxy's "session ended") sends
- * the browser to /login and throws, so callers never render a half-signed-in
- * page. Other statuses are returned as-is.
+ * Drop-in `fetch` for `/api/*`. The proxy's "session ended" answer
+ * (401 `unauthorized`) sends the browser to /login and throws, so callers
+ * never render a half-signed-in page. Any other 401 (an upstream service
+ * rejecting a key) is returned like every other status: redirecting on it
+ * would loop through /login.
  */
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, { credentials: 'same-origin', ...init });
   if (response.status === 401) {
-    redirectToLogin();
-    throw new ApiError(401, 'unauthorized', 'Your session has ended. Sign in again.');
+    const body: unknown = await response.clone().json().catch(() => undefined);
+    if (parseErrorBody(body).code === 'unauthorized') {
+      redirectToLogin();
+      throw new ApiError(401, 'unauthorized', 'Your session has ended. Sign in again.');
+    }
   }
   return response;
 }

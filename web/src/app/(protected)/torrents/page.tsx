@@ -107,7 +107,7 @@ export default function TorrentsPage() {
   }, [refresh]);
 
   return (
-    <main className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
+    <div className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
       {/* Page header */}
       <header className="mb-8">
         <div className="flex items-center justify-between">
@@ -201,7 +201,7 @@ export default function TorrentsPage() {
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }
 

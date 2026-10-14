@@ -23,6 +23,8 @@ export {
 export { Sheet } from './Sheet';
 export type { SheetProps } from './Sheet';
 export { ConfirmDialog } from './Dialog';
+export { ConfirmProvider, useConfirm } from './Confirm';
+export { CopyField, copyText } from './CopyField';
 export { Menu, MenuTrigger, MenuContent, MenuItem, MenuSeparator, MenuLabel } from './Menu';
 export { ToastProvider, useToast } from './Toast';
 export type { ToastOptions, ToastTone } from './Toast';

@@ -9,4 +9,6 @@ export async function signIn(page: Page, redirect = '/dev/ui') {
   await page.getByLabel('Password', { exact: true }).fill(E2E_USER.password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL((url) => url.pathname === redirect.split('?')[0]);
+  // In mock mode the UI mounts once the MSW worker is ready
+  await page.locator('main').first().waitFor();
 }

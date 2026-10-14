@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import type { ComponentProps, ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { cx } from '@/lib/utils/cx';
@@ -21,21 +22,36 @@ export function MenuContent({ className, sideOffset = 8, align = 'end', ...props
   );
 }
 
-interface MenuItemProps extends Omit<ComponentProps<typeof DropdownMenu.Item>, 'children'> {
+interface MenuItemProps extends Omit<ComponentProps<typeof DropdownMenu.Item>, 'children' | 'asChild'> {
   icon?: ReactNode;
   /** Right-aligned hint, e.g. a shortcut. */
   hint?: ReactNode;
   /** Quiet red text; destructive items still go through a confirm dialog. */
   danger?: boolean;
+  /** Navigate instead of running onSelect. */
+  href?: string;
   children: ReactNode;
 }
 
-export function MenuItem({ icon, hint, danger, className, children, ...props }: MenuItemProps) {
-  return (
-    <DropdownMenu.Item className={cx('menu-item', danger && 'danger', className)} {...props}>
+export function MenuItem({ icon, hint, danger, href, className, children, ...props }: MenuItemProps) {
+  const content = (
+    <>
       {icon}
       <span>{children}</span>
       {hint && <span className="hint">{hint}</span>}
+    </>
+  );
+  const classes = cx('menu-item', danger && 'danger', className);
+  if (href) {
+    return (
+      <DropdownMenu.Item asChild className={classes} {...props}>
+        <Link href={href}>{content}</Link>
+      </DropdownMenu.Item>
+    );
+  }
+  return (
+    <DropdownMenu.Item className={classes} {...props}>
+      {content}
     </DropdownMenu.Item>
   );
 }

@@ -58,10 +58,25 @@
   }
   .phone-bar.is-over-art { position: absolute; left: 0; right: 0; top: 0; }
   .phone-bar .brand { display: flex; align-items: center; gap: 8px; font-weight: var(--w-semibold); letter-spacing: -0.03em; font-size: 17px; }
-  .phone-bar .avatar-btn { background: rgb(11 13 18 / 0.5); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .phone-bar .avatar-btn { background: rgb(11 13 18 / 0.5); backdrop-filter: blur(12px); }
   @media (min-width: 1024px) { .phone-bar { display: none; } }
 
   .pcard.is-dismissed { opacity: 0.35; filter: grayscale(1); transition: opacity var(--d-slow), filter var(--d-slow); }
+
+  /* Overlays take focus themselves on open; keep their elevation, not the focus ring */
+  .sheet:focus-visible, .dialog:focus-visible { box-shadow: var(--e-4); }
+
+  /* Command palette (cmdk) details on top of .palette in components.css */
+  .palette [cmdk-group-heading] {
+    padding: var(--sp-2) var(--sp-3) var(--sp-1);
+    font-size: var(--t-micro); letter-spacing: var(--tr-micro); text-transform: uppercase;
+    font-weight: var(--w-semibold); color: var(--text-3);
+  }
+  .palette [cmdk-item] { cursor: pointer; }
+  @media (hover: none) { .palette .p-foot { display: none; } }
+  @media (max-width: 639px) {
+    .palette { top: calc(env(safe-area-inset-top, 0px) + 8px); width: calc(100% - 16px); max-height: 80vh; border-radius: var(--r-lg); }
+  }
 
   /* Skeletons appear only after 150 ms, so cached loads never flash (HANDOFF §4.3) */
   .skel-delay { animation: fade-in var(--d-base) var(--ease-out) 150ms both; }
@@ -69,7 +84,9 @@
 
 /* View transitions: slow, cinematic crossfade; poster morph handled by name */
 ::view-transition-old(root),
-::view-transition-new(root) {
+::view-transition-new(root),
+::view-transition-old(*),
+::view-transition-new(*) {
   animation-duration: var(--d-slower);
   animation-timing-function: var(--ease-in-out);
 }

@@ -106,7 +106,7 @@ export default function LibraryPage() {
   }, [fetchLibrary]);
 
   return (
-    <main className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
+    <div className="px-4 sm:px-6 lg:px-12 xl:px-16 py-6 sm:py-8 lg:py-12">
       {/* Page header */}
       <header className="mb-8">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">My Library</h1>
@@ -139,6 +139,6 @@ export default function LibraryPage() {
           torrentStatusMap={torrentMap}
         />
       )}
-    </main>
+    </div>
   );
 }

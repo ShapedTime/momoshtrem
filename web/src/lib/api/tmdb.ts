@@ -56,6 +56,12 @@ class TMDBClient {
         throw new NotFoundError(resource ?? 'Resource');
       }
 
+      // TMDB rejecting our API key is a server problem, not the user's session:
+      // a 401 here would send the browser to /login.
+      if (statusCode === 401 || statusCode === 403) {
+        throw new APIError('TMDB rejected the API key. Check TMDB_API_KEY.', 502, 'tmdb_auth');
+      }
+
       throw new APIError(`TMDB API request failed: ${error.message}`, statusCode);
     }
 

@@ -73,13 +73,13 @@ function SheetHead({ title, description, head, Title, Description, Close }: {
 }
 
 function PanelSheet({ open, onOpenChange, title, description, size, nested, head, footer, className, children }: SheetProps) {
-  const focus = useRestoreFocus();
+  const focus = useRestoreFocus({ focusContainer: true });
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         {!nested && <Dialog.Overlay className="scrim" />}
         {/* Without a description, opt out of aria-describedby explicitly (Radix warns otherwise) */}
-        <Dialog.Content className={sheetClass({ size, nested, className })} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
+        <Dialog.Content className={cx(sheetClass({ size, nested, className }), 'outline-none')} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
           <SheetHead title={title} description={description} head={head} Title={Dialog.Title} Description={Dialog.Description} Close={Dialog.Close} />
           <div className="sheet-body">{children}</div>
           {footer && <div className="sheet-foot">{footer}</div>}
@@ -90,13 +90,13 @@ function PanelSheet({ open, onOpenChange, title, description, size, nested, head
 }
 
 function DrawerSheet({ open, onOpenChange, title, description, size, nested, head, footer, className, children }: SheetProps) {
-  const focus = useRestoreFocus();
+  const focus = useRestoreFocus({ focusContainer: true });
   const Root = nested ? Drawer.NestedRoot : Drawer.Root;
   return (
     <Root open={open} onOpenChange={onOpenChange} handleOnly={size === 'full'} repositionInputs={false}>
       <Drawer.Portal>
         <Drawer.Overlay className="scrim" />
-        <Drawer.Content className={sheetClass({ size, nested, className })} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
+        <Drawer.Content className={cx(sheetClass({ size, nested, className }), 'outline-none')} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
           {/* Vaul injects unlayered handle styles, hence the important overrides */}
           <div className="grid h-5 shrink-0 place-items-center">
             <Drawer.Handle className="w-9! bg-surface-4! opacity-100!" />
