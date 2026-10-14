@@ -146,3 +146,23 @@
   .sub-result { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-md); background: var(--ink-1); border: 1px solid var(--line-1); }
   .sub-result > .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 }
+
+/* ---- Show page: episode rows, settings ------------------------------------ */
+@layer components {
+  /* Narrow rows keep only the pill's icon, but say the word to screen readers; % and air dates stay */
+  @media (max-width: 399px) {
+    .eprow .end .pill:not(.pill--downloading, .pill--upcoming) { padding: 0 6px; }
+    .eprow .end .pill:not(.pill--downloading, .pill--upcoming) > span {
+      position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    }
+  }
+
+  .fs { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .radio-card {
+    display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--surface-1); cursor: pointer;
+  }
+  .radio-card input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); flex-shrink: 0; }
+  .radio-card:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }
+  .radio-card:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+}

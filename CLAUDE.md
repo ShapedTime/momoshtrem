@@ -92,7 +92,7 @@ POST /api/shows               # Add show by TMDB ID
 POST /api/movies/{id}/assign-torrent   # Assign torrent to movie
 POST /api/shows/{id}/assign-torrent    # Auto-detect episodes from torrent
 GET  /api/torrents            # List active torrents
-POST /api/subtitles/search    # Search OpenSubtitles
+GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
 ```
 Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6.
 

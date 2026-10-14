@@ -11,20 +11,6 @@ import { apiFetch } from '@/lib/api/client';
 // Types
 // ============================================================================
 
-interface AddToLibraryState {
-  isAdding: boolean;
-  error: string | null;
-}
-
-interface UseAddToLibraryResult {
-  /** Add item to library without a torrent. Returns library ID on success. */
-  addToLibrary: (mediaType: 'movie' | 'tv', tmdbId: number) => Promise<number | null>;
-  /** Check if currently adding. */
-  isAdding: boolean;
-  /** Last error message. */
-  error: string | null;
-}
-
 interface AddTorrentState {
   addingMagnet: string | null;
   error: string | null;
@@ -45,58 +31,6 @@ interface UseAddTorrentResult {
   error: string | null;
   /** Reset tracking state. */
   reset: () => void;
-}
-
-// ============================================================================
-// useAddToLibrary Hook
-// ============================================================================
-
-/**
- * Hook for adding items to the library without a torrent.
- * Used for curating a "want to watch" list.
- */
-export function useAddToLibrary(): UseAddToLibraryResult {
-  const [state, setState] = useState<AddToLibraryState>({
-    isAdding: false,
-    error: null,
-  });
-
-  const addToLibrary = useCallback(
-    async (mediaType: 'movie' | 'tv', tmdbId: number): Promise<number | null> => {
-      setState({ isAdding: true, error: null });
-
-      try {
-        const response = await apiFetch('/api/library/add', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ media_type: mediaType, tmdb_id: tmdbId }),
-        });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data.error || 'Failed to add to library');
-        }
-
-        const data = await response.json();
-        setState({ isAdding: false, error: null });
-        return data.library_id;
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Failed to add to library';
-        setState({ isAdding: false, error: errorMessage });
-        return null;
-      }
-    },
-    []
-  );
-
-  return {
-    addToLibrary,
-    isAdding: state.isAdding,
-    error: state.error,
-  };
 }
 
 // ============================================================================

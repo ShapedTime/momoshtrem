@@ -1,6 +1,5 @@
 export { cx } from './cx';
 export { getRandomItem } from './array';
-export { formatRuntime, extractYear, formatReleaseDate } from './format';
 export {
   convertTorrentUrlToMagnet,
   batchConvertTorrentUrls,

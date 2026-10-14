@@ -11,11 +11,13 @@ interface SwitchProps {
   onCheckedChange: (checked: boolean) => void;
   /** Accessible name when there's no visible <label htmlFor>. */
   label?: string;
+  /** id of a hint that describes the setting. */
+  describedBy?: string;
   id?: string;
   disabled?: boolean;
 }
 
-export function Switch({ checked, onCheckedChange, label, id, disabled }: SwitchProps) {
+export function Switch({ checked, onCheckedChange, label, describedBy, id, disabled }: SwitchProps) {
   return (
     <span className="switch">
       <input
@@ -25,6 +27,7 @@ export function Switch({ checked, onCheckedChange, label, id, disabled }: Switch
         checked={checked}
         disabled={disabled}
         aria-label={label}
+        aria-describedby={describedBy}
         onChange={(event) => onCheckedChange(event.target.checked)}
       />
       <span className="track" aria-hidden="true" />

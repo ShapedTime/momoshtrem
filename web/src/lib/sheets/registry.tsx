@@ -1,6 +1,8 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { SheetProps } from '@/components/ui';
 import { InfuseSetupSheet } from '@/components/shell/InfuseSetupSheet';
+import { EpisodeSheet } from '@/components/title/show/EpisodeSheet';
+import { ShowSettingsSheet } from '@/components/title/show/ShowSettingsSheet';
 
 interface SheetBase {
   /** Other URL params this sheet owns; removed when it closes from a deep link. */
@@ -47,6 +49,9 @@ export const SHEETS: Record<string, SheetDefinition> = {
     params: ['path', 'url'],
     render: (params) => <InfuseSetupSheet path={params.get('path')} url={params.get('url')} />,
   },
+  // A show's episode: `tmdb` (the show) and `se` ("S01E05"); `season` is the page's tab and stays
+  episode: { params: ['tmdb', 'se'], Component: EpisodeSheet },
+  'show-settings': { params: ['tmdb'], Component: ShowSettingsSheet },
 };
 
 /** The sheet registered as `name`. Own keys only, so `?sheet=toString` opens nothing. */

@@ -8,7 +8,7 @@ import { libraryKeys, subtitleKeys, titleKeys, titleQuery, titlesApi } from '@/l
 import { removeConsequence } from '@/lib/title/facts';
 
 /** How often a downloading title refreshes its progress (paused in hidden tabs). */
-const DOWNLOAD_POLL_MS = 5000;
+export const DOWNLOAD_POLL_MS = 5000;
 
 /** `refetchInterval` for a title: every 5 s while it's downloading, otherwise not at all. */
 export const pollWhileDownloading = (title: Title | undefined): number | false =>
@@ -91,3 +91,45 @@ export function useTitleActions(title: Title) {
       Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: subtitleKeys.all })]),
   };
 }
+
+/**
+ * "Remove file from episode": confirms, unassigns the file (the episode
+ * stays and shows as missing), then refetches the title, its seasons and the
+ * library.
+ */
+export function useRemoveEpisodeFile() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const confirm = useConfirm();
+  const unassign = useMutation({
+    mutationFn: (episodeId: number) => titlesApi.unassignEpisode(episodeId),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: titleKeys.all }),
+        queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: subtitleKeys.all }),
+      ]),
+  });
+
+  return {
+    removing: unassign.isPending,
+    /** Resolves true once the file is gone. */
+    remove: async (episodeId: number, code: string): Promise<boolean> => {
+      const confirmed = await confirm({
+        title: `Remove the file from ${code}?`,
+        description: 'Infuse loses this episode right away and it shows as missing until you find another torrent. The torrent itself stays in Activity.',
+        confirmLabel: 'Remove file',
+      });
+      if (!confirmed) return false;
+      try {
+        await unassign.mutateAsync(episodeId);
+        toast({ tone: 'info', icon: Trash2, title: `Removed the file from ${code}` });
+        return true;
+      } catch (error) {
+        toast({ tone: 'error', title: `Couldn’t remove the file from ${code}`, body: error instanceof Error ? error.message : undefined });
+        return false;
+      }
+    },
+  };
+}
+

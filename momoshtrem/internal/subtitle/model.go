@@ -2,7 +2,6 @@ package subtitle
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -22,18 +21,6 @@ const (
 	SourceOpenSubtitles Source = "opensubtitles"
 	SourceTorrent       Source = "torrent"
 )
-
-// ParseItemType converts a string to ItemType with validation.
-func ParseItemType(s string) (ItemType, error) {
-	switch strings.ToLower(s) {
-	case "movie":
-		return ItemTypeMovie, nil
-	case "episode":
-		return ItemTypeEpisode, nil
-	default:
-		return "", fmt.Errorf("invalid item type: %q (must be 'movie' or 'episode')", s)
-	}
-}
 
 // Item is a library movie or episode that subtitles belong to.
 type Item struct {

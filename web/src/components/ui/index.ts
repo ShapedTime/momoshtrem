@@ -33,4 +33,3 @@ export type { ToastOptions, ToastTone } from './Toast';
 // Legacy, kept until their feature issues replace them
 export { Modal } from './Modal';
 export { RatingBadge } from './RatingBadge';
-export { Breadcrumb } from './Breadcrumb';

@@ -195,12 +195,8 @@ func (s *Server) setupRoutes() {
 	api.POST("/torrents/:hash/resume", s.resumeTorrent)
 	api.GET("/torrents/:hash/debug", s.getTorrentDebug)
 
-	// Subtitles: item-scoped under /movies/:id and /episodes/:id, plus the
-	// legacy /subtitles/* routes until the web drops them.
+	// Subtitles: item-scoped under /movies/:id and /episodes/:id
 	s.registerSubtitleRoutes(api)
-	api.GET("/subtitles/search", s.searchSubtitles)
-	api.POST("/subtitles/download", s.downloadSubtitle)
-	api.DELETE("/subtitles/:id", s.deleteSubtitle)
 
 	// Status
 	api.GET("/status", s.getStatus)

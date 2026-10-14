@@ -1,5 +1,7 @@
 // Title pages (movie and show detail, PLAN F2). Generic over `Title`, so the show page reuses them.
 export { MovieDetail } from './MovieDetail';
+export { ShowDetail } from './ShowDetail';
+export { LegacySearchHost } from './LegacySearchHost';
 export { TitleHero } from './TitleHero';
 export { PrimaryPanel } from './PrimaryPanel';
 export { StageSteps } from './StageSteps';

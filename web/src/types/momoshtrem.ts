@@ -36,13 +36,6 @@ export interface LibrarySeason {
   episodes?: LibraryEpisode[];
 }
 
-export interface RefreshShowResult {
-  show: LibraryShow;
-  seasons_added: number;
-  episodes_added: number;
-  season_errors?: string[];
-}
-
 export interface LibraryEpisode {
   id: number;
   episode_number: number;

@@ -351,12 +351,6 @@ func TestItemSubtitles_Delete(t *testing.T) {
 	if rec := f.do(t, http.MethodDelete, path(f.ru.ID), ""); rec.Code != http.StatusNotFound {
 		t.Errorf("deleted twice: status = %d, want 404", rec.Code)
 	}
-
-	t.Run("legacy route refuses torrent subtitles too", func(t *testing.T) {
-		if rec := f.do(t, http.MethodDelete, "/api/subtitles/"+itoa(f.torrent.ID), ""); rec.Code != http.StatusConflict {
-			t.Errorf("status = %d, want 409", rec.Code)
-		}
-	})
 }
 
 func TestItemSubtitles_Errors(t *testing.T) {
