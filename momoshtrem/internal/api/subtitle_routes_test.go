@@ -251,11 +251,15 @@ func TestItemSubtitles_Search(t *testing.T) {
 	})
 
 	t.Run("OpenSubtitles down", func(t *testing.T) {
-		fetcher.SearchErr = errors.New("unexpected status 503")
+		fetcher.SearchErr = errors.New("unexpected status 503: <html>secret upstream page</html>")
 		defer func() { fetcher.SearchErr = nil }()
 		rec := f.do(t, http.MethodGet, "/api/movies/1/subtitles/search", "")
 		if rec.Code != http.StatusBadGateway {
 			t.Errorf("status = %d, want 502", rec.Code)
+		}
+		// The upstream detail goes to the log, not the client.
+		if msg := decodeError(t, rec).Message; strings.Contains(msg, "secret") || strings.Contains(msg, "503") {
+			t.Errorf("message = %q leaks the upstream error", msg)
 		}
 	})
 }
@@ -321,6 +325,12 @@ func TestItemSubtitles_Delete(t *testing.T) {
 	rec := f.do(t, http.MethodDelete, path(f.torrent.ID), "")
 	if rec.Code != http.StatusConflict || decodeError(t, rec).Code != CodeConflict {
 		t.Errorf("torrent subtitle: status = %d %s, want 409 conflict", rec.Code, rec.Body)
+	}
+	// An earlier torrent's subtitle isn't listed, so it isn't found.
+	stale := f.repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 1, LanguageCode: "de", Source: subtitle.SourceTorrent,
+		InfoHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", FilePath: "Old/de.srt"})
+	if rec := f.do(t, http.MethodDelete, path(stale.ID), ""); rec.Code != http.StatusNotFound {
+		t.Errorf("an earlier torrent's subtitle: status = %d, want 404", rec.Code)
 	}
 	if rec := f.do(t, http.MethodDelete, "/api/episodes/501/subtitles/"+itoa(f.ru.ID), ""); rec.Code != http.StatusNotFound {
 		t.Errorf("another item's subtitle: status = %d, want 404", rec.Code)

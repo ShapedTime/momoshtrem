@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -95,6 +96,16 @@ func (c *Client) Search(ctx context.Context, params SearchParams) (*SearchRespon
 	return &result, nil
 }
 
+// withoutURL strips the request URL from transport errors: download links
+// are signed and errors end up in logs.
+func withoutURL(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err
+	}
+	return err
+}
+
 // searchQuery builds the /subtitles query. The API redirects requests whose
 // parameters aren't sorted and lowercase; url.Values.Encode sorts the keys,
 // and languages are lowercased and sorted here.
@@ -167,7 +178,7 @@ func (c *Client) Download(ctx context.Context, fileID int) ([]byte, string, erro
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to download file: %w", err)
+		return nil, "", fmt.Errorf("failed to download file: %w", withoutURL(err))
 	}
 	defer resp.Body.Close()
 
@@ -247,7 +258,7 @@ func (c *Client) get(ctx context.Context, endpoint string, result interface{}) e
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return fmt.Errorf("request failed: %w", withoutURL(err))
 	}
 	defer resp.Body.Close()
 
@@ -271,7 +282,7 @@ func (c *Client) post(ctx context.Context, endpoint string, body interface{}, re
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return fmt.Errorf("request failed: %w", withoutURL(err))
 	}
 	defer resp.Body.Close()
 

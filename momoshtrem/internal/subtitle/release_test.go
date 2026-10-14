@@ -26,6 +26,11 @@ func TestParseRelease(t *testing.T) {
 		{"Movie.2014.1080p.WEB-DL.DD5.1.H264", "1080p", "web", "", "", "", false},
 		{"Movie.2019.1080p.BluRay.DTS-HD", "1080p", "bluray", "", "", "", false},
 		{"Interstellar 2014 HDCAM", "", "cam", "", "", "", false},
+		// Title words aren't sources or cuts.
+		{"Charlotte's.Web.2006.1080p.BluRay.x264-GRP", "1080p", "bluray", "grp", "GRP", "", false},
+		{"Uncut.Gems.2019.1080p.WEBRip.x264-RARBG", "1080p", "web", "rarbg", "RARBG", "", false},
+		{"Cam.2018.720p.NF.WEB-DL.DDP5.1.x264-NTG", "720p", "web", "ntg", "NTG", "", false},
+		{"1917.2019.Extended.2160p.UHD.BluRay.x265-TERMiNAL", "2160p", "bluray", "terminal", "TERMiNAL", "extended", false},
 		{"", "", "", "", "", "", false},
 	}
 	for _, tt := range tests {

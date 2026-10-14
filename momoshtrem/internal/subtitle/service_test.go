@@ -217,26 +217,71 @@ func TestService_DeleteFromItem(t *testing.T) {
 	repo := subtitletest.NewRepo()
 	downloaded := repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 1, LanguageCode: "en", Source: subtitle.SourceOpenSubtitles, FilePath: local})
 	torrent := repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 1, LanguageCode: "en", Source: subtitle.SourceTorrent, InfoHash: hashA, FilePath: "Dune/en.srt"})
+	stale := repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 1, LanguageCode: "ru", Source: subtitle.SourceTorrent, InfoHash: hashB, FilePath: "Old/ru.srt"})
 	svc := subtitle.NewService(nil, repo, dir)
+	assigned := duneContext(flux, hashA)
 
-	if err := svc.DeleteFromItem(ctx, dune, torrent.ID); !errors.Is(err, subtitle.ErrTorrentSubtitle) {
+	if err := svc.DeleteFromItem(ctx, assigned, torrent.ID); !errors.Is(err, subtitle.ErrTorrentSubtitle) {
 		t.Errorf("torrent subtitle: err = %v, want ErrTorrentSubtitle", err)
 	}
-	other := subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: 1}
+	// A subtitle the list hides isn't found either.
+	if err := svc.DeleteFromItem(ctx, assigned, stale.ID); !errors.Is(err, subtitle.ErrNotFound) {
+		t.Errorf("an earlier torrent's subtitle: err = %v, want ErrNotFound", err)
+	}
+	if err := svc.DeleteFromItem(ctx, duneContext("", ""), torrent.ID); !errors.Is(err, subtitle.ErrNotFound) {
+		t.Errorf("torrent subtitle with nothing assigned: err = %v, want ErrNotFound", err)
+	}
+	other := subtitle.ItemContext{Item: subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: 1}}
 	if err := svc.DeleteFromItem(ctx, other, downloaded.ID); !errors.Is(err, subtitle.ErrNotFound) {
 		t.Errorf("another item's subtitle: err = %v, want ErrNotFound", err)
 	}
-	if err := svc.DeleteFromItem(ctx, dune, 999); !errors.Is(err, subtitle.ErrNotFound) {
+	if err := svc.DeleteFromItem(ctx, assigned, 999); !errors.Is(err, subtitle.ErrNotFound) {
 		t.Errorf("missing subtitle: err = %v, want ErrNotFound", err)
 	}
-	if err := svc.DeleteFromItem(ctx, dune, downloaded.ID); err != nil {
+	if err := svc.DeleteFromItem(ctx, assigned, downloaded.ID); err != nil {
 		t.Fatalf("delete downloaded: %v", err)
 	}
 	if _, err := os.Stat(local); !os.IsNotExist(err) {
 		t.Errorf("file still on disk (err %v)", err)
 	}
-	if rows := repo.All(); len(rows) != 1 || rows[0].ID != torrent.ID {
-		t.Errorf("rows = %+v, want only the torrent subtitle", rows)
+	if rows := repo.All(); len(rows) != 2 || rows[0].ID != torrent.ID || rows[1].ID != stale.ID {
+		t.Errorf("rows = %+v, want the two torrent subtitles", rows)
+	}
+}
+
+// failingUpsert is a repository whose downloaded upserts fail.
+type failingUpsert struct{ *subtitletest.Repo }
+
+func (failingUpsert) UpsertDownloaded(context.Context, *subtitle.Subtitle) error {
+	return errors.New("database is down")
+}
+
+// A failed upsert leaves the stored subtitle file as it was, and no temp file.
+func TestService_DownloadKeepsFileWhenTheRecordFails(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	movieDir := filepath.Join(dir, "movie", "1")
+	if err := os.MkdirAll(movieDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(movieDir, "en.srt")
+	if err := os.WriteFile(existing, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := failingUpsert{subtitletest.NewRepo()}
+	repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 1, LanguageCode: "en", Source: subtitle.SourceOpenSubtitles, FilePath: existing})
+	fetcher := &subtitletest.Fetcher{Files: map[int]subtitletest.File{11: {Name: "new.en.srt", Content: []byte("new")}}}
+	svc := subtitle.NewService(fetcher, repo, dir)
+
+	if _, err := svc.Download(ctx, duneContext(flux, hashA), 11, "en", ""); err == nil {
+		t.Fatal("Download succeeded with a failing repository")
+	}
+	if got, _ := os.ReadFile(existing); string(got) != "old" {
+		t.Errorf("en.srt = %q, want the old content", got)
+	}
+	entries, _ := os.ReadDir(movieDir)
+	if len(entries) != 1 {
+		t.Errorf("files = %v, want only en.srt", entries)
 	}
 }
 

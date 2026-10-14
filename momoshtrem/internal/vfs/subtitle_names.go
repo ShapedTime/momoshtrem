@@ -27,12 +27,12 @@ type namedSubtitle struct {
 // subtitleFileNames names an item's subtitles next to its video, whose file
 // name without the extension is base.
 //
-// The first subtitle in each language keeps "{base}.{lang}.{fmt}", the name
-// players match to the video; downloaded subtitles come before torrent ones,
-// then the oldest first. Later ones in that language are
+// The first subtitle in each language and format keeps
+// "{base}.{lang}.{fmt}", the name players match to the video; downloaded
+// subtitles come before torrent ones, then the oldest first. Later ones are
 // "{base}.{n}.{lang}.{fmt}", n counting from 2, so a downloaded and a
 // torrent subtitle (or two unknown-language files) don't overwrite each
-// other.
+// other. Counting per format keeps a VobSub .idx/.sub pair on one stem.
 func subtitleFileNames(base string, subs []*subtitle.Subtitle) []namedSubtitle {
 	sorted := slices.Clone(subs)
 	slices.SortStableFunc(sorted, func(a, b *subtitle.Subtitle) int {
@@ -54,14 +54,15 @@ func subtitleFileNames(base string, subs []*subtitle.Subtitle) []namedSubtitle {
 		}
 		numbered := func(n int) string { return base + "." + strconv.Itoa(n) + "." + lang + "." + format }
 
-		seen[lang]++
-		name := base + "." + lang + "." + format
-		if seen[lang] > 1 {
-			name = numbered(seen[lang])
+		key := lang + "." + format
+		seen[key]++
+		name := base + "." + key
+		if seen[key] > 1 {
+			name = numbered(seen[key])
 		}
 		for used[name] {
-			seen[lang]++
-			name = numbered(seen[lang])
+			seen[key]++
+			name = numbered(seen[key])
 		}
 		used[name] = true
 		out = append(out, namedSubtitle{Name: name, Sub: sub})

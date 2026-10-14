@@ -42,17 +42,19 @@ func seedLegacyMovie(t *testing.T, h *harness, tmdbID int, title string, year in
 	return movie
 }
 
-// eventsFor keeps the events about the given items: the shared test
-// database may hold other packages' rows, which the fake TMDB doesn't know.
-func eventsFor(events []BackfillEvent, ids ...int64) map[int64]BackfillEvent {
-	want := map[int64]bool{}
-	for _, id := range ids {
+// eventsFor keeps the events about the given items, keyed by TMDB ID: the
+// shared test database may hold other packages' rows, which the fake TMDB
+// doesn't know. Not by library ID: a movie and a show can share one (both
+// are 1 on a new database).
+func eventsFor(events []BackfillEvent, tmdbIDs ...int) map[int]BackfillEvent {
+	want := map[int]bool{}
+	for _, id := range tmdbIDs {
 		want[id] = true
 	}
-	out := map[int64]BackfillEvent{}
+	out := map[int]BackfillEvent{}
 	for _, ev := range events {
-		if want[ev.Item.ID] {
-			out[ev.Item.ID] = ev
+		if want[ev.Item.TMDBID] {
+			out[ev.Item.TMDBID] = ev
 		}
 	}
 	return out
@@ -97,8 +99,8 @@ func TestBackfill(t *testing.T) {
 		if _, err := h.syncer.Backfill(ctx, BackfillOptions{DryRun: true}, func(ev BackfillEvent) { events = append(events, ev) }); err != nil {
 			t.Fatal(err)
 		}
-		mine := eventsFor(events, legacyShow.ID, legacyMovie.ID)
-		if len(mine) != 2 || !mine[legacyShow.ID].DryRun {
+		mine := eventsFor(events, showTMDB, movieTMDB)
+		if len(mine) != 2 || !mine[showTMDB].DryRun {
 			t.Errorf("dry-run events = %+v", mine)
 		}
 		if h.tmdb.count("show")+h.tmdb.count("movie")+h.tmdb.count("season") != 0 {
@@ -126,7 +128,7 @@ func TestBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Backfill: %v", err)
 	}
-	mine := eventsFor(events, legacyShow.ID, legacyMovie.ID)
+	mine := eventsFor(events, showTMDB, movieTMDB)
 	if len(mine) != 2 {
 		t.Fatalf("events for seeded items = %+v", mine)
 	}
@@ -135,7 +137,7 @@ func TestBackfill(t *testing.T) {
 			t.Errorf("item %d failed: %v", id, ev.Err)
 		}
 	}
-	if ev := mine[legacyShow.ID]; ev.EpisodesAdded != 2 {
+	if ev := mine[showTMDB]; ev.EpisodesAdded != 2 {
 		t.Errorf("episodes added = %d, want 2 (a special and a new episode)", ev.EpisodesAdded)
 	}
 	if summary.Movies < 1 || summary.Shows < 1 {
@@ -194,7 +196,7 @@ func TestBackfill(t *testing.T) {
 		if _, err := h.syncer.Backfill(ctx, BackfillOptions{}, func(ev BackfillEvent) { rerun = append(rerun, ev) }); err != nil {
 			t.Fatal(err)
 		}
-		if mine := eventsFor(rerun, legacyShow.ID, legacyMovie.ID); len(mine) != 0 {
+		if mine := eventsFor(rerun, showTMDB, movieTMDB); len(mine) != 0 {
 			t.Errorf("rerun reprocessed %v", mine)
 		}
 	})
@@ -205,7 +207,7 @@ func TestBackfill(t *testing.T) {
 		if _, err := h.syncer.Backfill(ctx, BackfillOptions{Force: true}, func(ev BackfillEvent) { forced = append(forced, ev) }); err != nil {
 			t.Fatal(err)
 		}
-		if mine := eventsFor(forced, legacyShow.ID, legacyMovie.ID); len(mine) != 2 {
+		if mine := eventsFor(forced, showTMDB, movieTMDB); len(mine) != 2 {
 			t.Errorf("forced run processed %d seeded items, want 2", len(mine))
 		}
 		show, _ := h.shows.GetWithSeasonsAndEpisodesContext(ctx, legacyShow.ID)
@@ -221,7 +223,7 @@ func TestBackfill(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ev, ok := eventsFor(failed, broken.ID)[broken.ID]; !ok || ev.Err == nil {
+		if ev, ok := eventsFor(failed, broken.TMDBID)[broken.TMDBID]; !ok || ev.Err == nil {
 			t.Errorf("broken movie event = %+v", ev)
 		}
 		if summary.Failed < 1 {

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -261,7 +262,7 @@ func (s *Server) deleteItemSubtitle(itemType subtitle.ItemType) gin.HandlerFunc 
 			return
 		}
 
-		if err := s.subtitleService.DeleteFromItem(c.Request.Context(), item.Item, subtitleID); err != nil {
+		if err := s.subtitleService.DeleteFromItem(c.Request.Context(), *item, subtitleID); err != nil {
 			subtitleErrorResponse(c, err)
 			return
 		}
@@ -285,7 +286,9 @@ func subtitleErrorResponse(c *gin.Context, err error) {
 	case errors.Is(err, subtitle.ErrNotConfigured):
 		errorResponse(c, http.StatusServiceUnavailable, "OpenSubtitles is not configured")
 	case errors.Is(err, subtitle.ErrFetch):
-		errorResponse(c, http.StatusBadGateway, err.Error())
+		// The detail (OpenSubtitles' body, a download link) is for the log.
+		slog.Warn("OpenSubtitles request failed", "path", c.Request.URL.Path, "error", err)
+		errorResponse(c, http.StatusBadGateway, "OpenSubtitles request failed; try again later")
 	default:
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 	}

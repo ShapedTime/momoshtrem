@@ -32,9 +32,14 @@ func TestSubtitleFileNames(t *testing.T) {
 			map[int64]string{5: base + ".en.srt", 1: base + ".2.en.srt"},
 		},
 		{
-			"several torrent files in a language: oldest first",
+			"several torrent files in a language: oldest first, counted per format",
 			[]*subtitle.Subtitle{sub(9, "en", tor, "srt"), sub(3, "en", tor, "srt"), sub(4, "en", tor, "ass")},
-			map[int64]string{3: base + ".en.srt", 4: base + ".2.en.ass", 9: base + ".3.en.srt"},
+			map[int64]string{3: base + ".en.srt", 4: base + ".en.ass", 9: base + ".2.en.srt"},
+		},
+		{
+			"VobSub .idx/.sub pairs keep one stem",
+			[]*subtitle.Subtitle{sub(1, "en", tor, "idx"), sub(2, "en", tor, "sub"), sub(3, "en", tor, "idx"), sub(4, "en", tor, "sub")},
+			map[int64]string{1: base + ".en.idx", 2: base + ".en.sub", 3: base + ".2.en.idx", 4: base + ".2.en.sub"},
 		},
 		{
 			"unknown-language files don't overwrite each other",

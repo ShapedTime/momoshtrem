@@ -171,8 +171,14 @@ func (s *ShowAssignmentService) AssignTorrent(
 	}
 
 	episodesForTree := make([]vfs.EpisodeWithContext, 0, len(matchResult.Matched))
+	// An episode moving to another torrent leaves the old torrent's
+	// subtitles in the tree (and its cache) until a rebuild.
+	torrentChanged := false
 
 	for _, m := range matchResult.Matched {
+		if prev := m.Episode.Assignment; prev != nil && prev.InfoHash != infoHash {
+			torrentChanged = true
+		}
 		assignment := &library.TorrentAssignment{
 			ItemType:   library.ItemTypeEpisode,
 			ItemID:     m.Episode.ID,
@@ -220,10 +226,12 @@ func (s *ShowAssignmentService) AssignTorrent(
 	subtitlesCreated := 0
 	if s.subtitleCreator != nil && len(matchResult.MatchedSubtitles) > 0 {
 		subtitlesCreated = s.createSubtitles(ctx, matchResult.MatchedSubtitles, infoHash, magnetURI)
+	}
 
-		if subtitlesCreated > 0 && s.treeUpdater != nil {
-			s.treeUpdater.InvalidateTree()
-		}
+	// Targeted updates don't touch subtitle files: rebuild when there are
+	// new ones, or an earlier torrent's must go.
+	if s.treeUpdater != nil && (subtitlesCreated > 0 || torrentChanged) {
+		s.treeUpdater.InvalidateTree()
 	}
 
 	// 10. Build unmatched response

@@ -223,9 +223,18 @@ func (s *Service) download(ctx context.Context, item Item, fileID int, languageC
 		return nil, fmt.Errorf("failed to create subtitle directory: %w", err)
 	}
 	storedFilePath := filepath.Join(storageDir, code+"."+format)
-	if err := s.writeFileAtomic(storedFilePath, content); err != nil {
+
+	// Write beside the final path and rename only once the record is saved,
+	// so a failed upsert leaves the current subtitle untouched.
+	tmpPath, err := writeTemp(storageDir, content)
+	if err != nil {
 		return nil, fmt.Errorf("failed to save subtitle file: %w", err)
 	}
+	defer func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}()
 
 	sub := &Subtitle{
 		ItemType:     item.Type,
@@ -238,11 +247,12 @@ func (s *Service) download(ctx context.Context, item Item, fileID int, languageC
 		ReleaseName:  releaseName,
 	}
 	if err := s.repo.UpsertDownloaded(ctx, sub); err != nil {
-		if previous == nil || previous.FilePath != storedFilePath {
-			os.Remove(storedFilePath)
-		}
 		return nil, fmt.Errorf("failed to save subtitle record: %w", err)
 	}
+	if err := os.Rename(tmpPath, storedFilePath); err != nil {
+		return nil, fmt.Errorf("failed to save subtitle file: %w", err)
+	}
+	tmpPath = ""
 	// A replacement in another format leaves the old file behind.
 	if previous != nil && previous.FilePath != storedFilePath {
 		if err := os.Remove(previous.FilePath); err != nil && !os.IsNotExist(err) {
@@ -263,14 +273,15 @@ func (s *Service) download(ctx context.Context, item Item, fileID int, languageC
 }
 
 // DeleteFromItem deletes one of the item's downloaded subtitles and its file.
-// ErrNotFound when the subtitle isn't the item's; ErrTorrentSubtitle when it
-// came with the torrent.
-func (s *Service) DeleteFromItem(ctx context.Context, item Item, id int64) error {
+// ErrNotFound when the subtitle isn't among the item's current ones (see
+// Current: another item's, or an earlier torrent's); ErrTorrentSubtitle when
+// it came with the assigned torrent.
+func (s *Service) DeleteFromItem(ctx context.Context, item ItemContext, id int64) error {
 	sub, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if sub == nil || sub.Item() != item {
+	if sub == nil || sub.Item() != item.Item || len(Current([]*Subtitle{sub}, item.InfoHash)) == 0 {
 		return ErrNotFound
 	}
 	return s.remove(ctx, sub)
@@ -337,46 +348,29 @@ func (s *Service) Search(ctx context.Context, params opensubtitles.SearchParams)
 	return s.fetcher.Search(ctx, params)
 }
 
-// writeFileAtomic writes content to a file atomically using a temp file and rename.
-func (s *Service) writeFileAtomic(path string, content []byte) error {
-	dir := filepath.Dir(path)
-
-	// Create temp file in the same directory (for atomic rename)
+// writeTemp writes content to a synced temp file in dir (the final file's
+// directory, so a rename is atomic) and returns its path. The caller renames
+// or removes it.
+func writeTemp(dir string, content []byte) (string, error) {
 	tmpFile, err := os.CreateTemp(dir, ".subtitle-*.tmp")
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
+		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 
-	// Clean up temp file on any error
-	defer func() {
-		if tmpPath != "" {
-			os.Remove(tmpPath)
-		}
-	}()
-
-	// Write content
 	if _, err := tmpFile.Write(content); err != nil {
 		tmpFile.Close()
-		return fmt.Errorf("failed to write temp file: %w", err)
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write temp file: %w", err)
 	}
-
-	// Sync to disk
 	if err := tmpFile.Sync(); err != nil {
 		tmpFile.Close()
-		return fmt.Errorf("failed to sync temp file: %w", err)
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to sync temp file: %w", err)
 	}
-
 	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to close temp file: %w", err)
 	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	// Clear tmpPath so defer doesn't try to remove it
-	tmpPath = ""
-	return nil
+	return tmpPath, nil
 }

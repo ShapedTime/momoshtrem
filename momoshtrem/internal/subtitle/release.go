@@ -69,6 +69,8 @@ var editionWords = map[string]string{
 var (
 	wordRe       = regexp.MustCompile(`[a-z0-9]+`)
 	resolutionRe = regexp.MustCompile(`^(2160|1080|720|576|480)[pi]$`)
+	yearRe       = regexp.MustCompile(`^(19|20)\d\d$`)
+	seasonRe     = regexp.MustCompile(`^s\d{1,2}(e\d{1,4})?$`)
 	// trailingGroupRe finds "-FLUX" or "-NTb" at the end; bracketed, the
 	// group may have dots: "-[YTS.MX]".
 	trailingGroupRe   = regexp.MustCompile(`-([A-Za-z0-9]+)$`)
@@ -91,7 +93,7 @@ func ParseRelease(name string) Release {
 	r.Normalized = strings.Join(words, " ")
 
 	seen := make(map[string]bool, len(words))
-	for i, w := range words {
+	for _, w := range words {
 		if !seen[w] {
 			seen[w] = true
 			r.Tokens = append(r.Tokens, w)
@@ -102,31 +104,31 @@ func ParseRelease(name string) Release {
 		case r.Resolution == "" && (w == "4k" || w == "uhd"):
 			r.Resolution = "2160p"
 		}
-		if r.Source == "" {
-			// "WEB-DL" and "Blu-ray" split into two words.
-			if i+1 < len(words) {
-				if fam, ok := sourceFamilies[w+words[i+1]]; ok {
-					r.Source = fam
-				}
-			}
-			if r.Source == "" {
-				if fam, ok := sourceFamilies[w]; ok {
-					r.Source = fam
-				}
-			}
-		}
-		if r.Edition == "" {
-			if ed, ok := editionWords[w]; ok {
-				r.Edition = ed
-			}
-		}
 		if w == "repack" || w == "proper" || w == "rerip" {
 			r.Repack = true
 		}
 	}
 
+	// Source and cut words are read after the title, last first, so
+	// "Charlotte's Web", "Cam" or "Uncut Gems" aren't taken for them.
+	tail := words[titleEnd(words):]
+	for i := len(tail) - 1; i >= 0 && r.Source == ""; i-- {
+		// "WEB-DL" and "Blu-ray" split into two words.
+		if i+1 < len(tail) {
+			if fam, ok := sourceFamilies[tail[i]+tail[i+1]]; ok {
+				r.Source = fam
+				break
+			}
+		}
+		if fam, ok := sourceFamilies[tail[i]]; ok {
+			r.Source = fam
+		}
+	}
+	for i := len(tail) - 1; i >= 0 && r.Edition == ""; i-- {
+		r.Edition = editionWords[tail[i]]
+	}
 	if r.Edition == "" {
-		padded := " " + r.Normalized + " "
+		padded := " " + strings.Join(tail, " ") + " "
 		if strings.Contains(padded, " directors cut ") || strings.Contains(padded, " director s cut ") {
 			r.Edition = "directors"
 		}
@@ -135,6 +137,18 @@ func ParseRelease(name string) Release {
 	r.GroupName = findGroup(trimmed)
 	r.Group = normalizeGroup(r.GroupName)
 	return r
+}
+
+// titleEnd is the index of the first word after the title: a year (not the
+// first word, so "1917.2019…" works), a resolution or a season/episode tag.
+// 0 when there's none, so the whole name is read.
+func titleEnd(words []string) int {
+	for i, w := range words {
+		if resolutionRe.MatchString(w) || seasonRe.MatchString(w) || (i > 0 && yearRe.MatchString(w)) {
+			return i
+		}
+	}
+	return 0
 }
 
 // findGroup returns the release group as written, or "".
