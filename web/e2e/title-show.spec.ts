@@ -212,6 +212,23 @@ test.describe('show page', () => {
     await expect(page).not.toHaveURL(/[?&](ep|abs)=/);
   });
 
+  test('Enter right after a jump to another season never reloads the page', async ({ page }) => {
+    await signIn(page, '/tv/37854');
+    // A full reload (a native form submit) would wipe this
+    await page.evaluate(() => Object.assign(window, { stillHere: true }));
+    const jump = page.getByRole('textbox', { name: 'Jump to episode number' });
+    await jump.fill('1000');
+    await jump.press('Enter');
+    for (const wait of [0, 150, 300, 450]) {
+      await page.waitForTimeout(wait);
+      await page.keyboard.press('Enter');
+    }
+    const row = page.locator('#ep-109');
+    await expect(row).toBeFocused();
+    await expect(page).toHaveURL(/\/tv\/37854\?season=21$/);
+    expect(await page.evaluate(() => 'stillHere' in window)).toBe(true);
+  });
+
   test('a deep link to an absolute number lands on its row', async ({ page }) => {
     await signIn(page, '/tv/37854?season=21&abs=1047');
     const row = page.locator('#ep-156');

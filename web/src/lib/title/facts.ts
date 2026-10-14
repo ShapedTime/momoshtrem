@@ -16,6 +16,12 @@ const ORDERING: Record<EpisodeOrdering, string> = {
 const rating = (title: Title) =>
   title.vote_average === null ? null : `${title.vote_average.toFixed(1)}${title.vote_count ? ` · ${formatCount(title.vote_count)} votes` : ''}`;
 
+/** The first of a list, with "+N" for the rest: anime often airs on 30 stations ("Nippon TV +29"). */
+function firstOf(names: string[]): string | null {
+  if (!names.length) return null;
+  return names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0];
+}
+
 /** The Details panel: who made it, how long, when, in what language, and TMDB's rating. Empty values are left out. */
 export function titleFacts(title: Title): TitleFact[] {
   const facts: Array<[string, string | null]> =
@@ -28,7 +34,7 @@ export function titleFacts(title: Title): TitleFact[] {
           ['TMDB', rating(title)],
         ]
       : [
-          [title.networks.length > 1 ? 'Networks' : 'Network', title.networks.join(', ') || null],
+          [title.networks.length > 1 ? 'Networks' : 'Network', firstOf(title.networks)],
           ['Seasons', String(title.seasons.filter((season) => season.season_number > 0).length)],
           ['Status', title.status],
           ['Episode ordering', ORDERING[title.episode_ordering]],
