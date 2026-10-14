@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useOverArt } from '@/components/shell/ShellContext';
@@ -22,7 +22,7 @@ import { DetailsAside } from './DetailsAside';
 import { LegacySearchHost } from './LegacySearchHost';
 import { MoreLikeThis } from './MoreLikeThis';
 import { PrimaryPanel } from './PrimaryPanel';
-import { EpisodesSection, episodeSheetParams, type SeasonState } from './show';
+import { type EpisodeView, EpisodesSection, episodeSheetParams, type SeasonState } from './show';
 import { TitleHero } from './TitleHero';
 import { TitleMoreMenu } from './TitleMoreMenu';
 import { isTitleNotFound, TitleDetailSkeleton, TitleLoadError } from './TitleStates';
@@ -67,11 +67,30 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
   const { library } = show;
   useDocumentTitle(show.title);
 
-  const changeSeason = (next: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('season', String(next));
-    router.replace(`${pathname}?${params}`, { scroll: false });
-  };
+  const view: EpisodeView = searchParams.get('view') === 'rich' ? 'rich' : 'compact';
+  const ep = searchParams.get('ep');
+  const initialEpisode = ep !== null && /^\d+$/.test(ep) ? Number(ep) : null;
+
+  /** Replace some query params (null removes one), keeping the rest and the scroll position. */
+  const setParams = useCallback(
+    (changes: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null) params.delete(key);
+        else params.set(key, value);
+      }
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+  const changeSeason = (next: number) => setParams({ season: String(next), ep: null });
+
+  // `?ep=` is a one-off: once its season shows (and scrolled there), drop it so a refetch doesn't scroll again
+  const seasonShown = season.status === 'success';
+  useEffect(() => {
+    if (initialEpisode !== null && seasonShown) setParams({ ep: null });
+  }, [initialEpisode, seasonShown, setParams]);
   const findEpisode = (episode: EpisodeSummary) =>
     openLegacySearch(legacySearchContext(show, { season: episode.season_number, episode: episode.episode_number }));
 
@@ -104,6 +123,10 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
             onFindSeason={(number) => openLegacySearch(legacySearchContext(show, { season: number }))}
             onFindEpisode={findEpisode}
             onOpenEpisode={(episode) => sheets.open('episode', episodeSheetParams(show, episode))}
+            view={view}
+            onViewChange={(next) => setParams({ view: next === 'rich' ? 'rich' : null })}
+            onJumpToSeason={(number, episode) => setParams({ season: String(number), ep: String(episode) })}
+            initialEpisode={initialEpisode}
           />
           <CastRow cast={show.cast} />
           <TrailerCard youtubeKey={show.trailer_youtube_key} backdropPath={show.backdrop_path} titleName={show.title} />

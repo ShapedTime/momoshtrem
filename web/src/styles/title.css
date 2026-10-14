@@ -166,3 +166,21 @@
   .radio-card:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }
   .radio-card:has(input:focus-visible) { box-shadow: var(--focus-ring); }
 }
+
+/* ---- Long seasons (HANDOFF §5.4): tools, collapsed run, virtual list ------- */
+@layer components {
+  .ep-tools { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; justify-content: space-between; }
+  .ep-tools-right { display: flex; align-items: flex-start; gap: var(--sp-2); margin-left: auto; }
+  .ep-range { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+  .jump { width: 210px; }
+  @media (max-width: 639px) {
+    .ep-tools-right { width: 100%; }
+    .jump { flex: 1; width: auto; min-width: 0; }
+  }
+  .show-earlier { color: var(--text-3); }
+  .ep-list--virtual { display: block; position: relative; }
+  .ep-list--virtual > .eprow { position: absolute; top: 0; left: 0; width: 100%; }
+  .eprow.flash { animation: flash 1.6s var(--ease-out); }
+  @keyframes flash { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+  @media (max-width: 639px) { .eprow--rich { grid-template-columns: 104px minmax(0, 1fr) auto; } }
+}

@@ -159,6 +159,8 @@ test.describe('show page', () => {
     ['severance', '/tv/95396', 'Ready in Infuse'],
     ['specials', '/tv/57243?season=0', 'Ready in Infuse'],
     ['not-in-library', '/tv/66573', 'Not in your library'],
+    ['onepiece', '/tv/37854', 'Ready in Infuse'],
+    ['rich', '/tv/209867?view=rich', 'Episodes 29–38 have no torrent'],
   ] as const) {
     test(state, async ({ page }, testInfo) => {
       await signIn(page, path);
