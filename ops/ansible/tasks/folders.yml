@@ -1,0 +1,19 @@
+# Only the folders themselves: never recursive, never deletes.
+- name: Create the data folders
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ data_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Create the app folder
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"

@@ -140,7 +140,8 @@ At cutover (#39), the pre-cutover Proxmox snapshot is the only way back to the o
   - `POSTGRES_PASSWORD` only takes effect when the database is first created.
   - `SECRET_KEY` encrypts the stored Trakt tokens, so it has to travel with the DB.
 - **The password manager holds what the VM can't**: the backup repository password, the B2 key ID and secret, the bucket name, and the Healthchecks.io login. With these plus the repo, a rebuild can start from nothing.
-- **Ansible asks for the sudo password at run time.** It is never stored in a file or in the repo.
+- **Ansible asks for the sudo password at run time.** It is never stored in the repo.
+  - An agent can't answer the prompt. When an agent runs the playbook, the user may put the password in a gitignored file for that session only, and delete it afterwards ([`HOST.md`](HOST.md) §2).
 - **GitHub holds no deploy secrets.** CI pushes images with the built-in token, and the VM only reads the public repo and the public images.
 - **Secret rotation is out of scope for now.** The comments in `.env.example` are enough to rotate a secret by hand.
 

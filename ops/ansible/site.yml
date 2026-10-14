@@ -1,0 +1,65 @@
+# Configures the momoshtrem VM from the hand-off state in docs/ops/VM.md §5.
+# Runbook: docs/ops/HOST.md. Run from this folder:
+#   ansible-playbook site.yml --check --diff
+#   ansible-playbook site.yml
+- name: Configure the momoshtrem VM
+  hosts: momoshtrem
+  become: true
+
+  vars:
+    # Taken before anything changes. In check mode, tasks that need a package
+    # or folder this same run would create are skipped instead of failing.
+    docker_preinstalled: "{{ 'docker-ce' in ansible_facts.packages }}"
+
+  pre_tasks:
+    - name: Gather the installed packages
+      ansible.builtin.package_facts:
+      tags: always
+
+  tasks:
+    - name: Hand-off state
+      ansible.builtin.import_tasks: tasks/handoff.yml
+      tags: [always, handoff]
+
+    - name: Base packages and unattended upgrades
+      ansible.builtin.import_tasks: tasks/base.yml
+      tags: base
+
+    - name: QEMU guest agent
+      ansible.builtin.import_tasks: tasks/guest_agent.yml
+      tags: guest_agent
+
+    - name: Docker
+      ansible.builtin.import_tasks: tasks/docker.yml
+      tags: docker
+
+    - name: Journal size cap
+      ansible.builtin.import_tasks: tasks/journald.yml
+      tags: journald
+
+    - name: Firewall
+      ansible.builtin.import_tasks: tasks/firewall.yml
+      tags: firewall
+
+    - name: Data and app folders
+      ansible.builtin.import_tasks: tasks/folders.yml
+      tags: folders
+
+    - name: Boot unit
+      ansible.builtin.import_tasks: tasks/boot.yml
+      tags: boot
+
+  handlers:
+    - name: Restart docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+      # Restarting dockerd bounces every container; restart: unless-stopped
+      # brings them back. On the first run dockerd starts with daemon.json
+      # already in place, so there is nothing to restart.
+      when: docker_preinstalled
+
+    - name: Restart journald
+      ansible.builtin.systemd_service:
+        name: systemd-journald
+        state: restarted

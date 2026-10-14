@@ -31,3 +31,4 @@ data/
 
 # Proxmox/deployment notes (personal)
 proxmox-installation.md
+*sudo-pass.txt

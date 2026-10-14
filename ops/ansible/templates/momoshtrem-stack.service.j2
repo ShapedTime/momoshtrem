@@ -1,0 +1,21 @@
+# Managed by Ansible (ops/ansible). Local edits are overwritten.
+#
+# Runs `docker compose up -d` in {{ app_dir }} at boot. The compose file and
+# .env there must describe the deployed commit on their own (#38). There's no
+# ExecStop: shutdown stops the containers anyway, and `down` would remove them.
+[Unit]
+Description=momoshtrem stack (docker compose up at boot)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists={{ app_dir }}/compose.yml
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ app_dir }}
+ExecStart=/usr/bin/docker compose up -d
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

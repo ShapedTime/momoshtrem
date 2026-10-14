@@ -1,0 +1,60 @@
+# Non-secret values only. The repo is public: no secrets, no public hostname.
+
+admin_user: agha
+
+# SSH is allowed from here only. The playbook refuses to enable ufw unless
+# the SSH session it runs over comes from this network.
+lan_cidr: 192.168.0.0/24
+
+base_packages:
+  - ca-certificates
+  - curl
+  - git
+  - htop
+  - jq
+  - ncdu
+  - rsync
+  - ufw
+  - unattended-upgrades
+
+# Docker applies log options only to containers created after a change.
+docker_daemon_config:
+  log-driver: json-file
+  log-opts:
+    max-size: 10m
+    max-file: "3"
+
+journald_max_use: 500M
+
+# The data disk (docs/ops/VM.md §1). Folders are created, never recursed into
+# or deleted.
+data_root: /mnt/data
+data_dirs:
+  - path: "{{ data_root }}/momoshtrem"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+  # config.yaml, hand-managed (ops PLAN D6)
+  - path: "{{ data_root }}/momoshtrem/config"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+  # The momoshtrem container runs as root
+  - path: "{{ data_root }}/momoshtrem/data"
+    owner: root
+    group: root
+    mode: "0755"
+  # uid and gid 70 are postgres in postgres:16-alpine
+  - path: "{{ data_root }}/momoshtrem/pgdata"
+    owner: "70"
+    group: "70"
+    mode: "0700"
+  # Jackett runs as PUID 1000, which is admin_user
+  - path: "{{ data_root }}/jackett"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+
+# Where the deployed compose file and .env live (#38). The boot unit runs
+# `docker compose up -d` here once compose.yml exists.
+app_dir: /opt/momoshtrem

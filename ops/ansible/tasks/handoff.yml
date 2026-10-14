@@ -1,0 +1,39 @@
+# Checks the state the VM is handed over in (docs/ops/VM.md §5). Changes
+# nothing: the playbook never partitions or formats a disk.
+- name: Read the fstab source of /mnt/data
+  ansible.builtin.command: findmnt --fstab --noheadings --output SOURCE {{ data_root }}
+  register: data_fstab
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Look for a Docker snap
+  ansible.builtin.stat:
+    path: /snap/bin/docker
+  register: docker_snap
+
+- name: Look up the admin user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ admin_user }}"
+
+- name: Check the hand-off state
+  vars:
+    data_mount: "{{ ansible_facts.mounts | selectattr('mount', 'equalto', data_root) | first | default({}) }}"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '24.04'
+      - ansible_facts.hostname == inventory_hostname
+      - ansible_facts.lvm.vgs['ubuntu-vg'].free_g | float < 1
+      - data_mount.fstype | default('') == 'ext4'
+      - data_fstab.stdout is match('(UUID=|/dev/disk/by-uuid/)')
+      - not docker_snap.stat.exists
+      - ansible_facts.getent_passwd[admin_user][1] == '1000'
+    fail_msg: >-
+      The VM isn't in the hand-off state of docs/ops/VM.md §5. Expected:
+      Ubuntu 24.04, hostname {{ inventory_hostname }}, ubuntu-lv filling
+      ubuntu-vg, {{ data_root }} on ext4 mounted by UUID, no Docker snap, and
+      {{ admin_user }} with uid 1000. Fix it by hand; this playbook never
+      touches disks.
+    quiet: true

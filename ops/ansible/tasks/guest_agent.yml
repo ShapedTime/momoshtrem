@@ -1,0 +1,13 @@
+# The Proxmox side ("QEMU Guest Agent" on) is in docs/ops/VM.md §3.
+- name: Install the QEMU guest agent
+  ansible.builtin.apt:
+    name: qemu-guest-agent
+    state: present
+
+# The unit is static: udev starts it when the agent's virtio port appears, so
+# it can't be enabled, only started.
+- name: Start the QEMU guest agent
+  ansible.builtin.systemd_service:
+    name: qemu-guest-agent
+    state: started
+  when: not ansible_check_mode or 'qemu-guest-agent' in ansible_facts.packages
