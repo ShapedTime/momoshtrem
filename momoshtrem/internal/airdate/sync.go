@@ -12,13 +12,21 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 )
 
+// SeasonSource fetches a TMDB season. *tmdb.Cached implements it, so air
+// dates come from the shared cache (a day old at most while a show airs).
+type SeasonSource interface {
+	Season(ctx context.Context, showID, seasonNumber int, showStatus string) (*tmdb.Season, error)
+}
+
+var _ SeasonSource = (*tmdb.Cached)(nil)
+
 // SyncService manages background synchronization of episode air dates from TMDB
 type SyncService struct {
 	mu       sync.RWMutex
 	config   config.AirDateSyncConfig
 	showRepo *library.ShowRepository
 	syncRepo *library.SyncMetadataRepository
-	tmdb     *tmdb.Client
+	seasons  SeasonSource
 
 	lastSync   time.Time
 	syncStatus string // "ok", "pending", "in_progress", "error"
@@ -34,13 +42,13 @@ func NewSyncService(
 	cfg config.AirDateSyncConfig,
 	showRepo *library.ShowRepository,
 	syncRepo *library.SyncMetadataRepository,
-	tmdbClient *tmdb.Client,
+	seasons SeasonSource,
 ) *SyncService {
 	return &SyncService{
 		config:     cfg,
 		showRepo:   showRepo,
 		syncRepo:   syncRepo,
-		tmdb:       tmdbClient,
+		seasons:    seasons,
 		syncStatus: "pending",
 		stopChan:   make(chan struct{}),
 		log:        slog.With("component", "airdate-sync"),
@@ -202,8 +210,12 @@ func (s *SyncService) syncShowAirDates(ctx context.Context, show *library.Show) 
 	if err != nil {
 		return err
 	}
+	if showWithSeasons == nil {
+		return nil // Deleted since the list was read
+	}
 
-	// For each season, fetch episode air dates from TMDB
+	// For each season, specials (season 0) included, fetch episode air
+	// dates from TMDB
 	for _, season := range showWithSeasons.Seasons {
 		select {
 		case <-ctx.Done():
@@ -211,7 +223,7 @@ func (s *SyncService) syncShowAirDates(ctx context.Context, show *library.Show) 
 		default:
 		}
 
-		tmdbSeason, err := s.tmdb.GetSeason(show.TMDBID, season.SeasonNumber)
+		tmdbSeason, err := s.seasons.Season(ctx, show.TMDBID, season.SeasonNumber, showWithSeasons.Status)
 		if err != nil {
 			s.log.Warn("Failed to fetch season from TMDB",
 				"show_tmdb_id", show.TMDBID,
@@ -225,6 +237,7 @@ func (s *SyncService) syncShowAirDates(ctx context.Context, show *library.Show) 
 		for _, tmdbEp := range tmdbSeason.Episodes {
 			if tmdbEp.AirDate != "" {
 				if err := s.showRepo.UpdateEpisodeAirDate(
+					ctx,
 					season.ID,
 					tmdbEp.EpisodeNumber,
 					tmdbEp.AirDate,

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -137,42 +138,72 @@ func (s *Server) createMovie(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if s.opts.Metadata == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Metadata service not configured")
+		return
+	}
 
-	// Check if already exists
-	existing, err := s.movieRepo.GetByTMDBID(req.TMDBID)
+	// An unknown TMDB ID is the caller's mistake; any other TMDB failure is
+	// TMDB's.
+	result, err := s.opts.Metadata.CreateMovie(c.Request.Context(), req.TMDBID)
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if existing != nil {
-		c.JSON(http.StatusOK, toMovieResponse(existing, nil))
+		metadataErrorResponse(c, err, http.StatusBadRequest)
 		return
 	}
 
-	// Fetch from TMDB. An unknown TMDB ID is the caller's mistake; any other
-	// failure is TMDB's.
-	tmdbMovie, err := s.tmdbClient.GetMovie(req.TMDBID)
+	status := http.StatusCreated
+	if result.Existing {
+		status = http.StatusOK
+	}
+	c.JSON(status, toMovieResponse(result.Movie, nil))
+}
+
+// refreshMovie re-fetches a movie's metadata from TMDB. Title and year (the
+// WebDAV folder name) are kept.
+func (s *Server) refreshMovie(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	if s.opts.Metadata == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Metadata service not configured")
+		return
+	}
+
+	movie, err := s.opts.Metadata.RefreshMovie(c.Request.Context(), id)
 	if err != nil {
-		status := http.StatusBadGateway
-		if errors.Is(err, tmdb.ErrNotFound) {
-			status = http.StatusBadRequest
-		}
-		errorResponse(c, status, "Failed to fetch from TMDB: "+err.Error())
+		metadataErrorResponse(c, err, http.StatusNotFound)
 		return
 	}
 
-	movie := &library.Movie{
-		TMDBID: tmdbMovie.ID,
-		Title:  tmdbMovie.Title,
-		Year:   tmdbMovie.Year(),
+	assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
+	if err != nil {
+		errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for movie")
+		return
 	}
+	c.JSON(http.StatusOK, toMovieResponse(movie, assignment))
+}
 
-	if err := s.movieRepo.Create(movie); err != nil {
+// metadataErrorResponse maps a metadata.Syncer error to a response.
+// tmdbNotFound is the status for a TMDB ID TMDB doesn't know: 400 when the
+// client sent it, 404 when it's already in the library.
+func metadataErrorResponse(c *gin.Context, err error, tmdbNotFound int) {
+	switch {
+	case errors.Is(err, library.ErrMovieNotFound):
+		errorResponse(c, http.StatusNotFound, "Movie not found")
+	case errors.Is(err, library.ErrShowNotFound):
+		errorResponse(c, http.StatusNotFound, "Show not found")
+	case errors.Is(err, tmdb.ErrNoAPIKey):
+		errorResponse(c, http.StatusServiceUnavailable, "TMDB is not configured (set TMDB_API_KEY)")
+	case errors.Is(err, tmdb.ErrNotFound):
+		errorResponse(c, tmdbNotFound, err.Error())
+	case errors.Is(err, library.ErrTMDBFetch):
+		errorCodeResponse(c, http.StatusBadGateway, CodeTMDBUnavailable, err.Error())
+	case errors.Is(err, library.ErrInvalidShowSettings):
+		errorResponse(c, http.StatusUnprocessableEntity, err.Error())
+	default:
 		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
 	}
-
-	c.JSON(http.StatusCreated, toMovieResponse(movie, nil))
 }
 
 func (s *Server) getMovie(c *gin.Context) {
@@ -377,19 +408,17 @@ func (s *Server) createShow(c *gin.Context) {
 		return
 	}
 
-	result, err := s.showService.Create(c.Request.Context(), service.CreateShowInput{
+	if s.opts.Metadata == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Metadata service not configured")
+		return
+	}
+
+	result, err := s.opts.Metadata.CreateShow(c.Request.Context(), metadata.CreateShowInput{
 		TMDBID:  req.TMDBID,
 		Seasons: req.Seasons,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, tmdb.ErrNotFound):
-			errorResponse(c, http.StatusBadRequest, err.Error())
-		case errors.Is(err, library.ErrTMDBFetch):
-			errorResponse(c, http.StatusBadGateway, err.Error())
-		default:
-			errorResponse(c, http.StatusInternalServerError, err.Error())
-		}
+		metadataErrorResponse(c, err, http.StatusBadRequest)
 		return
 	}
 
@@ -399,7 +428,7 @@ func (s *Server) createShow(c *gin.Context) {
 	}
 
 	status := http.StatusCreated
-	if result.IsExisting {
+	if result.Existing {
 		status = http.StatusOK
 	}
 	c.JSON(status, toShowResponse(result.Show))
@@ -411,18 +440,14 @@ func (s *Server) getShow(c *gin.Context) {
 		return
 	}
 
-	show, err := s.showRepo.GetWithSeasonsAndEpisodes(id)
+	// Seasons, episodes and active assignments in two queries.
+	show, err := s.showRepo.GetWithSeasonsAndEpisodesContext(c.Request.Context(), id)
 	if err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if show == nil {
 		errorResponse(c, http.StatusNotFound, "Show not found")
-		return
-	}
-
-	if err := s.loadEpisodeAssignments(show); err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for episode")
 		return
 	}
 
@@ -434,14 +459,14 @@ func (s *Server) refreshShow(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if s.opts.Metadata == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Metadata service not configured")
+		return
+	}
 
-	result, err := s.showService.Refresh(c.Request.Context(), id)
+	result, err := s.opts.Metadata.RefreshShow(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, library.ErrShowNotFound) {
-			errorResponse(c, http.StatusNotFound, "Show not found")
-			return
-		}
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		metadataErrorResponse(c, err, http.StatusNotFound)
 		return
 	}
 
@@ -451,32 +476,12 @@ func (s *Server) refreshShow(c *gin.Context) {
 		seasonErrors = append(seasonErrors, se.Error())
 	}
 
-	if err := s.loadEpisodeAssignments(result.Show); err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for episode")
-		return
-	}
-
 	c.JSON(http.StatusOK, RefreshShowResponse{
 		Show:          toShowResponse(result.Show),
 		SeasonsAdded:  result.SeasonsAdded,
 		EpisodesAdded: result.EpisodesAdded,
 		SeasonErrors:  seasonErrors,
 	})
-}
-
-// loadEpisodeAssignments populates the Assignment field on every episode.
-func (s *Server) loadEpisodeAssignments(show *library.Show) error {
-	for i := range show.Seasons {
-		for j := range show.Seasons[i].Episodes {
-			ep := &show.Seasons[i].Episodes[j]
-			assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, ep.ID)
-			if err != nil {
-				return err
-			}
-			ep.Assignment = assignment
-		}
-	}
-	return nil
 }
 
 func (s *Server) deleteShow(c *gin.Context) {
@@ -617,6 +622,9 @@ func toShowResponse(show *library.Show) ShowResponse {
 	}
 
 	for _, season := range show.Seasons {
+		if season.SeasonNumber == 0 && !show.IncludeSpecials {
+			continue // Specials switched off: rows are kept, but hidden
+		}
 		seasonResp := SeasonResponse{
 			ID:           season.ID,
 			SeasonNumber: season.SeasonNumber,

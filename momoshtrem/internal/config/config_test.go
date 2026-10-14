@@ -14,7 +14,7 @@ var envVars = []string{
 	"BACKEND_API_TOKEN", "CORS_ALLOWED_ORIGINS", "WEBDAV_PUBLIC_URL",
 	"WEBDAV_AUTH_ENABLED", "WEBDAV_USERNAME", "WEBDAV_PASSWORD",
 	"DATABASE_URL", "METRICS_ENABLED", "METRICS_PORT",
-	"TMDB_API_KEY", "JACKETT_URL", "JACKETT_API_KEY", "ANTHROPIC_API_KEY",
+	"TMDB_API_KEY", "TMDB_LANGUAGE", "TMDB_RPS", "JACKETT_URL", "JACKETT_API_KEY", "ANTHROPIC_API_KEY",
 	"TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "SECRET_KEY",
 	"OPENSUBTITLES_API_KEY", "OPENSUBTITLES_USERNAME", "OPENSUBTITLES_PASSWORD",
 }
@@ -39,6 +39,8 @@ func TestLoad_NoFileHonoursEnv(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://u:p@db:5432/momo")
 	t.Setenv("TMDB_API_KEY", "tmdb-key")
+	t.Setenv("TMDB_LANGUAGE", "de-DE")
+	t.Setenv("TMDB_RPS", " 5 ")
 	t.Setenv("BACKEND_API_TOKEN", "token")
 	t.Setenv("WEBDAV_PUBLIC_URL", "https://example.org:36911/")
 	t.Setenv("WEBDAV_AUTH_ENABLED", "true")
@@ -66,6 +68,8 @@ func TestLoad_NoFileHonoursEnv(t *testing.T) {
 	}{
 		{"Database.URL", cfg.Database.URL, "postgres://u:p@db:5432/momo"},
 		{"TMDB.APIKey", cfg.TMDB.APIKey, "tmdb-key"},
+		{"TMDB.Language", cfg.TMDB.Language, "de-DE"},
+		{"TMDB.RPS", cfg.TMDB.RPS, 5},
 		{"Server.APIToken", cfg.Server.APIToken, "token"},
 		{"Server.WebDAVPublicURL", cfg.Server.WebDAVPublicURL, "https://example.org:36911/"},
 		{"WebDAVAuth.Enabled", cfg.Server.WebDAVAuth.Enabled, true},
@@ -103,6 +107,8 @@ database:
   url: postgres://file/momo
 tmdb:
   api_key: file-tmdb
+  language: ja-JP
+  rps: 8
 jackett:
   url: http://file-jackett:9117
   api_key: file-jackett
@@ -113,6 +119,7 @@ metrics:
 	t.Setenv("DATABASE_URL", "postgres://env/momo")
 	t.Setenv("BACKEND_API_TOKEN", "env-token")
 	t.Setenv("METRICS_ENABLED", "false")
+	t.Setenv("TMDB_RPS", "12")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -127,9 +134,11 @@ metrics:
 		{"Database.URL", cfg.Database.URL, "postgres://env/momo"},
 		{"Server.APIToken", cfg.Server.APIToken, "env-token"},
 		{"Metrics.Enabled", cfg.Metrics.Enabled, false},
+		{"TMDB.RPS", cfg.TMDB.RPS, 12},
 		// File wins over defaults when env is unset.
 		{"Server.HTTPPort", cfg.Server.HTTPPort, 5555},
 		{"TMDB.APIKey", cfg.TMDB.APIKey, "file-tmdb"},
+		{"TMDB.Language", cfg.TMDB.Language, "ja-JP"},
 		{"Jackett.URL", cfg.Jackett.URL, "http://file-jackett:9117"},
 		{"Jackett.APIKey", cfg.Jackett.APIKey, "file-jackett"},
 		{"Metrics.Port", cfg.Metrics.Port, 9000},
@@ -251,6 +260,50 @@ func TestLoad_PortRanges(t *testing.T) {
 	}
 }
 
+func TestLoad_TMDBSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		file     string
+		env      map[string]string
+		wantLang string
+		wantRPS  int
+		wantErr  string // "" means valid
+	}{
+		{"defaults", "", nil, "en-US", 20, ""},
+		{"file", "tmdb:\n  language: fr-FR\n  rps: 4\n", nil, "fr-FR", 4, ""},
+		{"env wins over file", "tmdb:\n  language: fr-FR\n  rps: 4\n", map[string]string{"TMDB_LANGUAGE": "pt-BR", "TMDB_RPS": "9"}, "pt-BR", 9, ""},
+		{"empty env keeps the file value", "tmdb:\n  language: fr-FR\n", map[string]string{"TMDB_LANGUAGE": " "}, "fr-FR", 20, ""},
+		{"rps zero in file", "tmdb:\n  rps: 0\n", nil, "", 0, "tmdb.rps"},
+		{"empty language in file", "tmdb:\n  language: \"\"\n", nil, "", 0, "tmdb.language"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, tt.file)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: want an error naming %s, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.TMDB.Language != tt.wantLang || cfg.TMDB.RPS != tt.wantRPS {
+				t.Errorf("TMDB = (%q, %d), want (%q, %d)", cfg.TMDB.Language, cfg.TMDB.RPS, tt.wantLang, tt.wantRPS)
+			}
+		})
+	}
+}
+
 func TestLoad_EnvStringsTrimmed(t *testing.T) {
 	tests := []struct {
 		name string
@@ -288,6 +341,9 @@ func TestLoad_InvalidEnvValues(t *testing.T) {
 		{"metrics port zero", "METRICS_PORT", "0"},
 		{"metrics enabled not a bool", "METRICS_ENABLED", "maybe"},
 		{"webdav auth enabled not a bool", "WEBDAV_AUTH_ENABLED", "yes please"},
+		{"tmdb rps not a number", "TMDB_RPS", "fast"},
+		{"tmdb rps zero", "TMDB_RPS", "0"},
+		{"tmdb rps fractional", "TMDB_RPS", "2.5"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

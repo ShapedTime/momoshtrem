@@ -51,7 +51,7 @@ func TestGetStatus(t *testing.T) {
 }
 
 func TestGetStatus_NotConfigured(t *testing.T) {
-	s := NewServer(nil, nil, nil, nil, nil, nil, Options{})
+	s := NewServer(nil, nil, nil, nil, nil, Options{})
 	rec := do(t, s, http.MethodGet, "/api/status", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)

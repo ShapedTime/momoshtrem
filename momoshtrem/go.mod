@@ -13,6 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.43.0
 	golang.org/x/sync v0.17.0
+	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.42.2
 )
@@ -129,7 +130,6 @@ require (
 	golang.org/x/mod v0.27.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	golang.org/x/time v0.0.0-20220609170525-579cf78fd858 // indirect
 	golang.org/x/tools v0.36.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect

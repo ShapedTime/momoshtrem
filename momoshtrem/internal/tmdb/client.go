@@ -6,227 +6,350 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
-const baseURL = "https://api.themoviedb.org/3"
+// DefaultBaseURL is TMDB's v3 API.
+const DefaultBaseURL = "https://api.themoviedb.org/3"
 
-// ErrNotFound means TMDB has no item with the requested ID.
-var ErrNotFound = errors.New("not found")
+const (
+	defaultTimeout       = 10 * time.Second
+	defaultAttempts      = 3
+	defaultBackoff       = 500 * time.Millisecond
+	defaultMaxRetryAfter = 30 * time.Second
 
-// Client is a TMDB API client
+	// Lists TMDB returns in full are trimmed to keep cached payloads small
+	// (a long anime's aggregate credits run to thousands of entries).
+	maxCredits  = 40
+	maxListItem = 20
+)
+
+var (
+	// ErrNotFound means TMDB has no item with the requested ID.
+	ErrNotFound = errors.New("not found")
+	// ErrUnauthorized means TMDB rejected the API key.
+	ErrUnauthorized = errors.New("TMDB rejected the API key (HTTP 401)")
+	// ErrNoAPIKey is returned without a request when no key is configured.
+	ErrNoAPIKey = errors.New("TMDB API key not configured")
+)
+
+// StatusError is an HTTP status TMDB answered with that has no sentinel.
+type StatusError struct {
+	StatusCode int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("unexpected status: %d", e.StatusCode)
+}
+
+// Client is a TMDB API client. It retries transient failures, honours
+// Retry-After on 429 and can rate-limit itself. Every error is free of the
+// request URL, which carries the API key.
 type Client struct {
-	apiKey     string
-	httpClient *http.Client
+	apiKey        string
+	baseURL       string
+	httpClient    *http.Client
+	language      string
+	limiter       *rate.Limiter // nil: unlimited
+	attempts      int
+	backoff       time.Duration
+	maxRetryAfter time.Duration
+
+	// sleep waits between attempts; tests replace it.
+	sleep func(ctx context.Context, d time.Duration) error
 }
 
-// NewClient creates a new TMDB client
-func NewClient(apiKey string) *Client {
-	return &Client{
-		apiKey: apiKey,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+// Option configures a Client.
+type Option func(*Client)
+
+// WithBaseURL points the client at another server (tests use httptest).
+func WithBaseURL(u string) Option {
+	return func(c *Client) { c.baseURL = strings.TrimRight(u, "/") }
+}
+
+// WithHTTPClient replaces the default HTTP client (10 s timeout).
+func WithHTTPClient(h *http.Client) Option {
+	return func(c *Client) { c.httpClient = h }
+}
+
+// WithLanguage sets the language parameter sent with every request, e.g.
+// "en-US". Empty sends none (TMDB's default, en-US).
+func WithLanguage(lang string) Option {
+	return func(c *Client) { c.language = lang }
+}
+
+// WithRateLimit caps requests per second. rps <= 0 disables the limit.
+func WithRateLimit(rps float64) Option {
+	return func(c *Client) {
+		if rps <= 0 {
+			c.limiter = nil
+			return
+		}
+		burst := int(rps)
+		if burst < 1 {
+			burst = 1
+		}
+		c.limiter = rate.NewLimiter(rate.Limit(rps), burst)
 	}
 }
 
-// Movie represents a movie from TMDB
-type Movie struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	ReleaseDate string `json:"release_date"`
-	Overview    string `json:"overview"`
-	PosterPath  string `json:"poster_path"`
-}
-
-// Year extracts the year from the release date
-func (m *Movie) Year() int {
-	if len(m.ReleaseDate) < 4 {
-		return 0
+// WithRetries sets how many attempts a request gets (1 means no retry) and
+// the base delay of the exponential backoff between them.
+func WithRetries(attempts int, backoff time.Duration) Option {
+	return func(c *Client) {
+		if attempts < 1 {
+			attempts = 1
+		}
+		c.attempts = attempts
+		c.backoff = backoff
 	}
-	var year int
-	fmt.Sscanf(m.ReleaseDate[:4], "%d", &year)
-	return year
 }
 
-// Show represents a TV show from TMDB
-type Show struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	FirstAirDate string `json:"first_air_date"`
-	Overview     string `json:"overview"`
-	PosterPath   string `json:"poster_path"`
-}
-
-// Year extracts the year from the first air date
-func (s *Show) Year() int {
-	if len(s.FirstAirDate) < 4 {
-		return 0
+// NewClient creates a TMDB client. An empty apiKey makes every call return
+// ErrNoAPIKey.
+func NewClient(apiKey string, opts ...Option) *Client {
+	c := &Client{
+		apiKey:        apiKey,
+		baseURL:       DefaultBaseURL,
+		httpClient:    &http.Client{Timeout: defaultTimeout},
+		attempts:      defaultAttempts,
+		backoff:       defaultBackoff,
+		maxRetryAfter: defaultMaxRetryAfter,
+		sleep:         sleepContext,
 	}
-	var year int
-	fmt.Sscanf(s.FirstAirDate[:4], "%d", &year)
-	return year
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-// Season represents a TV season from TMDB
-type Season struct {
-	ID           int       `json:"id"`
-	SeasonNumber int       `json:"season_number"`
-	Name         string    `json:"name"`
-	Episodes     []Episode `json:"episodes"`
-}
+// Language returns the language sent with requests ("" for TMDB's default).
+func (c *Client) Language() string { return c.language }
 
-// Episode represents a TV episode from TMDB
-type Episode struct {
-	ID            int    `json:"id"`
-	EpisodeNumber int    `json:"episode_number"`
-	Name          string `json:"name"`
-	Overview      string `json:"overview"`
-	AirDate       string `json:"air_date"`
-}
+// MovieDetails fetches a movie with external IDs, keywords, credits, videos,
+// recommendations and similar titles in one request.
+func (c *Client) MovieDetails(ctx context.Context, id int) (*MovieDetails, error) {
+	params := url.Values{"append_to_response": {"external_ids,keywords,credits,videos,recommendations,similar"}}
+	c.addVideoLanguage(params)
 
-// ShowDetails represents detailed show info including seasons
-type ShowDetails struct {
-	Show
-	Seasons []struct {
-		ID           int `json:"id"`
-		SeasonNumber int `json:"season_number"`
-		EpisodeCount int `json:"episode_count"`
-	} `json:"seasons"`
-}
-
-// GetMovie fetches movie details by TMDB ID
-func (c *Client) GetMovie(id int) (*Movie, error) {
-	endpoint := fmt.Sprintf("%s/movie/%d", baseURL, id)
-
-	movie := &Movie{}
-	if err := c.get(endpoint, movie); err != nil {
+	m := &MovieDetails{}
+	if err := c.get(ctx, fmt.Sprintf("/movie/%d", id), params, m, c.attempts); err != nil {
 		return nil, err
 	}
-
-	return movie, nil
+	m.Credits = trimCredits(m.Credits)
+	m.Recommendations.Results = trimList(m.Recommendations.Results)
+	m.Similar.Results = trimList(m.Similar.Results)
+	return m, nil
 }
 
-// GetShow fetches TV show details by TMDB ID
-func (c *Client) GetShow(id int) (*Show, error) {
-	endpoint := fmt.Sprintf("%s/tv/%d", baseURL, id)
+// ShowDetails fetches a show with external IDs, keywords, credits, aggregate
+// credits, videos, recommendations and similar titles in one request.
+func (c *Client) ShowDetails(ctx context.Context, id int) (*ShowDetails, error) {
+	params := url.Values{"append_to_response": {"external_ids,keywords,credits,aggregate_credits,videos,recommendations,similar"}}
+	c.addVideoLanguage(params)
 
-	show := &Show{}
-	if err := c.get(endpoint, show); err != nil {
+	s := &ShowDetails{}
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d", id), params, s, c.attempts); err != nil {
 		return nil, err
 	}
-
-	return show, nil
+	s.Credits = trimCredits(s.Credits)
+	s.AggregateCredits = trimAggregateCredits(s.AggregateCredits)
+	s.Recommendations.Results = trimList(s.Recommendations.Results)
+	s.Similar.Results = trimList(s.Similar.Results)
+	return s, nil
 }
 
-// GetShowDetails fetches detailed TV show info including seasons
-func (c *Client) GetShowDetails(id int) (*ShowDetails, error) {
-	endpoint := fmt.Sprintf("%s/tv/%d", baseURL, id)
-
-	details := &ShowDetails{}
-	if err := c.get(endpoint, details); err != nil {
+// Season fetches one season with its episodes. Season 0 holds specials.
+func (c *Client) Season(ctx context.Context, showID, seasonNumber int) (*Season, error) {
+	s := &Season{}
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d/season/%d", showID, seasonNumber), nil, s, c.attempts); err != nil {
 		return nil, err
 	}
-
-	return details, nil
+	return s, nil
 }
 
-// GetSeason fetches season details including episodes
-func (c *Client) GetSeason(showID int, seasonNumber int) (*Season, error) {
-	endpoint := fmt.Sprintf("%s/tv/%d/season/%d", baseURL, showID, seasonNumber)
-
-	season := &Season{}
-	if err := c.get(endpoint, season); err != nil {
+// EpisodeGroups lists a show's alternative episode orderings.
+func (c *Client) EpisodeGroups(ctx context.Context, showID int) ([]EpisodeGroupSummary, error) {
+	var resp struct {
+		Results []EpisodeGroupSummary `json:"results"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d/episode_groups", showID), nil, &resp, c.attempts); err != nil {
 		return nil, err
 	}
-
-	return season, nil
+	return resp.Results, nil
 }
 
-// SearchMovies searches for movies by title
-func (c *Client) SearchMovies(query string) ([]Movie, error) {
-	endpoint := fmt.Sprintf("%s/search/movie?query=%s", baseURL, url.QueryEscape(query))
-
-	var result struct {
-		Results []Movie `json:"results"`
+// EpisodeGroup fetches one episode group with its episodes.
+func (c *Client) EpisodeGroup(ctx context.Context, id string) (*EpisodeGroup, error) {
+	if id == "" {
+		return nil, ErrNotFound
 	}
-	if err := c.get(endpoint, &result); err != nil {
+	g := &EpisodeGroup{}
+	if err := c.get(ctx, "/tv/episode_group/"+url.PathEscape(id), nil, g, c.attempts); err != nil {
 		return nil, err
 	}
-
-	return result.Results, nil
+	return g, nil
 }
 
-// SearchShows searches for TV shows by title
-func (c *Client) SearchShows(query string) ([]Show, error) {
-	endpoint := fmt.Sprintf("%s/search/tv?query=%s", baseURL, url.QueryEscape(query))
-
-	var result struct {
-		Results []Show `json:"results"`
-	}
-	if err := c.get(endpoint, &result); err != nil {
-		return nil, err
-	}
-
-	return result.Results, nil
-}
-
-// Ping checks that TMDB is reachable and accepts the API key.
+// Ping checks that TMDB is reachable and accepts the API key. It doesn't
+// retry: /api/status wants a quick answer.
 func (c *Client) Ping(ctx context.Context) error {
-	return c.getContext(ctx, baseURL+"/configuration", nil)
+	return c.get(ctx, "/configuration", nil, nil, 1)
 }
 
-// get performs a GET request and decodes the response
-func (c *Client) get(endpoint string, v interface{}) error {
-	return c.getContext(context.Background(), endpoint, v)
+// addVideoLanguage asks for videos in the client's language and those with
+// no language, instead of the language alone (anime trailers are often
+// untagged).
+func (c *Client) addVideoLanguage(params url.Values) {
+	if c.language == "" {
+		return
+	}
+	lang, _, _ := strings.Cut(c.language, "-")
+	params.Set("include_video_language", lang+",null")
 }
 
-// getContext performs a GET request and decodes the response into v.
-// A nil v discards the body.
-func (c *Client) getContext(ctx context.Context, endpoint string, v interface{}) error {
-	// Add API key
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return fmt.Errorf("invalid endpoint: %w", err)
+// get requests path and decodes the JSON body into v (nil discards it),
+// making up to attempts tries.
+func (c *Client) get(ctx context.Context, path string, params url.Values, v any, attempts int) error {
+	if c.apiKey == "" {
+		return ErrNoAPIKey
 	}
 
-	q := u.Query()
+	q := url.Values{}
+	for k, vs := range params {
+		q[k] = vs
+	}
 	q.Set("api_key", c.apiKey)
-	u.RawQuery = q.Encode()
+	if c.language != "" {
+		q.Set("language", c.language)
+	}
+	endpoint := c.baseURL + path + "?" + q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	for attempt := 1; ; attempt++ {
+		if c.limiter != nil {
+			if err := c.limiter.Wait(ctx); err != nil {
+				return fmt.Errorf("rate limiter: %w", err)
+			}
+		}
+
+		retry, wait, err := c.do(ctx, endpoint, v)
+		if err == nil {
+			return nil
+		}
+		if !retry || attempt >= attempts || ctx.Err() != nil {
+			return err
+		}
+		if wait <= 0 {
+			wait = backoffDelay(c.backoff, attempt)
+		}
+		if err := c.sleep(ctx, wait); err != nil {
+			return err
+		}
+	}
+}
+
+// do makes one request. retry reports whether the failure is transient; wait
+// is how long the server asked us to wait (0 when it didn't say).
+func (c *Client) do(ctx context.Context, endpoint string, v any) (retry bool, wait time.Duration, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return fmt.Errorf("failed to build request: %w", withoutURL(err))
+		return false, 0, fmt.Errorf("failed to build request: %w", withoutURL(err))
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", withoutURL(err))
+		err = withoutURL(err)
+		return isTimeout(err) && ctx.Err() == nil, 0, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrNotFound
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		if v == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			return false, 0, nil
+		}
+		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+			err = withoutURL(err)
+			return isTimeout(err) && ctx.Err() == nil, 0, fmt.Errorf("failed to decode response: %w", err)
+		}
+		return false, 0, nil
+	case resp.StatusCode == http.StatusNotFound:
+		return false, 0, ErrNotFound
+	case resp.StatusCode == http.StatusUnauthorized:
+		return false, 0, ErrUnauthorized
+	case resp.StatusCode == http.StatusTooManyRequests:
+		wait := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if wait > c.maxRetryAfter {
+			return false, 0, &StatusError{StatusCode: resp.StatusCode}
+		}
+		return true, wait, &StatusError{StatusCode: resp.StatusCode}
+	case resp.StatusCode >= 500:
+		return true, 0, &StatusError{StatusCode: resp.StatusCode}
+	default:
+		return false, 0, &StatusError{StatusCode: resp.StatusCode}
 	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("TMDB rejected the API key (HTTP 401)")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
-	}
+}
 
-	if v == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
+// backoffDelay is base·2^(attempt-1), jittered to between half and all of it
+// so parallel retries spread out.
+func backoffDelay(base time.Duration, attempt int) time.Duration {
+	d := base << (attempt - 1)
+	if d <= 0 {
+		return 0
+	}
+	half := d / 2
+	return half + rand.N(half+1)
+}
+
+// parseRetryAfter reads a Retry-After header: delay seconds or an HTTP date.
+// It returns 0 when the header is absent or unreadable.
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(value); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		if d := at.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+// isTimeout reports whether err is a timeout of this request (as opposed to
+// the caller cancelling it).
+func isTimeout(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
 		return nil
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return nil
 }
 
 // withoutURL strips the request URL from transport errors, because the URL
@@ -237,4 +360,42 @@ func withoutURL(err error) error {
 		return uerr.Err
 	}
 	return err
+}
+
+// trimCredits keeps the first cast members and the directors and writers.
+func trimCredits(c Credits) Credits {
+	if len(c.Cast) > maxCredits {
+		c.Cast = c.Cast[:maxCredits]
+	}
+	crew := c.Crew[:0:0]
+	for _, m := range c.Crew {
+		if (m.Department == "Directing" || m.Department == "Writing") && len(crew) < maxCredits {
+			crew = append(crew, m)
+		}
+	}
+	c.Crew = crew
+	return c
+}
+
+// trimAggregateCredits keeps the first cast members and the directors and
+// writers.
+func trimAggregateCredits(c AggregateCredits) AggregateCredits {
+	if len(c.Cast) > maxCredits {
+		c.Cast = c.Cast[:maxCredits]
+	}
+	crew := c.Crew[:0:0]
+	for _, m := range c.Crew {
+		if (m.Department == "Directing" || m.Department == "Writing") && len(crew) < maxCredits {
+			crew = append(crew, m)
+		}
+	}
+	c.Crew = crew
+	return c
+}
+
+func trimList(items []ListItem) []ListItem {
+	if len(items) > maxListItem {
+		return items[:maxListItem]
+	}
+	return items
 }

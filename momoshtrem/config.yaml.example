@@ -13,6 +13,8 @@
 #   WEBDAV_USERNAME           server.webdav_auth.username
 #   WEBDAV_PASSWORD           server.webdav_auth.password
 #   TMDB_API_KEY              tmdb.api_key
+#   TMDB_LANGUAGE             tmdb.language (default en-US)
+#   TMDB_RPS                  tmdb.rps (default 20)
 #   JACKETT_URL               jackett.url
 #   JACKETT_API_KEY           jackett.api_key
 #   OPENSUBTITLES_API_KEY     opensubtitles.api_key
@@ -77,6 +79,8 @@ metrics:
 
 tmdb:
   api_key: ""  # Or TMDB_API_KEY
+  language: en-US   # Names and overviews; part of the TMDB cache key
+  rps: 20           # Requests per second to TMDB (it allows about 50)
 
 # Torrent search (optional). Or JACKETT_URL / JACKETT_API_KEY.
 jackett:

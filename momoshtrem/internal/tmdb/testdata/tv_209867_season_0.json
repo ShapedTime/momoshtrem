@@ -1,0 +1,39 @@
+{
+  "_id": "6531b1c1d5191f00c6a2c8a0",
+  "id": 400001,
+  "season_number": 0,
+  "name": "Specials",
+  "overview": "",
+  "poster_path": "/s0.jpg",
+  "air_date": "2023-10-06",
+  "episodes": [
+    {
+      "id": 4700001,
+      "season_number": 0,
+      "episode_number": 1,
+      "name": "Frieren Mini Anime 1",
+      "overview": "A short.",
+      "air_date": "2023-10-06",
+      "episode_type": "standard",
+      "runtime": 3,
+      "still_path": "/sp1.jpg",
+      "vote_average": 0,
+      "crew": [{"id": 9, "name": "Someone", "job": "Director"}],
+      "guest_stars": []
+    },
+    {
+      "id": 4700002,
+      "season_number": 0,
+      "episode_number": 2,
+      "name": "Frieren Mini Anime 2",
+      "overview": "",
+      "air_date": null,
+      "episode_type": "standard",
+      "runtime": null,
+      "still_path": null,
+      "vote_average": 0,
+      "crew": [],
+      "guest_stars": []
+    }
+  ]
+}

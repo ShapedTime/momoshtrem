@@ -1,5 +1,5 @@
-# Compiled binary
-momoshtrem
+# Compiled binary (anchored: cmd/momoshtrem/ is source)
+/momoshtrem
 
 # Runtime data
 data/

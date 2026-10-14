@@ -18,7 +18,7 @@ momoshtrem:   Library (Postgres) → VFS → Torrent files → WebDAV
 | Language | Go | Reuse anacrolix/torrent, familiar patterns |
 | Database | Postgres | Relational queries, JSONB, concurrent access from background jobs. (Stages 1–3 were built on SQLite; `cmd/migrate-to-pg` moved the data.) |
 | VFS approach | Library-first | Structure driven by user's library, not torrent contents |
-| Metadata | On-demand from TMDB | Keep DB minimal, fetch when needed |
+| Metadata | Stored in Postgres, TMDB responses cached in `tmdb_cache` | Pages load without a TMDB call per item; see [Metadata](#metadata) |
 
 ## Configuration
 
@@ -32,12 +32,14 @@ The service refuses to start without a database URL, with a port outside 1–655
 
 | Env var | Config key | Notes |
 |---|---|---|
-| `DATABASE_URL` | `database.url` | **Required.** Postgres connection string. Migrations in `internal/library/migrations/` run at startup. |
+| `DATABASE_URL` | `database.url` | **Required.** Postgres connection string. Migrations in `internal/library/migrations/` run at startup (see below). |
 | `BACKEND_API_TOKEN` | `server.api_token` | Shared secret for the REST API (see below). |
 | `CORS_ALLOWED_ORIGINS` | `server.cors_allowed_origins` | Comma-separated browser origins. Empty sends no CORS headers. |
 | `WEBDAV_PUBLIC_URL` | `server.webdav_public_url` | The WebDAV address Infuse uses, shown by `/api/status`. Defaults to `http://localhost:<webdav_port>/`. |
 | `WEBDAV_AUTH_ENABLED`, `WEBDAV_USERNAME`, `WEBDAV_PASSWORD` | `server.webdav_auth.*` | Basic auth for WebDAV. |
-| `TMDB_API_KEY` | `tmdb.api_key` | Library metadata and air-date sync. |
+| `TMDB_API_KEY` | `tmdb.api_key` | Library metadata and air-date sync. Without it, adding or refreshing titles returns `503`. |
+| `TMDB_LANGUAGE` | `tmdb.language` | Language of names and overviews, e.g. `de-DE`. Default `en-US`. |
+| `TMDB_RPS` | `tmdb.rps` | TMDB requests per second, a whole number of at least 1. Default `20` (TMDB allows about 50). |
 | `JACKETT_URL`, `JACKETT_API_KEY` | `jackett.*` | Torrent search (moving from web to the backend in B4). |
 | `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | `opensubtitles.*` | Subtitle download. |
 | `ANTHROPIC_API_KEY` | `ai.anthropic_api_key` | AI classifier and recommendations; disabled when unset. |
@@ -63,13 +65,49 @@ Errors use one shape: `{"error": {"code": "not_found", "message": "Movie not fou
 
 The Docker image stamps the version from the `VERSION` build arg (`MOMOSHTREM_VERSION` in compose).
 
+### Migrations
+
+At startup every embedded migration that isn't recorded in `schema_migrations` runs, in version order, each in its own transaction. Numbers are reserved per task, so a lower number can land after a higher one and still runs. A Postgres advisory lock serialises concurrent starts (the server and `backfill-metadata`, say). Versions recorded in the database but missing from the binary are logged as a warning: the binary is older than the database.
+
+## Metadata
+
+Adding a movie or show stores its TMDB metadata: IMDb and TVDB IDs, artwork, runtime, genres and status, plus every season, specials (season 0) included, with episode names, air dates, stills and runtimes. Refresh (`POST /api/movies/{id}/refresh`, `POST /api/shows/{id}/refresh`) fetches them again. Titles and years are fixed when the item is added, because they name the WebDAV folders. When a refresh renames an episode that has a file, the WebDAV tree is rebuilt.
+
+- **Specials.** Season 0 is stored when the show's `include_specials` is on, the default. Turning it off keeps the rows and hides them.
+- **Episode ordering.** Each show has an ordering: `aired`, `absolute` or `episode_group`. Anime defaults to `absolute`. Anime means the Animation genre with Japanese as the original language or Japan as an origin country, or TMDB's `anime` keyword. Absolute numbers come from the chosen TMDB episode group. For `absolute`, if no group is chosen, they come from the absolute-type group with the most episodes. Groups often lag airing shows, so episodes that aired after the group's last one carry on its numbering. Without a group, numbers count up across the regular seasons. Specials never get one.
+- **TMDB cache.** TMDB responses are kept in `tmdb_cache`. Details stay fresh for 7 days and episode groups for 7 days. Seasons stay fresh for 1 day while a show airs and for 30 days once it has ended. Concurrent requests for the same item share one TMDB call. When TMDB fails, an expired entry is served instead. The server deletes entries that expired more than 30 days ago when it starts. Refresh bypasses the cache. The client retries 5xx responses and timeouts with backoff, honours `Retry-After` on `429`, and never retries `401` or `404`.
+
+### Backfilling an existing library
+
+Movies and shows added before this existed have only a title and year. `backfill-metadata` fills in the rest. It adds specials and newly aired episodes, sets absolute numbers and, on a show's first sync, anime's default ordering. It never renames anything WebDAV shows: titles, years and existing episode names stay as they are, so Infuse paths don't move. It can run while the server is up: it only needs the database.
+
+```bash
+# Docker: a one-off container next to the running server
+docker compose run --rm momoshtrem backfill-metadata --dry-run   # list what it would do
+docker compose run --rm momoshtrem backfill-metadata
+
+# Locally
+cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
+DATABASE_URL=postgres://... TMDB_API_KEY=... ./momoshtrem backfill-metadata
+```
+
+| Flag | Default | |
+|---|---|---|
+| `--dry-run` | off | List the movies and shows it would process. No TMDB calls and no metadata writes, but like every start it first applies pending migrations. |
+| `--force` | off | Also reprocess items that already have metadata, least recently synced first, so repeated `--force --limit=N` runs cover the whole library. |
+| `--only=movies\|shows` | both | Limit the run to one kind. |
+| `--limit=N` | `0` (all) | Process at most N movies and N shows. |
+| `--rps=N` | `10` | TMDB requests per second, kept below the server's so both fit TMDB's limit. |
+
+It is resumable. An item is marked done (`metadata_updated_at`) only after it fully synced. A rerun, or a run after Ctrl-C, picks up the rest. Failures are logged and counted, and the exit code is `1` when any item failed, so run it again.
+
 ## Tests
 
-`go vet ./... && go test ./...` needs no services. The Postgres tests in `internal/library` skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB tests use an `httptest` server and fixtures in `internal/tmdb/testdata/`. The Postgres tests in `internal/library` and `internal/metadata` skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine
-MOMOSHTREM_TEST_DATABASE_URL='postgres://postgres:pw@localhost:55432/momo?sslmode=disable' go test ./internal/library/...
+MOMOSHTREM_TEST_DATABASE_URL='postgres://postgres:pw@localhost:55432/momo?sslmode=disable' go test ./internal/...
 docker stop momo-test-pg
 ```
 
