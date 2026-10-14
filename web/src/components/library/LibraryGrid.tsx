@@ -6,6 +6,7 @@ import { EmptyLibrary } from './EmptyLibrary';
 import { useToast } from '@/components/ui';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 import type { TorrentStatus } from '@/types/torrent';
+import { apiFetch } from '@/lib/api/client';
 
 type FilterType = 'all' | 'movies' | 'shows';
 
@@ -90,7 +91,7 @@ export function LibraryGrid({
       : `/api/library/shows/${id}`;
 
     try {
-      const response = await fetch(endpoint, { method: 'DELETE' });
+      const response = await apiFetch(endpoint, { method: 'DELETE' });
 
       if (!response.ok) {
         throw new Error('Failed to remove from library');

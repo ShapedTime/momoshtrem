@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { LibraryGrid } from '@/components/library';
 import { useTorrents } from '@/hooks';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
+import { apiFetch } from '@/lib/api/client';
 
 interface LibraryState {
   movies: LibraryMovie[];
@@ -33,8 +34,8 @@ export default function LibraryPage() {
 
     try {
       const [moviesRes, showsRes] = await Promise.all([
-        fetch('/api/library/movies'),
-        fetch('/api/library/shows'),
+        apiFetch('/api/library/movies'),
+        apiFetch('/api/library/shows'),
       ]);
 
       if (!moviesRes.ok || !showsRes.ok) {
@@ -73,7 +74,7 @@ export default function LibraryPage() {
     // Fetch movie posters
     const moviePromises = movies.map(async (movie) => {
       try {
-        const res = await fetch(`/api/tmdb/movie/${movie.tmdb_id}`);
+        const res = await apiFetch(`/api/tmdb/movie/${movie.tmdb_id}`);
         if (res.ok) {
           const data = await res.json();
           paths[`movie-${movie.tmdb_id}`] = data.posterPath || null;
@@ -86,7 +87,7 @@ export default function LibraryPage() {
     // Fetch show posters
     const showPromises = shows.map(async (show) => {
       try {
-        const res = await fetch(`/api/tmdb/tv/${show.tmdb_id}`);
+        const res = await apiFetch(`/api/tmdb/tv/${show.tmdb_id}`);
         if (res.ok) {
           const data = await res.json();
           paths[`tv-${show.tmdb_id}`] = data.posterPath || null;

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { ToastProvider } from '@/components/ui';
+import { Providers } from '@/lib/query/Providers';
 import { Gallery } from './Gallery';
 
 export const metadata: Metadata = { title: 'UI gallery' };
@@ -9,8 +9,8 @@ export const metadata: Metadata = { title: 'UI gallery' };
 export default function DevUiPage() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
-    <ToastProvider>
+    <Providers>
       <Gallery />
-    </ToastProvider>
+    </Providers>
   );
 }

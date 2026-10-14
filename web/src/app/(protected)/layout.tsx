@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import { LOGIN_ROUTE } from '@/config/auth';
 import { Header } from '@/components/layout';
-import { ToastProvider } from '@/components/ui';
+import { Providers } from '@/lib/query/Providers';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export default async function ProtectedLayout({
@@ -18,13 +18,13 @@ export default async function ProtectedLayout({
   }
 
   return (
-    <ToastProvider>
+    <Providers>
       <div className="min-h-screen bg-bg-primary">
         <Header />
         <main>
           <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
-    </ToastProvider>
+    </Providers>
   );
 }

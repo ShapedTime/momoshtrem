@@ -7,6 +7,7 @@ import type {
   SortDirection,
   VideoQuality,
 } from '@/types/jackett';
+import { apiFetch } from '@/lib/api/client';
 
 // ============================================
 // Hook State Types
@@ -32,7 +33,7 @@ async function fetchTorrents(
   query: string,
   signal?: AbortSignal
 ): Promise<TorrentResult[]> {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/jackett/search?q=${encodeURIComponent(query)}`,
     { signal }
   );

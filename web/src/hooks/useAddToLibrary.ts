@@ -5,6 +5,7 @@ import type {
   AddTorrentResponse,
   ShowAssignmentResponse,
 } from '@/types/momoshtrem';
+import { apiFetch } from '@/lib/api/client';
 
 // ============================================================================
 // Types
@@ -65,7 +66,7 @@ export function useAddToLibrary(): UseAddToLibraryResult {
       setState({ isAdding: true, error: null });
 
       try {
-        const response = await fetch('/api/library/add', {
+        const response = await apiFetch('/api/library/add', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -129,7 +130,7 @@ export function useAddTorrent(): UseAddTorrentResult {
       setState({ addingMagnet: magnetUri, error: null });
 
       try {
-        const response = await fetch('/api/library/add-torrent', {
+        const response = await apiFetch('/api/library/add-torrent', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -14,6 +14,7 @@ import type {
   TVSearchResult,
   SortOption,
 } from '@/types/tmdb';
+import { apiFetch } from '@/lib/api/client';
 
 // ============================================
 // Hook State Type
@@ -34,7 +35,7 @@ interface FetchStateWithRefetch<T> extends FetchState<T> {
 // ============================================
 
 async function fetchAPI<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal });
+  const response = await apiFetch(url, { signal });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

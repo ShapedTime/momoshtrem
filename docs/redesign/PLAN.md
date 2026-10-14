@@ -215,7 +215,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - Long operations return `202 {job_id | run_id}` and are polled.
 - Every route requires `X-Momoshtrem-Token` when `BACKEND_API_TOKEN` is set; otherwise `401 {error: {code: "unauthorized"}}` (G2). The web client maps a backend 401/403 to `502 backend_auth`, so a token mismatch never looks like an expired session.
 - CORS is an allowlist (`CORS_ALLOWED_ORIGINS`), empty by default, so no CORS headers are sent. Allowed origins may use `GET, POST, PUT, PATCH, DELETE, OPTIONS` and the `Content-Type`, `Authorization`, `X-Momoshtrem-Token` headers.
-- The web app exposes the same paths under its own session-checked `/api/*` routes.
+- The web app exposes the same paths under its own session-checked `/api/*` routes. A catch-all `web/src/app/api/[...path]` forwards any path whose first segment is in `BACKEND_PREFIXES` (`web/src/lib/api/backend-proxy.ts`), adding the token and streaming the response (SSE included); explicit web routes take precedence. Typed browser calls and TanStack Query factories for every endpoint live in `web/src/lib/api/endpoints/`, and MSW fixtures in `web/src/mocks/` (F1).
 
 ### Titles and library (B1)
 - `GET /titles/{movie|tv}/{tmdb_id}`: cached TMDB details, plus library state, assignment summary, watch state (once B5 lands) and the recommendation reason if there is one.
