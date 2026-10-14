@@ -15,7 +15,7 @@ All work is tracked in GitHub issues on `ShapedTime/momoshtrem`. **Every agent s
 7. **Open a PR.** Conventional-commit title. Body has `Closes #n` (or `Part of #n`), what changed, verification output, and screenshots at 390 px and 1440 px for UI work.
 8. **Finish.** Remove `in-progress` and leave a summary comment: what shipped, what didn't, and links to follow-up issues.
 
-Labels: `v2` (redesign and features), `epic` (large, may be split), `in-progress` (claimed), `blocked` (waiting on an issue or the user).
+Labels: `v2` (redesign and features), `ops` (deployment, CI/CD, backups and server setup), `epic` (large, may be split), `in-progress` (claimed), `blocked` (waiting on an issue or the user).
 
 ## Project Overview
 
@@ -35,6 +35,10 @@ v2 is a redesign plus new features (Trakt, AI recommendations, episode mapping, 
   - `screens/<screen>/<state>-<width>.png`: every screen and state.
   - `prototype.html`: the clickable prototype. Open it in a browser and use the hash routes from HANDOFF §7.
   - `assets/logo/`: logo files.
+
+## Ops track
+
+Server setup, CI/CD and backups are a separate track from v2: issues labelled `ops` (`gh issue list --label ops --state open`), epic #32. Read `docs/ops/PLAN.md` before any ops work: decisions (§2), state inventory (§5), rollback model (§6) and the deploy agent contract (§8). The repo is public, so secrets and the public hostname never go in it.
 
 ## Commands
 
