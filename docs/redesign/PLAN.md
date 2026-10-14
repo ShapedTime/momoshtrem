@@ -286,7 +286,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata: no cast, crew, overview or similar titles); `503 unavailable` without a TMDB key, library titles included.
 
 ### Subtitles (B7)
-Item-scoped under `/movies/{id}` and `/episodes/{id}`; the legacy `/subtitles/*` routes go when F2 drops their callers. Types: `web/src/lib/api/contract/subtitles.ts`.
+Item-scoped under `/movies/{id}` and `/episodes/{id}` (the legacy `/subtitles/*` routes are gone). Types: `web/src/lib/api/contract/subtitles.ts`.
 - `GET …/subtitles` → `{items: [Subtitle]}`: the downloaded subtitles and those that came with the assigned torrent (none from an earlier torrent, none with nothing assigned). Works without an OpenSubtitles key.
 - `GET …/subtitles/search?languages=en,az` → `{items: [SubtitleCandidate], release_name}`, ranked against the assigned release. `release_name` is null when nothing is assigned; every `match` is then `unknown`. `languages` defaults to `en`.
 - `POST …/subtitles` with `{file_id, language_code, release_name?}` → `201 Subtitle`. It replaces the downloaded subtitle in that language. It works with nothing assigned (`match` is then `unknown`).

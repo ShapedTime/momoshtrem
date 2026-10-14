@@ -181,7 +181,7 @@ func candidatesFrom(resp *opensubtitles.SearchResponse) []Candidate {
 // the candidate's, kept to show the match later. It works with nothing
 // assigned; the match is then unknown.
 func (s *Service) Download(ctx context.Context, item ItemContext, fileID int, languageCode, releaseName string) (*Stored, error) {
-	sub, err := s.download(ctx, item.Item, fileID, languageCode, "", strings.TrimSpace(releaseName))
+	sub, err := s.download(ctx, item.Item, fileID, languageCode, strings.TrimSpace(releaseName))
 	if err != nil {
 		return nil, err
 	}
@@ -189,21 +189,13 @@ func (s *Service) Download(ctx context.Context, item ItemContext, fileID int, la
 	return &stored, nil
 }
 
-// DownloadAndStore is the legacy POST /subtitles/download.
-func (s *Service) DownloadAndStore(ctx context.Context, itemType ItemType, itemID int64, fileID int, languageCode, languageName string) (*Subtitle, error) {
-	return s.download(ctx, Item{Type: itemType, ID: itemID}, fileID, languageCode, languageName, "")
-}
-
-func (s *Service) download(ctx context.Context, item Item, fileID int, languageCode, languageName, releaseName string) (*Subtitle, error) {
+func (s *Service) download(ctx context.Context, item Item, fileID int, languageCode, releaseName string) (*Subtitle, error) {
 	if !s.IsConfigured() {
 		return nil, ErrNotConfigured
 	}
 	code, ok := NormalizeLanguageCode(languageCode)
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidLanguage, languageCode)
-	}
-	if languageName == "" {
-		languageName = LanguageName(code)
 	}
 
 	content, fileName, err := s.fetcher.Download(ctx, fileID)
@@ -240,7 +232,7 @@ func (s *Service) download(ctx context.Context, item Item, fileID int, languageC
 		ItemType:     item.Type,
 		ItemID:       item.ID,
 		LanguageCode: code,
-		LanguageName: languageName,
+		LanguageName: LanguageName(code),
 		Format:       format,
 		FilePath:     storedFilePath,
 		FileSize:     int64(len(content)),
@@ -287,18 +279,6 @@ func (s *Service) DeleteFromItem(ctx context.Context, item ItemContext, id int64
 	return s.remove(ctx, sub)
 }
 
-// Delete is the legacy DELETE /subtitles/{id}.
-func (s *Service) Delete(ctx context.Context, id int64) error {
-	sub, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if sub == nil {
-		return ErrNotFound
-	}
-	return s.remove(ctx, sub)
-}
-
 func (s *Service) remove(ctx context.Context, sub *Subtitle) error {
 	// A torrent subtitle's FilePath is a path inside the torrent, not on disk.
 	if sub.Source == SourceTorrent {
@@ -337,15 +317,6 @@ func (s *Service) CreateTorrentSubtitle(ctx context.Context, sub *Subtitle) erro
 	)
 
 	return nil
-}
-
-// Search searches for subtitles using the configured fetcher (legacy
-// GET /subtitles/search, unranked).
-func (s *Service) Search(ctx context.Context, params opensubtitles.SearchParams) (*opensubtitles.SearchResponse, error) {
-	if !s.IsConfigured() {
-		return nil, ErrNotConfigured
-	}
-	return s.fetcher.Search(ctx, params)
 }
 
 // writeTemp writes content to a synced temp file in dir (the final file's
