@@ -1,0 +1,117 @@
+{
+  "media_type": "tv",
+  "tmdb_id": 209867,
+  "title": "Frieren: Beyond Journey's End",
+  "original_title": "葬送のフリーレン",
+  "year": 2023,
+  "overview": "An elf mage outlives her party.",
+  "poster_path": "/frieren-poster.jpg",
+  "backdrop_path": "/frieren-backdrop.jpg",
+  "backdrop_dominant_color": "#2d5a4f",
+  "genres": [
+    "Animation",
+    "Sci-Fi \u0026 Fantasy"
+  ],
+  "vote_average": 8.8,
+  "vote_count": 900,
+  "original_language": "ja",
+  "cast": [
+    {
+      "name": "Atsumi Tanezaki",
+      "character": "Frieren",
+      "profile_path": "/at.jpg"
+    }
+  ],
+  "trailer_youtube_key": null,
+  "similar": [
+    {
+      "media_type": "tv",
+      "tmdb_id": 37854,
+      "title": "One Piece",
+      "year": 1999,
+      "poster_path": "/op.jpg",
+      "library": {
+        "library_id": 4,
+        "availability_stage": "ready",
+        "episodes_total": 1124,
+        "episodes_ready": 1124
+      }
+    },
+    {
+      "media_type": "tv",
+      "tmdb_id": 66573,
+      "title": "The Good Place",
+      "year": 2016,
+      "poster_path": null,
+      "library": null
+    }
+  ],
+  "library": {
+    "in_library": true,
+    "library_id": 3,
+    "added_at": "2026-09-01T10:00:00Z",
+    "availability_stage": "needs_torrent",
+    "webdav_path": "/TV Shows/Frieren- Beyond Journey's End (2023)/",
+    "webdav_url": "https://momoshtrem.local:36911/TV%20Shows/Frieren-%20Beyond%20Journey%27s%20End%20%282023%29/",
+    "download": {
+      "pct": 42,
+      "speed_bps": 0,
+      "eta_seconds": null,
+      "seeders": 41
+    },
+    "needs_review": 0,
+    "review_job_id": null,
+    "episodes_total": 38,
+    "episodes_ready": 28,
+    "missing": {
+      "season_number": 1,
+      "from": 29,
+      "to": 38,
+      "absolute_from": 29,
+      "absolute_to": 38,
+      "count": 10
+    },
+    "torrent": null
+  },
+  "watch_state": null,
+  "recommendation_reason": null,
+  "status": "Returning Series",
+  "is_anime": true,
+  "episode_ordering": "absolute",
+  "episode_group_id": null,
+  "include_specials": true,
+  "classifier_mode": "auto",
+  "creators": [
+    "Kanehito Yamada"
+  ],
+  "networks": [
+    "Nippon TV"
+  ],
+  "end_year": null,
+  "episode_run_time": 24,
+  "seasons": [
+    {
+      "season_number": 1,
+      "name": "Season 1",
+      "episodes_total": 38,
+      "ready": 28,
+      "missing": 10,
+      "needs_review": 0,
+      "upcoming": 0,
+      "absolute_from": 1,
+      "absolute_to": 38
+    },
+    {
+      "season_number": 0,
+      "name": "Specials",
+      "episodes_total": 2,
+      "ready": 0,
+      "missing": 1,
+      "needs_review": 0,
+      "upcoming": 1,
+      "absolute_from": null,
+      "absolute_to": null
+    }
+  ],
+  "default_season": 1
+}

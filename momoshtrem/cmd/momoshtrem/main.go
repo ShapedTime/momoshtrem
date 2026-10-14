@@ -18,6 +18,8 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/api"
+	"github.com/shapedtime/momoshtrem/internal/artwork"
+	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
@@ -326,8 +328,21 @@ func main() {
 	apiOpts.TMDB = cachedTMDB
 	// Adds and refreshes library metadata; rebuilds the WebDAV tree when a
 	// refresh renames an assigned episode.
-	apiOpts.Metadata = metadata.NewSyncer(cachedTMDB, movieRepo, showRepo, metadataRepo,
+	syncer := metadata.NewSyncer(cachedTMDB, movieRepo, showRepo, metadataRepo,
 		metadata.WithTreeInvalidator(libraryFS))
+	apiOpts.Metadata = syncer
+	// Title pages and /library: library rows, cached TMDB details, live
+	// torrent state and hero colours (computed in the background, cached in
+	// tmdb_cache).
+	heroColors := artwork.New(tmdbCache)
+	apiOpts.Catalog = catalog.New(catalog.Deps{
+		Store:           library.NewCatalogRepository(db),
+		TMDB:            cachedTMDB,
+		Torrents:        torrentService,
+		Colors:          heroColors,
+		Settings:        syncer,
+		WebDAVPublicURL: webdavPublicURL,
+	})
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
@@ -431,6 +446,9 @@ func main() {
 	if err := webdavHTTPServer.Shutdown(ctx); err != nil {
 		slog.Error("WebDAV server shutdown error", "error", err)
 	}
+
+	// Stop background colour computations
+	heroColors.Close()
 
 	// Stop activity manager
 	if activityManager != nil {

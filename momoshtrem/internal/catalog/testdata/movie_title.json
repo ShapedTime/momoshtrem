@@ -1,0 +1,85 @@
+{
+  "media_type": "movie",
+  "tmdb_id": 693134,
+  "title": "Dune: Part Two",
+  "original_title": null,
+  "year": 2024,
+  "overview": "Paul Atreides unites with the Fremen.",
+  "poster_path": "/dune-poster.jpg",
+  "backdrop_path": "/dune-backdrop.jpg",
+  "backdrop_dominant_color": "#7a4a22",
+  "genres": [
+    "Science Fiction",
+    "Adventure"
+  ],
+  "vote_average": 8.1,
+  "vote_count": 6000,
+  "original_language": "en",
+  "cast": [
+    {
+      "name": "Timothée Chalamet",
+      "character": "Paul Atreides",
+      "profile_path": "/tc.jpg"
+    },
+    {
+      "name": "Zendaya",
+      "character": "Chani",
+      "profile_path": null
+    }
+  ],
+  "trailer_youtube_key": "Way9Dexny3w",
+  "similar": [
+    {
+      "media_type": "movie",
+      "tmdb_id": 157336,
+      "title": "Interstellar",
+      "year": 2014,
+      "poster_path": "/interstellar.jpg",
+      "library": {
+        "library_id": 8,
+        "availability_stage": "downloading",
+        "episodes_total": null,
+        "episodes_ready": null
+      }
+    },
+    {
+      "media_type": "movie",
+      "tmdb_id": 438631,
+      "title": "Dune",
+      "year": 2021,
+      "poster_path": null,
+      "library": null
+    }
+  ],
+  "library": {
+    "in_library": true,
+    "library_id": 7,
+    "added_at": "2026-09-01T10:00:00Z",
+    "availability_stage": "ready",
+    "webdav_path": "/Movies/Dune- Part Two (2024)/Dune- Part Two (2024).mkv",
+    "webdav_url": "https://momoshtrem.local:36911/Movies/Dune-%20Part%20Two%20%282024%29/Dune-%20Part%20Two%20%282024%29.mkv",
+    "download": null,
+    "needs_review": 0,
+    "review_job_id": null,
+    "episodes_total": null,
+    "episodes_ready": null,
+    "missing": null,
+    "torrent": {
+      "info_hash": "4f1a2b3c4d5e6f708192a3b4c5d6e7f8091abe90",
+      "release_name": "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+      "file_name": "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv",
+      "size_bytes": 18400000000,
+      "resolution": "2160p",
+      "source": "WEB-DL",
+      "added_at": "2026-09-01T11:00:00Z",
+      "state": "idle",
+      "seeders": 12
+    }
+  },
+  "watch_state": null,
+  "recommendation_reason": null,
+  "runtime": 167,
+  "directors": [
+    "Denis Villeneuve"
+  ]
+}

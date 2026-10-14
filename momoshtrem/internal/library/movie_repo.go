@@ -135,6 +135,33 @@ func (r *MovieRepository) List() ([]*Movie, error) {
 	return movies, rows.Err()
 }
 
+// ListWithActiveAssignment returns every movie, by title, each with its
+// active assignment (Movie.Assignment, nil when none). One query.
+func (r *MovieRepository) ListWithActiveAssignment(ctx context.Context) ([]*Movie, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT `+movieColumns+`, `+assignmentColumns+`
+		FROM movies m
+		`+activeAssignmentLateral("movie", "m.id")+`
+		ORDER BY m.title
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list movies: %w", err)
+	}
+	defer rows.Close()
+
+	var movies []*Movie
+	for rows.Next() {
+		dest, finish := assignmentDest(ItemTypeMovie)
+		movie, err := scanMovie(rows, dest...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan movie: %w", err)
+		}
+		movie.Assignment = finish(movie.ID)
+		movies = append(movies, movie)
+	}
+	return movies, rows.Err()
+}
+
 // ListWithAssignments returns all movies that have active torrent assignments
 func (r *MovieRepository) ListWithAssignments() ([]*Movie, error) {
 	rows, err := r.db.Query(`

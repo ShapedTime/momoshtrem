@@ -443,6 +443,41 @@ func (s *service) GetDebugInfo(infoHash string) (*DebugInfo, error) {
 	}, nil
 }
 
+// FilesProgress returns per-file progress of a loaded torrent, without the
+// piece map GetDebugInfo builds.
+func (s *service) FilesProgress(infoHash string) (map[string]FileProgress, error) {
+	s.mu.RLock()
+	t, exists := s.torrents[infoHash]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrTorrentNotFound
+	}
+	if t.Info() == nil {
+		return map[string]FileProgress{}, nil
+	}
+
+	files := t.Files()
+	progress := make(map[string]FileProgress, len(files))
+	for _, f := range files {
+		progress[f.Path()] = FileProgress{Length: f.Length(), BytesCompleted: f.BytesCompleted()}
+	}
+	return progress, nil
+}
+
+// IsActive reports whether a torrent is loaded and not idle. Without an
+// activity manager, loaded torrents are always active.
+func (s *service) IsActive(infoHash string) bool {
+	s.mu.RLock()
+	_, exists := s.torrents[infoHash]
+	s.mu.RUnlock()
+
+	if !exists {
+		return false
+	}
+	return s.am == nil || !s.am.IsPaused(infoHash)
+}
+
 // torrentToInfo converts a torrent.Torrent to TorrentInfo.
 func (s *service) torrentToInfo(t *torrent.Torrent) *TorrentInfo {
 	info := t.Info()

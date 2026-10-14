@@ -60,6 +60,17 @@ type FullStats struct {
 	NumPieces         int   // Total piece count
 }
 
+// FileProgress is how much of one file of a torrent is on disk.
+type FileProgress struct {
+	Length         int64
+	BytesCompleted int64
+}
+
+// Complete reports whether every byte of the file is on disk.
+func (p FileProgress) Complete() bool {
+	return p.BytesCompleted >= p.Length
+}
+
 // DebugInfo contains detailed piece-level information for debugging torrent streaming.
 type DebugInfo struct {
 	InfoHash    string          `json:"info_hash"`
@@ -146,6 +157,16 @@ type Service interface {
 
 	// GetDebugInfo returns detailed piece-level debug information for a torrent.
 	GetDebugInfo(infoHash string) (*DebugInfo, error)
+
+	// FilesProgress returns how much of each file of a loaded torrent is on
+	// disk, keyed by path. It's cheap: no piece map. Returns
+	// ErrTorrentNotFound if the torrent is not loaded; the map is empty while
+	// the metadata is still arriving.
+	FilesProgress(infoHash string) (map[string]FileProgress, error)
+
+	// IsActive reports whether a torrent is loaded with its network on
+	// (not idled by the activity manager).
+	IsActive(infoHash string) bool
 
 	// Close shuts down the torrent service.
 	Close() error

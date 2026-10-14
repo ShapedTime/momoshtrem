@@ -1,0 +1,259 @@
+package catalog
+
+import "time"
+
+// The JSON shapes of PLAN §6 "Titles and library", field for field with
+// web/src/lib/api/contract/titles.ts and library.ts. Nullable fields are
+// pointers; lists are never null.
+
+// Stage is a title's availability_stage.
+type Stage string
+
+const (
+	StageNone         Stage = "none"
+	StageNeedsTorrent Stage = "needs_torrent"
+	StageDownloading  Stage = "downloading"
+	StageReady        Stage = "ready"
+)
+
+// EpisodeState is an episode's state on the title page.
+type EpisodeState string
+
+const (
+	EpisodeWatched     EpisodeState = "watched"      // B5
+	EpisodeReady       EpisodeState = "ready"        // has a file
+	EpisodeDownloading EpisodeState = "downloading"  // has a file being fetched
+	EpisodeMissing     EpisodeState = "missing"      // aired, no file
+	EpisodeUpcoming    EpisodeState = "upcoming"     // not aired, or no air date
+	EpisodeNeedsReview EpisodeState = "needs_review" // B2
+)
+
+// TorrentState is a movie torrent's state in the client.
+type TorrentState string
+
+const (
+	TorrentActive    TorrentState = "active"
+	TorrentIdle      TorrentState = "idle"
+	TorrentNotLoaded TorrentState = "not_loaded"
+)
+
+// WatchState comes from Trakt (B5); always null until then.
+type WatchState struct {
+	WatchedAt *time.Time     `json:"watched_at"`
+	Plays     int            `json:"plays"`
+	Rating    *int           `json:"rating"`
+	Progress  *WatchProgress `json:"progress,omitempty"`
+}
+
+// WatchProgress is a show's episodes watched of aired.
+type WatchProgress struct {
+	Completed int `json:"completed"`
+	Aired     int `json:"aired"`
+}
+
+// DownloadProgress is what's being fetched for a title.
+type DownloadProgress struct {
+	Pct        int   `json:"pct"`         // 0–100
+	SpeedBps   int64 `json:"speed_bps"`   // 0 until B6
+	ETASeconds *int  `json:"eta_seconds"` // null: torrents fetch on demand
+	Seeders    int   `json:"seeders"`
+}
+
+// TitleTorrent is a movie's assigned torrent.
+type TitleTorrent struct {
+	InfoHash    string       `json:"info_hash"`
+	ReleaseName string       `json:"release_name"`
+	FileName    string       `json:"file_name"`
+	SizeBytes   int64        `json:"size_bytes"`
+	Resolution  *string      `json:"resolution"`
+	Source      *string      `json:"source"`
+	AddedAt     time.Time    `json:"added_at"`
+	State       TorrentState `json:"state"`
+	Seeders     *int         `json:"seeders"` // null unless loaded
+}
+
+// MissingRun is the first run of the frontier: aired, unassigned regular
+// episodes after the last assigned one, within one season.
+type MissingRun struct {
+	SeasonNumber int  `json:"season_number"`
+	From         int  `json:"from"` // in-season episode numbers
+	To           int  `json:"to"`
+	AbsoluteFrom *int `json:"absolute_from"`
+	AbsoluteTo   *int `json:"absolute_to"`
+	Count        int  `json:"count"`
+}
+
+// TitleLibraryState is where a title is: not in the library, needs a
+// torrent, downloading or ready.
+type TitleLibraryState struct {
+	InLibrary         bool              `json:"in_library"`
+	LibraryID         *int64            `json:"library_id"`
+	AddedAt           *time.Time        `json:"added_at"`
+	AvailabilityStage Stage             `json:"availability_stage"`
+	WebDAVPath        *string           `json:"webdav_path"`
+	WebDAVURL         *string           `json:"webdav_url"`
+	Download          *DownloadProgress `json:"download"`
+	NeedsReview       int               `json:"needs_review"`
+	ReviewJobID       *int64            `json:"review_job_id"`
+	EpisodesTotal     *int              `json:"episodes_total"`
+	EpisodesReady     *int              `json:"episodes_ready"`
+	Missing           *MissingRun       `json:"missing"`
+	Torrent           *TitleTorrent     `json:"torrent"`
+}
+
+// CastMember is one credited actor.
+type CastMember struct {
+	Name        string  `json:"name"`
+	Character   string  `json:"character"`
+	ProfilePath *string `json:"profile_path"`
+}
+
+// SimilarLibrary is a similar title's place in the library.
+type SimilarLibrary struct {
+	LibraryID         int64 `json:"library_id"`
+	AvailabilityStage Stage `json:"availability_stage"`
+	EpisodesTotal     *int  `json:"episodes_total"`
+	EpisodesReady     *int  `json:"episodes_ready"`
+}
+
+// SimilarTitle is a "More like this" entry.
+type SimilarTitle struct {
+	MediaType  string          `json:"media_type"`
+	TMDBID     int             `json:"tmdb_id"`
+	Title      string          `json:"title"`
+	Year       *int            `json:"year"`
+	PosterPath *string         `json:"poster_path"`
+	Library    *SimilarLibrary `json:"library"`
+}
+
+// TitleBase is what movie and show titles share.
+type TitleBase struct {
+	MediaType             string            `json:"media_type"`
+	TMDBID                int               `json:"tmdb_id"`
+	Title                 string            `json:"title"`
+	OriginalTitle         *string           `json:"original_title"`
+	Year                  *int              `json:"year"`
+	Overview              string            `json:"overview"`
+	PosterPath            *string           `json:"poster_path"`
+	BackdropPath          *string           `json:"backdrop_path"`
+	BackdropDominantColor *string           `json:"backdrop_dominant_color"`
+	Genres                []string          `json:"genres"`
+	VoteAverage           *float64          `json:"vote_average"`
+	VoteCount             int               `json:"vote_count"`
+	OriginalLanguage      *string           `json:"original_language"`
+	Cast                  []CastMember      `json:"cast"`
+	TrailerYouTubeKey     *string           `json:"trailer_youtube_key"`
+	Similar               []SimilarTitle    `json:"similar"`
+	Library               TitleLibraryState `json:"library"`
+	WatchState            *WatchState       `json:"watch_state"`
+	RecommendationReason  *string           `json:"recommendation_reason"`
+}
+
+// MovieTitle is GET /titles/movie/{tmdb_id}.
+type MovieTitle struct {
+	TitleBase
+	Runtime   *int     `json:"runtime"`
+	Directors []string `json:"directors"`
+}
+
+// SeasonSummary is one season on a show's title page. For a show that isn't
+// in the library only EpisodesTotal is known.
+type SeasonSummary struct {
+	SeasonNumber  int    `json:"season_number"`
+	Name          string `json:"name"`
+	EpisodesTotal int    `json:"episodes_total"` // upcoming included
+	Ready         int    `json:"ready"`          // with a file
+	Missing       int    `json:"missing"`
+	NeedsReview   int    `json:"needs_review"`
+	Upcoming      int    `json:"upcoming"`
+	AbsoluteFrom  *int   `json:"absolute_from"`
+	AbsoluteTo    *int   `json:"absolute_to"`
+}
+
+// ShowTitle is GET /titles/tv/{tmdb_id}.
+type ShowTitle struct {
+	TitleBase
+	Status          *string         `json:"status"`
+	IsAnime         bool            `json:"is_anime"`
+	EpisodeOrdering string          `json:"episode_ordering"`
+	EpisodeGroupID  *string         `json:"episode_group_id"`
+	IncludeSpecials bool            `json:"include_specials"`
+	ClassifierMode  string          `json:"classifier_mode"`
+	Creators        []string        `json:"creators"`
+	Networks        []string        `json:"networks"`
+	EndYear         *int            `json:"end_year"`
+	EpisodeRunTime  *int            `json:"episode_run_time"`
+	Seasons         []SeasonSummary `json:"seasons"` // specials last
+	DefaultSeason   *int            `json:"default_season"`
+}
+
+// EpisodeSummary is one episode of GET /titles/tv/{id}/seasons/{n}.
+type EpisodeSummary struct {
+	ID             int64        `json:"id"`
+	SeasonNumber   int          `json:"season_number"`
+	EpisodeNumber  int          `json:"episode_number"`
+	AbsoluteNumber *int         `json:"absolute_number"`
+	Name           string       `json:"name"`
+	Overview       string       `json:"overview"`
+	AirDate        *string      `json:"air_date"`
+	StillPath      *string      `json:"still_path"`
+	Runtime        *int         `json:"runtime"`
+	EpisodeType    *string      `json:"episode_type"`
+	State          EpisodeState `json:"state"`
+	Pct            *int         `json:"pct"`         // while downloading
+	WebDAVPath     *string      `json:"webdav_path"` // while it has a file
+}
+
+// EpisodeRange is a jump target in a long season.
+type EpisodeRange struct {
+	Label        string `json:"label"`
+	Kind         string `json:"kind"` // "arc" or "block"
+	From         int    `json:"from"` // in-season episode numbers
+	To           int    `json:"to"`
+	AbsoluteFrom *int   `json:"absolute_from"`
+	AbsoluteTo   *int   `json:"absolute_to"`
+	Missing      int    `json:"missing"`
+}
+
+// SeasonDetail is GET /titles/tv/{tmdb_id}/seasons/{n}.
+type SeasonDetail struct {
+	SeasonNumber int              `json:"season_number"`
+	Name         string           `json:"name"`
+	Episodes     []EpisodeSummary `json:"episodes"`
+	Ranges       []EpisodeRange   `json:"ranges"`
+}
+
+// LibraryItem is one row of GET /library.
+type LibraryItem struct {
+	ID                int64      `json:"id"`
+	MediaType         string     `json:"media_type"`
+	TMDBID            int        `json:"tmdb_id"`
+	Title             string     `json:"title"`
+	Year              *int       `json:"year"`
+	PosterPath        *string    `json:"poster_path"`
+	AvailabilityStage Stage      `json:"availability_stage"`
+	EpisodesTotal     *int       `json:"episodes_total"`
+	EpisodesReady     *int       `json:"episodes_ready"`
+	EpisodesWatched   *int       `json:"episodes_watched"`
+	NeedsReview       int        `json:"needs_review"`
+	SizeBytes         int64      `json:"size_bytes"`
+	AddedAt           time.Time  `json:"added_at"`
+	LastWatchedAt     *time.Time `json:"last_watched_at"`
+}
+
+// LibraryPage is GET /library: a Paginated<LibraryItem>.
+type LibraryPage struct {
+	Items    []LibraryItem `json:"items"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
+}
+
+// EpisodeGroup is one entry of GET /shows/{id}/episode-groups.
+type EpisodeGroup struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Type         int    `json:"type"`
+	GroupCount   int    `json:"group_count"`
+	EpisodeCount int    `json:"episode_count"`
+}

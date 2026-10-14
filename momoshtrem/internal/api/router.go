@@ -54,8 +54,11 @@ type Options struct {
 	// those routes return 503.
 	Metadata *metadata.Syncer
 	// TMDB is the cached TMDB client, for routes that read TMDB data
-	// directly (title pages, episode groups).
+	// directly. Title pages and episode groups go through Catalog.
 	TMDB *tmdb.Cached
+	// Catalog serves the title pages, show settings and GET /library. Nil
+	// makes those routes return 503.
+	Catalog Catalog
 }
 
 // NewServer creates a new API server
@@ -199,6 +202,9 @@ func (s *Server) setupRoutes() {
 
 	// Status
 	api.GET("/status", s.getStatus)
+
+	s.registerTitleRoutes(api)   // Title pages, seasons, show settings and episode groups
+	s.registerLibraryRoutes(api) // GET /library
 }
 
 // Handler returns the HTTP handler
