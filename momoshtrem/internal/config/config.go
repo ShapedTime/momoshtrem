@@ -1,8 +1,11 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,12 +24,26 @@ type Config struct {
 	Subtitles     SubtitlesConfig     `yaml:"subtitles"`
 	AirDateSync   AirDateSyncConfig   `yaml:"airdate_sync"`
 	Metrics       MetricsConfig       `yaml:"metrics"`
+	Jackett       JackettConfig       `yaml:"jackett"`
+	AI            AIConfig            `yaml:"ai"`
+	Trakt         TraktConfig         `yaml:"trakt"`
+	Security      SecurityConfig      `yaml:"security"`
 }
 
 type ServerConfig struct {
 	HTTPPort   int              `yaml:"http_port"`
 	WebDAVPort int              `yaml:"webdav_port"`
 	WebDAVAuth WebDAVAuthConfig `yaml:"webdav_auth"`
+
+	// APIToken is the shared secret required in the X-Momoshtrem-Token header
+	// on every /api route. Empty disables the check (startup warning).
+	APIToken string `yaml:"api_token"`
+	// CORSAllowedOrigins lists browser origins allowed to call the REST API.
+	// Empty means no CORS headers at all (server-to-server only).
+	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
+	// WebDAVPublicURL is the address Infuse uses to reach WebDAV, e.g.
+	// https://momoshtrem.duckdns.org:36911/. Reported by /api/status.
+	WebDAVPublicURL string `yaml:"webdav_public_url"`
 }
 
 // WebDAVAuthConfig configures authentication for the WebDAV server
@@ -36,18 +53,18 @@ type WebDAVAuthConfig struct {
 	Password string `yaml:"password"` // Password for Basic Auth
 }
 
+// DatabaseConfig configures the Postgres connection.
 type DatabaseConfig struct {
-	Path string `yaml:"path"`
-	URL  string `yaml:"url"`
+	URL string `yaml:"url"` // Postgres connection string (required)
 }
 
 type TorrentConfig struct {
 	MetadataFolder       string `yaml:"metadata_folder"`
-	GlobalCacheSize      int64  `yaml:"global_cache_size"`       // MB
-	AddTimeout           int    `yaml:"add_timeout"`             // seconds
-	ReadTimeout          int    `yaml:"read_timeout"`            // seconds
+	GlobalCacheSize      int64  `yaml:"global_cache_size"` // MB
+	AddTimeout           int    `yaml:"add_timeout"`       // seconds
+	ReadTimeout          int    `yaml:"read_timeout"`      // seconds
 	IdleEnabled          bool   `yaml:"idle_enabled"`
-	IdleTimeout          int    `yaml:"idle_timeout"`            // seconds
+	IdleTimeout          int    `yaml:"idle_timeout"` // seconds
 	StartPaused          bool   `yaml:"start_paused"`
 	DropDuplicatePeerIds bool   `yaml:"drop_duplicate_peer_ids"` // Prevent duplicate peer connections
 	MaxUnverifiedMB      int64  `yaml:"max_unverified_mb"`       // Cap in-flight unverified data (MB, 0=unlimited)
@@ -97,6 +114,29 @@ type AirDateSyncConfig struct {
 	BatchDelayMs      int  `yaml:"batch_delay_ms"`      // Delay between batches in ms (default: 500)
 }
 
+// JackettConfig configures the Jackett Torznab indexer aggregator.
+type JackettConfig struct {
+	URL    string `yaml:"url"`     // e.g. http://jackett:9117
+	APIKey string `yaml:"api_key"` // From the Jackett dashboard
+}
+
+// AIConfig configures Anthropic-backed features. They are disabled when the
+// key is empty.
+type AIConfig struct {
+	AnthropicAPIKey string `yaml:"anthropic_api_key"`
+}
+
+// TraktConfig configures the read-only Trakt integration.
+type TraktConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+}
+
+// SecurityConfig holds keys used to protect data at rest.
+type SecurityConfig struct {
+	SecretKey string `yaml:"secret_key"` // AES-GCM key for encrypting tokens at rest
+}
+
 // DefaultConfig returns configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -108,8 +148,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Database: DatabaseConfig{
-			Path: "./data/momoshtrem.db",
-			URL:  "", // Set via DATABASE_URL env var or config.yaml
+			URL: "", // Required: DATABASE_URL env var or database.url in config.yaml
 		},
 		Torrent: TorrentConfig{
 			MetadataFolder:       "./data/torrents",
@@ -129,8 +168,8 @@ func DefaultConfig() *Config {
 		Streaming: StreamingConfig{
 			HeaderPriorityBytes: 10 * 1024 * 1024, // 10MB
 			FooterPriorityBytes: 5 * 1024 * 1024,  // 5MB
-			ReadaheadBytes:      64 * 1024 * 1024,  // 64MB
-			UrgentBufferBytes:   8 * 1024 * 1024,   // 8MB
+			ReadaheadBytes:      64 * 1024 * 1024, // 64MB
+			UrgentBufferBytes:   8 * 1024 * 1024,  // 8MB
 		},
 		OpenSubtitles: OpenSubtitlesConfig{},
 		Subtitles: SubtitlesConfig{
@@ -150,65 +189,153 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Load reads configuration from a YAML file
+// Load builds the configuration in three layers: defaults, then the optional
+// YAML file at path, then environment variables. Environment overrides are
+// applied whether or not the file exists, so a container can be configured
+// with env vars alone. The result is validated before it is returned.
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil // Use defaults if no config file
-		}
-		return nil, err
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, err
-	}
-
-	// Environment variable overrides
-	if envKey := os.Getenv("TMDB_API_KEY"); envKey != "" {
-		cfg.TMDB.APIKey = envKey
-	}
-
-	// WebDAV auth environment variable overrides
-	if envEnabled := os.Getenv("WEBDAV_AUTH_ENABLED"); envEnabled != "" {
-		cfg.Server.WebDAVAuth.Enabled = strings.ToLower(envEnabled) == "true"
-	}
-	if envUser := os.Getenv("WEBDAV_USERNAME"); envUser != "" {
-		cfg.Server.WebDAVAuth.Username = envUser
-	}
-	if envPass := os.Getenv("WEBDAV_PASSWORD"); envPass != "" {
-		cfg.Server.WebDAVAuth.Password = envPass
-	}
-
-	// Metrics environment variable overrides
-	if envEnabled := os.Getenv("METRICS_ENABLED"); envEnabled != "" {
-		cfg.Metrics.Enabled = strings.ToLower(envEnabled) == "true"
-	}
-	if envPort := os.Getenv("METRICS_PORT"); envPort != "" {
-		if port, err := strconv.Atoi(envPort); err == nil {
-			cfg.Metrics.Port = port
+	if path != "" {
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			if err := yaml.Unmarshal(data, cfg); err != nil {
+				return nil, fmt.Errorf("failed to parse config file %s: %w", path, err)
+			}
+		case errors.Is(err, fs.ErrNotExist):
+			slog.Info("Config file not found, using defaults and environment", "path", path)
+		default:
+			return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
 		}
 	}
 
-	// Database URL environment variable override
-	if envURL := os.Getenv("DATABASE_URL"); envURL != "" {
-		cfg.Database.URL = envURL
+	if err := applyEnv(cfg); err != nil {
+		return nil, err
 	}
+	cfg.Server.CORSAllowedOrigins = normalizeOrigins(cfg.Server.CORSAllowedOrigins)
 
-	// OpenSubtitles environment variable overrides
-	if envKey := os.Getenv("OPENSUBTITLES_API_KEY"); envKey != "" {
-		cfg.OpenSubtitles.APIKey = envKey
-	}
-	if envUser := os.Getenv("OPENSUBTITLES_USERNAME"); envUser != "" {
-		cfg.OpenSubtitles.Username = envUser
-	}
-	if envPass := os.Getenv("OPENSUBTITLES_PASSWORD"); envPass != "" {
-		cfg.OpenSubtitles.Password = envPass
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// applyEnv overrides cfg with any non-empty environment variables.
+// An empty variable means "not set" and leaves the file or default value alone.
+func applyEnv(cfg *Config) error {
+	// Server and REST API security
+	envString("BACKEND_API_TOKEN", &cfg.Server.APIToken)
+	envList("CORS_ALLOWED_ORIGINS", &cfg.Server.CORSAllowedOrigins)
+	envString("WEBDAV_PUBLIC_URL", &cfg.Server.WebDAVPublicURL)
+
+	// WebDAV auth
+	if err := envBool("WEBDAV_AUTH_ENABLED", &cfg.Server.WebDAVAuth.Enabled); err != nil {
+		return err
+	}
+	envString("WEBDAV_USERNAME", &cfg.Server.WebDAVAuth.Username)
+	envString("WEBDAV_PASSWORD", &cfg.Server.WebDAVAuth.Password)
+
+	// Database
+	envString("DATABASE_URL", &cfg.Database.URL)
+
+	// Metrics
+	if err := envBool("METRICS_ENABLED", &cfg.Metrics.Enabled); err != nil {
+		return err
+	}
+	if err := envPort("METRICS_PORT", &cfg.Metrics.Port); err != nil {
+		return err
+	}
+
+	// External services
+	envString("TMDB_API_KEY", &cfg.TMDB.APIKey)
+	envString("JACKETT_URL", &cfg.Jackett.URL)
+	envString("JACKETT_API_KEY", &cfg.Jackett.APIKey)
+	envString("ANTHROPIC_API_KEY", &cfg.AI.AnthropicAPIKey)
+	envString("TRAKT_CLIENT_ID", &cfg.Trakt.ClientID)
+	envString("TRAKT_CLIENT_SECRET", &cfg.Trakt.ClientSecret)
+	envString("SECRET_KEY", &cfg.Security.SecretKey)
+
+	// OpenSubtitles
+	envString("OPENSUBTITLES_API_KEY", &cfg.OpenSubtitles.APIKey)
+	envString("OPENSUBTITLES_USERNAME", &cfg.OpenSubtitles.Username)
+	envString("OPENSUBTITLES_PASSWORD", &cfg.OpenSubtitles.Password)
+
+	return nil
+}
+
+func envString(name string, dst *string) {
+	if v := os.Getenv(name); v != "" {
+		*dst = v
+	}
+}
+
+func envBool(name string, dst *bool) error {
+	v := os.Getenv(name)
+	if v == "" {
+		return nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return fmt.Errorf("invalid %s %q: want true or false", name, v)
+	}
+	*dst = b
+	return nil
+}
+
+func envPort(name string, dst *int) error {
+	v := os.Getenv(name)
+	if v == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("invalid %s %q: want a port number between 1 and 65535", name, v)
+	}
+	*dst = port
+	return nil
+}
+
+// envList parses a comma-separated variable, trimming spaces and dropping
+// empty entries.
+func envList(name string, dst *[]string) {
+	v := os.Getenv(name)
+	if v == "" {
+		return
+	}
+	*dst = splitList(v)
+}
+
+func splitList(v string) []string {
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// normalizeOrigins trims entries, drops empty ones and strips a trailing
+// slash, since browsers never send one in the Origin header.
+func normalizeOrigins(origins []string) []string {
+	var out []string
+	for _, o := range origins {
+		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		if o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// Validate reports configuration that would prevent the service from starting.
+func (c *Config) Validate() error {
+	if strings.TrimSpace(c.Database.URL) == "" {
+		return errors.New("DATABASE_URL is required (set the DATABASE_URL environment variable or database.url in the config file)")
+	}
+	return nil
 }
 
 // EnsureDirectories creates required directories
@@ -216,11 +343,6 @@ func (c *Config) EnsureDirectories() error {
 	dirs := []string{
 		c.Torrent.MetadataFolder,
 		c.Subtitles.DownloadPath,
-	}
-
-	// Only create SQLite directory if Path is configured
-	if c.Database.Path != "" {
-		dirs = append(dirs, filepath.Dir(c.Database.Path))
 	}
 
 	// Add VFS cache directory if configured
