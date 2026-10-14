@@ -1,0 +1,21 @@
+// Title pages (movie and show detail, PLAN F2). Generic over `Title`, so the show page reuses them.
+export { MovieDetail } from './MovieDetail';
+export { TitleHero } from './TitleHero';
+export { PrimaryPanel } from './PrimaryPanel';
+export { StageSteps } from './StageSteps';
+export { StageButton } from './StageButton';
+export type { StageActionHandler } from './StageButton';
+export { ActionDock } from './ActionDock';
+export { DetailsAside } from './DetailsAside';
+export { CastRow } from './CastRow';
+export { TrailerCard } from './TrailerCard';
+export { MoreLikeThis, titleHref } from './MoreLikeThis';
+export { CurrentTorrentPanel } from './CurrentTorrentPanel';
+export { SubtitlesPanel } from './SubtitlesPanel';
+export type { SubtitlesPanelProps, SubtitleSearchState } from './SubtitlesPanel';
+export { WatchStateLine, OnTraktCard } from './WatchState';
+export { WhyCard } from './WhyCard';
+export { TitleMoreMenu } from './TitleMoreMenu';
+export { ClampedText } from './ClampedText';
+export { BackButton } from './BackButton';
+export { TitleDetailSkeleton, TitleLoadError, isTitleNotFound } from './TitleStates';

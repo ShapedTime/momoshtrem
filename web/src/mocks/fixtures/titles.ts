@@ -1,4 +1,5 @@
 import type {
+  DownloadProgress,
   EpisodeRange,
   EpisodeState,
   EpisodeSummary,
@@ -14,6 +15,7 @@ import type {
   Timestamp,
   Title,
   TitleLibraryState,
+  TitleTorrent,
 } from '@/lib/api/contract';
 import { type CatalogEntry, findTitle, iso } from './catalog';
 import { MOVIES, type MovieSeed, type SeasonSeed, SHOWS, type ShowSeed, type TitleSeed } from './title-seeds';
@@ -41,6 +43,8 @@ export interface MockLibraryEntry {
   files: boolean;
   /** Shows: episodes whose file was unassigned. */
   unassigned: Set<number>;
+  /** Movies: a torrent assigned this session (the legacy add-torrent route); it starts downloading. */
+  assigned?: TitleTorrent;
   /** Shows. */
   settings: ShowSettings;
 }
@@ -301,21 +305,45 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
   };
 }
 
+/** A torrent assigned this session: loaded, nothing fetched yet. */
+const JUST_ADDED: DownloadProgress = { pct: 0, speed_bps: 0, eta_seconds: null, seeders: 12 };
+
 function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEntry | undefined): TitleLibraryState {
   if (!row) return notInLibrary();
-  const torrent = row.files ? (movie.torrent ?? null) : null;
+  const torrent = row.assigned ?? (row.files ? (movie.torrent ?? null) : null);
+  const download = row.assigned ? JUST_ADDED : torrent ? (movie.download ?? null) : null;
   const path = torrent ? moviePath(entry, torrent.file_name) : null;
   return {
     ...notInLibrary(),
     in_library: true,
     library_id: row.library_id,
     added_at: row.added_at,
-    availability_stage: !torrent ? 'needs_torrent' : movie.download ? 'downloading' : 'ready',
+    availability_stage: !torrent ? 'needs_torrent' : download ? 'downloading' : 'ready',
     webdav_path: path,
     webdav_url: webdavUrl(path),
-    download: torrent ? (movie.download ?? null) : null,
+    download,
     torrent,
   };
+}
+
+/** The legacy add-torrent route for a movie: assign a release by its magnet (dn = the release name). */
+export function assignMovieTorrent(row: MockLibraryEntry, magnetUri: string): TitleTorrent {
+  const params = new URLSearchParams(magnetUri.replace(/^magnet:\?/, ''));
+  const releaseName = params.get('dn') ?? 'Unnamed.Release.1080p';
+  const torrent: TitleTorrent = {
+    info_hash: (params.get('xt') ?? '').replace('urn:btih:', '').toLowerCase(),
+    release_name: releaseName,
+    file_name: `${releaseName}.mkv`,
+    size_bytes: 4_200_000_000,
+    resolution: /2160p/i.test(releaseName) ? '2160p' : /1080p/i.test(releaseName) ? '1080p' : null,
+    source: /bluray/i.test(releaseName) ? 'BluRay' : /web/i.test(releaseName) ? 'WEB-DL' : null,
+    added_at: new Date().toISOString(),
+    state: 'active',
+    seeders: 12,
+  };
+  row.assigned = torrent;
+  row.files = true;
+  return torrent;
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
@@ -429,7 +457,7 @@ export function itemRelease(library: MockLibrary, type: SubtitleItemType, id: nu
   if (type === 'movie') {
     const found = findByLibraryId(library, 'movie', id);
     if (!found) return undefined;
-    return found.row.files ? (MOVIES[found.entry.tmdb_id]?.torrent?.release_name ?? null) : null;
+    return found.row.files ? (found.row.assigned?.release_name ?? MOVIES[found.entry.tmdb_id]?.torrent?.release_name ?? null) : null;
   }
   const episode = findEpisode(id);
   if (!episode || !library.has(libraryKey('tv', episode.tmdbId))) return undefined;

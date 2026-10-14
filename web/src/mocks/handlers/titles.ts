@@ -90,6 +90,7 @@ export const titlesHandlers = [
     const found = findByLibraryId(library, 'movie', Number(params.id));
     if (!found) return notFound('No such movie');
     found.row.files = false;
+    found.row.assigned = undefined;
     return noContent();
   }),
   http.delete('*/api/episodes/:id/assign', ({ params }) => {

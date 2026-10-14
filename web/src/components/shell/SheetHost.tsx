@@ -9,10 +9,15 @@ export function SheetHost() {
   const { current, close, params } = useSheet();
   const definition = getSheet(current);
   if (!definition) return null;
+  const closeSheet = () => close(definition.params);
+  if (definition.Component) {
+    const { Component } = definition;
+    return <Component params={params} close={closeSheet} />;
+  }
   return (
     <Sheet
       open
-      onOpenChange={(open) => !open && close(definition.params)}
+      onOpenChange={(open) => !open && closeSheet()}
       title={definition.title}
       description={definition.description}
       size={definition.size}

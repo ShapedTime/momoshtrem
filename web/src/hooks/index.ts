@@ -1,7 +1,6 @@
 export {
   useTrending,
   useSearch,
-  useMovie,
   useTVShow,
   useSeason,
 } from './useTMDB';
@@ -14,7 +13,7 @@ export { useLibrary, useLibraryStatus, useRemoveFromLibrary } from './useLibrary
 
 export { useAddToLibrary, useAddTorrent, isShowResponse } from './useAddToLibrary';
 
-export { useTorrents, useTorrentStatus } from './useTorrents';
+export { useTorrents } from './useTorrents';
 
 export { useSubtitles, useSubtitleSearch } from './useSubtitles';
 

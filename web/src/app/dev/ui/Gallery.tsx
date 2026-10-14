@@ -60,7 +60,10 @@ import {
   useToast,
   WideSkeletons,
 } from '@/components/ui';
+import { PrimaryPanel } from '@/components/title';
 import { STATUS, type StatusKey } from '@/lib/status';
+import { primaryActionFor } from '@/lib/title/stage-copy';
+import { buildTitle } from '@/mocks/fixtures/titles';
 
 function Section({ id, title, subtitle, children }: { id: string; title: string; subtitle?: string; children: ReactNode }) {
   return (
@@ -114,6 +117,19 @@ const TYPE_SCALE = [
   ['t-micro', 'Micro · Integrations'],
   ['t-mono', 'Frieren.Beyond.Journeys.End.S01E29.1080p.WEB-DL.mkv'],
 ] as const;
+
+/** One movie per stage, from the mock fixtures (Past Lives, One Battle After Another, Interstellar, Dune: Part Two). */
+const PANEL_STAGES = (
+  [
+    ['none', 666277],
+    ['needs_torrent', 1054867],
+    ['downloading', 157336],
+    ['ready', 693134],
+  ] as const
+).flatMap(([label, tmdbId]) => {
+  const title = buildTitle('movie', tmdbId);
+  return title ? [[label, title] as const] : [];
+});
 
 export function Gallery() {
   const { toast } = useToast();
@@ -412,6 +428,16 @@ export function Gallery() {
           </Banner>
           <Banner tone="ready" title="Connection works" />
           <Banner tone="accent" title="Picked up where you left off" />
+        </div>
+      </Section>
+
+      <Section id="primary-panel" title="Primary panel" subtitle="The detail pages' state machine (HANDOFF §5.3): Add → Torrent → Download → Ready, with one next thing to do. On phone the buttons move to the action dock.">
+        <div className="grid gap-4 lg:grid-cols-2">
+          {PANEL_STAGES.map(([label, title]) => (
+            <Frame key={label} label={label}>
+              <PrimaryPanel copy={primaryActionFor(title)} onAction={() => toast({ tone: 'info', title: 'Stage action' })} titleName={title.title} />
+            </Frame>
+          ))}
         </div>
       </Section>
 

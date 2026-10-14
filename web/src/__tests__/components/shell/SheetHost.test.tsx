@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { SheetHost } from '@/components/shell/SheetHost';
-import { getSheet } from '@/lib/sheets/registry';
+import { getSheet, SHEETS, type SheetComponentProps } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
 
 const mockRouter = { push: jest.fn(), replace: jest.fn(), back: jest.fn() };
@@ -37,6 +37,25 @@ describe('SheetHost', () => {
     const { container } = render(<SheetHost />);
     expect(container).toBeEmptyDOMElement();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('lets a self-rendering sheet draw itself and close with its params', () => {
+    function EpisodeProbe({ params, close }: SheetComponentProps) {
+      return (
+        <button type="button" onClick={close}>
+          Episode {params.get('episode')}
+        </button>
+      );
+    }
+    SHEETS['probe'] = { params: ['episode'], Component: EpisodeProbe };
+    try {
+      mockSearch = 'sheet=probe&episode=29';
+      render(<SheetHost />);
+      fireEvent.click(screen.getByRole('button', { name: 'Episode 29' }));
+      expect(mockRouter.replace).toHaveBeenCalledWith('/library', { scroll: false });
+    } finally {
+      delete SHEETS['probe'];
+    }
   });
 });
 

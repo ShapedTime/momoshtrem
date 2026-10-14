@@ -19,12 +19,15 @@ interface TorrentSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   context: TorrentSearchContext;
+  /** After a torrent was added and assigned (e.g. to refetch the title). */
+  onAdded?: () => void;
 }
 
 export function TorrentSearchModal({
   isOpen,
   onClose,
   context,
+  onAdded,
 }: TorrentSearchModalProps) {
   // Search state
   const { results, isLoading, error, search, clearResults } = useTorrentSearch();
@@ -127,6 +130,7 @@ export function TorrentSearchModal({
         toast({ tone: 'error', title: addError || 'Failed to add torrent' });
         return;
       }
+      onAdded?.();
 
       // Handle response based on media type
       if (result.media_type === 'movie') {
@@ -159,7 +163,7 @@ export function TorrentSearchModal({
         }
       }
     },
-    [context.mediaType, context.tmdbId, context.title, addTorrent, addError, toast]
+    [context.mediaType, context.tmdbId, context.title, addTorrent, addError, toast, onAdded]
   );
 
   // Handle assignment results modal close
