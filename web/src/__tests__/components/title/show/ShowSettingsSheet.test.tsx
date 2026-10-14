@@ -99,7 +99,22 @@ describe('ShowSettingsSheet', () => {
     expect(patches[0]).toMatchObject({ episode_ordering: 'aired', episode_group_id: null });
   });
 
-  it('shows a 422 at the group picker and stays open', async () => {
+  it('Cancel closes without saving', async () => {
+    const { close, patches } = renderSheet();
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('switch', { name: 'Include specials' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(close).toHaveBeenCalled();
+    expect(patches).toEqual([]);
+  });
+
+  it('describes the specials switch', async () => {
+    renderSheet();
+    await screen.findByRole('dialog');
+    expect(screen.getByRole('switch', { name: 'Include specials' })).toHaveAccessibleDescription('Season 0: recaps, OVAs, mini anime');
+  });
+
+  it('shows a 422 at the group picker and stays open, until another ordering is picked', async () => {
     const { close } = renderSheet(422);
     await screen.findByRole('dialog');
     fireEvent.click(screen.getByRole('radio', { name: /TMDB episode group/ }));
@@ -107,5 +122,23 @@ describe('ShowSettingsSheet', () => {
     expect(await screen.findByText('Pick an episode group for this ordering.')).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Episode group' })).toHaveAttribute('aria-invalid', 'true');
     expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('radio', { name: /^Aired/ }));
+    await waitFor(() => expect(screen.queryByText('Pick an episode group for this ordering.')).not.toBeInTheDocument());
+  });
+
+  it('says when the show’s settings didn’t load, and retries', async () => {
+    global.fetch = jest.fn(() => Promise.resolve(answer(500, { error: { code: 'internal_error', message: 'Database is locked.' } }))) as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ShowSettingsSheet params={new URLSearchParams('sheet=show-settings&tmdb=209867')} close={jest.fn()} />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t load the show’s settings');
+    expect(screen.queryByText(/Add the show to your library/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
   });
 });

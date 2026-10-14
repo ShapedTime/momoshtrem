@@ -30,6 +30,7 @@ interface EpisodesSectionProps {
 }
 
 const LIST_ID = 'season-episodes';
+const PANEL_ID = 'season-panel';
 
 function SeasonEpisodes({ show, season, onFindEpisode, onOpenEpisode }: Pick<EpisodesSectionProps, 'show' | 'season' | 'onFindEpisode' | 'onOpenEpisode'>) {
   if (season.status === 'pending') {
@@ -84,8 +85,7 @@ export function EpisodesSection(props: EpisodesSectionProps) {
   const inLibrary = show.library.in_library;
   const summary = inLibrary ? episodesSummary(show) : null;
   const selected = show.seasons.find((s) => s.season_number === seasonNumber);
-  const episodes = inLibrary && season.status === 'success' ? season.season.episodes : [];
-  const firstMissing = episodes.find((episode) => episode.state === 'missing');
+  const firstMissing = inLibrary && season.status === 'success' ? season.season.episodes.find((episode) => episode.state === 'missing') : undefined;
 
   return (
     <section className="section" aria-labelledby="episodes-h">
@@ -106,13 +106,13 @@ export function EpisodesSection(props: EpisodesSectionProps) {
         )}
       </div>
       {inLibrary && <NeedsReviewBanner count={show.library.needs_review} jobId={show.library.review_job_id} />}
-      {selected && <SeasonTabs seasons={show.seasons} value={selected.season_number} onChange={onSeasonChange} controls={episodes.length ? LIST_ID : undefined} />}
+      {selected && <SeasonTabs seasons={show.seasons} value={selected.season_number} onChange={onSeasonChange} controls={inLibrary ? PANEL_ID : undefined} />}
       {!inLibrary ? (
         <EmptyState cat="peek" title="Add it to see what’s ready">
           Once it’s in your library, each episode shows whether it’s ready, downloading or missing.
         </EmptyState>
       ) : selected ? (
-        <>
+        <div role="tabpanel" id={PANEL_ID} aria-label={seasonLabel(selected)} className="flex flex-col gap-4">
           {tools}
           <BulkFind
             missing={selected.missing}
@@ -121,7 +121,7 @@ export function EpisodesSection(props: EpisodesSectionProps) {
             onFindMissing={() => (firstMissing ? onFindEpisode(firstMissing) : onFindSeason(selected.season_number))}
           />
           <SeasonEpisodes {...props} />
-        </>
+        </div>
       ) : (
         <p className="t-small text-fg-3">TMDB lists no seasons for this show yet.</p>
       )}

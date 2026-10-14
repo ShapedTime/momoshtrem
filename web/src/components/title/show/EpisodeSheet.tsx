@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCw, Search, Trash2 } from 'lucide-react';
-import { Button, CopyField, FilePath, LoadingRegion, Sheet, Skeleton, SkeletonText, StatusPill } from '@/components/ui';
+import { Banner, Button, CopyField, FilePath, LoadingRegion, Sheet, Skeleton, SkeletonText, StatusPill } from '@/components/ui';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
 import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { useRemoveEpisodeFile } from '@/hooks/useTitle';
@@ -95,18 +95,36 @@ export function EpisodeSheet({ params, close }: SheetComponentProps) {
   const show = showQuery.data?.media_type === 'tv' ? showQuery.data : undefined;
   const seasonResult = useQuery({ ...seasonQuery(tmdbId, code?.season ?? 0), enabled: valid && Boolean(show?.library.in_library) });
   const episode = seasonResult.data?.episodes.find((e) => e.episode_number === code?.episode);
-  const loading = valid && (showQuery.isPending || (Boolean(show?.library.in_library) && seasonResult.isPending));
+  const failed = showQuery.isError || seasonResult.isError;
+  const loading = valid && !failed && (showQuery.isPending || (Boolean(show?.library.in_library) && seasonResult.isPending));
   const label = code ? episodeCode(code.season, code.episode) : 'Episode';
+  const retry = () => {
+    if (showQuery.isError) void showQuery.refetch();
+    if (seasonResult.isError) void seasonResult.refetch();
+  };
 
   return (
     <Sheet
       open
       onOpenChange={(open) => !open && close()}
-      title={episode?.name ?? label}
+      title={episode?.name || label}
       description={show ? `${show.title} · ${label}` : undefined}
       size="narrow"
     >
-      {loading ? (
+      {failed ? (
+        <Banner
+          tone="error"
+          role="alert"
+          title="Couldn’t load this episode"
+          action={
+            <Button size="sm" onClick={retry}>
+              <RefreshCw size={15} aria-hidden="true" /> Try again
+            </Button>
+          }
+        >
+          {(showQuery.error ?? seasonResult.error)?.message}
+        </Banner>
+      ) : loading ? (
         <LoadingRegion label="Loading the episode" className="flex flex-col gap-4">
           <Skeleton shape="line" width={120} />
           <SkeletonText lines={3} />

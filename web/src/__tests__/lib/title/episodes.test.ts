@@ -33,11 +33,12 @@ describe('selectedSeason', () => {
 });
 
 describe('labels', () => {
-  it('shows absolute numbers with the code for absolute ordering only', () => {
+  it('shows absolute numbers with the code for absolute ordering, unless they match the in-season number', () => {
     const episode = { season_number: 22, episode_number: 15, absolute_number: 1100 };
     expect(episodeLabel(episode, 'absolute')).toBe('#1100 · S22E15');
     expect(episodeLabel(episode, 'aired')).toBe('S22E15');
     expect(episodeLabel({ ...episode, absolute_number: null }, 'absolute')).toBe('S22E15');
+    expect(episodeLabel({ season_number: 1, episode_number: 29, absolute_number: 29 }, 'absolute')).toBe('S01E29');
   });
 
   it('names seasons: Specials, TMDB’s name, or Season N', () => {
@@ -53,8 +54,9 @@ describe('labels', () => {
     expect(parseEpisodeCode(null)).toBeNull();
   });
 
-  it('sums up what is ready', () => {
+  it('sums up what is ready, naming absolute numbering only when it differs from in-season numbers', () => {
     expect(episodesSummary(show(95396))).toMatch(/^\d+ of \d+ ready$/);
+    expect(episodesSummary(show(209867))).toMatch(/^\d+ of 38 ready$/);
     expect(episodesSummary(show(37854))).toMatch(/^Absolute numbering · [\d,]+ episodes · [\d,]+ ready$/);
     expect(episodesSummary(show(66573))).toBeNull();
   });

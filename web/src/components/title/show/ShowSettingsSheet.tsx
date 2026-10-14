@@ -2,6 +2,7 @@
 
 import { type FormEvent, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { RefreshCw } from 'lucide-react';
 import { Banner, Button, LoadingRegion, Select, Sheet, Skeleton, SkeletonText, Switch, useToast } from '@/components/ui';
 import { isApiError } from '@/lib/api/client';
 import type { ClassifierMode, EpisodeOrdering, ShowSettingsPatch, ShowTitle } from '@/lib/api/contract';
@@ -36,9 +37,11 @@ interface FormProps {
   /** A 422 (no valid group for group ordering) shows at the group picker; anything else above the buttons. */
   error: { field: string | null; form: string | null };
   onSubmit: (patch: ShowSettingsPatch) => void;
+  /** Another ordering: an earlier error no longer applies. */
+  onOrderingChange: () => void;
 }
 
-function ShowSettingsForm({ show, formId, error, onSubmit }: FormProps) {
+function ShowSettingsForm({ show, formId, error, onSubmit, onOrderingChange }: FormProps) {
   const ids = useId();
   const [ordering, setOrdering] = useState(show.episode_ordering);
   const [groupId, setGroupId] = useState(show.episode_group_id ?? '');
@@ -64,7 +67,10 @@ function ShowSettingsForm({ show, formId, error, onSubmit }: FormProps) {
               name={`${ids}-ordering`}
               value={option.value}
               checked={ordering === option.value}
-              onChange={() => setOrdering(option.value)}
+              onChange={() => {
+                setOrdering(option.value);
+                onOrderingChange();
+              }}
             />
             <span className="flex flex-col gap-1">
               <span className="font-semibold">{option.label}</span>
@@ -97,7 +103,7 @@ function ShowSettingsForm({ show, formId, error, onSubmit }: FormProps) {
             Season 0: recaps, OVAs, mini anime
           </span>
         </div>
-        <Switch id={`${ids}-specials`} checked={includeSpecials} onCheckedChange={setIncludeSpecials} />
+        <Switch id={`${ids}-specials`} describedBy={`${ids}-specials-help`} checked={includeSpecials} onCheckedChange={setIncludeSpecials} />
       </div>
 
       <Select
@@ -172,7 +178,20 @@ export function ShowSettingsSheet({ params, close }: SheetComponentProps) {
         )
       }
     >
-      {valid && query.isPending ? (
+      {query.isError ? (
+        <Banner
+          tone="error"
+          role="alert"
+          title="Couldn’t load the show’s settings"
+          action={
+            <Button size="sm" onClick={() => void query.refetch()}>
+              <RefreshCw size={15} aria-hidden="true" /> Try again
+            </Button>
+          }
+        >
+          {query.error.message}
+        </Banner>
+      ) : valid && query.isPending ? (
         <LoadingRegion label="Loading the show’s settings" className="flex flex-col gap-3">
           <Skeleton shape="line" width={120} />
           {[0, 1, 2].map((i) => (
@@ -181,7 +200,13 @@ export function ShowSettingsSheet({ params, close }: SheetComponentProps) {
           <SkeletonText lines={2} />
         </LoadingRegion>
       ) : show && libraryId !== null ? (
-        <ShowSettingsForm show={show} formId={formId} error={error} onSubmit={(patch) => save.mutate(patch)} />
+        <ShowSettingsForm
+          show={show}
+          formId={formId}
+          error={error}
+          onSubmit={(patch) => save.mutate(patch)}
+          onOrderingChange={() => save.reset()}
+        />
       ) : (
         <p className="text-fg-2">Add the show to your library to choose how its episodes are numbered and matched.</p>
       )}

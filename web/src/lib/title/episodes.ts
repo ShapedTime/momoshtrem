@@ -13,10 +13,22 @@ export function parseEpisodeCode(code: string | null): { season: number; episode
   return match ? { season: Number(match[1]), episode: Number(match[2]) } : null;
 }
 
-/** "#1100 · S22E15" with absolute ordering (when the episode has a number), else "S22E15". */
+/**
+ * "#1100 · S22E15" with absolute ordering, else "S22E15". The absolute number
+ * is left out where it's the in-season one anyway (Frieren S01E29 is #29).
+ */
 export function episodeLabel(episode: Pick<EpisodeSummary, 'season_number' | 'episode_number' | 'absolute_number'>, ordering: EpisodeOrdering): string {
   const code = episodeCode(episode.season_number, episode.episode_number);
-  return ordering === 'absolute' && episode.absolute_number !== null ? `#${episode.absolute_number} · ${code}` : code;
+  const absolute = episode.absolute_number;
+  return ordering === 'absolute' && absolute !== null && absolute !== episode.episode_number ? `#${absolute} · ${code}` : code;
+}
+
+/** Absolute ordering where some season's numbers run on from earlier ones (One Piece's #1086 is S22E01). */
+export function showsAbsoluteNumbers(show: Pick<ShowTitle, 'episode_ordering' | 'seasons'>): boolean {
+  return (
+    show.episode_ordering === 'absolute' &&
+    show.seasons.some((season) => season.season_number > 0 && season.absolute_from !== null && season.absolute_from !== 1)
+  );
 }
 
 /** Tab label: "Specials", TMDB's name ("Wano Country"), or "Season 3". */
@@ -43,11 +55,11 @@ export function nextUpEpisodeId(show: Pick<ShowTitle, 'library'>, seasonNumber: 
   return episodes.find((episode) => episode.episode_number === missing.from)?.id ?? null;
 }
 
-/** "28 of 38 ready", or "Absolute numbering · 1,124 episodes · 1,088 ready". */
-export function episodesSummary(show: Pick<ShowTitle, 'episode_ordering' | 'library'>): string | null {
+/** "28 of 38 ready", or "Absolute numbering · 1,124 episodes · 1,088 ready" when the numbers run across seasons. */
+export function episodesSummary(show: Pick<ShowTitle, 'episode_ordering' | 'seasons' | 'library'>): string | null {
   const { episodes_total: total, episodes_ready: ready } = show.library;
   if (total === null || ready === null) return null;
-  if (show.episode_ordering === 'absolute') {
+  if (showsAbsoluteNumbers(show)) {
     return `Absolute numbering · ${total.toLocaleString('en-US')} episodes · ${ready.toLocaleString('en-US')} ready`;
   }
   return `${ready.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ready`;

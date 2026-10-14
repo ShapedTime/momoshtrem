@@ -29,7 +29,7 @@ test.describe('show page', () => {
     await expect(page.getByRole('heading', { name: FRIEREN, level: 1 })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Episodes 29–38 have no torrent' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Find episodes 29–38' })).toBeVisible();
-    await expect(page.getByText('Absolute numbering · 38 episodes')).toBeVisible();
+    await expect(page.getByText(/^\d+ of 38 ready$/)).toBeVisible();
 
     await expect(seasons(page).getByRole('tab')).toHaveText([/^Season 1\s*38$/, /^Specials\s*6$/]);
     await expect(seasons(page).getByRole('tab', { name: /Season 1/ })).toHaveAttribute('aria-selected', 'true');
@@ -41,6 +41,9 @@ test.describe('show page', () => {
     const next = list.locator('.eprow.is-next');
     await expect(next).toContainText('Up next');
     await expect(next).toContainText('Let’s Go Somewhere We Can’t Reach');
+    // Absolute numbers that match the in-season ones aren't repeated
+    await expect(next).toContainText('S01E29');
+    await expect(next).not.toContainText('#29');
     await expect(list.getByRole('link', { name: 'Review the mapping for S01E26' })).toHaveAttribute('href', '/mapping/101');
     await expectAccessibleAndContained(page);
 
@@ -98,6 +101,31 @@ test.describe('show page', () => {
     await expect(toast(page, 'Removed the file from S01E28')).toBeVisible();
     await expect(sheet).toBeHidden();
     await expect(page.getByRole('region', { name: 'Episodes 28–38 have no torrent' })).toBeVisible();
+  });
+
+  test('the episode sheet closes with Escape and with Back, and hands Replace to the search', async ({ page }) => {
+    await signIn(page, '/tv/209867');
+    const options = page.getByRole('button', { name: /^S01E28 options/ });
+    const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again' });
+
+    await options.click();
+    await expect(sheet).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+    await expect(page).toHaveURL(/\/tv\/209867$/);
+
+    await options.click();
+    await expect(sheet).toBeVisible();
+    await page.goBack();
+    await expect(sheet).toBeHidden();
+    await expect(page).toHaveURL(/\/tv\/209867$/);
+
+    await options.click();
+    await sheet.getByRole('button', { name: 'Replace torrent' }).click();
+    await expect(sheet).toBeHidden();
+    const search = page.getByRole('dialog', { name: `Search: ${FRIEREN} S01E28` });
+    await expect(search).toBeVisible();
+    await expect(search.getByRole('searchbox', { name: 'Search torrents' })).toHaveValue(`${FRIEREN} S01E28`);
   });
 
   test('Doctor Who opens on its specials with ?season=0', async ({ page }) => {

@@ -1,7 +1,8 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useOverArt } from '@/components/shell/ShellContext';
 import { NotFoundView } from '@/components/system/NotFoundView';
@@ -9,7 +10,7 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { DOWNLOAD_POLL_MS, useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
-import { seasonQuery } from '@/lib/api/endpoints';
+import { seasonQuery, titleKeys } from '@/lib/api/endpoints';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { selectedSeason } from '@/lib/title/episodes';
 import { titleFacts } from '@/lib/title/facts';
@@ -28,13 +29,27 @@ import { isTitleNotFound, TitleDetailSkeleton, TitleLoadError } from './TitleSta
 import { TrailerCard } from './TrailerCard';
 import { OnTraktCard } from './WatchState';
 
-/** The selected season, polled while one of its episodes downloads. */
+/**
+ * The selected season, polled while one of its episodes downloads. When a
+ * poll sees an episode change state (a download finished), the show is
+ * refetched too, so the panel, header and tab counts keep up.
+ */
 function useSeasonState(show: ShowTitle, seasonNumber: number | null): SeasonState {
+  const queryClient = useQueryClient();
   const query = useQuery({
     ...seasonQuery(show.tmdb_id, seasonNumber ?? 0),
     enabled: show.library.in_library && seasonNumber !== null,
     refetchInterval: (q) => (q.state.data?.episodes.some((episode) => episode.state === 'downloading') ? DOWNLOAD_POLL_MS : false),
   });
+  const states = query.data ? `${query.data.season_number}:${query.data.episodes.map((episode) => episode.state).join(',')}` : null;
+  const previous = useRef(states);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = states;
+    if (!before || !states || before === states || before.split(':')[0] !== states.split(':')[0]) return;
+    // Exact: the season itself just loaded
+    void queryClient.invalidateQueries({ queryKey: titleKeys.detail('tv', show.tmdb_id), exact: true });
+  }, [states, queryClient, show.tmdb_id]);
   if (query.isPending) return { status: 'pending' };
   if (query.isError) return { status: 'error', message: query.error.message, retry: () => void query.refetch() };
   return { status: 'success', season: query.data };
