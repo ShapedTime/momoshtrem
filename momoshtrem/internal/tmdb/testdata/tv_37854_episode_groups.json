@@ -1,0 +1,8 @@
+{
+  "results": [
+    {"id": "5a65aedcc3a3683c2b00f9dd", "name": "Absolute Order", "description": "Episodes in absolute order", "type": 2, "group_count": 1, "episode_count": 1100, "network": null},
+    {"id": "5b1f6ff4925141523f00d2bb", "name": "Story Arcs", "description": "", "type": 5, "group_count": 32, "episode_count": 1100, "network": null},
+    {"id": "60f1f1f1f1f1f1f1f1f1f1f1", "name": "Absolute (old)", "description": "", "type": 2, "group_count": 1, "episode_count": 900, "network": {"id": 1, "name": "Fuji TV", "logo_path": null, "origin_country": "JP"}}
+  ],
+  "id": 37854
+}

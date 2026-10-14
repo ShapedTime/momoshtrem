@@ -8,6 +8,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -22,7 +23,6 @@ type Server struct {
 	movieRepo       *library.MovieRepository
 	showRepo        *library.ShowRepository
 	assignmentRepo  *library.AssignmentRepository
-	tmdbClient      *tmdb.Client
 	torrentService  torrent.Service // Optional: nil until Stage 2 implementation
 	identifier      *identify.Identifier
 	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
@@ -34,7 +34,6 @@ type Server struct {
 	opts Options
 
 	// Business logic services
-	showService           *service.ShowService
 	showAssignmentService *service.ShowAssignmentService
 }
 
@@ -51,6 +50,12 @@ type Options struct {
 	Status StatusReporter
 	// Settings is the app_settings store, for the settings routes (B4, R2).
 	Settings *library.SettingsRepository
+	// Metadata adds and refreshes movies and shows from TMDB. Nil makes
+	// those routes return 503.
+	Metadata *metadata.Syncer
+	// TMDB is the cached TMDB client, for routes that read TMDB data
+	// directly (title pages, episode groups).
+	TMDB *tmdb.Cached
 }
 
 // NewServer creates a new API server
@@ -58,7 +63,6 @@ func NewServer(
 	movieRepo *library.MovieRepository,
 	showRepo *library.ShowRepository,
 	assignmentRepo *library.AssignmentRepository,
-	tmdbClient *tmdb.Client,
 	torrentService torrent.Service, // Can be nil until Stage 2
 	treeUpdater vfs.TreeUpdater, // Optional: updates VFS tree on assignment changes
 	opts Options,
@@ -72,15 +76,11 @@ func NewServer(
 		movieRepo:      movieRepo,
 		showRepo:       showRepo,
 		assignmentRepo: assignmentRepo,
-		tmdbClient:     tmdbClient,
 		torrentService: torrentService,
 		identifier:     identifier,
 		treeUpdater:    treeUpdater,
 		opts:           opts,
 	}
-
-	// Initialize business logic services
-	s.showService = service.NewShowService(showRepo, tmdbClient)
 
 	// Build assignment service with optional dependencies
 	var assignmentOpts []service.AssignmentServiceOption
@@ -165,6 +165,7 @@ func (s *Server) setupRoutes() {
 	api.POST("/movies", s.createMovie)
 	api.GET("/movies/:id", s.getMovie)
 	api.DELETE("/movies/:id", s.deleteMovie)
+	api.POST("/movies/:id/refresh", s.refreshMovie)              // Re-fetch metadata from TMDB
 	api.POST("/movies/:id/assign-torrent", s.assignMovieTorrent) // Auto-detect movie file
 	api.DELETE("/movies/:id/assign", s.unassignMovieTorrent)
 

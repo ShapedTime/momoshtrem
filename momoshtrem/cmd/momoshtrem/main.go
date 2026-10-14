@@ -20,6 +20,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/status"
@@ -34,12 +35,40 @@ import (
 // version is set at build time with -ldflags "-X main.version=<version>".
 var version = "dev"
 
+// backfillCommand is the subcommand that writes TMDB metadata onto an
+// existing library.
+const backfillCommand = "backfill-metadata"
+
 func main() {
 	startedAt := time.Now()
 
 	// Parse command line flags
 	configPath := flag.String("config", "config.yaml", "Path to configuration file")
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintf(out, "Usage: %s [-config path] [command]\n\n", os.Args[0])
+		fmt.Fprintf(out, "Without a command, runs the server. Commands:\n")
+		fmt.Fprintf(out, "  %s  write TMDB metadata onto movies and shows added before it existed\n", backfillCommand)
+		fmt.Fprintf(out, "                     (%s -h for its flags)\n\nFlags:\n", backfillCommand)
+		flag.PrintDefaults()
+	}
 	flag.Parse()
+
+	command := flag.Arg(0)
+	var backfill backfillFlags
+	switch command {
+	case "":
+	case backfillCommand:
+		var code int
+		var ok bool
+		if backfill, code, ok = parseBackfillFlags(flag.Args()[1:]); !ok {
+			os.Exit(code)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	// Setup structured logging
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -47,13 +76,34 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	slog.Info("Starting momoshtrem", "version", version, "config", *configPath)
+	slog.Info("Starting momoshtrem", "version", version, "config", *configPath, "command", command)
 
 	// Load configuration (defaults → config file if present → env)
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
+	}
+
+	// Initialize database (and run migrations)
+	db, err := library.NewDB(cfg.Database.URL)
+	if err != nil {
+		slog.Error("Failed to open database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	slog.Info("Database initialized",
+		"driver", "postgres",
+		"host", dsnHost(cfg.Database.URL),
+		"from_env", os.Getenv("DATABASE_URL") != "",
+	)
+
+	// Subcommands branch off here, before torrent storage: the running
+	// server holds its bolt locks, so `docker compose run` must not touch it.
+	if command == backfillCommand {
+		code := runBackfill(cfg, db, backfill)
+		db.Close()
+		os.Exit(code)
 	}
 
 	apiOpts := api.Options{
@@ -68,35 +118,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize database
-	db, err := library.NewDB(cfg.Database.URL)
-	if err != nil {
-		slog.Error("Failed to open database", "error", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-	slog.Info("Database initialized",
-		"driver", "postgres",
-		"host", dsnHost(cfg.Database.URL),
-		"from_env", os.Getenv("DATABASE_URL") != "",
-	)
-
 	// Initialize repositories
 	movieRepo := library.NewMovieRepository(db)
 	showRepo := library.NewShowRepository(db)
 	assignmentRepo := library.NewAssignmentRepository(db)
 	syncMetaRepo := library.NewSyncMetadataRepository(db)
 	settingsRepo := library.NewSettingsRepository(db)
+	metadataRepo := library.NewMetadataRepository(db)
 
-	// Initialize TMDB client
-	var tmdbClient *tmdb.Client
-	if cfg.TMDB.APIKey != "" {
-		tmdbClient = tmdb.NewClient(cfg.TMDB.APIKey)
-		slog.Info("TMDB client initialized")
-	} else {
+	// Initialize TMDB: the client, and the Postgres-backed cache every
+	// metadata reader goes through. Without a key, calls fail with
+	// tmdb.ErrNoAPIKey (503 from the API).
+	if cfg.TMDB.APIKey == "" {
 		slog.Warn("TMDB API key not configured, some features will be unavailable")
-		tmdbClient = tmdb.NewClient("") // Empty client will fail on API calls
 	}
+	tmdbClient := tmdb.NewClient(cfg.TMDB.APIKey,
+		tmdb.WithLanguage(cfg.TMDB.Language),
+		tmdb.WithRateLimit(float64(cfg.TMDB.RPS)),
+	)
+	cachedTMDB := tmdb.NewCached(tmdbClient, library.NewTMDBCacheRepository(db))
+	slog.Info("TMDB client initialized", "language", cfg.TMDB.Language, "rps", cfg.TMDB.RPS)
 
 	// Initialize torrent storage
 	pieceStorage, _, pieceCompletion, err := torrent.InitStorage(
@@ -269,15 +310,20 @@ func main() {
 	}
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
+	apiOpts.TMDB = cachedTMDB
+	// Adds and refreshes library metadata; rebuilds the WebDAV tree when a
+	// refresh renames an assigned episode.
+	apiOpts.Metadata = metadata.NewSyncer(cachedTMDB, movieRepo, showRepo, metadataRepo,
+		metadata.WithTreeInvalidator(libraryFS))
 
 	// Initialize servers with torrent service and tree updater
-	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, tmdbClient, torrentService, libraryFS, apiOpts)
+	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
 	apiServer.SetReaderTracker(readerTracker)
 
 	// Initialize air date sync service
 	var airDateSync *airdate.SyncService
 	if cfg.AirDateSync.Enabled && cfg.TMDB.APIKey != "" {
-		airDateSync = airdate.NewSyncService(cfg.AirDateSync, showRepo, syncMetaRepo, tmdbClient)
+		airDateSync = airdate.NewSyncService(cfg.AirDateSync, showRepo, syncMetaRepo, cachedTMDB)
 		airDateSync.Start()
 		apiServer.SetAirDateSyncService(airDateSync)
 		slog.Info("Air date sync service initialized",

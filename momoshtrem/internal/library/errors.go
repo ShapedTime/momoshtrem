@@ -10,4 +10,7 @@ var (
 	ErrTorrentServiceUnavailable = errors.New("torrent service not available")
 	ErrNoVideoFiles              = errors.New("no video files found in torrent")
 	ErrTMDBFetch                 = errors.New("failed to fetch from TMDB")
+	// ErrInvalidShowSettings is returned for an unknown episode ordering or
+	// classifier mode. The API maps it to 422.
+	ErrInvalidShowSettings = errors.New("invalid show settings")
 )

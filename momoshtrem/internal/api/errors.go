@@ -18,6 +18,8 @@ const (
 	CodeInternalError   = "internal_error"
 	CodeUnavailable     = "unavailable"
 	CodeTimeout         = "timeout"
+	// CodeTMDBUnavailable is a 502: TMDB failed and nothing was cached.
+	CodeTMDBUnavailable = "tmdb_unavailable"
 )
 
 // ErrorBody is the JSON shape of every API error response.

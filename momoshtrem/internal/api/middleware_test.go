@@ -48,7 +48,7 @@ func newTestServer(opts Options) *Server {
 	if opts.Status == nil {
 		opts.Status = &fakeStatus{report: healthyReport()}
 	}
-	return NewServer(nil, nil, nil, nil, nil, nil, opts)
+	return NewServer(nil, nil, nil, nil, nil, opts)
 }
 
 func do(t *testing.T, s *Server, method, path string, headers map[string]string) *httptest.ResponseRecorder {

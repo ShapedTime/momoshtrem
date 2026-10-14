@@ -1,0 +1,31 @@
+{
+  "id": "5b1f6ff4925141523f00d2bb",
+  "name": "Story Arcs",
+  "description": "",
+  "type": 5,
+  "group_count": 2,
+  "episode_count": 4,
+  "network": null,
+  "groups": [
+    {
+      "id": "g2",
+      "name": "Orange Town Arc",
+      "order": 2,
+      "locked": true,
+      "episodes": [
+        {"id": 103, "name": "Morgan versus Luffy!", "season_number": 1, "episode_number": 3, "order": 0, "air_date": "1999-11-17", "show_id": 37854},
+        {"id": 104, "name": "Luffy's Past!", "season_number": 1, "episode_number": 4, "order": 1, "air_date": "1999-11-24", "show_id": 37854}
+      ]
+    },
+    {
+      "id": "g1",
+      "name": "Romance Dawn Arc",
+      "order": 1,
+      "locked": true,
+      "episodes": [
+        {"id": 101, "name": "I'm Luffy!", "season_number": 1, "episode_number": 1, "order": 0, "air_date": "1999-10-20", "show_id": 37854},
+        {"id": 102, "name": "Enter the Great Swordsman!", "season_number": 1, "episode_number": 2, "order": 1, "air_date": "1999-11-17", "show_id": 37854}
+      ]
+    }
+  ]
+}

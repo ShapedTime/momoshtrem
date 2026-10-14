@@ -73,6 +73,11 @@ type TorrentConfig struct {
 
 type TMDBConfig struct {
 	APIKey string `yaml:"api_key"`
+	// Language is sent with every TMDB request (names, overviews), e.g.
+	// "en-US" or "de-DE".
+	Language string `yaml:"language"`
+	// RPS caps TMDB requests per second (TMDB allows about 50).
+	RPS int `yaml:"rps"`
 }
 
 type VFSConfig struct {
@@ -161,6 +166,10 @@ func DefaultConfig() *Config {
 			StartPaused:          true,
 			DropDuplicatePeerIds: true,
 			MaxUnverifiedMB:      8,
+		},
+		TMDB: TMDBConfig{
+			Language: "en-US",
+			RPS:      20,
 		},
 		VFS: VFSConfig{
 			TreeTTL:  0,              // DEPRECATED: ignored
@@ -252,6 +261,10 @@ func applyEnv(cfg *Config) error {
 
 	// External services
 	envString("TMDB_API_KEY", &cfg.TMDB.APIKey)
+	envString("TMDB_LANGUAGE", &cfg.TMDB.Language)
+	if err := envPositiveInt("TMDB_RPS", &cfg.TMDB.RPS); err != nil {
+		return err
+	}
 	envString("JACKETT_URL", &cfg.Jackett.URL)
 	envString("JACKETT_API_KEY", &cfg.Jackett.APIKey)
 	envString("ANTHROPIC_API_KEY", &cfg.AI.AnthropicAPIKey)
@@ -296,6 +309,19 @@ func envPort(name string, dst *int) error {
 		return fmt.Errorf("invalid %s %q: want a port number between 1 and 65535", name, v)
 	}
 	*dst = port
+	return nil
+}
+
+func envPositiveInt(name string, dst *int) error {
+	v := os.Getenv(name)
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 1 {
+		return fmt.Errorf("invalid %s %q: want a whole number of at least 1", name, v)
+	}
+	*dst = n
 	return nil
 }
 
@@ -348,6 +374,13 @@ func (c *Config) Validate() error {
 		if err := checkPort("metrics.port", c.Metrics.Port); err != nil {
 			return err
 		}
+	}
+
+	if c.TMDB.RPS < 1 {
+		return fmt.Errorf("invalid tmdb.rps %d: want at least 1", c.TMDB.RPS)
+	}
+	if strings.TrimSpace(c.TMDB.Language) == "" {
+		return errors.New("tmdb.language must not be empty (e.g. en-US)")
 	}
 
 	for _, o := range c.Server.CORSAllowedOrigins {
