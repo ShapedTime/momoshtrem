@@ -23,3 +23,8 @@ export const SHEETS: Record<string, SheetDefinition> = {
     render: () => <InfuseSetupSheet />,
   },
 };
+
+/** The sheet registered as `name`. Own keys only, so `?sheet=toString` opens nothing. */
+export function getSheet(name: string | null): SheetDefinition | undefined {
+  return name !== null && Object.hasOwn(SHEETS, name) ? SHEETS[name] : undefined;
+}

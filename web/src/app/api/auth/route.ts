@@ -3,6 +3,7 @@ import { applySessionCookie, clearSessionCookie, createSessionToken, safeRedirec
 import { getClientIp } from '@/lib/auth/client-ip';
 import { checkRateLimit, clearRateLimit, recordFailedAttempt } from '@/lib/auth/rate-limit';
 import { LOGIN_ROUTE } from '@/config/auth';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { LoginErrorCode, LoginResponse } from '@/types/auth';
 
 const MESSAGES: Record<LoginErrorCode, string> = {
@@ -67,6 +68,14 @@ function respond(
 
 // POST /api/auth: sign in
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // Another site posting here could sign the browser into this account, or
+  // burn the global failure ceiling and lock the owner out. Browsers send
+  // Sec-Fetch-Site; no-JS form posts are same-origin and other clients send none.
+  if (request.headers.get('sec-fetch-site') === 'cross-site') {
+    const body: ApiErrorBody = { error: { code: 'forbidden', message: 'Sign in from this site.' } };
+    return NextResponse.json(body, { status: 403 });
+  }
+
   const wantsJson = (request.headers.get('accept') ?? '').includes('application/json');
   const { username, password, redirect } = await readCredentials(request);
   const target = safeRedirect(redirect);

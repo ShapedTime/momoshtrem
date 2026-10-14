@@ -4,7 +4,7 @@ import { getClientIp } from '@/lib/auth/client-ip';
 const headers = (xff?: string) => new Headers(xff ? { 'x-forwarded-for': xff } : {});
 
 describe('getClientIp', () => {
-  it('uses the socket address Next.js fills in when there is no proxy', () => {
+  it('uses the only entry when there is no proxy (Next.js fills it from the socket when the header is missing)', () => {
     expect(getClientIp(headers('192.168.1.20'), 0)).toBe('192.168.1.20');
   });
 

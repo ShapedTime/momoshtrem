@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect } from 'react';
 
 export interface ShellContextValue {
-  openPalette: (query?: string) => void;
+  openPalette: () => void;
   /** Hero pages draw the top bar transparent over their artwork until you scroll. */
   setOverArt: (overArt: boolean) => void;
 }

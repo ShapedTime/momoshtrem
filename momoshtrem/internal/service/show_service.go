@@ -87,7 +87,7 @@ func (s *ShowService) Create(ctx context.Context, input CreateShowInput) (*Creat
 	// 2. Fetch show details from TMDB
 	tmdbShow, err := s.tmdbClient.GetShowDetails(input.TMDBID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch show from TMDB: %w", err)
+		return nil, fmt.Errorf("%w: %w", library.ErrTMDBFetch, err)
 	}
 
 	// 3. Create show record

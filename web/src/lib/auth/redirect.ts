@@ -5,6 +5,7 @@ const BASE = 'http://momoshtrem.local';
 /**
  * Where to send someone after signing in. Only same-origin, relative paths
  * are allowed: "/library?type=tv" passes; "//evil.com", "/\\evil.com",
+ * "/..//evil.com" (dot segments that normalise to "//evil.com"),
  * "https://evil.com", "javascript:…", "/login" and "/api/…" fall back to
  * the default.
  */
@@ -24,5 +25,8 @@ export function safeRedirect(value: unknown, fallback: string = DEFAULT_REDIRECT
   if (url.pathname === LOGIN_ROUTE || url.pathname.startsWith(`${LOGIN_ROUTE}/`) || url.pathname.startsWith('/api/')) {
     return fallback;
   }
-  return `${url.pathname}${url.search}${url.hash}`;
+  const result = `${url.pathname}${url.search}${url.hash}`;
+  // URL resolves dot segments, so "/..//evil.com" comes out protocol-relative
+  if (result.startsWith('//') || result.startsWith('/\\')) return fallback;
+  return result;
 }

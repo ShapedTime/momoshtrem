@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 
 /**
  * POST /api/library/sync-air-dates
  * Trigger a manual air date sync from TMDB.
  * Returns immediately; sync runs in background.
  */
-export async function POST(): Promise<NextResponse<{ message: string } | { error: string }>> {
+export async function POST(): Promise<NextResponse<{ message: string } | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

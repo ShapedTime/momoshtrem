@@ -2,6 +2,7 @@ package tmdb
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,6 +46,9 @@ func TestGetContext_Status(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want it to contain %q", err, tt.wantErr)
+			}
+			if tt.status == http.StatusNotFound && !errors.Is(err, ErrNotFound) {
+				t.Errorf("error = %v, want ErrNotFound", err)
 			}
 		})
 	}

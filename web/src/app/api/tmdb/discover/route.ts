@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { tmdbClient } from '@/lib/api/tmdb';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type {
   DiscoverResults,
   MovieSearchResult,
@@ -13,7 +14,7 @@ type DiscoverResponse = DiscoverResults<MovieSearchResult | TVSearchResult>;
 
 export async function GET(
   request: NextRequest
-): Promise<NextResponse<DiscoverResponse | { error: string }>> {
+): Promise<NextResponse<DiscoverResponse | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

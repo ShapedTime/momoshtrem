@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Sheet } from '@/components/ui/Sheet';
 
 // Desktop presentation (Radix Dialog panel); jsdom can't run Vaul's drag physics.
@@ -63,5 +63,25 @@ describe('Sheet', () => {
     fireEvent.keyDown(top, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument());
     expect(screen.getByRole('dialog', { name: 'Play it in Infuse' })).toBeInTheDocument();
+  });
+
+  it('stays open when a toast is tapped, and closes on any other outside press', async () => {
+    render(
+      <>
+        <Harness />
+        <div className="toast-region">
+          <button>Dismiss toast</button>
+        </div>
+        <button>Elsewhere</button>
+      </>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    await screen.findByRole('dialog');
+    // Radix starts listening for outside presses on the next tick
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    fireEvent.pointerDown(screen.getByText('Dismiss toast'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByText('Elsewhere'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 });

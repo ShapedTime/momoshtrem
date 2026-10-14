@@ -35,7 +35,8 @@ export function ConnectionBanner() {
   const online = useOnline();
   const pathname = usePathname();
   const status = useQuery(statusQuery());
-  const backendDown = status.isError && isApiError(status.error) && UNREACHABLE.has(status.error.code);
+  // A request that never got an answer (fetch's TypeError) isn't an ApiError: unreachable too
+  const backendDown = status.isError && (!isApiError(status.error) || UNREACHABLE.has(status.error.code));
 
   if (!online) {
     return (

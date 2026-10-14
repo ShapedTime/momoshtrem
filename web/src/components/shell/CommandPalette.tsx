@@ -4,18 +4,16 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Command } from 'cmdk';
-import { useQueryClient } from '@tanstack/react-query';
 import { CornerDownLeft, LogOut, Search, Settings, Tv, type LucideIcon } from 'lucide-react';
 import { Kbd } from '@/components/ui';
 import { useRestoreFocus } from '@/hooks/useRestoreFocus';
 import { NAV } from '@/lib/nav';
 import { useSheet } from '@/lib/sheets/useSheet';
-import { signOut } from './signOut';
+import { useSignOut } from './signOut';
 
 interface PaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  initialQuery?: string;
 }
 
 function Item({ icon: Icon, label, hint, onSelect, value }: { icon: LucideIcon; label: string; hint?: string; onSelect: () => void; value?: string }) {
@@ -38,16 +36,22 @@ function Item({ icon: Icon, label, hint, onSelect, value }: { icon: LucideIcon; 
  * and library results arrive with Discover & search (#7); "Ask momoshtrem"
  * with #9.
  */
-export function CommandPalette({ open, onOpenChange, initialQuery = '' }: PaletteProps) {
+export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const signOut = useSignOut();
   const sheets = useSheet();
   const focus = useRestoreFocus();
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState('');
+  const [wasOpen, setWasOpen] = useState(open);
+
+  // However it closed (Esc, outside click, ⌘K, an item), it opens empty next time
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) setQuery('');
+  }
 
   const run = (action: () => void) => {
     onOpenChange(false);
-    setQuery('');
     action();
   };
 
@@ -73,13 +77,7 @@ export function CommandPalette({ open, onOpenChange, initialQuery = '' }: Palett
               </Command.Group>
               <Command.Group heading="Actions">
                 <Item icon={Tv} label="How to play in Infuse" hint="WebDAV address and setup" onSelect={() => run(() => sheets.open('infuse-setup'))} />
-                <Item
-                  icon={LogOut}
-                  label="Log out"
-                  onSelect={() =>
-                    run(() => signOut(() => queryClient.clear()))
-                  }
-                />
+                <Item icon={LogOut} label="Log out" onSelect={() => run(() => void signOut())} />
               </Command.Group>
               {query.trim() && (
                 <Command.Group heading="Search">

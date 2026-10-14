@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/status"
 )
 
+// NewServer switches gin to release mode, but tests that build a gin context
+// directly (errors_test.go) can run first and would print debug warnings.
 func init() {
 	gin.SetMode(gin.TestMode)
 }
@@ -124,6 +127,7 @@ func TestCORSMiddleware(t *testing.T) {
 		method      string
 		origin      string
 		headers     map[string]string
+		path        string // "" means /api/status
 		wantStatus  int
 		wantACAO    string // expected Access-Control-Allow-Origin ("" = absent)
 		wantNoCORS  bool   // expect no CORS headers at all, not even Vary
@@ -151,6 +155,12 @@ func TestCORSMiddleware(t *testing.T) {
 			wantStatus: http.StatusNoContent, wantACAO: allowed, wantMethods: true,
 		},
 		{
+			name: "preflight for a POST-only route skips token check", origins: []string{allowed}, token: "tok",
+			method: http.MethodOptions, origin: allowed, path: "/api/movies",
+			headers:    map[string]string{"Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "Content-Type, " + TokenHeader},
+			wantStatus: http.StatusNoContent, wantACAO: allowed, wantMethods: true,
+		},
+		{
 			name: "preflight from disallowed origin falls through to auth", origins: []string{allowed}, token: "tok",
 			method: http.MethodOptions, origin: "https://evil.example",
 			headers:    map[string]string{"Access-Control-Request-Method": "POST"},
@@ -171,7 +181,12 @@ func TestCORSMiddleware(t *testing.T) {
 				headers[k] = v
 			}
 
-			rec := do(t, s, tt.method, "/api/status", headers)
+			path := tt.path
+			if path == "" {
+				path = "/api/status"
+			}
+
+			rec := do(t, s, tt.method, path, headers)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.wantStatus, rec.Body)
@@ -202,5 +217,29 @@ func TestCORSMiddleware(t *testing.T) {
 				t.Error("wildcard origin must never be sent")
 			}
 		})
+	}
+}
+
+func TestRecovery(t *testing.T) {
+	// Gin writes the panic and stack to DefaultErrorWriter when the
+	// middleware is built; capture it to check the panic is still logged.
+	var logged bytes.Buffer
+	prev := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = &logged
+	t.Cleanup(func() { gin.DefaultErrorWriter = prev })
+
+	s := newTestServer(Options{})
+	s.router.GET("/api/panic", func(*gin.Context) { panic("boom") })
+
+	rec := do(t, s, http.MethodGet, "/api/panic", nil)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body %s)", rec.Code, rec.Body)
+	}
+	if got := decodeError(t, rec).Code; got != CodeInternalError {
+		t.Errorf("error code = %q, want %q", got, CodeInternalError)
+	}
+	if !strings.Contains(logged.String(), "boom") {
+		t.Errorf("panic not logged, got %q", logged.String())
 	}
 }

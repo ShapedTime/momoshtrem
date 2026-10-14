@@ -26,9 +26,9 @@ Settings are layered, and each layer overrides the one before:
 
 1. **Built-in defaults** (`internal/config/config.go`, `DefaultConfig`).
 2. **`config.yaml`**, if it exists (path from `-config`, `/config/config.yaml` in Docker). It's optional. See `momoshtrem/config.yaml.example`.
-3. **Environment variables**, which always apply, with or without a config file. An empty variable counts as unset.
+3. **Environment variables**, which always apply, with or without a config file. Values are trimmed, and an empty variable counts as unset.
 
-The service refuses to start without a database URL, and with an invalid `METRICS_PORT` or boolean value.
+The service refuses to start without a database URL, with a port outside 1–65535, an invalid boolean, or a CORS origin that isn't `http(s)://host[:port]`.
 
 | Env var | Config key | Notes |
 |---|---|---|
@@ -53,15 +53,25 @@ When `BACKEND_API_TOKEN` is set, every `/api/*` request must send the same value
 
 When the token is unset the API is open and the service logs a warning at startup. Only do this for local development.
 
-CORS is off unless `CORS_ALLOWED_ORIGINS` lists origins. The web app calls the API server-to-server, so it doesn't need CORS.
+CORS is off unless `CORS_ALLOWED_ORIGINS` lists origins, each exactly as the browser sends it (`https://host[:port]`, no path; `*` is rejected). The web app calls the API server-to-server, so it doesn't need CORS.
 
 ### Errors and status
 
 Errors use one shape: `{"error": {"code": "not_found", "message": "Movie not found"}}`.
 
-`GET /api/status` reports the version, uptime, database health and size, the WebDAV URL, and whether Jackett and TMDB are reachable. Results are cached for 30 s, and `?refresh=1` forces a new check at most once every 5 s. It returns `503` only when the database is down.
+`GET /api/status` reports the version, uptime, database health and size, the WebDAV URL, and whether Jackett and TMDB are reachable. Results are cached for 30 s (5 s while the database is down), and `?refresh=1` forces a new check at most once every 5 s. It returns `503` only when the database is down.
 
 The Docker image stamps the version from the `VERSION` build arg (`MOMOSHTREM_VERSION` in compose).
+
+## Tests
+
+`go vet ./... && go test ./...` needs no services. The Postgres tests in `internal/library` skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+
+```bash
+docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine
+MOMOSHTREM_TEST_DATABASE_URL='postgres://postgres:pw@localhost:55432/momo?sslmode=disable' go test ./internal/library/...
+docker stop momo-test-pg
+```
 
 ## Implementation Stages
 

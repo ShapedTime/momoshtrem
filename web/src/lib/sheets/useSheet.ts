@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 /** The sheet opened by this tab (vs. arriving on a deep link), so closing can go Back. */
@@ -16,6 +16,13 @@ export function useSheet() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const current = searchParams.get('sheet');
+
+  // Closed some other way (Back): a later deep link to the same sheet must not go Back
+  const previous = useRef(current);
+  useEffect(() => {
+    if (previous.current && !current) pushedSheet = null;
+    previous.current = current;
+  }, [current]);
 
   const open = useCallback(
     (name: string, params: Record<string, string> = {}) => {

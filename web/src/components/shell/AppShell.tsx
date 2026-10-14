@@ -32,6 +32,8 @@ export function AppShell({ username, children }: { username: string; children: R
   // ⌘K / Ctrl K anywhere; "/" when not typing
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // A confirm dialog sits above the palette; never open the palette underneath it
+      if (document.querySelector('[role="alertdialog"]')) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setPaletteOpen((open) => !open);

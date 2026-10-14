@@ -10,6 +10,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/service"
+	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -148,10 +149,15 @@ func (s *Server) createMovie(c *gin.Context) {
 		return
 	}
 
-	// Fetch from TMDB
+	// Fetch from TMDB. An unknown TMDB ID is the caller's mistake; any other
+	// failure is TMDB's.
 	tmdbMovie, err := s.tmdbClient.GetMovie(req.TMDBID)
 	if err != nil {
-		errorResponse(c, http.StatusBadRequest, "Failed to fetch from TMDB: "+err.Error())
+		status := http.StatusBadGateway
+		if errors.Is(err, tmdb.ErrNotFound) {
+			status = http.StatusBadRequest
+		}
+		errorResponse(c, status, "Failed to fetch from TMDB: "+err.Error())
 		return
 	}
 
@@ -376,7 +382,14 @@ func (s *Server) createShow(c *gin.Context) {
 		Seasons: req.Seasons,
 	})
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, tmdb.ErrNotFound):
+			errorResponse(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, library.ErrTMDBFetch):
+			errorResponse(c, http.StatusBadGateway, err.Error())
+		default:
+			errorResponse(c, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 

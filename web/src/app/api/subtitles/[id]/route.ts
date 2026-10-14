@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -14,7 +15,7 @@ interface RouteParams {
 export async function DELETE(
   _request: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse<null | { error: string }>> {
+): Promise<NextResponse<null | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

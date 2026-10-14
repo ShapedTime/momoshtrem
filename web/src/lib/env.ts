@@ -33,7 +33,7 @@ const OPTIONAL_VARS = [
 
 /**
  * Validate all environment variables at startup.
- * @throws ConfigurationError if required variables are missing
+ * @throws ConfigurationError if required variables are missing or SESSION_SECRET is too short
  */
 export function validateEnvironment(): EnvConfig {
   const missing: string[] = [];
@@ -51,6 +51,14 @@ export function validateEnvironment(): EnvConfig {
     throw new ConfigurationError(
       `Missing required environment variables: ${missing.join(', ')}\n` +
         `Please set these in your .env file or environment.`
+    );
+  }
+
+  // SESSION_SECRET must be at least 32 chars: sign-in refuses a shorter one
+  if (process.env.SESSION_SECRET!.length < 32) {
+    throw new ConfigurationError(
+      'SESSION_SECRET must be at least 32 characters.\n' +
+        'Generate one with: openssl rand -base64 32'
     );
   }
 
@@ -73,13 +81,6 @@ export function validateEnvironment(): EnvConfig {
       '[CONFIG] BACKEND_API_TOKEN is not set. momoshtrem rejects requests without ' +
         'the X-Momoshtrem-Token header when its own BACKEND_API_TOKEN is set; ' +
         'set the same value on both services.'
-    );
-  }
-
-  // SESSION_SECRET validation - must be at least 32 chars
-  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length < 32) {
-    console.warn(
-      '[CONFIG] SESSION_SECRET should be at least 32 characters for security.'
     );
   }
 

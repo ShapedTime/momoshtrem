@@ -96,7 +96,8 @@ class MomoshtremClient {
     const parsed = parseMomoshtremError(body);
     throw new APIError(
       parsed?.message || `Failed to ${operation}: ${response.statusText}`,
-      response.status
+      response.status,
+      parsed?.code
     );
   }
 

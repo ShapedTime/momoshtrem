@@ -123,8 +123,12 @@ func (s *Server) SetReaderTracker(rt *streaming.ReaderTracker) {
 }
 
 func (s *Server) setupMiddleware() {
-	// Recovery middleware
-	s.router.Use(gin.Recovery())
+	// Recovery middleware. Gin logs the panic and stack; the client gets the
+	// usual error body instead of an empty 500.
+	s.router.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+		errorResponse(c, http.StatusInternalServerError, "internal error")
+		c.Abort()
+	}))
 
 	// Logging middleware
 	s.router.Use(func(c *gin.Context) {

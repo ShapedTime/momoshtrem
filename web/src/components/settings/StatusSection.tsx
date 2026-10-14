@@ -38,39 +38,44 @@ export function StatusSection() {
     );
   }
 
-  if (!data) {
-    const unreachable = isApiError(error) && (error.code === 'backend_unreachable' || error.code === 'timeout');
-    return (
-      <Banner
-        tone="error"
-        role="alert"
-        icon={WifiOff}
-        title={unreachable ? 'Can’t reach momoshtrem' : 'Couldn’t check the services'}
-        action={
-          unreachable ? (
-            <Link href="/offline?from=%2Fsettings%3Fsection%3Dstatus" className="btn btn-secondary btn-sm">
-              Details
-            </Link>
-          ) : (
-            <Button size="sm" loading={rechecking} onClick={recheck}>
-              Try again
-            </Button>
-          )
-        }
-      >
-        {error?.message}
-      </Banner>
-    );
-  }
+  const unreachable = isApiError(error) && (error.code === 'backend_unreachable' || error.code === 'timeout');
+  const errorBanner = (
+    <Banner
+      tone="error"
+      role="alert"
+      icon={WifiOff}
+      title={unreachable ? 'Can’t reach momoshtrem' : 'Couldn’t check the services'}
+      action={
+        unreachable ? (
+          <Link href="/offline?from=%2Fsettings%3Fsection%3Dstatus" className="btn btn-secondary btn-sm">
+            Details
+          </Link>
+        ) : (
+          <Button size="sm" loading={rechecking} onClick={recheck}>
+            Try again
+          </Button>
+        )
+      }
+    >
+      {data ? `Below is the last successful check, from ${timeFormat.format(new Date(data.checked_at))}.` : error?.message}
+    </Banner>
+  );
+
+  if (!data) return errorBanner;
 
   const rows = serviceRows(data);
   const summary = summarize(rows);
 
   return (
     <div className="flex flex-col gap-5">
-      <Banner tone={summary.tone} role="status" title={summary.title}>
-        {summary.body}
-      </Banner>
+      {/* A failed re-check keeps the last rows, but never the last "All good" */}
+      {error ? (
+        errorBanner
+      ) : (
+        <Banner tone={summary.tone} role="status" title={summary.title}>
+          {summary.body}
+        </Banner>
+      )}
       <Panel className="overflow-hidden">
         <ul aria-label="Services">
           {rows.map((row) => {

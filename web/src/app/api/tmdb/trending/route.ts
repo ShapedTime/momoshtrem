@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import { tmdbClient } from '@/lib/api/tmdb';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { TrendingResults } from '@/types/tmdb';
 
-export async function GET(): Promise<NextResponse<TrendingResults | { error: string }>> {
+export async function GET(): Promise<NextResponse<TrendingResults | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

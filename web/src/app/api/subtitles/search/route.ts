@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 
 /**
  * GET /api/subtitles/search
@@ -9,7 +10,7 @@ import { requireAuth } from '@/lib/api/auth-guard';
  */
 export async function GET(
   request: NextRequest
-): Promise<NextResponse<{ results: unknown[] } | { error: string }>> {
+): Promise<NextResponse<{ results: unknown[] } | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

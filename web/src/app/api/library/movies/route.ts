@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { LibraryMovie } from '@/types/momoshtrem';
 
 /**
  * GET /api/library/movies
  * List all movies in the library.
  */
-export async function GET(): Promise<NextResponse<{ movies: LibraryMovie[] } | { error: string }>> {
+export async function GET(): Promise<NextResponse<{ movies: LibraryMovie[] } | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 
@@ -42,7 +43,7 @@ interface AddMovieBody {
  */
 export async function POST(
   request: NextRequest
-): Promise<NextResponse<LibraryMovie | { error: string }>> {
+): Promise<NextResponse<LibraryMovie | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

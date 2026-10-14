@@ -151,17 +151,19 @@ func NewService(opts Options) *Service {
 
 // Report returns the current status. Probe results are cached for CacheTTL;
 // refresh bypasses the cache unless the cached report is younger than
-// RefreshMinInterval. Concurrent callers share one in-flight check.
-// Uptime and active readers are always live.
+// RefreshMinInterval. A report with the database down is only kept for
+// RefreshMinInterval, so an outage and the recovery both show up quickly.
+// Concurrent callers share one in-flight check. Uptime and active readers
+// are always live.
 func (s *Service) Report(ctx context.Context, refresh bool) Report {
-	maxAge := CacheTTL
-	if refresh {
-		maxAge = RefreshMinInterval
-	}
-
 	s.mu.Lock()
 	cached, cachedAt := s.cached, s.cachedAt
 	s.mu.Unlock()
+
+	maxAge := CacheTTL
+	if refresh || (cached != nil && !cached.DB.OK) {
+		maxAge = RefreshMinInterval
+	}
 
 	var report Report
 	if cached != nil && s.now().Sub(cachedAt) < maxAge {

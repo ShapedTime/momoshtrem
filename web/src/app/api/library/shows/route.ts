@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { LibraryShow } from '@/types/momoshtrem';
 
 /**
  * GET /api/library/shows
  * List all shows in the library.
  */
-export async function GET(): Promise<NextResponse<{ shows: LibraryShow[] } | { error: string }>> {
+export async function GET(): Promise<NextResponse<{ shows: LibraryShow[] } | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 
@@ -43,7 +44,7 @@ interface AddShowBody {
  */
 export async function POST(
   request: NextRequest
-): Promise<NextResponse<LibraryShow | { error: string }>> {
+): Promise<NextResponse<LibraryShow | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

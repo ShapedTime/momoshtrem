@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -223,7 +224,8 @@ func Load(path string) (*Config, error) {
 }
 
 // applyEnv overrides cfg with any non-empty environment variables.
-// An empty variable means "not set" and leaves the file or default value alone.
+// An empty or whitespace-only variable means "not set" and leaves the file or
+// default value alone.
 func applyEnv(cfg *Config) error {
 	// Server and REST API security
 	envString("BACKEND_API_TOKEN", &cfg.Server.APIToken)
@@ -266,7 +268,7 @@ func applyEnv(cfg *Config) error {
 }
 
 func envString(name string, dst *string) {
-	if v := os.Getenv(name); v != "" {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		*dst = v
 	}
 }
@@ -317,12 +319,12 @@ func splitList(v string) []string {
 	return out
 }
 
-// normalizeOrigins trims entries, drops empty ones and strips a trailing
-// slash, since browsers never send one in the Origin header.
+// normalizeOrigins trims and lowercases entries, drops empty ones and strips a
+// trailing slash, matching the Origin header browsers send.
 func normalizeOrigins(origins []string) []string {
 	var out []string
 	for _, o := range origins {
-		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		o = strings.ToLower(strings.TrimRight(strings.TrimSpace(o), "/"))
 		if o != "" {
 			out = append(out, o)
 		}
@@ -334,6 +336,45 @@ func normalizeOrigins(origins []string) []string {
 func (c *Config) Validate() error {
 	if strings.TrimSpace(c.Database.URL) == "" {
 		return errors.New("DATABASE_URL is required (set the DATABASE_URL environment variable or database.url in the config file)")
+	}
+
+	if err := checkPort("server.http_port", c.Server.HTTPPort); err != nil {
+		return err
+	}
+	if err := checkPort("server.webdav_port", c.Server.WebDAVPort); err != nil {
+		return err
+	}
+	if c.Metrics.Enabled {
+		if err := checkPort("metrics.port", c.Metrics.Port); err != nil {
+			return err
+		}
+	}
+
+	for _, o := range c.Server.CORSAllowedOrigins {
+		if err := validateOrigin(o); err != nil {
+			return fmt.Errorf("invalid CORS_ALLOWED_ORIGINS entry %q: %w", o, err)
+		}
+	}
+	return nil
+}
+
+func checkPort(name string, port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("invalid %s %d: want a port number between 1 and 65535", name, port)
+	}
+	return nil
+}
+
+// validateOrigin accepts only what a browser sends in the Origin header:
+// http(s)://host[:port], with nothing after it. "*" is rejected: the
+// middleware matches origins exactly, so it would silently allow nothing.
+func validateOrigin(origin string) error {
+	if origin == "*" {
+		return errors.New("wildcard is not allowed; list each origin")
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Scheme+"://"+u.Host != origin {
+		return errors.New("want http(s)://host[:port] with no path, query or fragment")
 	}
 	return nil
 }

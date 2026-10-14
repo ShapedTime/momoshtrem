@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { LibraryStatus } from '@/types/momoshtrem';
 
 interface StatusResponse {
@@ -16,7 +17,7 @@ interface StatusResponse {
  */
 export async function GET(
   request: NextRequest
-): Promise<NextResponse<StatusResponse | { error: string }>> {
+): Promise<NextResponse<StatusResponse | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

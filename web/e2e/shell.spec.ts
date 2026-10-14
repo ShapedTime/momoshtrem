@@ -33,6 +33,8 @@ test.describe('app shell', () => {
     await signIn(page, '/library');
     await page.keyboard.press('Tab');
     await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#main')).toBeFocused();
   });
 
   test('the user menu signs you out', async ({ page }, testInfo) => {
@@ -118,6 +120,41 @@ test.describe('URL-driven sheets', () => {
     await page.goBack();
     await expect(sheet).toBeHidden();
     await expect(page).toHaveURL(/\/library$/);
+  });
+
+  test('an unknown sheet name opens nothing and breaks nothing (?sheet=toString)', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await page.goto('/library?sheet=toString');
+    // The badge comes from a client query: the shell hydrated and is still standing
+    const nav = isDesktop(testInfo.project.name) ? page.locator('header.topbar') : page.locator('nav.tabbar');
+    await expect(nav.getByLabel('1 downloading')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'My Library' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'This page didn’t load' })).toHaveCount(0);
+  });
+
+  test('Copy works on plain HTTP: the fallback keeps its selection inside the sheet', async ({ page }) => {
+    // No async Clipboard API (a LAN address over HTTP); record what execCommand('copy') sees
+    await page.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, 'clipboard', { get: () => undefined, configurable: true });
+      const copies: string[] = [];
+      Object.assign(window, { copies });
+      document.execCommand = () => {
+        const active = document.activeElement;
+        copies.push(active instanceof HTMLTextAreaElement ? active.value.slice(active.selectionStart, active.selectionEnd) : '');
+        return true;
+      };
+    });
+    await signIn(page, '/library');
+    await page.goto('/library?sheet=infuse-setup');
+    const sheet = page.getByRole('dialog', { name: 'Play it in Infuse' });
+    const copy = sheet.getByRole('button', { name: 'Copy' });
+    await copy.click();
+    expect(await page.evaluate(() => (window as unknown as { copies: string[] }).copies)).toEqual(['https://momoshtrem.duckdns.org:36911/']);
+    await expect(copy).toBeFocused();
+    // Dismissing the "Copied" toast leaves the sheet open
+    await page.locator('.toast-region').getByRole('button', { name: 'Dismiss' }).click();
+    await expect(sheet).toBeVisible();
   });
 
   test('respects reduced motion', async ({ page }) => {

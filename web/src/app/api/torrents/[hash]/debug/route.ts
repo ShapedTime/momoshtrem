@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { TorrentDebugInfo } from '@/types/torrent-debug';
 
 interface RouteParams {
@@ -15,7 +16,7 @@ interface RouteParams {
 export async function GET(
   _request: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse<TorrentDebugInfo | { error: string }>> {
+): Promise<NextResponse<TorrentDebugInfo | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

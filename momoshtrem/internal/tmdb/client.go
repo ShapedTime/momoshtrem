@@ -13,6 +13,9 @@ import (
 
 const baseURL = "https://api.themoviedb.org/3"
 
+// ErrNotFound means TMDB has no item with the requested ID.
+var ErrNotFound = errors.New("not found")
+
 // Client is a TMDB API client
 type Client struct {
 	apiKey     string
@@ -205,7 +208,7 @@ func (c *Client) getContext(ctx context.Context, endpoint string, v interface{})
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("not found")
+		return ErrNotFound
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return fmt.Errorf("TMDB rejected the API key (HTTP 401)")

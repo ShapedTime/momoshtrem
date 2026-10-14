@@ -67,18 +67,23 @@ export async function* askStream(body: AskRequest, signal?: AbortSignal): AsyncG
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += value.replace(/\r\n/g, '\n');
-    let boundary = buffer.indexOf('\n\n');
-    while (boundary !== -1) {
-      const parsed = parseSseFrame(buffer.slice(0, boundary));
-      buffer = buffer.slice(boundary + 2);
-      if (parsed) yield parsed;
-      boundary = buffer.indexOf('\n\n');
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value.replace(/\r\n/g, '\n');
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const parsed = parseSseFrame(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        if (parsed) yield parsed;
+        boundary = buffer.indexOf('\n\n');
+      }
     }
+    const tail = parseSseFrame(buffer.trim());
+    if (tail) yield tail;
+  } finally {
+    // A consumer that stops iterating early still releases the connection
+    reader.cancel().catch(() => {});
   }
-  const tail = parseSseFrame(buffer.trim());
-  if (tail) yield tail;
 }

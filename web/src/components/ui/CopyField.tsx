@@ -19,17 +19,22 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     // fall through to the legacy path
   }
+  const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const area = document.createElement('textarea');
   area.value = text;
   area.setAttribute('readonly', '');
   area.style.position = 'fixed';
   area.style.opacity = '0';
-  document.body.appendChild(area);
+  area.style.fontSize = '16px'; // iOS zooms into anything smaller
+  // In an open sheet, a textarea on <body> loses focus (and the selection) to the sheet's focus trap
+  (previous?.closest('[role="dialog"]') ?? document.body).appendChild(area);
   area.select();
+  area.setSelectionRange(0, text.length);
   try {
     return document.execCommand('copy');
   } finally {
     area.remove();
+    previous?.focus();
   }
 }
 

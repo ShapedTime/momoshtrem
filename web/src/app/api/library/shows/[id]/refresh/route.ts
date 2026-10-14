@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { momoshtremClient } from '@/lib/api/momoshtrem';
 import { isAppError, ValidationError } from '@/lib/errors';
 import { requireAuth } from '@/lib/api/auth-guard';
+import type { ApiErrorBody } from '@/lib/api/contract';
 import type { RefreshShowResult } from '@/types/momoshtrem';
 
 interface RouteParams {
@@ -15,7 +16,7 @@ interface RouteParams {
 export async function POST(
   _request: NextRequest,
   { params }: RouteParams
-): Promise<NextResponse<RefreshShowResult | { error: string }>> {
+): Promise<NextResponse<RefreshShowResult | { error: string } | ApiErrorBody>> {
   const authError = await requireAuth();
   if (authError) return authError;
 

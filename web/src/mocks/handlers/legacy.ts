@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
-import type { RecentlyAiredResponse } from '@/types/momoshtrem';
-import type { TrendingResults } from '@/types/tmdb';
+import type { LibraryMovie, LibraryShow, RecentlyAiredResponse } from '@/types/momoshtrem';
+import type { GenreList, TrendingResults } from '@/types/tmdb';
 import { CATALOG, iso } from '../fixtures/catalog';
 
 /** Just enough of the legacy web routes for the old pages to render in mock mode. */
@@ -31,8 +31,8 @@ const recentlyAired: RecentlyAiredResponse = { episodes: [], last_sync_time: iso
 
 export const legacyHandlers = [
   http.get('*/api/tmdb/trending', () => HttpResponse.json(trending)),
-  http.get('*/api/tmdb/genres', () => HttpResponse.json({ genres: [{ id: 16, name: 'Animation' }, { id: 18, name: 'Drama' }] })),
+  http.get('*/api/tmdb/genres', () => HttpResponse.json<GenreList>({ genres: [{ id: 16, name: 'Animation' }, { id: 18, name: 'Drama' }] })),
   http.get('*/api/library/recently-aired', () => HttpResponse.json(recentlyAired)),
-  http.get('*/api/library/movies', () => HttpResponse.json({ movies: [] })),
-  http.get('*/api/library/shows', () => HttpResponse.json({ shows: [] })),
+  http.get('*/api/library/movies', () => HttpResponse.json<{ movies: LibraryMovie[] }>({ movies: [] })),
+  http.get('*/api/library/shows', () => HttpResponse.json<{ shows: LibraryShow[] }>({ shows: [] })),
 ];

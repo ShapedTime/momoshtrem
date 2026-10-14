@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { TraktConnect } from '@/lib/api/contract';
+import type { TraktConnect, UpNextItem, WatchlistItem } from '@/lib/api/contract';
 import { history, TRAKT, UP_NEXT, WATCHLIST } from '../fixtures/trakt';
 import { latency } from './util';
 
@@ -18,11 +18,11 @@ export const traktHandlers = [
   http.delete('*/api/integrations/trakt', () => new HttpResponse(null, { status: 204 })),
   http.get('*/api/me/up-next', async () => {
     await latency();
-    return HttpResponse.json({ items: UP_NEXT });
+    return HttpResponse.json<{ items: UpNextItem[] }>({ items: UP_NEXT });
   }),
   http.get('*/api/me/watchlist', async ({ request }) => {
     const type = new URL(request.url).searchParams.get('type');
-    return HttpResponse.json({ items: WATCHLIST.filter((item) => !type || item.media_type === type) });
+    return HttpResponse.json<{ items: WatchlistItem[] }>({ items: WATCHLIST.filter((item) => !type || item.media_type === type) });
   }),
   http.get('*/api/me/history', ({ request }) => HttpResponse.json(history(Number(new URL(request.url).searchParams.get('page') ?? 1)))),
 ];

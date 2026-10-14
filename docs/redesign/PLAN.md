@@ -160,7 +160,7 @@ New and moved environment variables:
 | `CORS_ALLOWED_ORIGINS` | momoshtrem | Optional comma-separated browser origins. Empty (the default) sends no CORS headers, since web calls the backend server-to-server. |
 | `WEBDAV_PUBLIC_URL` | momoshtrem | The WebDAV address Infuse uses (e.g. `https://momoshtrem.duckdns.org:36911/`), reported by `/status`. Defaults to `http://localhost:<webdav_port>/`. |
 
-momoshtrem reads every setting from env, with or without `config.yaml` (defaults → file → env). `DATABASE_URL` is required.
+momoshtrem reads these settings and the other secrets and service URLs (`DATABASE_URL`, `TMDB_API_KEY`, OpenSubtitles, WebDAV auth, metrics) from env, with or without `config.yaml` (defaults → file → env). `config.yaml` covers the rest (ports, torrent, streaming…). `DATABASE_URL` is required.
 
 ## 5. Data model changes (Postgres)
 
@@ -211,7 +211,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 ## 6. API contract (backend, under `/api`)
 
 **Conventions**
-- JSON throughout. Errors are `{error: {code, message}}` (implemented in G2 for every route: `internal/api/errors.go` derives `code` from the status: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `rate_limited`, `unavailable`, `timeout`, `internal_error`; `errorCodeResponse` sets a specific one). Lists are `{items, total, page, page_size}`.
+- JSON throughout. Errors are `{error: {code, message}}` (implemented in G2 for every route: `internal/api/errors.go` derives `code` from the status: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `rate_limited`, `unavailable`, `timeout`, `internal_error`; `errorCodeResponse` sets a specific one). Paginated lists (`/library`, `/me/history`, `/search/torrents`) are `{items, total, page, page_size}`; short lists (up next, watchlist, threads, episode groups, torrent files, `/torrents`) are `{items}`.
 - Long operations return `202 {job_id | run_id}` and are polled.
 - Every route requires `X-Momoshtrem-Token` when `BACKEND_API_TOKEN` is set; otherwise `401 {error: {code: "unauthorized"}}` (G2). The web client maps a backend 401/403 to `502 backend_auth`, so a token mismatch never looks like an expired session.
 - CORS is an allowlist (`CORS_ALLOWED_ORIGINS`), empty by default, so no CORS headers are sent. Allowed origins may use `GET, POST, PUT, PATCH, DELETE, OPTIONS` and the `Content-Type`, `Authorization`, `X-Momoshtrem-Token` headers.
@@ -221,7 +221,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `GET /titles/{movie|tv}/{tmdb_id}`: cached TMDB details, plus library state, assignment summary, watch state (once B5 lands) and the recommendation reason if there is one.
 - `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=`: items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls.
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}`.
-- `GET /shows/{id}/episode-groups`: TMDB episode groups, for the ordering picker.
+- `GET /shows/{id}/episode-groups`: `{items: [{id, name, type, group_count, episode_count}]}`, TMDB episode groups for the ordering picker.
 
 ### Assignment (B2/B3)
 - `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?}}` returns `202 {job_id}`. `?wait=true` keeps the legacy synchronous behaviour until H2.
@@ -231,7 +231,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `POST /assignment-jobs/{id}/reclassify` with `{scope: "unresolved"|"all", hint?: string}`. Re-runs the AI resolver, optionally with a user hint such as "absolute numbering" or "these are the OVAs".
 - `POST /assignment-jobs/{id}/apply`: writes the assignments and updates the VFS.
 - Manual override: `PUT /episodes/{id}/assignment` and `PUT /movies/{id}/assignment`, both with `{info_hash, file_path}`.
-- `GET /torrents/{hash}/files`: file tree with sizes and the current mapping.
+- `GET /torrents/{hash}/files`: `{items: [{path, size, mapped_to}]}`, every file with its size and current mapping (`mapped_to` is an episode target, `{movie_id}` or null).
 
 ### Search (B4)
 
@@ -283,17 +283,18 @@ Related endpoints:
 - `POST /integrations/trakt/connect` returns `{user_code, verification_url, expires_at, interval}`. The backend polls Trakt itself; the client polls `GET /integrations/trakt`.
 - `POST /integrations/trakt/sync` returns `202`.
 - `DELETE /integrations/trakt` disconnects and purges the imported data.
-- `GET /me/up-next` returns `[{show, next_episode, availability, airs_at?, progress, last_watched_at}]`.
+- `GET /me/up-next` returns `{items: [{show, next_episode, availability, airs_at, progress: {completed, aired}, last_watched_at}]}`.
   - `availability` is one of `ready`, `downloading`, `needs_torrent`, `not_in_library` or `airs_on`.
-- `GET /me/watchlist?type=`: items with library and availability state.
-- `GET /me/history?page=`.
+- `GET /me/watchlist?type=`: `{items}` with library and availability state.
+- `GET /me/history?page=`: paginated.
 - Watch state (`watched`, `progress`, `rating`) is also embedded in the `/titles` and `/library` responses.
 
 ### Recommendations (R1–R3)
 - `GET /recommendations/home` returns:
   ```
   {
-    run: { id, finished_at },
+    run: { id, finished_at } | null,
+    hero_picks: [{ tmdb_id, media_type, kicker, reason }],   // "Tonight's pick", stable per day
     shelves: [{
       slug, title, subtitle,
       items: [{ media_type, tmdb_id, title, year, poster_path, reason, in_library, on_watchlist }]
@@ -314,7 +315,7 @@ Related endpoints:
   | `done` | `{thread_id, usage}` |
 
   The web route passes the stream through unbuffered.
-- `GET /recommendations/threads` and `GET /recommendations/threads/{id}`.
+- `GET /recommendations/threads` (`{items: [{id, title, created_at, updated_at}]}`) and `GET /recommendations/threads/{id}` (the thread plus its `messages`).
 - `POST /recommendations/feedback` with `{media_type, tmdb_id, signal}`.
 - `GET /settings/ai` and `PUT /settings/ai` with `{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`.
 - `GET /settings/ai/usage`: month-to-date cost by feature.
@@ -336,8 +337,8 @@ Related endpoints:
   - Probes run concurrently with a 3 s timeout each. Results are cached for 30 s, and concurrent callers share one check. `?refresh=1` bypasses the cache at most once every 5 s.
   - It returns 200 even when a probe fails (the body says what's wrong) and 503 only when the database ping fails. The response never contains secrets.
   - Per-indexer health (`jackett.indexers`, HANDOFF §6) is added by B4.
-  - The web app's own `GET /api/status` (F1) adds `web: {version}`. When the backend can't be reached it answers `503 {error: {code: "backend_unreachable"}, web, webdav: {reachable}}`, probing WebDAV directly (`WEBDAV_INTERNAL_URL`, default: the API host on port 36911) so the offline page can say whether Infuse still plays.
-- `GET /torrents` (B6) merges torrents known from the DB but not loaded (`idle`) with live stats. It returns real `download_speed`/`upload_speed`, and each torrent links to its titles.
+  - The web app's own `GET /api/status` (F1) adds `web: {version}`. A backend 503 (database down) is passed through as 200 with the same body, so Settings can show which service is down. Only a backend that can't be reached becomes `503 {error: {code: "backend_unreachable"}, web, webdav: {reachable}}`, probing WebDAV directly (`WEBDAV_INTERNAL_URL`, default: the API host on port 36911) so the offline page can say whether Infuse still plays.
+- `GET /torrents` (B6) returns `{items}`. It merges torrents known from the DB but not loaded (`idle`) with live stats. It returns real `download_speed`/`upload_speed`, and each torrent links to its titles.
 
 ## 7. Phases and tasks
 

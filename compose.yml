@@ -62,7 +62,8 @@ services:
     volumes:
       - ${MOMOSHTREM_CONFIG:-./data/momoshtrem/config}:/config
       - ${MOMOSHTREM_DATA:-./data/momoshtrem/data}:/data
-    # Every setting can come from env; config.yaml in /config is optional.
+    # The settings below come from env; config.yaml in /config is optional and
+    # covers the rest (ports, torrent, streaming...).
     environment:
       - DATABASE_URL=postgres://momoshtrem:${POSTGRES_PASSWORD}@postgres:5432/momoshtrem?sslmode=disable
       - BACKEND_API_TOKEN=${BACKEND_API_TOKEN:-}
@@ -115,7 +116,12 @@ services:
       - MOMOSHTREM_URL=http://momoshtrem:4444
       - BACKEND_API_TOKEN=${BACKEND_API_TOKEN:-}
       - SESSION_SECRET=${SESSION_SECRET}
-      - SECURE_COOKIES=false
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+      - AUTH_MAX_ATTEMPTS=${AUTH_MAX_ATTEMPTS:-}
+      - AUTH_GLOBAL_MAX_FAILURES=${AUTH_GLOBAL_MAX_FAILURES:-}
+      - AUTH_WINDOW_MINUTES=${AUTH_WINDOW_MINUTES:-}
+      - AUTH_BLOCK_MINUTES=${AUTH_BLOCK_MINUTES:-}
+      - WEBDAV_INTERNAL_URL=${WEBDAV_INTERNAL_URL:-}
     depends_on:
       - jackett
       - momoshtrem
