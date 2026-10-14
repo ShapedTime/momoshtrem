@@ -606,6 +606,7 @@ func (r *ShowRepository) GetRecentlyAiredEpisodes(lookbackDays int) ([]RecentlyA
 type EpisodeContext struct {
 	ShowTitle     string
 	ShowYear      int
+	ShowTMDBID    int
 	SeasonNumber  int
 	EpisodeNumber int
 }
@@ -614,12 +615,12 @@ type EpisodeContext struct {
 func (r *ShowRepository) GetEpisodeContext(episodeID int64) (*EpisodeContext, error) {
 	ctx := &EpisodeContext{}
 	err := r.db.QueryRow(`
-		SELECT s.title, s.year, sn.season_number, e.episode_number
+		SELECT s.title, s.year, s.tmdb_id, sn.season_number, e.episode_number
 		FROM episodes e
 		INNER JOIN seasons sn ON sn.id = e.season_id
 		INNER JOIN shows s ON s.id = sn.show_id
 		WHERE e.id = $1
-	`, episodeID).Scan(&ctx.ShowTitle, &ctx.ShowYear, &ctx.SeasonNumber, &ctx.EpisodeNumber)
+	`, episodeID).Scan(&ctx.ShowTitle, &ctx.ShowYear, &ctx.ShowTMDBID, &ctx.SeasonNumber, &ctx.EpisodeNumber)
 
 	if err == sql.ErrNoRows {
 		return nil, nil

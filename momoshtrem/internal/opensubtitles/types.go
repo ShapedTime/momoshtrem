@@ -12,51 +12,59 @@ type SubtitleFetcher interface {
 	Download(ctx context.Context, fileID int) ([]byte, string, error)
 }
 
-// SearchParams contains parameters for subtitle search
+// SearchParams contains parameters for subtitle search.
+//
+// Movies are found by their own TMDB ID. Episodes are found by the show's
+// TMDB ID (sent as parent_tmdb_id) with the season and episode number: in
+// the OpenSubtitles API tmdb_id is the ID "of the movie or episode", and the
+// docs recommend "the parent ID, along with the episode and season number"
+// for episodes.
+// https://opensubtitles.stoplight.io/docs/opensubtitles-api/a172317bd5ccc-search-for-subtitles
 type SearchParams struct {
-	TMDBID        int      // TMDB ID of the movie or TV show
+	TMDBID        int      // Movies: the movie's TMDB ID
+	ParentTMDBID  int      // Episodes: the show's TMDB ID
 	Type          string   // "movie" or "episode"
-	SeasonNumber  int      // Season number (for episodes)
+	SeasonNumber  int      // Season number (for episodes; 0 is specials)
 	EpisodeNumber int      // Episode number (for episodes)
-	Languages     []string // ISO 639-1 language codes (en, ru, tr, az)
+	Languages     []string // OpenSubtitles language codes (en, pt-br, ...)
 }
 
 // SearchResponse is the API response for subtitle search
 type SearchResponse struct {
-	TotalPages int               `json:"total_pages"`
-	TotalCount int               `json:"total_count"`
-	Page       int               `json:"page"`
+	TotalPages int              `json:"total_pages"`
+	TotalCount int              `json:"total_count"`
+	Page       int              `json:"page"`
 	Data       []SubtitleResult `json:"data"`
 }
 
 // SubtitleResult represents a single subtitle from search results
 type SubtitleResult struct {
-	ID         string           `json:"id"`
-	Type       string           `json:"type"`
+	ID         string             `json:"id"`
+	Type       string             `json:"type"`
 	Attributes SubtitleAttributes `json:"attributes"`
 }
 
 // SubtitleAttributes contains the subtitle metadata
 type SubtitleAttributes struct {
-	SubtitleID      string  `json:"subtitle_id"`
-	Language        string  `json:"language"`        // ISO 639-1 code
-	DownloadCount   int     `json:"download_count"`
-	NewDownloadCount int    `json:"new_download_count"`
-	HearingImpaired bool    `json:"hearing_impaired"`
-	HD              bool    `json:"hd"`
-	FPS             float64 `json:"fps"`
-	Votes           int     `json:"votes"`
-	Ratings         float64 `json:"ratings"`
-	FromTrusted     bool    `json:"from_trusted"`
-	ForeignPartsOnly bool   `json:"foreign_parts_only"`
-	AITranslated    bool    `json:"ai_translated"`
-	MachineTranslated bool  `json:"machine_translated"`
-	Release         string  `json:"release"`
-	Comments        string  `json:"comments"`
-	LegacySubtitleID int   `json:"legacy_subtitle_id"`
-	UploadDate      string  `json:"upload_date"`
-	Files           []SubtitleFile `json:"files"`
-	FeatureDetails  FeatureDetails `json:"feature_details"`
+	SubtitleID        string         `json:"subtitle_id"`
+	Language          string         `json:"language"` // ISO 639-1 code
+	DownloadCount     int            `json:"download_count"`
+	NewDownloadCount  int            `json:"new_download_count"`
+	HearingImpaired   bool           `json:"hearing_impaired"`
+	HD                bool           `json:"hd"`
+	FPS               float64        `json:"fps"`
+	Votes             int            `json:"votes"`
+	Ratings           float64        `json:"ratings"`
+	FromTrusted       bool           `json:"from_trusted"`
+	ForeignPartsOnly  bool           `json:"foreign_parts_only"`
+	AITranslated      bool           `json:"ai_translated"`
+	MachineTranslated bool           `json:"machine_translated"`
+	Release           string         `json:"release"`
+	Comments          string         `json:"comments"`
+	LegacySubtitleID  int            `json:"legacy_subtitle_id"`
+	UploadDate        string         `json:"upload_date"`
+	Files             []SubtitleFile `json:"files"`
+	FeatureDetails    FeatureDetails `json:"feature_details"`
 }
 
 // SubtitleFile represents a file within a subtitle entry
@@ -89,18 +97,18 @@ type LoginRequest struct {
 
 // LoginResponse is the API response for login
 type LoginResponse struct {
-	User  LoginUser `json:"user"`
-	Token string    `json:"token"`
-	Status int      `json:"status"`
+	User   LoginUser `json:"user"`
+	Token  string    `json:"token"`
+	Status int       `json:"status"`
 }
 
 // LoginUser contains user info from login
 type LoginUser struct {
-	AllowedDownloads   int    `json:"allowed_downloads"`
-	Level              string `json:"level"`
-	UserID             int    `json:"user_id"`
-	ExtInstalled       bool   `json:"ext_installed"`
-	VIP                bool   `json:"vip"`
+	AllowedDownloads int    `json:"allowed_downloads"`
+	Level            string `json:"level"`
+	UserID           int    `json:"user_id"`
+	ExtInstalled     bool   `json:"ext_installed"`
+	VIP              bool   `json:"vip"`
 }
 
 // DownloadRequest is the request body for download
@@ -110,33 +118,17 @@ type DownloadRequest struct {
 
 // DownloadResponse is the API response for download
 type DownloadResponse struct {
-	Link          string `json:"link"`
-	FileName      string `json:"file_name"`
-	Requests      int    `json:"requests"`
-	Remaining     int    `json:"remaining"`
-	Message       string `json:"message"`
-	ResetTime     string `json:"reset_time"`
-	ResetTimeUTC  string `json:"reset_time_utc"`
+	Link         string `json:"link"`
+	FileName     string `json:"file_name"`
+	Requests     int    `json:"requests"`
+	Remaining    int    `json:"remaining"`
+	Message      string `json:"message"`
+	ResetTime    string `json:"reset_time"`
+	ResetTimeUTC string `json:"reset_time_utc"`
 }
 
 // ErrorResponse represents an API error
 type ErrorResponse struct {
 	Message string `json:"message"`
 	Status  int    `json:"status"`
-}
-
-// LanguageName maps ISO 639-1 codes to display names
-var LanguageNames = map[string]string{
-	"en": "English",
-	"ru": "Russian",
-	"tr": "Turkish",
-	"az": "Azerbaijani",
-}
-
-// GetLanguageName returns the display name for a language code
-func GetLanguageName(code string) string {
-	if name, ok := LanguageNames[code]; ok {
-		return name
-	}
-	return code
 }

@@ -1,0 +1,68 @@
+{
+  "total_pages": 1,
+  "total_count": 4,
+  "per_page": 60,
+  "page": 1,
+  "data": [
+    {
+      "id": "6001",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "6001",
+        "language": "en",
+        "download_count": 21000,
+        "hearing_impaired": false,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Severance.S02E05.720p.HDTV.x264-SYNCOPY",
+        "files": [{ "file_id": 2001, "cd_number": 1, "file_name": "Severance.S02E05.720p.HDTV.x264-SYNCOPY.srt" }],
+        "feature_details": { "feature_id": 9101, "feature_type": "Episode", "year": 2025, "title": "Trojan's Horse", "parent_title": "Severance", "season_number": 2, "episode_number": 5 }
+      }
+    },
+    {
+      "id": "6002",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "6002",
+        "language": "en",
+        "download_count": 1204,
+        "hearing_impaired": true,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Severance.S02E05.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb",
+        "files": [{ "file_id": 2002, "cd_number": 1, "file_name": "Severance.S02E05.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb.srt" }],
+        "feature_details": { "feature_id": 9101, "feature_type": "Episode", "year": 2025, "title": "Trojan's Horse", "parent_title": "Severance", "season_number": 2, "episode_number": 5 }
+      }
+    },
+    {
+      "id": "6003",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "6003",
+        "language": "en",
+        "download_count": 312,
+        "hearing_impaired": false,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Severance.S02E05.Trojans.Horse.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+        "files": [{ "file_id": 2003, "cd_number": 1, "file_name": "Severance.S02E05.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.srt" }],
+        "feature_details": { "feature_id": 9101, "feature_type": "Episode", "year": 2025, "title": "Trojan's Horse", "parent_title": "Severance", "season_number": 2, "episode_number": 5 }
+      }
+    },
+    {
+      "id": "6004",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "6004",
+        "language": "en",
+        "download_count": 88,
+        "hearing_impaired": false,
+        "ai_translated": false,
+        "machine_translated": true,
+        "release": "Severance.S02E05.1080p.WEB.h264-ETHEL",
+        "files": [{ "file_id": 2004, "cd_number": 1, "file_name": "Severance.S02E05.1080p.WEB.h264-ETHEL.srt" }],
+        "feature_details": { "feature_id": 9101, "feature_type": "Episode", "year": 2025, "title": "Trojan's Horse", "parent_title": "Severance", "season_number": 2, "episode_number": 5 }
+      }
+    }
+  ]
+}
