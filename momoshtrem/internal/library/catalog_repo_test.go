@@ -243,6 +243,27 @@ func TestCatalogRepository_LibraryItems(t *testing.T) {
 		}
 	})
 
+	t.Run("downloading movie", func(t *testing.T) {
+		q := query
+		q.MediaType = "movie"
+		q.Downloading = []FileRef{{InfoHash: "hash-movie", Path: "Movie/movie.mkv"}}
+		items, _, err := repo.LibraryItems(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stages := map[string]string{}
+		for _, item := range items {
+			stages[item.Title] = item.Stage
+		}
+		if stages["Movie WithFile "+tok] != "downloading" || stages["Movie NoFile "+tok] != "needs_torrent" {
+			t.Errorf("stages = %v", stages)
+		}
+		q.Status = LibraryStatusIncomplete
+		if _, total, err := repo.LibraryItems(ctx, q); err != nil || total != 2 {
+			t.Errorf("incomplete movies = %d, %v; want 2 (downloading counts)", total, err)
+		}
+	})
+
 	t.Run("paging", func(t *testing.T) {
 		q := query
 		q.Limit, q.Offset = 3, 3
@@ -301,6 +322,65 @@ func TestCatalogRepository_LibraryItems(t *testing.T) {
 		}
 		_ = noFile
 	})
+}
+
+// Assignment.Create deactivates the old one, but if two are ever active the
+// newest wins everywhere: title pages, /library stage and size.
+func TestCatalogRepository_NewestActiveAssignmentWins(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	repo := NewCatalogRepository(db)
+	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
+	tok := fmt.Sprintf("Zn%d", time.Now().UnixNano())
+
+	file := func(itemType ItemType, itemID int64, path string, size int64, age time.Duration) {
+		t.Helper()
+		var id int64
+		err := db.QueryRow(`
+			INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, is_active, created_at)
+			VALUES ($1, $2, 'hash-' || $3, 'magnet:?xt=urn:btih:x', $3, $4, TRUE, NOW() - make_interval(secs => $5))
+			RETURNING id
+		`, string(itemType), itemID, path, size, age.Seconds()).Scan(&id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM torrent_assignments WHERE id = $1`, id) })
+	}
+
+	movie := seed.movie("Newest Movie " + tok)
+	file(ItemTypeMovie, movie.ID, "old.mkv", 9000, time.Hour)
+	file(ItemTypeMovie, movie.ID, "new.mkv", 3000, time.Minute)
+	show := seed.show("Newest Show "+tok, true)
+	ep := seed.episodes(show, 1, aired)[1]
+	file(ItemTypeEpisode, ep, "old-ep.mkv", 800, time.Hour)
+	file(ItemTypeEpisode, ep, "new-ep.mkv", 200, time.Minute)
+
+	got, err := repo.MovieByTMDBID(ctx, movie.TMDBID)
+	if err != nil || got.Assignment == nil || got.Assignment.FilePath != "new.mkv" {
+		t.Errorf("movie assignment = %+v, %v; want new.mkv", got.Assignment, err)
+	}
+	seasons, err := repo.ShowEpisodes(ctx, show.ID)
+	if err != nil || len(seasons) != 1 || seasons[0].Episodes[0].Assignment.FilePath != "new-ep.mkv" {
+		t.Errorf("show episodes = %+v, %v; want new-ep.mkv", seasons, err)
+	}
+	view, err := repo.SeasonByTMDBID(ctx, show.TMDBID, 1)
+	if err != nil || view.Season.Episodes[0].Assignment.FilePath != "new-ep.mkv" {
+		t.Errorf("season view = %+v, %v; want new-ep.mkv", view, err)
+	}
+
+	// The old files being fetched doesn't make the titles downloading.
+	items, _, err := repo.LibraryItems(ctx, LibraryQuery{Search: tok, Today: today, Downloading: []FileRef{
+		{InfoHash: "hash-old.mkv", Path: "old.mkv"}, {InfoHash: "hash-old-ep.mkv", Path: "old-ep.mkv"},
+	}})
+	if err != nil || len(items) != 2 {
+		t.Fatalf("library = %+v, %v", items, err)
+	}
+	for _, item := range items {
+		want := map[string]int64{"movie": 3000, "tv": 200}[item.MediaType]
+		if item.Stage != "ready" || item.SizeBytes != want {
+			t.Errorf("%s: stage %s size %d, want ready %d", item.Title, item.Stage, item.SizeBytes, want)
+		}
+	}
 }
 
 func TestCatalogRepository_TitleQueries(t *testing.T) {

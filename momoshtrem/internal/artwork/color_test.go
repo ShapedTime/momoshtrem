@@ -242,6 +242,9 @@ func TestExtractor_FailureIsRememberedBriefly(t *testing.T) {
 	if hits := srv.hits.Load(); hits != 1 {
 		t.Errorf("fetched %d times within the failure TTL, want 1", hits)
 	}
+	if e.hostDown() {
+		t.Error("a 404 is an answer: it must not mark the host down")
+	}
 
 	now = now.Add(failureTTL + time.Minute)
 	_ = e.Color(context.Background(), "/missing.jpg")
@@ -274,6 +277,165 @@ func TestExtractor_CloseStopsBackgroundWork(t *testing.T) {
 	}
 	if got := e.Color(context.Background(), "/good.jpg"); got != nil {
 		t.Errorf("Color after Close = %s, want nil", *got)
+	}
+}
+
+// fakeClock is a settable clock, safe across goroutines.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+func (e *Extractor) hostDown() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.now().Before(e.downUntil)
+}
+
+func (e *Extractor) probeRunning() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.probing
+}
+
+// timed returns Color's answer and how long it took.
+func timed(e *Extractor, ctx context.Context, path string) (*string, time.Duration) {
+	start := time.Now()
+	got := e.Color(ctx, path)
+	return got, time.Since(start)
+}
+
+// A caller that joins a flight already running waits only what's left of
+// the budget, and not at all once it's spent.
+func TestExtractor_JoinedFlightWaitsOnlyTheRest(t *testing.T) {
+	srv := newImageServer(t, jpegBytes(t, color.White), time.Minute) // never in time
+	clock := &fakeClock{now: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)}
+	e := New(newMemCache(), WithBaseURL(srv.URL+"/w300"), WithBudget(time.Second))
+	e.now = clock.Now
+	defer e.Close()
+
+	// The first caller's request ends early; its flight carries on.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if got := e.Color(ctx, "/good.jpg"); got != nil {
+		t.Fatalf("first Color = %s, want nil", *got)
+	}
+
+	clock.Advance(900 * time.Millisecond)
+	got, took := timed(e, context.Background(), "/good.jpg")
+	if got != nil || took < 90*time.Millisecond || took > 700*time.Millisecond {
+		t.Errorf("joined 900 ms in: %v after %v, want nil after ~100 ms", deref(got), took)
+	}
+
+	clock.Advance(time.Second)
+	got, took = timed(e, context.Background(), "/good.jpg")
+	if got != nil || took > 50*time.Millisecond {
+		t.Errorf("joined past the budget: %v after %v, want nil at once", deref(got), took)
+	}
+	if hits := srv.hits.Load(); hits != 1 {
+		t.Errorf("image requested %d times, want 1 (one flight)", hits)
+	}
+}
+
+// After a transport failure Color stops waiting for the host: it answers
+// null at once and sends one probe at a time until the host answers.
+func TestExtractor_HostDown(t *testing.T) {
+	body := jpegBytes(t, color.RGBA{0, 0, 200, 255})
+	var stalled atomic.Bool
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if stalled.Load() {
+			<-r.Context().Done() // the client times out
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cache := newMemCache()
+	clock := &fakeClock{now: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)}
+	e := New(cache, WithBaseURL(srv.URL), WithBudget(2*time.Second),
+		WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
+	e.now = clock.Now
+	defer e.Close()
+	waitForProbe := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for e.probeRunning() {
+			if time.Now().After(deadline) {
+				t.Fatal("probe never finished")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	stalled.Store(true)
+	if got := e.Color(context.Background(), "/a.jpg"); got != nil {
+		t.Fatalf("Color with the host stalled = %s, want nil", *got)
+	}
+	if !e.hostDown() {
+		t.Fatal("a timeout should mark the host down")
+	}
+	if entry, ok := cache.entry("color:w300/a.jpg"); !ok || string(entry.payload) != "null" {
+		t.Errorf("failure entry = %+v (found %v), want null", entry, ok)
+	}
+
+	// Down: no waiting, and one probe however many titles ask.
+	before := hits.Load()
+	for _, p := range []string{"/b.jpg", "/c.jpg", "/d.jpg"} {
+		if got, took := timed(e, context.Background(), p); got != nil || took > 30*time.Millisecond {
+			t.Errorf("Color(%s) while down = %v after %v, want nil at once", p, deref(got), took)
+		}
+	}
+	waitForProbe()
+	if n := hits.Load() - before; n != 1 {
+		t.Errorf("requests while down = %d, want 1 probe", n)
+	}
+	if entry, ok := cache.entry("color:w300/b.jpg"); !ok || string(entry.payload) != "null" {
+		t.Errorf("failed probe entry = %+v (found %v), want null", entry, ok)
+	}
+	if !e.hostDown() {
+		t.Error("a failed probe keeps the host down")
+	}
+
+	// The host is back: the next probe succeeds and lifts the breaker.
+	stalled.Store(false)
+	if got := e.Color(context.Background(), "/c.jpg"); got != nil {
+		t.Errorf("Color while still down = %s, want nil", *got)
+	}
+	waitForProbe()
+	if e.hostDown() {
+		t.Fatal("a successful probe should mark the host up")
+	}
+	if got := e.Color(context.Background(), "/c.jpg"); got == nil || *got != "#0100c8" {
+		t.Errorf("probed colour = %v, want #0100c8 from the cache", deref(got))
+	}
+	if got := e.Color(context.Background(), "/d.jpg"); got == nil || *got != "#0100c8" {
+		t.Errorf("Color once up = %v, want it computed inline", deref(got))
+	}
+
+	// Without a successful probe the breaker still lifts after 5 minutes.
+	stalled.Store(true)
+	_ = e.Color(context.Background(), "/e.jpg")
+	if !e.hostDown() {
+		t.Fatal("host should be down again")
+	}
+	clock.Advance(hostDownFor + time.Second)
+	if e.hostDown() {
+		t.Error("the breaker should lift after hostDownFor")
 	}
 }
 

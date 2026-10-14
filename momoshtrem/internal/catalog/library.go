@@ -12,6 +12,9 @@ import (
 const (
 	DefaultPageSize = 50
 	MaxPageSize     = 200
+	// MaxPage caps page so the offset can't overflow; it's far past the end
+	// of any library.
+	MaxPage = 1_000_000
 )
 
 // Library status filters (GET /library?status=).
@@ -28,8 +31,8 @@ type LibraryParams struct {
 	Status    string // "" or a Status*
 	Sort      string // "" (added), "added", "title", "last_watched" or "size"
 	Query     string
-	Page      int // from 1
-	PageSize  int // 1..MaxPageSize; 0 is DefaultPageSize
+	Page      int // From 1; capped at MaxPage
+	PageSize  int // 0 is DefaultPageSize; capped at MaxPageSize
 }
 
 // Library lists the library, a page at a time, each item with its
@@ -48,9 +51,9 @@ func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, e
 		return nil, fmt.Errorf("%w: page must be at least 1", ErrInvalidQuery)
 	case p.PageSize < 1:
 		return nil, fmt.Errorf("%w: page_size must be at least 1", ErrInvalidQuery)
-	case p.PageSize > MaxPageSize:
-		p.PageSize = MaxPageSize
 	}
+	p.PageSize = min(p.PageSize, MaxPageSize)
+	p.Page = min(p.Page, MaxPage)
 	switch p.MediaType {
 	case "", "movie", "tv":
 	default:

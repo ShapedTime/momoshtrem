@@ -5,6 +5,7 @@ package artwork
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg" // TMDB serves JPEG backdrops
@@ -12,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,6 +32,9 @@ const (
 	computeTimeout = 15 * time.Second
 	// failureTTL is how long a failed fetch is remembered before retrying.
 	failureTTL = time.Hour
+	// hostDownFor is how long the image host counts as unreachable after a
+	// transport error or timeout: Color answers null at once meanwhile.
+	hostDownFor = 5 * time.Minute
 	// maxImageBytes guards against a runaway response.
 	maxImageBytes = 4 << 20
 
@@ -64,7 +69,9 @@ func WithBudget(d time.Duration) Option {
 
 // Extractor computes a title's hero colour from its backdrop and caches it
 // forever under "color:w300{path}". A computation that outlives the inline
-// budget finishes in the background (one per key); Close stops them.
+// budget finishes in the background (one per key); Close stops them. While
+// the image host is unreachable, Color stops waiting for it and sends a
+// single probe instead.
 type Extractor struct {
 	cache   Cache
 	http    *http.Client
@@ -80,12 +87,17 @@ type Extractor struct {
 	mu      sync.Mutex
 	closed  bool
 	flights map[string]*flight
+	// downUntil: the image host failed at the transport level. Until then
+	// Color doesn't wait, and at most one probe runs (probing).
+	downUntil time.Time
+	probing   bool
 }
 
 // flight is one computation in progress; done closes when hex is set.
 type flight struct {
-	done chan struct{}
-	hex  *string
+	done    chan struct{}
+	started time.Time
+	hex     *string
 }
 
 // New creates an Extractor backed by cache.
@@ -134,11 +146,11 @@ func (e *Extractor) Color(ctx context.Context, backdropPath string) *string {
 		e.log.Warn("Undecodable colour cache entry; recomputing", "key", key)
 	}
 
-	f := e.start(key, backdropPath)
-	if f == nil {
-		return nil // shutting down
+	f, wait := e.join(key, backdropPath)
+	if f == nil || wait <= 0 {
+		return nil // shutting down, host down, or the budget is already spent
 	}
-	timer := time.NewTimer(e.budget)
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case <-f.done:
@@ -159,18 +171,35 @@ func (e *Extractor) Close() {
 	e.wg.Wait()
 }
 
-// start joins the computation for key, starting it if none is running.
-func (e *Extractor) start(key, backdropPath string) *flight {
+// join returns the computation for key, starting it if none is running,
+// and how long the caller may still wait for it: the budget less the time
+// the flight has already run. While the host is down it returns no flight
+// and starts at most one probe, across all keys.
+func (e *Extractor) join(key, backdropPath string) (*flight, time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if f, ok := e.flights[key]; ok {
-		return f
-	}
 	if e.closed {
-		return nil
+		return nil, 0
+	}
+	now := e.now()
+	if now.Before(e.downUntil) {
+		if _, running := e.flights[key]; !e.probing && !running {
+			e.probing = true
+			e.startLocked(key, backdropPath, true)
+		}
+		return nil, 0
 	}
 
-	f := &flight{done: make(chan struct{})}
+	f, ok := e.flights[key]
+	if !ok {
+		f = e.startLocked(key, backdropPath, false)
+	}
+	return f, e.budget - now.Sub(f.started)
+}
+
+// startLocked computes key in the background. Call with e.mu held.
+func (e *Extractor) startLocked(key, backdropPath string, probe bool) *flight {
+	f := &flight{done: make(chan struct{}), started: e.now()}
 	e.flights[key] = f
 	e.wg.Add(1)
 	go func() {
@@ -178,10 +207,26 @@ func (e *Extractor) start(key, backdropPath string) *flight {
 		f.hex = e.compute(key, backdropPath)
 		e.mu.Lock()
 		delete(e.flights, key)
+		if probe {
+			e.probing = false
+		}
 		e.mu.Unlock()
 		close(f.done)
 	}()
 	return f
+}
+
+// hostReached records whether the image host answered. A transport error or
+// timeout marks it down for hostDownFor; any answer, a 404 included, marks
+// it up.
+func (e *Extractor) hostReached(reached bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if reached {
+		e.downUntil = time.Time{}
+		return
+	}
+	e.downUntil = e.now().Add(hostDownFor)
 }
 
 // compute fetches and samples the backdrop and stores the result: the colour
@@ -197,9 +242,13 @@ func (e *Extractor) compute(key, backdropPath string) *string {
 		if ctx.Err() != nil && e.ctx.Err() != nil {
 			return nil // shutting down: don't remember a failure
 		}
-		e.log.Warn("Failed to fetch backdrop for its colour", "path", backdropPath, "error", err)
+		var unreachable *unreachableError
+		reached := !errors.As(err, &unreachable)
+		e.hostReached(reached)
+		e.log.Warn("Failed to fetch backdrop for its colour", "path", backdropPath, "host_reached", reached, "error", err)
 		expires = e.now().Add(failureTTL)
 	} else {
+		e.hostReached(true)
 		c := DominantColor(img)
 		hex = &c
 	}
@@ -218,7 +267,7 @@ func (e *Extractor) fetch(ctx context.Context, backdropPath string) (image.Image
 	}
 	resp, err := e.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, &unreachableError{fmt.Errorf("request failed: %w", err)}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -226,9 +275,26 @@ func (e *Extractor) fetch(ctx context.Context, backdropPath string) (image.Image
 	}
 	img, _, err := image.Decode(io.LimitReader(resp.Body, maxImageBytes))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %w", err)
+		err = fmt.Errorf("failed to decode image: %w", err)
+		if isTimeout(err) {
+			return nil, &unreachableError{err} // the body stalled, not a bad image
+		}
+		return nil, err
 	}
 	return img, nil
+}
+
+// unreachableError is a fetch failure that says the host can't be reached
+// (a transport error or timeout), as opposed to an answer such as a 404.
+type unreachableError struct{ err error }
+
+func (u *unreachableError) Error() string { return u.err.Error() }
+func (u *unreachableError) Unwrap() error { return u.err }
+
+// isTimeout reports whether err is a network or deadline timeout.
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())
 }
 
 // DominantColor samples img on a 32×18 grid and averages the samples,

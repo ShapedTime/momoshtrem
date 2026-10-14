@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -442,6 +443,11 @@ func TestLibrary(t *testing.T) {
 	page, err = f.svc.Library(context.Background(), LibraryParams{})
 	if err != nil || page.Page != 1 || page.PageSize != DefaultPageSize || f.store.lastQuery.Offset != 0 || f.store.lastQuery.Limit != 50 {
 		t.Errorf("defaults = %+v (%+v), %v", page, f.store.lastQuery, err)
+	}
+
+	page, err = f.svc.Library(context.Background(), LibraryParams{Page: math.MaxInt, PageSize: MaxPageSize})
+	if err != nil || page.Page != MaxPage || f.store.lastQuery.Offset != (MaxPage-1)*MaxPageSize {
+		t.Errorf("huge page = %+v (offset %d), %v; want it capped at %d", page, f.store.lastQuery.Offset, err, MaxPage)
 	}
 
 	for _, status := range []string{StatusWatching, StatusNeedsReview} {
