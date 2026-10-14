@@ -251,7 +251,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
     webdav_path, webdav_url,                 // null until something is assigned (the VFS hides empty titles)
     download: {pct, speed_bps, eta_seconds, seeders} | null,   // shows: combined over the downloading episodes
     needs_review, review_job_id,             // review_job_id is filled by B2/#5
-    episodes_total, episodes_ready,          // shows: aired regular episodes, and those with a file;
+    episodes_total, episodes_ready,          // shows: aired regular episodes (plus any with a file), and those with a file;
                                              // null for movies and while not in the library
     missing: {season_number, from, to, absolute_from, absolute_to, count} | null,   // shows: the first frontier run (below)
     torrent: {info_hash, release_name, file_name, size_bytes, resolution, source, added_at,
@@ -270,7 +270,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
                    webdav_path }             // only while the episode has a file
   EpisodeRange { label, kind: arc|block, from, to, absolute_from, absolute_to, missing }   // from/to in-season
   ```
-  Ranges exist only for seasons over 20 episodes: TMDB story-arc groups (type 5) that overlap the season; otherwise split where air dates are more than 45 days apart (not for specials, which air years apart), then cut into blocks of up to 10. Block labels are in-season numbers, e.g. `"21–28"`.
+  Ranges exist only for seasons over 20 episodes: TMDB story-arc groups (type 5) that overlap the season; otherwise split where air dates are more than 45 days apart (not for specials, which air years apart), then cut into blocks of up to 10. Episodes no arc covers (arc groups lag behind airing shows) get blocks too. Block labels are in-season numbers, e.g. `"21–28"`, or `"31"` for a single episode. Without TMDB the season still loads, with blocks.
 - **Availability rules.** The server computes `availability_stage`, so the client never infers it.
   - Movie: `none` not in the library; `needs_torrent` no active assignment; `downloading` the torrent is loaded and active and the file isn't fully cached; `ready` otherwise.
   - Show: `none` not in the library; `needs_torrent` nothing assigned, or the frontier is non-empty; `downloading` any assigned episode is downloading; `ready` otherwise.
@@ -280,10 +280,10 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
 - `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item.
-- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=&page_size=` (50 by default, max 200): items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls. `status=watching` and `status=needs_review` stay empty until B5 and B2.
+- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=&page_size=` (50 by default, max 200): items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading). `status=watching` and `status=needs_review` stay empty until B5 and B2; until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
 - `GET /shows/{id}/episode-groups`: `{items: [{id, name, type, group_count, episode_count}]}`, TMDB episode groups for the ordering picker.
-- Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata); `503 unavailable` without a TMDB key.
+- Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata: no cast, crew, overview or similar titles); `503 unavailable` without a TMDB key, library titles included.
 
 ### Subtitles (B7)
 Item-scoped under `/movies/{id}` and `/episodes/{id}`; the legacy `/subtitles/*` routes go when F2 drops their callers. Types: `web/src/lib/api/contract/subtitles.ts`.

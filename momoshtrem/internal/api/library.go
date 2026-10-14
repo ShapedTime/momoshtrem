@@ -112,21 +112,16 @@ func parseID(c *gin.Context, param string) (int64, bool) {
 // Movie handlers
 
 func (s *Server) listMovies(c *gin.Context) {
-	movies, err := s.movieRepo.List()
+	// Movies and their active assignments in one query.
+	movies, err := s.movieRepo.ListWithActiveAssignment(c.Request.Context())
 	if err != nil {
 		errorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Get assignments for each movie
 	response := make([]MovieResponse, len(movies))
 	for i, movie := range movies {
-		assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, movie.ID)
-		if err != nil {
-			errorResponse(c, http.StatusInternalServerError, "Failed to get assignment for movie")
-			return
-		}
-		response[i] = toMovieResponse(movie, assignment)
+		response[i] = toMovieResponse(movie, movie.Assignment)
 	}
 
 	c.JSON(http.StatusOK, response)

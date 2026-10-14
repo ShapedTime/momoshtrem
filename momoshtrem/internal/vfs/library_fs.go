@@ -448,17 +448,16 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 		}
 
 		// Create movie folder: /Movies/Title (Year)/
-		folderName := makeMediaFolderName(movie.Title, movie.Year)
-		folderPath := MoviesPath + "/" + folderName
+		folderPath := MovieDir(movie.Title, movie.Year)
+		folderName := path.Base(folderPath)
 
 		movieDir := NewVirtualDir(folderName)
 		moviesDir.children[folderName] = movieDir
 		tree.pathMap[folderPath] = movieDir
 
 		// Add video file
-		ext := getVideoExt(movie.Assignment.FilePath)
-		fileName := folderName + ext
-		filePath := folderPath + "/" + fileName
+		filePath := MovieFilePath(movie.Title, movie.Year, movie.Assignment.FilePath)
+		fileName := path.Base(filePath)
 
 		videoFile := NewPlaceholderFile(fileName, movie.Assignment.FileSize, movie.Assignment)
 		movieDir.children[fileName] = videoFile
@@ -475,8 +474,8 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 	}
 	for _, show := range shows {
 		// Create show folder: /TV Shows/Title (Year)/
-		showFolderName := makeMediaFolderName(show.Title, show.Year)
-		showPath := TVShowsPath + "/" + showFolderName
+		showPath := ShowDir(show.Title, show.Year)
+		showFolderName := path.Base(showPath)
 
 		showDir := NewVirtualDir(showFolderName)
 		tvDir.children[showFolderName] = showDir
@@ -484,8 +483,8 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 
 		for _, season := range show.Seasons {
 			// Create season folder: /TV Shows/Title (Year)/Season 01/
-			seasonFolderName := makeSeasonFolderName(season.SeasonNumber)
-			seasonPath := showPath + "/" + seasonFolderName
+			seasonPath := SeasonDir(show.Title, show.Year, season.SeasonNumber)
+			seasonFolderName := path.Base(seasonPath)
 
 			seasonDir := NewVirtualDir(seasonFolderName)
 			showDir.children[seasonFolderName] = seasonDir
@@ -498,8 +497,8 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 
 				// Episode file: Show - S01E05 - Name.ext
 				ext := getVideoExt(episode.Assignment.FilePath)
-				fileName := makeEpisodeFileName(show.Title, season.SeasonNumber, episode.EpisodeNumber, episode.Name, ext)
-				filePath := seasonPath + "/" + fileName
+				filePath := EpisodeFilePath(show.Title, show.Year, season.SeasonNumber, episode.EpisodeNumber, episode.Name, episode.Assignment.FilePath)
+				fileName := path.Base(filePath)
 
 				videoFile := NewPlaceholderFile(fileName, episode.Assignment.FileSize, episode.Assignment)
 				seasonDir.children[fileName] = videoFile
@@ -570,8 +569,8 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 	}
 
 	// Build paths
-	folderName := makeMediaFolderName(movie.Title, movie.Year)
-	folderPath := MoviesPath + "/" + folderName
+	folderPath := MovieDir(movie.Title, movie.Year)
+	folderName := path.Base(folderPath)
 
 	moviesDir, ok := fs.tree.pathMap[MoviesPath].(*VirtualDir)
 	if !ok {
@@ -604,9 +603,8 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 		slog.Error("Movie directory not found after creation", "path", folderPath)
 		return
 	}
-	ext := getVideoExt(assignment.FilePath)
-	fileName := folderName + ext
-	filePath := folderPath + "/" + fileName
+	filePath := MovieFilePath(movie.Title, movie.Year, assignment.FilePath)
+	fileName := path.Base(filePath)
 
 	videoFile := NewPlaceholderFile(fileName, assignment.FileSize, assignment)
 	movieDir.children[fileName] = videoFile
@@ -633,8 +631,8 @@ func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
 		return
 	}
 
-	folderName := makeMediaFolderName(title, year)
-	folderPath := MoviesPath + "/" + folderName
+	folderPath := MovieDir(title, year)
+	folderName := path.Base(folderPath)
 
 	movieDir, exists := fs.tree.pathMap[folderPath]
 	if !exists {
@@ -690,8 +688,8 @@ func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
 
 	for _, ep := range episodes {
 		// Get or create show folder
-		showFolderName := makeMediaFolderName(ep.ShowTitle, ep.ShowYear)
-		showPath := TVShowsPath + "/" + showFolderName
+		showPath := ShowDir(ep.ShowTitle, ep.ShowYear)
+		showFolderName := path.Base(showPath)
 
 		showDirEntry, exists := fs.tree.pathMap[showPath]
 		if !exists {
@@ -706,8 +704,8 @@ func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
 		}
 
 		// Get or create season folder
-		seasonFolderName := makeSeasonFolderName(ep.SeasonNumber)
-		seasonPath := showPath + "/" + seasonFolderName
+		seasonPath := SeasonDir(ep.ShowTitle, ep.ShowYear, ep.SeasonNumber)
+		seasonFolderName := path.Base(seasonPath)
 
 		seasonDirEntry, exists := fs.tree.pathMap[seasonPath]
 		if !exists {
@@ -722,9 +720,8 @@ func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
 		}
 
 		// Add episode file
-		ext := getVideoExt(ep.Assignment.FilePath)
-		fileName := makeEpisodeFileName(ep.ShowTitle, ep.SeasonNumber, ep.Episode.EpisodeNumber, ep.Episode.Name, ext)
-		filePath := seasonPath + "/" + fileName
+		filePath := EpisodeFilePath(ep.ShowTitle, ep.ShowYear, ep.SeasonNumber, ep.Episode.EpisodeNumber, ep.Episode.Name, ep.Assignment.FilePath)
+		fileName := path.Base(filePath)
 
 		videoFile := NewPlaceholderFile(fileName, ep.Assignment.FileSize, ep.Assignment)
 		seasonDir.children[fileName] = videoFile
@@ -758,8 +755,8 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 		return
 	}
 
-	showFolderName := makeMediaFolderName(showTitle, showYear)
-	showPath := TVShowsPath + "/" + showFolderName
+	showPath := ShowDir(showTitle, showYear)
+	showFolderName := path.Base(showPath)
 
 	showDirEntry, exists := fs.tree.pathMap[showPath]
 	if !exists {
@@ -772,8 +769,8 @@ func (fs *LibraryFS) RemoveEpisodeFromTree(showTitle string, showYear int, seaso
 		return
 	}
 
-	seasonFolderName := makeSeasonFolderName(seasonNumber)
-	seasonPath := showPath + "/" + seasonFolderName
+	seasonPath := SeasonDir(showTitle, showYear, seasonNumber)
+	seasonFolderName := path.Base(seasonPath)
 
 	seasonDirEntry, exists := fs.tree.pathMap[seasonPath]
 	if !exists {
@@ -845,8 +842,8 @@ func (fs *LibraryFS) RemoveShowFromTree(title string, year int) {
 		return
 	}
 
-	showFolderName := makeMediaFolderName(title, year)
-	showPath := TVShowsPath + "/" + showFolderName
+	showPath := ShowDir(title, year)
+	showFolderName := path.Base(showPath)
 
 	showDirEntry, exists := fs.tree.pathMap[showPath]
 	if !exists {

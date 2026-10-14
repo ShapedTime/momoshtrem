@@ -2,8 +2,6 @@ package library
 
 import (
 	"time"
-
-	"github.com/shapedtime/momoshtrem/internal/common"
 )
 
 // ItemType represents the type of library item
@@ -148,30 +146,6 @@ type TorrentAssignment struct {
 	Source     string // Optional: BluRay, WEB-DL, etc.
 	IsActive   bool
 	CreatedAt  time.Time
-}
-
-// VFSPath returns the virtual filesystem path for a movie
-func (m *Movie) VFSPath() string {
-	return "/" + SanitizeFilename(m.Title) + " (" + common.Itoa(m.Year) + ")"
-}
-
-// VFSPath returns the virtual filesystem path for a show
-func (s *Show) VFSPath() string {
-	return "/" + SanitizeFilename(s.Title) + " (" + common.Itoa(s.Year) + ")"
-}
-
-// VFSPath returns the virtual filesystem path for a season
-func (sn *Season) VFSPath(showPath string) string {
-	return showPath + "/Season " + common.PadZero(sn.SeasonNumber, 2)
-}
-
-// VFSPath returns the virtual filesystem path for an episode
-func (e *Episode) VFSPath(seasonPath string, showTitle string, seasonNumber int) string {
-	name := e.Name
-	if name == "" {
-		name = "Episode " + common.Itoa(e.EpisodeNumber)
-	}
-	return seasonPath + "/" + SanitizeFilename(showTitle) + " - S" + common.PadZero(seasonNumber, 2) + "E" + common.PadZero(e.EpisodeNumber, 2) + " - " + SanitizeFilename(name)
 }
 
 // RecentlyAiredEpisode represents an episode with show context for the recently-aired API

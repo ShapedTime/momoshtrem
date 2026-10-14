@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "id": 3,
+      "media_type": "tv",
+      "tmdb_id": 209867,
+      "title": "Frieren",
+      "year": 2023,
+      "poster_path": "/f.jpg",
+      "availability_stage": "needs_torrent",
+      "episodes_total": 38,
+      "episodes_ready": 28,
+      "episodes_watched": 0,
+      "needs_review": 0,
+      "size_bytes": 28000,
+      "added_at": "2026-09-01T10:00:00Z",
+      "last_watched_at": null
+    },
+    {
+      "id": 7,
+      "media_type": "movie",
+      "tmdb_id": 693134,
+      "title": "Dune",
+      "year": 2024,
+      "poster_path": null,
+      "availability_stage": "ready",
+      "episodes_total": null,
+      "episodes_ready": null,
+      "episodes_watched": null,
+      "needs_review": 0,
+      "size_bytes": 18400,
+      "added_at": "2026-09-01T10:00:00Z",
+      "last_watched_at": null
+    }
+  ],
+  "total": 51,
+  "page": 2,
+  "page_size": 200
+}
