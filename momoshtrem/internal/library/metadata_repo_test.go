@@ -357,9 +357,26 @@ func TestMetadataRepository_ListForBackfill(t *testing.T) {
 		t.Errorf("unforced list = %v; want pending %d without done %d", got, pending.ID, done.ID)
 	}
 
+	// A movie synced a day ago comes before one synced just now, so
+	// `--force --limit=N` runs advance through the library.
+	older := seedMovie(t, db, "Synced yesterday", 2004)
+	if _, err := db.Exec(`UPDATE movies SET metadata_updated_at = NOW() - INTERVAL '1 day' WHERE id = $1`, older.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	forced, _ := repo.ListForBackfill(ctx, MediaMovie, true, 0)
-	if got := ids(forced); !got[pending.ID] || !got[done.ID] {
-		t.Errorf("forced list misses %d or %d", pending.ID, done.ID)
+	position := map[int64]int{}
+	for i, it := range forced {
+		position[it.ID] = i
+	}
+	for _, id := range []int64{pending.ID, older.ID, done.ID} {
+		if _, ok := position[id]; !ok {
+			t.Fatalf("forced list misses %d", id)
+		}
+	}
+	if !(position[pending.ID] < position[older.ID] && position[older.ID] < position[done.ID]) {
+		t.Errorf("forced order: never synced %d, yesterday %d, now %d; want that order",
+			position[pending.ID], position[older.ID], position[done.ID])
 	}
 
 	if limited, _ := repo.ListForBackfill(ctx, MediaMovie, true, 1); len(limited) != 1 {

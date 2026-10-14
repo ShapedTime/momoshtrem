@@ -83,12 +83,39 @@ func TestAbsoluteNumbers(t *testing.T) {
 			want: map[int64]int{101: 1, 103: 3},
 		},
 		{
-			name:     "episodes the group doesn't list get no number",
-			episodes: []NumberedEpisode{ep(1, 1, 11), ep(1, 2, 12), ep(9, 1, 91)},
+			name: "episodes the group skips before its last one get no number",
+			// The group leaves out S1E2 (a recap, say) but goes on to S1E3.
+			episodes: []NumberedEpisode{ep(1, 1, 11), ep(1, 2, 12), ep(1, 3, 13)},
+			group: &tmdb.EpisodeGroup{Groups: []tmdb.EpisodeGroupGroup{
+				{Order: 0, Episodes: []tmdb.GroupEpisode{gep(1, 1, 11, 0), gep(1, 3, 13, 1)}},
+			}},
+			want: map[int64]int{101: 1, 103: 2},
+		},
+		{
+			name: "episodes aired after the group's last one continue its numbering",
+			// The absolute group lags airing: it stops at S1E2, but S1E3,
+			// S1E4 and S2E1 have aired since. Specials still get nothing.
+			episodes: []NumberedEpisode{ep(2, 1, 21), ep(1, 4, 14), ep(1, 1, 11), ep(1, 2, 12), ep(1, 3, 13), ep(0, 1, 1)},
 			group: &tmdb.EpisodeGroup{Groups: []tmdb.EpisodeGroupGroup{
 				{Order: 0, Episodes: []tmdb.GroupEpisode{gep(1, 1, 11, 0), gep(1, 2, 12, 1)}},
 			}},
-			want: map[int64]int{101: 1, 102: 2},
+			want: map[int64]int{101: 1, 102: 2, 103: 3, 104: 4, 201: 5},
+		},
+		{
+			name: "continuation starts after episodes the library lacks",
+			// The group lists S1E1..E3; the library only has E1. E4 follows
+			// the group's E3, so it is 4, not 2.
+			episodes: []NumberedEpisode{ep(1, 1, 11), ep(1, 4, 14)},
+			group: &tmdb.EpisodeGroup{Groups: []tmdb.EpisodeGroupGroup{
+				{Order: 0, Episodes: []tmdb.GroupEpisode{gep(1, 1, 11, 0), gep(1, 2, 12, 1), gep(1, 3, 13, 2)}},
+			}},
+			want: map[int64]int{101: 1, 104: 4},
+		},
+		{
+			name:     "an empty group numbers everything cumulatively",
+			episodes: []NumberedEpisode{ep(1, 1, 11), ep(1, 2, 12), ep(0, 1, 1)},
+			group:    &tmdb.EpisodeGroup{},
+			want:     map[int64]int{101: 1, 102: 2},
 		},
 		{
 			name:     "specials in a group are skipped",

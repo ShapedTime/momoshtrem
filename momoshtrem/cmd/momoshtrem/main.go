@@ -39,6 +39,10 @@ var version = "dev"
 // existing library.
 const backfillCommand = "backfill-metadata"
 
+// tmdbCacheGrace is how long expired TMDB cache entries are kept for
+// stale-on-error before startup prunes them.
+const tmdbCacheGrace = 30 * 24 * time.Hour
+
 func main() {
 	startedAt := time.Now()
 
@@ -136,8 +140,17 @@ func main() {
 		tmdb.WithLanguage(cfg.TMDB.Language),
 		tmdb.WithRateLimit(float64(cfg.TMDB.RPS)),
 	)
-	cachedTMDB := tmdb.NewCached(tmdbClient, library.NewTMDBCacheRepository(db))
+	tmdbCache := library.NewTMDBCacheRepository(db)
+	cachedTMDB := tmdb.NewCached(tmdbClient, tmdbCache)
 	slog.Info("TMDB client initialized", "language", cfg.TMDB.Language, "rps", cfg.TMDB.RPS)
+
+	// Drop cache entries long expired. Recently expired ones stay: they are
+	// served when TMDB is down.
+	if pruned, err := tmdbCache.PruneExpired(context.Background(), tmdbCacheGrace); err != nil {
+		slog.Warn("Failed to prune the TMDB cache", "error", err)
+	} else if pruned > 0 {
+		slog.Info("Pruned expired TMDB cache entries", "rows", pruned)
+	}
 
 	// Initialize torrent storage
 	pieceStorage, _, pieceCompletion, err := torrent.InitStorage(

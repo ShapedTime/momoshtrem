@@ -281,18 +281,22 @@ func (s *Syncer) refreshShow(ctx context.Context, showID int64) (*ShowResult, er
 	return s.syncShow(fresh, show, details.Status, seasonsToSync(details, show.IncludeSpecials), false)
 }
 
-// updateShowMetadata stores the show's TMDB metadata. On the first sync of
-// a show added before metadata existed, anime also gets its default
-// (absolute) ordering, like a newly added show.
+// updateShowMetadata stores the show's TMDB metadata. A show added before
+// metadata existed gets anime's default (absolute) ordering, like a newly
+// added show, but only on the sync that first detects it as anime: once
+// is_anime is stored, a later sync never overrides the user's ordering, even
+// if an earlier sync didn't finish.
 func (s *Syncer) updateShowMetadata(ctx context.Context, show *library.Show, details *tmdb.ShowDetails) error {
 	m := showMetadata(details)
+	wasAnime := show.IsAnime
 	if err := s.meta.UpdateShowMetadata(ctx, show.ID, m); err != nil {
 		return err
 	}
 	show.IsAnime = m.IsAnime
 	show.Status = m.Status
 
-	if show.MetadataUpdatedAt == nil && m.IsAnime && show.EpisodeOrdering == library.OrderingAired {
+	firstDetected := m.IsAnime && !wasAnime && show.MetadataUpdatedAt == nil
+	if firstDetected && show.EpisodeOrdering == library.OrderingAired {
 		settings := show.Settings()
 		settings.EpisodeOrdering = DefaultOrdering(true)
 		if err := s.meta.UpdateShowSettings(ctx, show.ID, settings); err != nil {

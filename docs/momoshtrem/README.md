@@ -74,8 +74,8 @@ At startup every embedded migration that isn't recorded in `schema_migrations` r
 Adding a movie or show stores its TMDB metadata: IMDb and TVDB IDs, artwork, runtime, genres and status, plus every season, specials (season 0) included, with episode names, air dates, stills and runtimes. Refresh (`POST /api/movies/{id}/refresh`, `POST /api/shows/{id}/refresh`) fetches them again. Titles and years are fixed when the item is added, because they name the WebDAV folders. When a refresh renames an episode that has a file, the WebDAV tree is rebuilt.
 
 - **Specials.** Season 0 is stored when the show's `include_specials` is on, the default. Turning it off keeps the rows and hides them.
-- **Episode ordering.** Each show has an ordering: `aired`, `absolute` or `episode_group`. Anime defaults to `absolute`. Anime means the Animation genre with Japanese as the original language or Japan as an origin country, or TMDB's `anime` keyword. Absolute numbers come from the chosen TMDB episode group. For `absolute`, if no group is chosen, they come from the absolute-type group with the most episodes. Otherwise they count up across the regular seasons. Specials never get one.
-- **TMDB cache.** TMDB responses are kept in `tmdb_cache`. Details stay fresh for 7 days and episode groups for 7 days. Seasons stay fresh for 1 day while a show airs and for 30 days once it has ended. Concurrent requests for the same item share one TMDB call. When TMDB fails, an expired entry is served instead. Refresh bypasses the cache. The client retries 5xx responses and timeouts with backoff, honours `Retry-After` on `429`, and never retries `401` or `404`.
+- **Episode ordering.** Each show has an ordering: `aired`, `absolute` or `episode_group`. Anime defaults to `absolute`. Anime means the Animation genre with Japanese as the original language or Japan as an origin country, or TMDB's `anime` keyword. Absolute numbers come from the chosen TMDB episode group. For `absolute`, if no group is chosen, they come from the absolute-type group with the most episodes. Groups often lag airing shows, so episodes that aired after the group's last one carry on its numbering. Without a group, numbers count up across the regular seasons. Specials never get one.
+- **TMDB cache.** TMDB responses are kept in `tmdb_cache`. Details stay fresh for 7 days and episode groups for 7 days. Seasons stay fresh for 1 day while a show airs and for 30 days once it has ended. Concurrent requests for the same item share one TMDB call. When TMDB fails, an expired entry is served instead. The server deletes entries that expired more than 30 days ago when it starts. Refresh bypasses the cache. The client retries 5xx responses and timeouts with backoff, honours `Retry-After` on `429`, and never retries `401` or `404`.
 
 ### Backfilling an existing library
 
@@ -93,8 +93,8 @@ DATABASE_URL=postgres://... TMDB_API_KEY=... ./momoshtrem backfill-metadata
 
 | Flag | Default | |
 |---|---|---|
-| `--dry-run` | off | List the movies and shows it would process. No TMDB calls, no writes. |
-| `--force` | off | Also reprocess items that already have metadata. |
+| `--dry-run` | off | List the movies and shows it would process. No TMDB calls and no metadata writes, but like every start it first applies pending migrations. |
+| `--force` | off | Also reprocess items that already have metadata, least recently synced first, so repeated `--force --limit=N` runs cover the whole library. |
 | `--only=movies\|shows` | both | Limit the run to one kind. |
 | `--limit=N` | `0` (all) | Process at most N movies and N shows. |
 | `--rps=N` | `10` | TMDB requests per second, kept below the server's so both fit TMDB's limit. |

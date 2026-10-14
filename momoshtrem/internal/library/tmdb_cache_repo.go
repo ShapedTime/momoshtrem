@@ -36,6 +36,24 @@ func (r *TMDBCacheRepository) Get(ctx context.Context, key string) (payload []by
 	return payload, expires.Time, true, nil
 }
 
+// PruneExpired deletes entries that expired more than grace ago. Entries
+// that expired recently stay, to be served when TMDB is down; entries that
+// never expire are never pruned. It returns how many rows it deleted.
+func (r *TMDBCacheRepository) PruneExpired(ctx context.Context, grace time.Duration) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM tmdb_cache WHERE expires_at < NOW() - make_interval(secs => $1)`,
+		grace.Seconds(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to prune tmdb cache: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to count pruned tmdb cache rows: %w", err)
+	}
+	return n, nil
+}
+
 // Set stores a JSON payload under key. A zero expiresAt never expires.
 func (r *TMDBCacheRepository) Set(ctx context.Context, key string, payload []byte, expiresAt time.Time) error {
 	var expires sql.NullTime

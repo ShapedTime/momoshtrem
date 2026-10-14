@@ -49,6 +49,46 @@ func TestMetadataErrorResponse(t *testing.T) {
 	}
 }
 
+// The legacy GET /shows/:id response hides specials when they're switched
+// off, but the rows stay.
+func TestToShowResponse_Specials(t *testing.T) {
+	show := func(includeSpecials bool) *library.Show {
+		return &library.Show{
+			ID: 1, TMDBID: 2, Title: "Doctor Who", Year: 2005, IncludeSpecials: includeSpecials,
+			Seasons: []library.Season{
+				{ID: 10, SeasonNumber: 0, Episodes: []library.Episode{{ID: 100, EpisodeNumber: 1, Name: "Special"}}},
+				{ID: 11, SeasonNumber: 1, Episodes: []library.Episode{
+					{ID: 110, EpisodeNumber: 1, Name: "Rose", Assignment: &library.TorrentAssignment{ID: 5, FilePath: "rose.mkv"}},
+				}},
+			},
+		}
+	}
+	tests := []struct {
+		name            string
+		includeSpecials bool
+		wantSeasons     []int
+	}{
+		{"specials on", true, []int{0, 1}},
+		{"specials off", false, []int{1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := toShowResponse(show(tt.includeSpecials))
+			var got []int
+			for _, s := range resp.Seasons {
+				got = append(got, s.SeasonNumber)
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tt.wantSeasons) {
+				t.Errorf("seasons = %v, want %v", got, tt.wantSeasons)
+			}
+			last := resp.Seasons[len(resp.Seasons)-1].Episodes[0]
+			if !last.HasAssignment || last.Assignment == nil || last.Assignment.FilePath != "rose.mkv" {
+				t.Errorf("episode = %+v, want its assignment", last)
+			}
+		})
+	}
+}
+
 func TestMetadataRoutes_WithoutSyncer(t *testing.T) {
 	s := newTestServer(Options{})
 	tests := []struct {

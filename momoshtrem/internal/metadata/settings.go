@@ -121,6 +121,11 @@ func (s *Syncer) fetchSpecials(ctx context.Context, show *library.Show) {
 		for _, se := range res.errors {
 			s.log.Warn("Failed to fetch specials", "show_id", show.ID, "error", se.Err)
 		}
+		// Specials kept from before may have files; a new name moves them.
+		if res.assignedRenamed && s.tree != nil {
+			s.log.Info("Assigned special renamed; rebuilding WebDAV tree", "show_id", show.ID)
+			s.tree.InvalidateTree()
+		}
 		return
 	}
 }

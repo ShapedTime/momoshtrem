@@ -50,9 +50,11 @@ func PickAbsoluteGroup(groups []tmdb.EpisodeGroupSummary) string {
 //
 // With a group, the order is the group's: its groups by order, then their
 // episodes by order. Library episodes are matched by TMDB episode ID, falling
-// back to season and episode number; episodes the group doesn't list get no
-// number. Without a group, numbers are cumulative over the regular seasons in
-// season and episode order.
+// back to season and episode number. Episodes aired after the last one the
+// group lists continue its numbering in aired order (groups lag airing
+// shows); other episodes the group doesn't list get no number. Without a
+// group, numbers are cumulative over the regular seasons in season and
+// episode order.
 //
 // Specials (season 0) never get a number, and don't advance the count. The
 // result maps episode IDs to numbers; unnumbered episodes are absent.
@@ -104,6 +106,7 @@ func numbersFromGroup(episodes []NumberedEpisode, group *tmdb.EpisodeGroup) map[
 
 	numbers := make(map[int64]int, len(episodes))
 	counted := make(map[seasonEpisode]bool)
+	var last seasonEpisode // Latest aired episode the group covers
 	next := 1
 	for _, g := range groups {
 		eps := append([]tmdb.GroupEpisode(nil), g.Episodes...)
@@ -115,6 +118,9 @@ func numbersFromGroup(episodes []NumberedEpisode, group *tmdb.EpisodeGroup) map[
 				continue // specials get no number; overlapping groups count once
 			}
 			counted[key] = true
+			if key.after(last) {
+				last = key
+			}
 			n := next
 			next++
 
@@ -127,5 +133,33 @@ func numbersFromGroup(episodes []NumberedEpisode, group *tmdb.EpisodeGroup) map[
 			}
 		}
 	}
+
+	// Groups lag behind airing shows (a long anime's absolute group may stop
+	// dozens of episodes short). Episodes aired after the last one the group
+	// covers carry on from where it stops, in aired order. Unlisted episodes
+	// before that point stay unnumbered: the group left them out on purpose.
+	var newer []NumberedEpisode
+	for _, ep := range episodes {
+		key := seasonEpisode{ep.SeasonNumber, ep.EpisodeNumber}
+		if _, done := numbers[ep.ID]; ep.SeasonNumber > 0 && !done && key.after(last) {
+			newer = append(newer, ep)
+		}
+	}
+	sort.SliceStable(newer, func(i, j int) bool {
+		return seasonEpisode{newer[j].SeasonNumber, newer[j].EpisodeNumber}.after(
+			seasonEpisode{newer[i].SeasonNumber, newer[i].EpisodeNumber})
+	})
+	for _, ep := range newer {
+		numbers[ep.ID] = next
+		next++
+	}
 	return numbers
+}
+
+// after reports whether a airs after b in season and episode order.
+func (a seasonEpisode) after(b seasonEpisode) bool {
+	if a.season != b.season {
+		return a.season > b.season
+	}
+	return a.episode > b.episode
 }

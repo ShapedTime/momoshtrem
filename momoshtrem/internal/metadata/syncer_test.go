@@ -341,6 +341,27 @@ func TestSyncer_ApplySettings(t *testing.T) {
 		}
 	})
 
+	t.Run("specials back on with an assigned special renamed rebuilds the tree", func(t *testing.T) {
+		if _, err := h.syncer.ApplySettings(ctx, showID, SettingsPatch{IncludeSpecials: boolPtr(false)}); err != nil {
+			t.Fatal(err)
+		}
+		stored, _ := h.shows.GetWithSeasonsAndEpisodesContext(ctx, showID)
+		h.assign(t, episodeOf(t, stored, 0, 1).ID)
+		h.tmdb.renameEpisode(id, 0, 1, "Special (renamed)")
+		before := h.tree.n.Load()
+
+		show, err := h.syncer.ApplySettings(ctx, showID, SettingsPatch{IncludeSpecials: boolPtr(true)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := episodeOf(t, show, 0, 1).Name; got != "Special (renamed)" {
+			t.Errorf("special name = %q", got)
+		}
+		if n := h.tree.n.Load() - before; n != 1 {
+			t.Errorf("tree rebuilds = %d, want 1: the special's file name changed", n)
+		}
+	})
+
 	t.Run("back to aired numbers cumulatively", func(t *testing.T) {
 		show, err := h.syncer.ApplySettings(ctx, showID, SettingsPatch{EpisodeOrdering: ordering(library.OrderingAired)})
 		if err != nil {
@@ -357,6 +378,42 @@ func TestSyncer_ApplySettings(t *testing.T) {
 			t.Errorf("error = %v, want ErrShowNotFound", err)
 		}
 	})
+}
+
+func TestSyncer_AnimeDefaultOnlyOnFirstDetection(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	id := uniqueTMDBID()
+	legacy := seedLegacyShow(t, h, id, "Frieren", 2023, map[int][]string{1: {"E1"}})
+	h.tmdb.addShow(tmdb.ShowDetails{
+		ID: id, Name: "Frieren", FirstAirDate: "2023-09-29", Status: "Returning Series",
+		OriginalLanguage: "ja", Genres: []tmdb.Genre{{ID: 16, Name: "Animation"}},
+	}, map[int][]string{1: {"E1"}, 2: {"E2"}})
+	// Season 2 keeps failing, so the show is never stamped as synced.
+	h.tmdb.seasonErrs[[2]int{id, 2}] = &tmdb.StatusError{StatusCode: 503}
+
+	first, err := h.syncer.RefreshShow(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Complete() || first.Show.MetadataUpdatedAt != nil {
+		t.Fatalf("want an incomplete, unstamped sync; got %+v", first.SeasonErrors)
+	}
+	if first.Show.EpisodeOrdering != library.OrderingAbsolute {
+		t.Fatalf("first detection: ordering = %q, want absolute", first.Show.EpisodeOrdering)
+	}
+
+	aired := library.OrderingAired
+	if _, err := h.syncer.ApplySettings(ctx, legacy.ID, SettingsPatch{EpisodeOrdering: &aired}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.syncer.RefreshShow(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Show.EpisodeOrdering != library.OrderingAired {
+		t.Errorf("refresh reset the user's ordering to %q", second.Show.EpisodeOrdering)
+	}
 }
 
 func TestSyncer_Movies(t *testing.T) {

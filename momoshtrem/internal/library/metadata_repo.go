@@ -309,7 +309,9 @@ type BackfillItem struct {
 }
 
 // ListForBackfill returns the movies or shows that have never had a metadata
-// sync (all of them with force), oldest first. limit 0 means no limit.
+// sync (all of them with force). Never-synced items come first, then the
+// least recently synced, so repeated `--force --limit=N` runs work through
+// the whole library. limit 0 means no limit.
 func (r *MetadataRepository) ListForBackfill(ctx context.Context, kind MediaKind, force bool, limit int) ([]BackfillItem, error) {
 	var table string
 	switch kind {
@@ -325,7 +327,7 @@ func (r *MetadataRepository) ListForBackfill(ctx context.Context, kind MediaKind
 		SELECT id, tmdb_id, title, year, metadata_updated_at
 		FROM `+table+`
 		WHERE $1::boolean OR metadata_updated_at IS NULL
-		ORDER BY id
+		ORDER BY metadata_updated_at ASC NULLS FIRST, id
 		LIMIT NULLIF($2, 0)
 	`, force, limit)
 	if err != nil {

@@ -50,3 +50,38 @@ func TestTMDBCacheRepository(t *testing.T) {
 		t.Error("Set with invalid JSON: want an error")
 	}
 }
+
+func TestTMDBCacheRepository_PruneExpired(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewTMDBCacheRepository(db)
+	ctx := context.Background()
+
+	prefix := fmt.Sprintf("test:prune:%d:", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, prefix+"%") })
+
+	now := time.Now()
+	entries := map[string]time.Time{
+		"long-expired":     now.Add(-40 * 24 * time.Hour),
+		"recently-expired": now.Add(-2 * 24 * time.Hour), // kept for stale-on-error
+		"fresh":            now.Add(time.Hour),
+		"never":            {},
+	}
+	for key, expires := range entries {
+		if err := repo.Set(ctx, prefix+key, []byte(`{}`), expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := repo.PruneExpired(ctx, 30*24*time.Hour); err != nil {
+		t.Fatalf("PruneExpired: %v", err)
+	}
+	for key := range entries {
+		_, _, found, err := repo.Get(ctx, prefix+key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := key != "long-expired"; found != want {
+			t.Errorf("%s: found %v, want %v", key, found, want)
+		}
+	}
+}
