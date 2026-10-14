@@ -1,37 +1,347 @@
-import type { EpisodeSummary, MovieTitle, SeasonSummary, ShowTitle, Title } from '@/lib/api/contract';
+import type {
+  EpisodeRange,
+  EpisodeState,
+  EpisodeSummary,
+  MediaType,
+  MissingRun,
+  MovieTitle,
+  SeasonDetail,
+  SeasonSummary,
+  ShowSettingsPatch,
+  ShowTitle,
+  SimilarTitle,
+  Timestamp,
+  Title,
+  TitleLibraryState,
+} from '@/lib/api/contract';
 import { type CatalogEntry, findTitle, iso } from './catalog';
+import { MOVIES, type MovieSeed, type SeasonSeed, SHOWS, type ShowSeed, type TitleSeed } from './title-seeds';
 
-function episodes(season: number, count: number, readyUpTo: number, watchedUpTo: number): EpisodeSummary[] {
-  return Array.from({ length: count }, (_, i) => {
-    const n = i + 1;
-    const state = n <= watchedUpTo ? 'watched' : n <= readyUpTo ? 'ready' : n === readyUpTo + 1 ? 'downloading' : 'missing';
+/**
+ * Title and season answers built from the seeds (title-seeds.ts) and the
+ * page's library: what's added, unassigned or changed lives in a `MockLibrary`
+ * that handlers/titles.ts keeps per page.
+ */
+
+/** The mock WEBDAV_PUBLIC_URL. */
+const WEBDAV_PUBLIC_URL = 'https://momoshtrem.local:36911';
+const TODAY = iso(0).slice(0, 10);
+const DAY = 86_400_000;
+
+type ShowSettings = Required<ShowSettingsPatch>;
+
+/** One title in the mock library. */
+export interface MockLibraryEntry {
+  library_id: number;
+  added_at: Timestamp;
+  /** False for a title added this session, or a movie whose torrent was unassigned: nothing has a file. */
+  files: boolean;
+  /** Shows: episodes whose file was unassigned. */
+  unassigned: Set<number>;
+  /** Shows. */
+  settings: ShowSettings;
+}
+
+/** Keyed by `libraryKey(mediaType, tmdbId)`. */
+export type MockLibrary = Map<string, MockLibraryEntry>;
+
+export const libraryKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`;
+
+
+// ---- Paths (the backend's VFS layout) -----------------------------------------
+
+/** library.SanitizeFilename */
+const sanitize = (name: string) => name.replace(/[/\\:|]/g, '-').replace(/[*?<>]/g, '').replace(/"/g, "'");
+const pad = (n: number) => String(n).padStart(2, '0');
+const folder = (entry: CatalogEntry) => `${sanitize(entry.title)} (${entry.year})`;
+
+function moviePath(entry: CatalogEntry, fileName: string): string {
+  const ext = /\.[^./]+$/.exec(fileName)?.[0] ?? '.mkv';
+  return `/Movies/${folder(entry)}/${folder(entry)}${ext}`;
+}
+
+const showPath = (entry: CatalogEntry) => `/TV Shows/${folder(entry)}/`;
+
+const episodePath = (entry: CatalogEntry, season: number, episode: number, name: string) =>
+  `/TV Shows/${folder(entry)}/Season ${pad(season)}/${sanitize(entry.title)} - S${pad(season)}E${pad(episode)} - ${sanitize(name)}.mkv`;
+
+const webdavUrl = (path: string | null) => (path === null ? null : WEBDAV_PUBLIC_URL + path.split('/').map(encodeURIComponent).join('/'));
+
+// ---- Library ----------------------------------------------------------------
+
+const defaultSettings = (entry: CatalogEntry): ShowSettings => ({
+  episode_ordering: entry.is_anime ? 'absolute' : 'aired',
+  episode_group_id: null,
+  include_specials: true,
+  classifier_mode: 'auto',
+});
+
+/** The library a page starts with. */
+export function seedLibrary(): MockLibrary {
+  const library: MockLibrary = new Map();
+  const seeds: Array<[MediaType, Record<number, TitleSeed>]> = [['movie', MOVIES], ['tv', SHOWS]];
+  for (const [mediaType, records] of seeds) {
+    for (const [tmdbId, seed] of Object.entries(records)) {
+      const entry = findTitle(mediaType, Number(tmdbId));
+      if (!seed.library || !entry) continue;
+      library.set(libraryKey(mediaType, entry.tmdb_id), {
+        library_id: seed.library.id,
+        added_at: iso(seed.library.added_days_ago),
+        files: true,
+        unassigned: new Set(),
+        settings: defaultSettings(entry),
+      });
+    }
+  }
+  return library;
+}
+
+/** A title just added: in the library, nothing assigned. */
+export function addToLibrary(library: MockLibrary, entry: CatalogEntry): MockLibraryEntry {
+  const ids = [...library].filter(([key]) => key.startsWith(`${entry.media_type}:`)).map(([, row]) => row.library_id);
+  const row: MockLibraryEntry = {
+    library_id: Math.max(0, ...ids) + 1,
+    added_at: new Date().toISOString(),
+    files: false,
+    unassigned: new Set(),
+    settings: defaultSettings(entry),
+  };
+  library.set(libraryKey(entry.media_type, entry.tmdb_id), row);
+  return row;
+}
+
+/** The catalog entry and library row for a library id (`/movies/{id}`, `/shows/{id}`). */
+export function findByLibraryId(library: MockLibrary, mediaType: MediaType, id: number) {
+  for (const [key, row] of library) {
+    const [type, tmdbId] = key.split(':');
+    const entry = findTitle(type as MediaType, Number(tmdbId));
+    if (type === mediaType && row.library_id === id && entry) return { key, row, entry };
+  }
+  return undefined;
+}
+
+const episodeIdFor = (key: number, season: number, episode: number) => key * 100_000 + season * 1000 + episode;
+
+/** Library id of a seeded episode. */
+export function episodeId(tmdbId: number, season: number, episode: number): number {
+  return episodeIdFor(SHOWS[tmdbId].key, season, episode);
+}
+
+/** The show an episode id belongs to, when it exists. */
+export function findEpisode(id: number): { tmdbId: number; season: number; episode: number } | undefined {
+  const key = Math.floor(id / 100_000);
+  const season = Math.floor((id % 100_000) / 1000);
+  const episode = id % 1000;
+  const found = Object.entries(SHOWS).find(([, show]) => show.key === key);
+  if (!found) return undefined;
+  const exists = found[1].seasons.some((s) => s.n === season && s.episodes.some((e) => e.n === episode));
+  return exists ? { tmdbId: Number(found[0]), season, episode } : undefined;
+}
+
+// ---- Builders ---------------------------------------------------------------
+
+const hasFile = (state: EpisodeState) => state === 'watched' || state === 'ready' || state === 'downloading';
+
+function notInLibrary(): TitleLibraryState {
+  return {
+    in_library: false,
+    library_id: null,
+    added_at: null,
+    availability_stage: 'none',
+    webdav_path: null,
+    webdav_url: null,
+    download: null,
+    needs_review: 0,
+    review_job_id: null,
+    episodes_total: null,
+    episodes_ready: null,
+    missing: null,
+    torrent: null,
+  };
+}
+
+interface BuiltSeason {
+  seed: SeasonSeed;
+  episodes: EpisodeSummary[];
+}
+
+/** Seasons as the backend sees them, with the library applied; season 0 only while specials are on. */
+function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry | undefined): BuiltSeason[] {
+  const includeSpecials = row?.settings.include_specials ?? true;
+  let absolute = 1;
+  return show.seasons
+    .map((season) => {
+      if (season.n > 0) absolute = season.absolute_from ?? absolute;
+      const episodes = season.episodes.map((seed): EpisodeSummary => {
+        const id = episodeIdFor(show.key, season.n, seed.n);
+        const lost = !row?.files || row.unassigned.has(id);
+        const aired = seed.air_date !== null && seed.air_date <= TODAY;
+        const state = lost && seed.state !== 'missing' && seed.state !== 'upcoming' ? (aired ? 'missing' : 'upcoming') : seed.state;
+        return {
+          id,
+          season_number: season.n,
+          episode_number: seed.n,
+          absolute_number: season.n > 0 ? absolute++ : null,
+          name: seed.name,
+          overview: seed.overview ?? '',
+          air_date: seed.air_date,
+          still_path: null,
+          runtime: seed.runtime,
+          episode_type: seed.episode_type ?? 'standard',
+          state,
+          pct: state === 'downloading' ? (seed.pct ?? 0) : null,
+          webdav_path: hasFile(state) ? episodePath(entry, season.n, seed.n, seed.name) : null,
+        };
+      });
+      return { seed: season, episodes };
+    })
+    .filter((season) => includeSpecials || season.seed.n !== 0);
+}
+
+function seasonSummary({ seed, episodes }: BuiltSeason, inLibrary: boolean): SeasonSummary {
+  const count = (match: (state: EpisodeState) => boolean) => (inLibrary ? episodes.filter((e) => match(e.state)).length : 0);
+  const absolute = episodes.map((e) => e.absolute_number).filter((n): n is number => n !== null);
+  return {
+    season_number: seed.n,
+    name: seed.name,
+    episodes_total: episodes.length,
+    ready: count(hasFile),
+    missing: count((state) => state === 'missing'),
+    needs_review: count((state) => state === 'needs_review'),
+    upcoming: count((state) => state === 'upcoming'),
+    absolute_from: inLibrary ? (absolute[0] ?? null) : null,
+    absolute_to: inLibrary ? (absolute.at(-1) ?? null) : null,
+  };
+}
+
+/** Story arcs when TMDB has them; otherwise split at breaks of more than 45 days (not specials), then into blocks of up to 10. */
+function ranges({ seed, episodes }: BuiltSeason): EpisodeRange[] {
+  if (episodes.length <= 20) return [];
+  const spans: Array<Pick<EpisodeRange, 'label' | 'kind' | 'from' | 'to'>> =
+    seed.arcs?.map((arc) => ({ ...arc, kind: 'arc' as const })) ??
+    episodes
+      .reduce<EpisodeSummary[][]>((runs, episode, i) => {
+        const previous = episodes[i - 1]?.air_date;
+        // Specials air years apart: number blocks only.
+        const gap = seed.n > 0 && previous && episode.air_date && Date.parse(episode.air_date) - Date.parse(previous) > 45 * DAY;
+        if (i === 0 || gap) runs.push([]);
+        runs[runs.length - 1].push(episode);
+        return runs;
+      }, [])
+      .flatMap((block) =>
+        Array.from({ length: Math.ceil(block.length / 10) }, (_, i) => {
+          const chunk = block.slice(i * 10, i * 10 + 10);
+          const from = chunk[0].episode_number;
+          const to = chunk[chunk.length - 1].episode_number;
+          return { label: `${from}–${to}`, kind: 'block' as const, from, to };
+        })
+      );
+  return spans.map((span) => {
+    const inside = episodes.filter((e) => e.episode_number >= span.from && e.episode_number <= span.to);
     return {
-      id: season * 1000 + n,
-      season_number: season,
-      episode_number: n,
-      absolute_number: season === 0 ? null : n,
-      name: season === 0 ? `Special ${n}` : `Episode ${n}`,
-      air_date: iso(400 - n * 7).slice(0, 10),
-      still_path: null,
-      runtime: 24,
-      state,
-      pct: state === 'downloading' ? 64 : null,
+      ...span,
+      absolute_from: inside[0]?.absolute_number ?? null,
+      absolute_to: inside.at(-1)?.absolute_number ?? null,
+      missing: inside.filter((e) => e.state === 'missing').length,
     };
   });
 }
 
-function seasonSummary(season: number, name: string, list: EpisodeSummary[]): SeasonSummary {
+/** The first run of the frontier: aired regular episodes after the last one with a file. */
+function frontierRun(seasons: BuiltSeason[]): MissingRun | null {
+  const regular = seasons.filter((s) => s.seed.n > 0).flatMap((s) => s.episodes);
+  const rest = regular.slice(regular.findLastIndex((e) => hasFile(e.state)) + 1);
+  const start = rest.findIndex((e) => e.state === 'missing');
+  if (start < 0) return null;
+  let end = start;
+  while (rest[end + 1]?.state === 'missing' && rest[end + 1].season_number === rest[start].season_number) end++;
+  return { season_number: rest[start].season_number, from: rest[start].episode_number, to: rest[end].episode_number, count: end - start + 1 };
+}
+
+function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry | undefined, seasons: BuiltSeason[]): TitleLibraryState {
+  if (!row) return notInLibrary();
+  const all = seasons.flatMap((s) => s.episodes);
+  const regular = all.filter((e) => e.season_number > 0);
+  const withFile = regular.filter((e) => hasFile(e.state));
+  const downloading = all.filter((e) => e.state === 'downloading');
+  const needsReview = all.filter((e) => e.state === 'needs_review').length;
+  const missing = frontierRun(seasons);
+  const path = all.some((e) => hasFile(e.state)) ? showPath(entry) : null;
   return {
-    season_number: season,
-    name,
-    episodes_total: list.length,
-    ready: list.filter((e) => e.state === 'ready' || e.state === 'watched').length,
-    missing: list.filter((e) => e.state === 'missing').length,
-    needs_review: list.filter((e) => e.state === 'needs_review').length,
+    in_library: true,
+    library_id: row.library_id,
+    added_at: row.added_at,
+    availability_stage: withFile.length === 0 || missing ? 'needs_torrent' : downloading.length ? 'downloading' : 'ready',
+    webdav_path: path,
+    webdav_url: webdavUrl(path),
+    download: downloading.length
+      ? {
+          pct: Math.round(downloading.reduce((sum, e) => sum + (e.pct ?? 0), 0) / downloading.length),
+          speed_bps: 0,
+          eta_seconds: null,
+          seeders: show.seeders ?? 0,
+        }
+      : null,
+    needs_review: needsReview,
+    review_job_id: needsReview ? (show.review_job_id ?? null) : null,
+    episodes_total: regular.filter((e) => e.state !== 'upcoming').length,
+    episodes_ready: withFile.length,
+    missing,
+    torrent: null,
   };
 }
 
-function base(entry: CatalogEntry) {
+function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEntry | undefined): TitleLibraryState {
+  if (!row) return notInLibrary();
+  const torrent = row.files ? (movie.torrent ?? null) : null;
+  const path = torrent ? moviePath(entry, torrent.file_name) : null;
+  return {
+    ...notInLibrary(),
+    in_library: true,
+    library_id: row.library_id,
+    added_at: row.added_at,
+    availability_stage: !torrent ? 'needs_torrent' : movie.download ? 'downloading' : 'ready',
+    webdav_path: path,
+    webdav_url: webdavUrl(path),
+    download: torrent ? (movie.download ?? null) : null,
+    torrent,
+  };
+}
+
+function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
+  const row = library.get(libraryKey(entry.media_type, entry.tmdb_id));
+  if (entry.media_type === 'movie') return movieLibrary(entry, MOVIES[entry.tmdb_id], row);
+  const show = SHOWS[entry.tmdb_id];
+  return showLibrary(entry, show, row, buildSeasons(entry, show, row));
+}
+
+function similarTitles(seed: TitleSeed, library: MockLibrary): SimilarTitle[] {
+  return seed.similar.flatMap(([mediaType, tmdbId]) => {
+    const entry = findTitle(mediaType, tmdbId);
+    if (!entry) return [];
+    const state = libraryState(entry, library);
+    return [
+      {
+        media_type: mediaType,
+        tmdb_id: tmdbId,
+        title: entry.title,
+        year: entry.year,
+        poster_path: null,
+        library:
+          state.library_id === null
+            ? null
+            : {
+                library_id: state.library_id,
+                availability_stage: state.availability_stage,
+                episodes_total: state.episodes_total,
+                episodes_ready: state.episodes_ready,
+              },
+      },
+    ];
+  });
+}
+
+function base(entry: CatalogEntry, seed: TitleSeed, library: MockLibrary) {
   return {
     tmdb_id: entry.tmdb_id,
     title: entry.title,
@@ -40,52 +350,63 @@ function base(entry: CatalogEntry) {
     overview: entry.overview,
     poster_path: null,
     backdrop_path: null,
-    backdrop_dominant_color: '#2f8f7f',
+    backdrop_dominant_color: seed.color,
     genres: entry.genres,
-    vote_average: 8.4,
-    cast: [{ name: 'Atsumi Tanezaki', character: 'Frieren', profile_path: null }],
-    trailer_youtube_key: null,
-    recommendation_reason: 'Because you loved Mushishi: quiet, melancholic and kind.',
+    vote_average: seed.vote_average,
+    vote_count: seed.vote_count,
+    original_language: seed.original_language,
+    cast: seed.cast,
+    trailer_youtube_key: seed.trailer_youtube_key,
+    similar: similarTitles(seed, library),
+    library: libraryState(entry, library),
+    watch_state: seed.watch_state,
+    recommendation_reason: seed.recommendation_reason,
   };
 }
 
-export function buildTitle(mediaType: 'movie' | 'tv', tmdbId: number): Title | undefined {
+/** GET /titles/{movie|tv}/{tmdb_id} for a catalog title, against the page's library. */
+export function buildTitle(mediaType: MediaType, tmdbId: number, library: MockLibrary = seedLibrary()): Title | undefined {
   const entry = findTitle(mediaType, tmdbId);
   if (!entry) return undefined;
 
   if (entry.media_type === 'movie') {
-    const movie: MovieTitle = {
-      ...base(entry),
-      media_type: 'movie',
-      runtime: entry.runtime ?? null,
-      library: { in_library: true, library_id: tmdbId % 1000, availability_stage: 'ready', webdav_path: `/Movies/${entry.title} (${entry.year})/`, download: null, needs_review: 0 },
-      watch_state: { watched_at: null, plays: 0, rating: null },
-    };
-    return movie;
+    const movie = MOVIES[tmdbId];
+    if (!movie) return undefined;
+    const title: MovieTitle = { ...base(entry, movie, library), media_type: 'movie', runtime: entry.runtime ?? null, directors: movie.crew };
+    return title;
   }
 
-  const main = episodes(1, 28, 20, 12);
-  const specials = episodes(0, 4, 2, 0);
-  const show: ShowTitle = {
-    ...base(entry),
+  const show = SHOWS[tmdbId];
+  if (!show) return undefined;
+  const row = library.get(libraryKey('tv', tmdbId));
+  const seasons = buildSeasons(entry, show, row);
+  const settings = row?.settings ?? defaultSettings(entry);
+  const regular = seasons.filter((s) => s.seed.n > 0);
+  const specials = seasons.filter((s) => s.seed.n === 0);
+  const withFile = regular.filter((s) => s.episodes.some((e) => hasFile(e.state)));
+  const titleBase = base(entry, show, library);
+  const title: ShowTitle = {
+    ...titleBase,
     media_type: 'tv',
-    status: 'Returning Series',
+    status: show.status,
     is_anime: Boolean(entry.is_anime),
-    episode_ordering: 'aired',
-    episode_group_id: null,
-    include_specials: true,
-    classifier_mode: 'auto',
-    seasons: [seasonSummary(1, 'Season 1', main), seasonSummary(0, 'Specials', specials)],
-    episodes: [...main, ...specials],
-    library: {
-      in_library: true,
-      library_id: tmdbId % 1000,
-      availability_stage: 'downloading',
-      webdav_path: `/Shows/${entry.title}/`,
-      download: { pct: 64, speed_bps: 6_400_000, eta_seconds: 540, seeders: 312 },
-      needs_review: 0,
-    },
-    watch_state: { watched_at: iso(2), plays: 12, rating: 9, progress: { completed: 12, aired: 28 } },
+    ...settings,
+    creators: show.crew,
+    networks: show.networks,
+    end_year: show.end_year,
+    episode_run_time: show.episode_run_time,
+    seasons: [...regular, ...specials].map((season) => seasonSummary(season, row !== undefined)),
+    default_season:
+      titleBase.library.missing?.season_number ?? withFile.at(-1)?.seed.n ?? regular[0]?.seed.n ?? specials[0]?.seed.n ?? null,
   };
-  return show;
+  return title;
+}
+
+/** GET /titles/tv/{tmdb_id}/seasons/{n}. Undefined for an unknown (or hidden) season. */
+export function buildSeason(tmdbId: number, seasonNumber: number, library: MockLibrary = seedLibrary()): SeasonDetail | undefined {
+  const entry = findTitle('tv', tmdbId);
+  const show = SHOWS[tmdbId];
+  if (!entry || !show) return undefined;
+  const season = buildSeasons(entry, show, library.get(libraryKey('tv', tmdbId))).find((s) => s.seed.n === seasonNumber);
+  return season && { season_number: season.seed.n, name: season.seed.name, episodes: season.episodes, ranges: ranges(season) };
 }

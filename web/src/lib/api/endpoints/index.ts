@@ -4,6 +4,7 @@
  * issue owns its own. Use with `useQuery(titleQuery('tv', 209867))`.
  */
 export * from './titles';
+export * from './subtitles';
 export * from './library';
 export * from './assignment';
 export * from './search';
