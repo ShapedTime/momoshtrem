@@ -53,12 +53,12 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
   - Jackett's config is in `/mnt/data/3/jackett`.
 - **There are no backups of any kind**: no cron, no timers, nothing off the box. qemu-guest-agent isn't running.
 - **ufw allows** 3000, 4444, 9117, 5050, 9090, 80, 443 and 36911 from anywhere. Docker-published ports bypass ufw, though, so compose is what actually decides what's exposed.
-- **A systemd unit** (`streaming-stack.service`) runs `docker compose up -d` at boot.
+- **A systemd unit** (`streaming-stack.service`) is meant to run `docker compose up -d` at boot, but it points at the missing `/opt/streaming-stack` and fails. The stack comes back only through `restart: unless-stopped`.
 
 **App checkout.** It lives at `/opt/streaming-stack-3/apple-tv-tor-stream`.
 - **It is stale.** It is at `e063821` (2026-04-23), 23 commits behind `main`, and still runs the old `PrettyTVCatalog` frontend.
 - **Images are built on the VM** with `docker compose build`.
-- **The data paths depend on an untracked file.** `compose.override.yml` maps them to `/mnt/data/3/...`. Without it, compose falls back to `./data/...`, where a stray root-owned `./data/pgdata` holds an older 47 MB database. Losing the override would silently start the app on the wrong database.
+- **The data paths depend on an untracked file.** `compose.override.yml` maps them to `/mnt/data/3/...`. Without it, compose falls back to `./data/...`, where a stray root-owned `./data/pgdata` holds an empty 47 MB cluster, created by accident on 2026-04-19. Losing the override would silently start the app on an empty database.
 - **`.env` and the `Caddyfile` exist only on the VM** (both are gitignored). The Caddyfile still proxies to `prettytvcatalog:3000`. A git stash named "compose" is left over.
 - **The compose project name comes from the folder name**, and so does the name of the `caddy_data` volume. That volume holds Caddy's internal CA, which Infuse trusts.
 
