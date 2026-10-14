@@ -351,6 +351,7 @@ func TestSeason_StoryArcs(t *testing.T) {
 	f.tmdb.groups["arcs"] = &tmdb.EpisodeGroup{Groups: []tmdb.EpisodeGroupGroup{
 		{Name: "Journey's End", Order: 0, Episodes: eps(1, 17)},
 		{Name: "First-Class Mage Exam", Order: 1, Episodes: eps(18, 28)},
+		{Name: "Golden Land", Order: 2, Episodes: eps(29, 31)},
 	}}
 
 	season, err := f.svc.Season(context.Background(), frierenTMDB, 1)
@@ -361,12 +362,19 @@ func TestSeason_StoryArcs(t *testing.T) {
 	for _, r := range season.Ranges {
 		labels = append(labels, r.Kind+":"+r.Label)
 	}
-	want := []string{"arc:Journey's End", "arc:First-Class Mage Exam", "block:29–38"}
+	want := []string{"arc:Journey's End", "arc:First-Class Mage Exam", "arc:Golden Land", "block:32–38"}
 	if !reflect.DeepEqual(labels, want) {
 		t.Errorf("ranges = %v, want %v", labels, want)
 	}
-	if season.Ranges[2].Missing != 10 {
-		t.Errorf("trailing block missing = %d, want 10", season.Ranges[2].Missing)
+	if season.Ranges[3].Missing != 7 {
+		t.Errorf("trailing block missing = %d, want 7", season.Ranges[3].Missing)
+	}
+
+	// Arcs covering less than 80% of the season (28 of 38): blocks.
+	f.tmdb.groups["arcs"].Groups = f.tmdb.groups["arcs"].Groups[:2]
+	season, err = f.svc.Season(context.Background(), frierenTMDB, 1)
+	if err != nil || len(season.Ranges) != 4 || season.Ranges[0].Kind != "block" {
+		t.Errorf("ranges with 28 of 38 covered = %+v, %v", season.Ranges, err)
 	}
 
 	// TMDB down: numbered blocks instead.
@@ -374,6 +382,37 @@ func TestSeason_StoryArcs(t *testing.T) {
 	season, err = f.svc.Season(context.Background(), frierenTMDB, 1)
 	if err != nil || len(season.Ranges) != 4 || season.Ranges[0].Kind != "block" {
 		t.Errorf("ranges without TMDB = %+v, %v", season.Ranges, err)
+	}
+}
+
+// Long specials get blocks without looking up story arcs, even when the
+// arc group lists them.
+func TestSeason_SpecialsNeverUseArcs(t *testing.T) {
+	f := newFixture()
+	specials := &f.store.seasons[3][0]
+	group := tmdb.EpisodeGroupGroup{Name: "Specials"}
+	for n := 1; n <= 25; n++ {
+		if n > len(specials.Episodes) {
+			specials.Episodes = append(specials.Episodes, library.Episode{ID: int64(3000 + n), EpisodeNumber: n, Name: "Special", AirDate: "2010-01-01"})
+		}
+		group.Episodes = append(group.Episodes, tmdb.GroupEpisode{SeasonNumber: 0, EpisodeNumber: n})
+	}
+	f.tmdb.groupLists[frierenTMDB] = []tmdb.EpisodeGroupSummary{{ID: "arcs", Type: tmdb.GroupStoryArc, EpisodeCount: 25}}
+	f.tmdb.groups["arcs"] = &tmdb.EpisodeGroup{Groups: []tmdb.EpisodeGroupGroup{group}}
+
+	season, err := f.svc.Season(context.Background(), frierenTMDB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := []string{}
+	for _, r := range season.Ranges {
+		labels = append(labels, r.Kind+":"+r.Label)
+	}
+	if want := []string{"block:1–10", "block:11–20", "block:21–25"}; !reflect.DeepEqual(labels, want) {
+		t.Errorf("ranges = %v, want %v", labels, want)
+	}
+	if n := f.tmdb.total(); n != 0 {
+		t.Errorf("TMDB calls = %d, want none for specials", n)
 	}
 }
 

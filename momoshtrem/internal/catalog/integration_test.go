@@ -216,6 +216,10 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 	it.season(other, 1, 3, "2020-01-03")
 
 	arcsID := "arcs-" + it.tag
+	var firstArc []tmdb.GroupEpisode // S01E01–24: 80% of the season, so arcs win
+	for n := 1; n <= 24; n++ {
+		firstArc = append(firstArc, tmdb.GroupEpisode{SeasonNumber: 1, EpisodeNumber: n})
+	}
 	tmdbSrv := fakeTMDBServer(t, map[string]any{
 		fmt.Sprintf("/movie/%d", movieID): tmdb.MovieDetails{ID: movieID, Title: "Movie " + it.tag, ReleaseDate: "2024-01-01",
 			BackdropPath: movieBackdrop, Recommendations: tmdb.ResultsPage{Results: []tmdb.ListItem{
@@ -228,10 +232,10 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 				{ID: otherShowID, MediaType: "tv", Name: "Other"}, {ID: it.id(8), MediaType: "tv", Name: "Not added"},
 			}}},
 		fmt.Sprintf("/tv/%d/episode_groups", showID): map[string]any{"results": []tmdb.EpisodeGroupSummary{
-			{ID: arcsID, Type: tmdb.GroupStoryArc, EpisodeCount: 20},
+			{ID: arcsID, Type: tmdb.GroupStoryArc, EpisodeCount: len(firstArc)},
 		}},
 		"/tv/episode_group/" + arcsID: tmdb.EpisodeGroup{ID: arcsID, Groups: []tmdb.EpisodeGroupGroup{
-			{Name: "First Arc", Order: 0, Episodes: []tmdb.GroupEpisode{{SeasonNumber: 1, EpisodeNumber: 1}, {SeasonNumber: 1, EpisodeNumber: 20}}},
+			{Name: "First Arc", Order: 0, Episodes: firstArc},
 		}},
 	})
 	t.Cleanup(func() {
@@ -302,7 +306,7 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(season.Ranges) == 0 || season.Ranges[0].Kind != "arc" || season.Ranges[0].Label != "First Arc" || season.Ranges[1].Label != "21–30" {
+	if len(season.Ranges) == 0 || season.Ranges[0].Kind != "arc" || season.Ranges[0].Label != "First Arc" || season.Ranges[1].Label != "25–30" {
 		t.Errorf("ranges = %+v", season.Ranges)
 	}
 	if e := season.Episodes[0]; e.State != EpisodeReady || e.AbsoluteNumber == nil || *e.AbsoluteNumber != 101 ||
