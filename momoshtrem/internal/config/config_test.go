@@ -239,6 +239,17 @@ func TestLoad_MissingDatabaseURL(t *testing.T) {
 	})
 }
 
+func TestLoad_ExampleFileParses(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load(filepath.Join("..", "..", "config.yaml.example"))
+	if err != nil {
+		t.Fatalf("config.yaml.example: %v", err)
+	}
+	if !strings.HasPrefix(cfg.Database.URL, "postgres://") {
+		t.Errorf("example database.url = %q, want a postgres:// URL", cfg.Database.URL)
+	}
+}
+
 func TestLoad_InvalidYAML(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://env/momo")
