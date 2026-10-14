@@ -366,19 +366,21 @@ func main() {
 	subtitleRepo := subtitle.NewRepository(db.DB)
 	libraryFS.SetSubtitleRepository(subtitleRepo)
 
-	// Initialize subtitle service (optional, for downloading new subtitles)
+	// Initialize subtitle service. Always: stored subtitles list and torrent
+	// subtitles are recorded without OpenSubtitles; only search and download
+	// need its key.
+	var osFetcher opensubtitles.SubtitleFetcher
 	if cfg.OpenSubtitles.APIKey != "" {
-		osClient := opensubtitles.NewClient(
+		osFetcher = opensubtitles.NewClient(
 			cfg.OpenSubtitles.APIKey,
 			cfg.OpenSubtitles.Username,
 			cfg.OpenSubtitles.Password,
 		)
-		subtitleService := subtitle.NewService(osClient, subtitleRepo, cfg.Subtitles.DownloadPath)
-		apiServer.SetSubtitleService(subtitleService)
 		slog.Info("Subtitle service initialized with OpenSubtitles client")
 	} else {
 		slog.Warn("OpenSubtitles API key not configured, subtitle download unavailable")
 	}
+	apiServer.SetSubtitleService(subtitle.NewService(osFetcher, subtitleRepo, cfg.Subtitles.DownloadPath))
 
 	// Validate WebDAV auth config and create server
 	webdav.ValidateConfig(cfg.Server.WebDAVAuth)

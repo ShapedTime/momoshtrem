@@ -43,11 +43,8 @@ type SubtitleResponse struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-type SubtitleListResponse struct {
-	Subtitles []SubtitleResponse `json:"subtitles"`
-}
-
-// Subtitle handlers
+// Legacy subtitle handlers (/subtitles/*). The item-scoped routes in
+// subtitle_routes.go replace them; they go when the web drops their callers.
 
 func (s *Server) searchSubtitles(c *gin.Context) {
 	if s.subtitleService == nil || !s.subtitleService.IsConfigured() {
@@ -90,13 +87,17 @@ func (s *Server) searchSubtitles(c *gin.Context) {
 		}
 	}
 
-	// Search via service
+	// Search via service. For episodes tmdb_id is the show's.
 	params := opensubtitles.SearchParams{
-		TMDBID:        tmdbID,
 		Type:          mediaType,
 		Languages:     languages,
 		SeasonNumber:  seasonNum,
 		EpisodeNumber: episodeNum,
+	}
+	if mediaType == "episode" {
+		params.ParentTMDBID = tmdbID
+	} else {
+		params.TMDBID = tmdbID
 	}
 
 	searchResp, err := s.subtitleService.Search(c.Request.Context(), params)
@@ -118,7 +119,7 @@ func (s *Server) searchSubtitles(c *gin.Context) {
 		results = append(results, SubtitleSearchResult{
 			FileID:        file.FileID,
 			LanguageCode:  sub.Attributes.Language,
-			LanguageName:  opensubtitles.GetLanguageName(sub.Attributes.Language),
+			LanguageName:  subtitle.LanguageName(sub.Attributes.Language),
 			ReleaseName:   sub.Attributes.Release,
 			DownloadCount: sub.Attributes.DownloadCount,
 			FileName:      file.FileName,
@@ -158,7 +159,7 @@ func (s *Server) downloadSubtitle(c *gin.Context) {
 		req.LanguageName,
 	)
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Subtitle download failed: "+err.Error())
+		subtitleErrorResponse(c, err)
 		return
 	}
 
@@ -185,11 +186,7 @@ func (s *Server) deleteSubtitle(c *gin.Context) {
 	}
 
 	if err := s.subtitleService.Delete(c.Request.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			errorResponse(c, http.StatusNotFound, "Subtitle not found")
-			return
-		}
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		subtitleErrorResponse(c, err)
 		return
 	}
 
@@ -199,50 +196,6 @@ func (s *Server) deleteSubtitle(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
-}
-
-func (s *Server) getMovieSubtitles(c *gin.Context) {
-	if s.subtitleService == nil {
-		errorResponse(c, http.StatusServiceUnavailable, "Subtitle service not configured")
-		return
-	}
-
-	id, ok := parseID(c, "id")
-	if !ok {
-		return
-	}
-
-	subtitles, err := s.subtitleService.GetByItem(c.Request.Context(), subtitle.ItemTypeMovie, id)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	c.JSON(http.StatusOK, SubtitleListResponse{
-		Subtitles: toSubtitleResponses(subtitles),
-	})
-}
-
-func (s *Server) getEpisodeSubtitles(c *gin.Context) {
-	if s.subtitleService == nil {
-		errorResponse(c, http.StatusServiceUnavailable, "Subtitle service not configured")
-		return
-	}
-
-	id, ok := parseID(c, "id")
-	if !ok {
-		return
-	}
-
-	subtitles, err := s.subtitleService.GetByItem(c.Request.Context(), subtitle.ItemTypeEpisode, id)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	c.JSON(http.StatusOK, SubtitleListResponse{
-		Subtitles: toSubtitleResponses(subtitles),
-	})
 }
 
 // Helper functions
@@ -256,12 +209,4 @@ func toSubtitleResponse(s *subtitle.Subtitle) SubtitleResponse {
 		FileSize:     s.FileSize,
 		CreatedAt:    s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
-}
-
-func toSubtitleResponses(subs []*subtitle.Subtitle) []SubtitleResponse {
-	result := make([]SubtitleResponse, len(subs))
-	for i, sub := range subs {
-		result[i] = toSubtitleResponse(sub)
-	}
-	return result
 }

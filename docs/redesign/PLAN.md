@@ -287,10 +287,12 @@ Migration numbers are reserved per task so parallel branches don't collide.
 
 ### Subtitles (B7)
 Item-scoped under `/movies/{id}` and `/episodes/{id}`; the legacy `/subtitles/*` routes go when F2 drops their callers. Types: `web/src/lib/api/contract/subtitles.ts`.
-- `GET …/subtitles` → `{items: [Subtitle]}`.
-- `GET …/subtitles/search?languages=en,az` → `{items: [SubtitleCandidate], release_name}`, ranked against the assigned release. `release_name` is null when nothing is assigned; every `match` is then `unknown`.
-- `POST …/subtitles` with `{file_id, language_code, release_name?}` → `201 Subtitle`. It replaces the downloaded subtitle in that language.
+- `GET …/subtitles` → `{items: [Subtitle]}`: the downloaded subtitles and those that came with the assigned torrent (none from an earlier torrent, none with nothing assigned). Works without an OpenSubtitles key.
+- `GET …/subtitles/search?languages=en,az` → `{items: [SubtitleCandidate], release_name}`, ranked against the assigned release. `release_name` is null when nothing is assigned; every `match` is then `unknown`. `languages` defaults to `en`.
+- `POST …/subtitles` with `{file_id, language_code, release_name?}` → `201 Subtitle`. It replaces the downloaded subtitle in that language. It works with nothing assigned (`match` is then `unknown`).
 - `DELETE …/subtitles/{sid}` → `204`, or `409 conflict` for a subtitle that came with the torrent.
+- Errors: `404` for an unknown item (or a subtitle that isn't the item's), `400 bad_request` for a malformed language code, `503 unavailable` for search and download without an OpenSubtitles key, `502` when OpenSubtitles fails.
+- The assigned release is the magnet's `dn`, else the torrent's top folder, else the file name. `machine_translated` covers AI translation too.
 ```
 Subtitle { id, language_code, language_name, format, source: opensubtitles|torrent, release_name, match, created_at }
 SubtitleCandidate { file_id, language_code, language_name, release_name, file_name, downloads,

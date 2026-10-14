@@ -27,6 +27,7 @@ type Server struct {
 	identifier      *identify.Identifier
 	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
 	subtitleService *subtitle.Service    // Optional: subtitle search/download service
+	subtitleItems   subtitleItemResolver // Loads movies and episodes for the subtitle routes
 	airDateSync     *airdate.SyncService // Optional: air date sync service
 
 	readerTracker *streaming.ReaderTracker // Optional: tracks active readers for debug endpoint
@@ -84,6 +85,7 @@ func NewServer(
 		treeUpdater:    treeUpdater,
 		opts:           opts,
 	}
+	s.subtitleItems = &libraryItemResolver{movies: movieRepo, shows: showRepo, assignments: assignmentRepo}
 
 	// Build assignment service with optional dependencies
 	var assignmentOpts []service.AssignmentServiceOption
@@ -193,12 +195,12 @@ func (s *Server) setupRoutes() {
 	api.POST("/torrents/:hash/resume", s.resumeTorrent)
 	api.GET("/torrents/:hash/debug", s.getTorrentDebug)
 
-	// Subtitles
+	// Subtitles: item-scoped under /movies/:id and /episodes/:id, plus the
+	// legacy /subtitles/* routes until the web drops them.
+	s.registerSubtitleRoutes(api)
 	api.GET("/subtitles/search", s.searchSubtitles)
 	api.POST("/subtitles/download", s.downloadSubtitle)
 	api.DELETE("/subtitles/:id", s.deleteSubtitle)
-	api.GET("/movies/:id/subtitles", s.getMovieSubtitles)
-	api.GET("/episodes/:id/subtitles", s.getEpisodeSubtitles)
 
 	// Status
 	api.GET("/status", s.getStatus)

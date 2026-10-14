@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,8 +17,8 @@ import (
 )
 
 const (
-	baseURL   = "https://api.opensubtitles.com/api/v1"
-	userAgent = "momoshtrem v1.0"
+	defaultBaseURL = "https://api.opensubtitles.com/api/v1"
+	userAgent      = "momoshtrem v1.0"
 
 	// HTTP timeouts
 	defaultHTTPTimeout = 30 * time.Second
@@ -31,6 +33,7 @@ type Client struct {
 	apiKey     string
 	username   string
 	password   string
+	baseURL    string
 	httpClient *http.Client
 
 	// Token management
@@ -39,16 +42,36 @@ type Client struct {
 	tokenExp time.Time
 }
 
+var _ SubtitleFetcher = (*Client)(nil)
+
+// Option configures a Client.
+type Option func(*Client)
+
+// WithBaseURL points the client at another API root (tests).
+func WithBaseURL(u string) Option {
+	return func(c *Client) { c.baseURL = strings.TrimSuffix(u, "/") }
+}
+
+// WithHTTPClient replaces the default HTTP client.
+func WithHTTPClient(hc *http.Client) Option {
+	return func(c *Client) { c.httpClient = hc }
+}
+
 // NewClient creates a new OpenSubtitles client
-func NewClient(apiKey, username, password string) *Client {
-	return &Client{
+func NewClient(apiKey, username, password string, opts ...Option) *Client {
+	c := &Client{
 		apiKey:   apiKey,
 		username: username,
 		password: password,
+		baseURL:  defaultBaseURL,
 		httpClient: &http.Client{
 			Timeout: defaultHTTPTimeout,
 		},
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // IsConfigured returns true if the client has an API key configured
@@ -62,30 +85,7 @@ func (c *Client) Search(ctx context.Context, params SearchParams) (*SearchRespon
 		return nil, fmt.Errorf("OpenSubtitles API key not configured")
 	}
 
-	// Build query parameters
-	query := url.Values{}
-
-	if params.TMDBID > 0 {
-		query.Set("tmdb_id", strconv.Itoa(params.TMDBID))
-	}
-
-	if params.Type == "episode" {
-		query.Set("type", "episode")
-		if params.SeasonNumber > 0 {
-			query.Set("season_number", strconv.Itoa(params.SeasonNumber))
-		}
-		if params.EpisodeNumber > 0 {
-			query.Set("episode_number", strconv.Itoa(params.EpisodeNumber))
-		}
-	} else {
-		query.Set("type", "movie")
-	}
-
-	if len(params.Languages) > 0 {
-		query.Set("languages", strings.Join(params.Languages, ","))
-	}
-
-	endpoint := fmt.Sprintf("%s/subtitles?%s", baseURL, query.Encode())
+	endpoint := fmt.Sprintf("%s/subtitles?%s", c.baseURL, searchQuery(params).Encode())
 
 	var result SearchResponse
 	if err := c.get(ctx, endpoint, &result); err != nil {
@@ -93,6 +93,45 @@ func (c *Client) Search(ctx context.Context, params SearchParams) (*SearchRespon
 	}
 
 	return &result, nil
+}
+
+// searchQuery builds the /subtitles query. The API redirects requests whose
+// parameters aren't sorted and lowercase; url.Values.Encode sorts the keys,
+// and languages are lowercased and sorted here.
+func searchQuery(params SearchParams) url.Values {
+	query := url.Values{}
+
+	if params.Type == "episode" {
+		query.Set("type", "episode")
+		if params.ParentTMDBID > 0 {
+			query.Set("parent_tmdb_id", strconv.Itoa(params.ParentTMDBID))
+		}
+		// Season 0 holds specials, so it's sent whenever an episode is.
+		if params.SeasonNumber > 0 || params.EpisodeNumber > 0 {
+			query.Set("season_number", strconv.Itoa(params.SeasonNumber))
+		}
+		if params.EpisodeNumber > 0 {
+			query.Set("episode_number", strconv.Itoa(params.EpisodeNumber))
+		}
+	} else {
+		query.Set("type", "movie")
+		if params.TMDBID > 0 {
+			query.Set("tmdb_id", strconv.Itoa(params.TMDBID))
+		}
+	}
+
+	if len(params.Languages) > 0 {
+		langs := make([]string, 0, len(params.Languages))
+		for _, l := range params.Languages {
+			if l = strings.ToLower(strings.TrimSpace(l)); l != "" && !slices.Contains(langs, l) {
+				langs = append(langs, l)
+			}
+		}
+		sort.Strings(langs)
+		query.Set("languages", strings.Join(langs, ","))
+	}
+
+	return query
 }
 
 // Download downloads a subtitle file by file ID
@@ -108,7 +147,7 @@ func (c *Client) Download(ctx context.Context, fileID int) ([]byte, string, erro
 	}
 
 	// Request download link
-	endpoint := fmt.Sprintf("%s/download", baseURL)
+	endpoint := fmt.Sprintf("%s/download", c.baseURL)
 	reqBody := DownloadRequest{FileID: fileID}
 
 	var downloadResp DownloadResponse
@@ -176,7 +215,7 @@ func (c *Client) login(ctx context.Context) error {
 		return nil
 	}
 
-	endpoint := fmt.Sprintf("%s/login", baseURL)
+	endpoint := fmt.Sprintf("%s/login", c.baseURL)
 	reqBody := LoginRequest{
 		Username: c.username,
 		Password: c.password,

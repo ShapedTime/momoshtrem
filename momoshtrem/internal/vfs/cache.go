@@ -12,7 +12,9 @@ import (
 )
 
 const (
-	cacheVersion = 1
+	// cacheVersion 2 stores subtitle files; a v1 cache has none, so it's
+	// ignored and the tree rebuilt from the database.
+	cacheVersion = 2
 	cacheFile    = "vfs_tree.gob"
 )
 
@@ -30,6 +32,7 @@ type cachedMovie struct {
 	InfoHash   string
 	MagnetURI  string
 	FilePath   string
+	Subtitles  []cachedSubtitle
 }
 
 type cachedShow struct {
@@ -40,6 +43,45 @@ type cachedShow struct {
 type cachedSeason struct {
 	FolderName string
 	Episodes   []cachedEpisode
+	Subtitles  []cachedSubtitle // Every episode's, named after it
+}
+
+// cachedSubtitle is a subtitle file next to a video: downloaded (LocalPath)
+// or streamed from a torrent (TorrentPath and InfoHash).
+type cachedSubtitle struct {
+	FileName    string
+	FileSize    int64
+	LocalPath   string
+	TorrentPath string
+	InfoHash    string
+}
+
+// cacheSubtitles lists the subtitle files in dir.
+func cacheSubtitles(dir *VirtualDir) []cachedSubtitle {
+	var out []cachedSubtitle
+	for name, entry := range dir.children {
+		switch e := entry.(type) {
+		case *SubtitleFile:
+			out = append(out, cachedSubtitle{FileName: name, FileSize: e.size, LocalPath: e.localPath})
+		case *TorrentSubtitleFile:
+			out = append(out, cachedSubtitle{FileName: name, FileSize: e.size, TorrentPath: e.torrentPath, InfoHash: e.infoHash})
+		}
+	}
+	return out
+}
+
+// restoreSubtitles puts cached subtitle files back in dir.
+func restoreSubtitles(tree *DirectoryTree, dir *VirtualDir, dirPath string, subs []cachedSubtitle) {
+	for _, cs := range subs {
+		var entry Entry
+		if cs.InfoHash != "" {
+			entry = NewTorrentSubtitleFile(cs.FileName, cs.TorrentPath, cs.FileSize, cs.InfoHash)
+		} else {
+			entry = NewSubtitleFile(cs.FileName, cs.LocalPath, cs.FileSize)
+		}
+		dir.children[cs.FileName] = entry
+		tree.pathMap[dirPath+"/"+cs.FileName] = entry
+	}
 }
 
 type cachedEpisode struct {
@@ -93,6 +135,7 @@ func (fs *LibraryFS) loadTreeFromCache() error {
 		filePath := folderPath + "/" + cm.FileName
 		movieDir.children[cm.FileName] = videoFile
 		tree.pathMap[filePath] = videoFile
+		restoreSubtitles(tree, movieDir, folderPath, cm.Subtitles)
 	}
 
 	// Restore shows
@@ -120,6 +163,7 @@ func (fs *LibraryFS) loadTreeFromCache() error {
 				seasonDir.children[ce.FileName] = videoFile
 				tree.pathMap[filePath] = videoFile
 			}
+			restoreSubtitles(tree, seasonDir, seasonPath, csn.Subtitles)
 		}
 	}
 
@@ -171,6 +215,7 @@ func (fs *LibraryFS) saveTreeToCache() {
 					InfoHash:   pf.assignment.InfoHash,
 					MagnetURI:  pf.assignment.MagnetURI,
 					FilePath:   pf.assignment.FilePath,
+					Subtitles:  cacheSubtitles(movieDir),
 				})
 				break // Only one video file per movie folder
 			}
@@ -208,6 +253,7 @@ func (fs *LibraryFS) saveTreeToCache() {
 					})
 				}
 				if len(csn.Episodes) > 0 {
+					csn.Subtitles = cacheSubtitles(seasonDir)
 					cs.Seasons = append(cs.Seasons, csn)
 				}
 			}

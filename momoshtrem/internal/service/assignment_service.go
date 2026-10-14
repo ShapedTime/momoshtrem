@@ -219,7 +219,7 @@ func (s *ShowAssignmentService) AssignTorrent(
 	// 9. Process matched subtitles
 	subtitlesCreated := 0
 	if s.subtitleCreator != nil && len(matchResult.MatchedSubtitles) > 0 {
-		subtitlesCreated = s.createSubtitles(ctx, matchResult.MatchedSubtitles, infoHash)
+		subtitlesCreated = s.createSubtitles(ctx, matchResult.MatchedSubtitles, infoHash, magnetURI)
 
 		if subtitlesCreated > 0 && s.treeUpdater != nil {
 			s.treeUpdater.InvalidateTree()
@@ -263,11 +263,12 @@ func (s *ShowAssignmentService) AssignTorrent(
 	return result, nil
 }
 
-// createSubtitles creates subtitle records for matched subtitles.
+// createSubtitles creates subtitle records for matched subtitles. Each
+// replaces the episode's subtitles from any earlier torrent.
 func (s *ShowAssignmentService) createSubtitles(
 	ctx context.Context,
 	matched []identify.MatchedSubtitle,
-	infoHash string,
+	infoHash, magnetURI string,
 ) int {
 	created := 0
 
@@ -282,6 +283,7 @@ func (s *ShowAssignmentService) createSubtitles(
 			FileSize:     ms.FileSize,
 			Source:       subtitle.SourceTorrent,
 			InfoHash:     infoHash,
+			ReleaseName:  subtitle.AssignedRelease(magnetURI, ms.FilePath),
 		}
 
 		if err := s.subtitleCreator.CreateTorrentSubtitle(ctx, sub); err != nil {

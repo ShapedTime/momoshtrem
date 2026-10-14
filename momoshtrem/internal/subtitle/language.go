@@ -89,42 +89,42 @@ var languagePatterns = []languagePattern{
 
 // directoryLanguages maps directory names to language info
 var directoryLanguages = map[string]struct{ code, name string }{
-	"english":    {"en", "English"},
-	"eng":        {"en", "English"},
-	"russian":    {"ru", "Russian"},
-	"rus":        {"ru", "Russian"},
-	"turkish":    {"tr", "Turkish"},
-	"tur":        {"tr", "Turkish"},
+	"english":     {"en", "English"},
+	"eng":         {"en", "English"},
+	"russian":     {"ru", "Russian"},
+	"rus":         {"ru", "Russian"},
+	"turkish":     {"tr", "Turkish"},
+	"tur":         {"tr", "Turkish"},
 	"azerbaijani": {"az", "Azerbaijani"},
-	"spanish":    {"es", "Spanish"},
-	"german":     {"de", "German"},
-	"french":     {"fr", "French"},
-	"italian":    {"it", "Italian"},
-	"portuguese": {"pt", "Portuguese"},
-	"japanese":   {"ja", "Japanese"},
-	"korean":     {"ko", "Korean"},
-	"chinese":    {"zh", "Chinese"},
-	"arabic":     {"ar", "Arabic"},
-	"hindi":      {"hi", "Hindi"},
-	"polish":     {"pl", "Polish"},
-	"dutch":      {"nl", "Dutch"},
-	"swedish":    {"sv", "Swedish"},
-	"norwegian":  {"no", "Norwegian"},
-	"danish":     {"da", "Danish"},
-	"finnish":    {"fi", "Finnish"},
-	"czech":      {"cs", "Czech"},
-	"hungarian":  {"hu", "Hungarian"},
-	"romanian":   {"ro", "Romanian"},
-	"greek":      {"el", "Greek"},
-	"hebrew":     {"he", "Hebrew"},
-	"thai":       {"th", "Thai"},
-	"vietnamese": {"vi", "Vietnamese"},
-	"indonesian": {"id", "Indonesian"},
-	"ukrainian":  {"uk", "Ukrainian"},
-	"bulgarian":  {"bg", "Bulgarian"},
-	"croatian":   {"hr", "Croatian"},
-	"serbian":    {"sr", "Serbian"},
-	"subs":       {"", ""},  // Common folder name, but no specific language
+	"spanish":     {"es", "Spanish"},
+	"german":      {"de", "German"},
+	"french":      {"fr", "French"},
+	"italian":     {"it", "Italian"},
+	"portuguese":  {"pt", "Portuguese"},
+	"japanese":    {"ja", "Japanese"},
+	"korean":      {"ko", "Korean"},
+	"chinese":     {"zh", "Chinese"},
+	"arabic":      {"ar", "Arabic"},
+	"hindi":       {"hi", "Hindi"},
+	"polish":      {"pl", "Polish"},
+	"dutch":       {"nl", "Dutch"},
+	"swedish":     {"sv", "Swedish"},
+	"norwegian":   {"no", "Norwegian"},
+	"danish":      {"da", "Danish"},
+	"finnish":     {"fi", "Finnish"},
+	"czech":       {"cs", "Czech"},
+	"hungarian":   {"hu", "Hungarian"},
+	"romanian":    {"ro", "Romanian"},
+	"greek":       {"el", "Greek"},
+	"hebrew":      {"he", "Hebrew"},
+	"thai":        {"th", "Thai"},
+	"vietnamese":  {"vi", "Vietnamese"},
+	"indonesian":  {"id", "Indonesian"},
+	"ukrainian":   {"uk", "Ukrainian"},
+	"bulgarian":   {"bg", "Bulgarian"},
+	"croatian":    {"hr", "Croatian"},
+	"serbian":     {"sr", "Serbian"},
+	"subs":        {"", ""}, // Common folder name, but no specific language
 }
 
 // DetectLanguage attempts to detect the language from a subtitle filename.
@@ -151,4 +151,51 @@ func DetectLanguage(filename string) (code string, name string, detected bool) {
 	}
 
 	return "unknown", "Unknown", false
+}
+
+// openSubtitlesLanguages names the OpenSubtitles language codes that aren't
+// in languagePatterns, including its regional ones.
+var openSubtitlesLanguages = map[string]string{
+	"pt-br": "Portuguese (Brazil)", "pt-pt": "Portuguese", "zh-cn": "Chinese (Simplified)",
+	"zh-tw": "Chinese (Traditional)", "ze": "Chinese (Bilingual)", "fa": "Persian",
+	"ka": "Georgian", "hy": "Armenian", "et": "Estonian", "lv": "Latvian", "lt": "Lithuanian",
+	"is": "Icelandic", "mk": "Macedonian", "sq": "Albanian", "bs": "Bosnian", "ca": "Catalan",
+	"eu": "Basque", "gl": "Galician", "bn": "Bengali", "ta": "Tamil", "te": "Telugu",
+	"ml": "Malayalam", "ur": "Urdu", "kk": "Kazakh", "mn": "Mongolian", "tl": "Tagalog",
+	"unknown": "Unknown",
+}
+
+// languageNames maps a language code to its English name: the codes
+// DetectLanguage knows, plus OpenSubtitles' own.
+var languageNames = func() map[string]string {
+	names := make(map[string]string, len(languagePatterns)+len(openSubtitlesLanguages))
+	for _, lp := range languagePatterns {
+		names[lp.code] = lp.name
+	}
+	for code, name := range openSubtitlesLanguages {
+		names[code] = name
+	}
+	return names
+}()
+
+// LanguageName returns the English name for a language code ("en" →
+// "English"), or the code in capitals when it isn't known.
+func LanguageName(code string) string {
+	code = strings.ToLower(code)
+	if name, ok := languageNames[code]; ok {
+		return name
+	}
+	return strings.ToUpper(code)
+}
+
+// languageCodeRe accepts ISO 639-1/2 codes with an optional region, the way
+// OpenSubtitles writes them: "en", "pt-br", "zh-cn".
+var languageCodeRe = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,4})?$`)
+
+// NormalizeLanguageCode lowercases a language code and reports whether it's
+// well formed. Downloaded subtitles are stored as {code}.{format}, so
+// nothing else may get through.
+func NormalizeLanguageCode(code string) (string, bool) {
+	code = strings.ToLower(strings.TrimSpace(code))
+	return code, languageCodeRe.MatchString(code)
 }

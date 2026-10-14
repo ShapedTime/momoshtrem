@@ -1,0 +1,157 @@
+{
+  "total_pages": 1,
+  "total_count": 8,
+  "per_page": 60,
+  "page": 1,
+  "data": [
+    {
+      "id": "5001",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5001",
+        "language": "en",
+        "download_count": 182345,
+        "new_download_count": 912,
+        "hearing_impaired": false,
+        "hd": false,
+        "fps": 23.976,
+        "votes": 12,
+        "ratings": 8.1,
+        "from_trusted": true,
+        "foreign_parts_only": false,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Interstellar.2014.720p.WEB-DL.DD5.1.H264-RARBG",
+        "upload_date": "2015-03-31T12:00:00Z",
+        "files": [{ "file_id": 1001, "cd_number": 1, "file_name": "Interstellar.2014.720p.WEB-DL.DD5.1.H264-RARBG.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "movie_name": "2014 - Interstellar", "imdb_id": 816692, "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5002",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5002",
+        "language": "en",
+        "download_count": 48211,
+        "hearing_impaired": false,
+        "hd": true,
+        "fps": 23.976,
+        "from_trusted": true,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Interstellar.2014.1080p.BluRay.x264.YIFY",
+        "upload_date": "2015-04-02T09:00:00Z",
+        "files": [{ "file_id": 1002, "cd_number": 1, "file_name": "Interstellar.2014.1080p.BluRay.x264.YIFY.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5003",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5003",
+        "language": "en",
+        "download_count": 96000,
+        "hearing_impaired": false,
+        "hd": true,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Interstellar.2014.IMAX.1080p.BluRay.x264-SPARKS",
+        "files": [{ "file_id": 1003, "cd_number": 1, "file_name": "Interstellar.2014.IMAX.1080p.BluRay.x264-SPARKS.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5004",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5004",
+        "language": "en",
+        "download_count": 120000,
+        "hearing_impaired": false,
+        "hd": true,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Interstellar.2014.1080p.BluRay.x264-SPARKS",
+        "files": [{ "file_id": 1004, "cd_number": 1, "file_name": "Interstellar.2014.1080p.BluRay.x264-SPARKS.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5005",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5005",
+        "language": "az",
+        "download_count": 900,
+        "hearing_impaired": false,
+        "ai_translated": true,
+        "machine_translated": false,
+        "release": "Interstellar.2014.1080p.BluRay.x264-[YTS.AG]",
+        "files": [{ "file_id": 1005, "cd_number": 1, "file_name": "Interstellar.2014.1080p.BluRay.x264-[YTS.AG].az.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5006",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5006",
+        "language": "en",
+        "download_count": 5000,
+        "hearing_impaired": false,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "",
+        "files": [{ "file_id": 1006, "cd_number": 1, "file_name": "English.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5007",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5007",
+        "language": "en",
+        "download_count": 30,
+        "hearing_impaired": false,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Interstellar 2014 HDCAM",
+        "files": [{ "file_id": 1007, "cd_number": 1, "file_name": "Interstellar 2014 HDCAM.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5008",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5008",
+        "language": "en",
+        "download_count": 9000,
+        "hearing_impaired": true,
+        "hd": true,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Interstellar.2014.1080p.BluRay.x264.YIFY",
+        "files": [{ "file_id": 1008, "cd_number": 1, "file_name": "Interstellar.2014.1080p.BluRay.x264.YIFY.HI.srt" }],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    },
+    {
+      "id": "5009",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "5009",
+        "language": "en",
+        "download_count": 10,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "no files: skipped",
+        "files": [],
+        "feature_details": { "feature_id": 9001, "feature_type": "Movie", "year": 2014, "title": "Interstellar", "tmdb_id": 157336 }
+      }
+    }
+  ]
+}
