@@ -51,7 +51,7 @@ The backend uses a **library-first** virtual filesystem: the folder structure is
 
 ```
                         ┌──────────────────────────────────┐
-                        │   PrettyTVCatalog (:3000)        │
+                        │   web: momoshtrem UI (:3000)     │
                         │   Browse, search, manage library  │
                         └───────────────┬──────────────────┘
                                         │
@@ -154,7 +154,7 @@ apple-tv-tor-stream/
 │   │   ├── torrent/         # Torrent client wrapper
 │   │   └── streaming/       # Piece prioritization
 │   └── config.yaml.example
-├── PrettyTVCatalog/         # Next.js frontend — browse, search, manage
+├── web/                     # Next.js frontend (momoshtrem-web): browse, search, manage
 │   ├── src/app/             # Pages and API routes
 │   ├── src/lib/api/         # API clients (momoshtrem, jackett, tmdb)
 │   └── src/types/           # TypeScript interfaces
@@ -180,7 +180,7 @@ The virtual filesystem is built from your library database. When you add a movie
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **PrettyTVCatalog** | 3000 | Next.js web UI for browsing, searching, and managing your library |
+| **web** (momoshtrem-web) | 3000 | Next.js web UI for browsing, searching, and managing your library |
 | **momoshtrem** | 4444 (internal) | Go backend — REST API, torrent client, library management |
 | **momoshtrem WebDAV** | 36911 | Virtual filesystem endpoint for media players |
 | **Jackett** | 9117 | Torrent indexer aggregator — search across multiple trackers |

@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'PrettyTVCatalog',
-  description: 'Apple TV streaming catalog',
+  title: 'momoshtrem',
+  description: 'Self-hosted library and torrent streaming for Infuse on Apple TV',
 };
 
 export default function RootLayout({

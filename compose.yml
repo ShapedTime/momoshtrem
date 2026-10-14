@@ -50,7 +50,7 @@ services:
       context: ./momoshtrem
       dockerfile: Dockerfile
     # Ports NOT exposed to host - only accessible via Docker internal network
-    # REST API (4444) accessible by prettytvcatalog internally
+    # REST API (4444) accessible by web internally
     # WebDAV (36911) accessible by caddy internally
     expose:
       - "4444"
@@ -85,10 +85,10 @@ services:
       - momoshtrem
     restart: unless-stopped
 
-  prettytvcatalog:
-    container_name: prettytvcatalog
+  web:
+    container_name: momoshtrem-web
     build:
-      context: ./PrettyTVCatalog
+      context: ./web
       dockerfile: Dockerfile
     ports:
       - 3000:3000

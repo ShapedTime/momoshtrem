@@ -1,5 +1,5 @@
 // Cookie name for session
-export const SESSION_COOKIE_NAME = 'prettytv_session';
+export const SESSION_COOKIE_NAME = 'momoshtrem_session';
 
 // Session duration: 7 days in milliseconds
 export const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;

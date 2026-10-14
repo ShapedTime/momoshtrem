@@ -29,7 +29,7 @@ your-domain.example.com:36911 {
 your-domain.example.com:3000 {
     tls internal
 
-    reverse_proxy prettytvcatalog:3000
+    reverse_proxy web:3000
 
     log {
         output stdout

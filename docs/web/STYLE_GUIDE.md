@@ -1,4 +1,4 @@
-# PrettyTVCatalog - Frontend Style Guide
+# momoshtrem web - Frontend Style Guide
 
 ## Design Philosophy
 

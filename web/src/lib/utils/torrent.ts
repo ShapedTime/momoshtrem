@@ -93,7 +93,7 @@ export async function convertTorrentUrlToMagnet(
     const response = await fetch(torrentUrl, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; PrettyTVCatalog/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; momoshtrem/1.0)',
       },
     });
 
