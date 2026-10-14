@@ -35,7 +35,7 @@
 | D6 | Models: classifier `claude-haiku-5-5`; recommendation agent `claude-opus-5-5` by default, configurable (e.g. `claude-sonnet-5-5`) | Uses the Go SDK `github.com/anthropics/anthropic-sdk-go`. Haiku can't use the `_20260209` web search/fetch tools, so the agent runs on Opus or Sonnet. **Load the `claude-api` skill before writing any Claude API code.** |
 | D7 | Single user | `APP_USERNAME` and `APP_PASSWORD` env vars; no users table. |
 | D8 | Specials are stored as season 0 | Shown as "Specials" in the UI. On WebDAV: a `Season 00` folder with `S00Exx` file names (the Infuse/Plex convention; verify on device). |
-| D9 | The database is **Postgres** (already true) | Docs and `config.yaml.example` still say SQLite; fixed in G2. Migrations live in `momoshtrem/internal/library/migrations/` (embedded). |
+| D9 | The database is **Postgres** (already true) | Docs and `config.yaml.example` said SQLite until G2 fixed them. Migrations live in `momoshtrem/internal/library/migrations/` (embedded). |
 
 ## 3. Current state: findings that drive this plan
 
@@ -157,6 +157,10 @@ New and moved environment variables:
 | `ANTHROPIC_API_KEY` | momoshtrem | Classifier and recommendations. The features are disabled when unset. |
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | momoshtrem | Trakt app, created at trakt.tv/oauth/applications |
 | `SECRET_KEY` | momoshtrem | AES-GCM key for encrypting Trakt tokens at rest |
+| `CORS_ALLOWED_ORIGINS` | momoshtrem | Optional comma-separated browser origins. Empty (the default) sends no CORS headers, since web calls the backend server-to-server. |
+| `WEBDAV_PUBLIC_URL` | momoshtrem | The WebDAV address Infuse uses (e.g. `https://momoshtrem.duckdns.org:36911/`), reported by `/status`. Defaults to `http://localhost:<webdav_port>/`. |
+
+momoshtrem reads every setting from env, with or without `config.yaml` (defaults → file → env). `DATABASE_URL` is required.
 
 ## 5. Data model changes (Postgres)
 
@@ -207,9 +211,10 @@ Migration numbers are reserved per task so parallel branches don't collide.
 ## 6. API contract (backend, under `/api`)
 
 **Conventions**
-- JSON throughout. Errors are `{error: {code, message}}`; lists are `{items, total, page, page_size}`.
+- JSON throughout. Errors are `{error: {code, message}}` (implemented in G2 for every route: `internal/api/errors.go` derives `code` from the status: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `rate_limited`, `unavailable`, `timeout`, `internal_error`; `errorCodeResponse` sets a specific one). Lists are `{items, total, page, page_size}`.
 - Long operations return `202 {job_id | run_id}` and are polled.
-- Every route requires `X-Momoshtrem-Token` (G2).
+- Every route requires `X-Momoshtrem-Token` when `BACKEND_API_TOKEN` is set; otherwise `401 {error: {code: "unauthorized"}}` (G2). The web client maps a backend 401/403 to `502 backend_auth`, so a token mismatch never looks like an expired session.
+- CORS is an allowlist (`CORS_ALLOWED_ORIGINS`), empty by default, so no CORS headers are sent. Allowed origins may use `GET, POST, PUT, PATCH, DELETE, OPTIONS` and the `Content-Type`, `Authorization`, `X-Momoshtrem-Token` headers.
 - The web app exposes the same paths under its own session-checked `/api/*` routes.
 
 ### Titles and library (B1)
@@ -315,7 +320,22 @@ Related endpoints:
 - `GET /settings/ai/usage`: month-to-date cost by feature.
 
 ### System
-- `GET /status` returns `{version, db, jackett: {reachable}, tmdb, trakt: {connected}, ai: {configured, mtd_cost_usd}, webdav: {url}}`.
+- `GET /status[?refresh=1]` (G2) returns:
+  ```
+  {
+    version, uptime_seconds, checked_at,          // checked_at: RFC 3339, when the probes ran
+    db: { ok, size_bytes, error? },
+    webdav: { url, port, auth_enabled, username?, active_readers? },  // username only when auth is on
+    jackett: { configured, reachable, latency_ms?, error? },
+    tmdb: { configured, reachable, latency_ms?, error? },
+    trakt: { configured, connected },             // connected is always false until B5
+    ai: { configured, mtd_cost_usd },             // mtd_cost_usd is null until B2
+    opensubtitles: { configured }
+  }
+  ```
+  - Probes run concurrently with a 3 s timeout each. Results are cached for 30 s, and concurrent callers share one check. `?refresh=1` bypasses the cache at most once every 5 s.
+  - It returns 200 even when a probe fails (the body says what's wrong) and 503 only when the database ping fails. The response never contains secrets.
+  - Per-indexer health (`jackett.indexers`, HANDOFF §6) is added by B4.
 - `GET /torrents` (B6) merges torrents known from the DB but not loaded (`idle`) with live stats. It returns real `download_speed`/`upload_speed`, and each torrent links to its titles.
 
 ## 7. Phases and tasks
