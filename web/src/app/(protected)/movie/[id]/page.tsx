@@ -20,6 +20,7 @@ import {
 } from '@/components/media';
 import { Button, Breadcrumb } from '@/components/ui';
 import { CircleAlert } from 'lucide-react';
+import { apiFetch } from '@/lib/api/client';
 
 function ErrorState({ message }: { message: string }) {
   return (
@@ -87,7 +88,7 @@ export default function MoviePage() {
       }
 
       try {
-        const res = await fetch(`/api/library/movies/${libraryId}`);
+        const res = await apiFetch(`/api/library/movies/${libraryId}`);
         if (res.ok) {
           const data = await res.json();
           setLibraryMovie(data);
@@ -112,7 +113,7 @@ export default function MoviePage() {
 
     setIsUnassigning(true);
     try {
-      const res = await fetch(`/api/library/movies/${libraryId}/assign`, {
+      const res = await apiFetch(`/api/library/movies/${libraryId}/assign`, {
         method: 'DELETE',
       });
 

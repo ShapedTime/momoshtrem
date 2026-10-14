@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useToast } from '@/components/ui';
 import { STATUS } from '@/lib/status';
 import type { LibraryStatus } from '@/types/momoshtrem';
+import { apiFetch } from '@/lib/api/client';
 
 interface AddToLibraryButtonProps {
   mediaType: 'movie' | 'tv';
@@ -89,7 +90,7 @@ export function AddToLibraryButton({
     setIsAdding(true);
 
     try {
-      const response = await fetch('/api/library/add', {
+      const response = await apiFetch('/api/library/add', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

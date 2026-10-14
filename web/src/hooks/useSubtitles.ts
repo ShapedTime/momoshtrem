@@ -7,6 +7,7 @@ import type {
   SubtitleSearchContext,
   DownloadSubtitleRequest,
 } from '@/types/subtitle';
+import { apiFetch } from '@/lib/api/client';
 
 // ============================================================================
 // Types
@@ -77,7 +78,7 @@ export function useSubtitles(
           ? `/api/movies/${itemId}/subtitles`
           : `/api/episodes/${itemId}/subtitles`;
 
-      const response = await fetch(endpoint);
+      const response = await apiFetch(endpoint);
 
       if (!response.ok) {
         throw new Error('Failed to fetch subtitles');
@@ -106,7 +107,7 @@ export function useSubtitles(
   const downloadSubtitle = useCallback(
     async (params: DownloadSubtitleRequest): Promise<Subtitle | null> => {
       try {
-        const response = await fetch('/api/subtitles/download', {
+        const response = await apiFetch('/api/subtitles/download', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(params),
@@ -141,7 +142,7 @@ export function useSubtitles(
 
   const deleteSubtitle = useCallback(async (subtitleId: number): Promise<boolean> => {
     try {
-      const response = await fetch(`/api/subtitles/${subtitleId}`, {
+      const response = await apiFetch(`/api/subtitles/${subtitleId}`, {
         method: 'DELETE',
       });
 
@@ -243,7 +244,7 @@ export function useSubtitleSearch(
           if (context.episode) params.set('episode', context.episode.toString());
         }
 
-        const response = await fetch(`/api/subtitles/search?${params}`, {
+        const response = await apiFetch(`/api/subtitles/search?${params}`, {
           signal: abortControllerRef.current.signal,
         });
 

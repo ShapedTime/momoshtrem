@@ -47,6 +47,7 @@ docker compose up -d --build
 
 # Frontend
 cd web && npm run dev
+cd web && NEXT_PUBLIC_API_MOCKING=enabled npm run dev   # mock mode: MSW answers every PLAN §6 endpoint
 cd web && npm run lint && npx tsc --noEmit && npm test
 cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx playwright install chromium)
 

@@ -18,12 +18,12 @@ import type {
 } from '@/types/subtitle';
 
 /** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
-const TOKEN_HEADER = 'X-Momoshtrem-Token';
+export const TOKEN_HEADER = 'X-Momoshtrem-Token';
 
 /** Error code for a backend that rejected the web app's API token. */
 export const BACKEND_AUTH_CODE = 'backend_auth';
 
-const BACKEND_AUTH_MESSAGE =
+export const BACKEND_AUTH_MESSAGE =
   "momoshtrem rejected the web app's API token. Check BACKEND_API_TOKEN on both services.";
 
 /**

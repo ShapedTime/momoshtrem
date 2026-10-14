@@ -6,6 +6,7 @@ import type {
   LibraryShow,
   LibraryStatus,
 } from '@/types/momoshtrem';
+import { apiFetch } from '@/lib/api/client';
 
 // ============================================================================
 // Types
@@ -58,8 +59,8 @@ export function useLibrary(): UseLibraryResult {
 
     try {
       const [moviesRes, showsRes] = await Promise.all([
-        fetch('/api/library/movies'),
-        fetch('/api/library/shows'),
+        apiFetch('/api/library/movies'),
+        apiFetch('/api/library/shows'),
       ]);
 
       if (!moviesRes.ok || !showsRes.ok) {
@@ -131,7 +132,7 @@ export function useLibraryStatus(
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/library/status?media_type=${mediaType}&tmdb_id=${tmdbId}`
       );
 
@@ -196,7 +197,7 @@ export function useRemoveFromLibrary(): UseRemoveFromLibraryResult {
     setState({ isRemoving: true, error: null });
 
     try {
-      const response = await fetch(`/api/library/movies/${libraryId}`, {
+      const response = await apiFetch(`/api/library/movies/${libraryId}`, {
         method: 'DELETE',
       });
 
@@ -220,7 +221,7 @@ export function useRemoveFromLibrary(): UseRemoveFromLibraryResult {
     setState({ isRemoving: true, error: null });
 
     try {
-      const response = await fetch(`/api/library/shows/${libraryId}`, {
+      const response = await apiFetch(`/api/library/shows/${libraryId}`, {
         method: 'DELETE',
       });
 

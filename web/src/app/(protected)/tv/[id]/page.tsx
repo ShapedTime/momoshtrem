@@ -24,6 +24,7 @@ import {
 } from '@/components/media';
 import { Button, Breadcrumb } from '@/components/ui';
 import { CircleAlert } from 'lucide-react';
+import { apiFetch } from '@/lib/api/client';
 
 function ErrorState({ message }: { message: string }) {
   return (
@@ -95,7 +96,7 @@ export default function TVShowPage() {
     }
 
     try {
-      const res = await fetch(`/api/library/shows/${libraryId}`);
+      const res = await apiFetch(`/api/library/shows/${libraryId}`);
       if (res.ok) {
         const data = await res.json();
         setLibraryShow(data);
@@ -125,7 +126,7 @@ export default function TVShowPage() {
     setIsRefreshing(true);
     setRefreshMessage(null);
     try {
-      const res = await fetch(`/api/library/shows/${libraryId}/refresh`, {
+      const res = await apiFetch(`/api/library/shows/${libraryId}/refresh`, {
         method: 'POST',
       });
       if (!res.ok) {
@@ -285,7 +286,7 @@ export default function TVShowPage() {
   // Handler for unassigning episode torrent
   const handleUnassignEpisode = useCallback(async (episodeId: number) => {
     try {
-      const res = await fetch(`/api/episodes/${episodeId}/assign`, {
+      const res = await apiFetch(`/api/episodes/${episodeId}/assign`, {
         method: 'DELETE',
       });
 

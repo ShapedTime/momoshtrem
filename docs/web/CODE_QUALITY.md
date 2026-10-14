@@ -15,28 +15,33 @@
 src/
 ├── app/                  # Next.js routes (thin layer)
 │   ├── api/              # API routes - orchestration only
+│   │   └── [...path]/    # Session-checked proxy to the backend (PLAN §6)
 │   └── (pages)/          # React pages - composition only
 │
 ├── lib/                  # Business logic (domain layer)
-│   ├── api/              # External API clients
-│   │   ├── tmdb.ts       # TMDB API
-│   │   ├── jackett.ts    # Jackett API
-│   │   ├── momoshtrem.ts # momoshtrem API (library, torrents)
-│   │   └── subtitle.ts   # OpenSubtitles API
-│   ├── services/         # Business logic services
+│   ├── api/
+│   │   ├── client.ts     # Browser: apiFetch / apiJson / ApiError (401 → /login)
+│   │   ├── contract/     # PLAN §6 types, one file per domain
+│   │   ├── endpoints/    # Browser: typed calls + TanStack Query keys/queryOptions
+│   │   ├── backend-proxy.ts  # Server: /api/* → momoshtrem /api/* with the token
+│   │   ├── momoshtrem.ts # Server: legacy momoshtrem client
+│   │   ├── tmdb.ts       # Server: TMDB
+│   │   └── jackett.ts    # Server: Jackett (moves to the backend in v2)
+│   ├── query/            # QueryClient defaults and <Providers>
 │   ├── auth/             # Authentication logic
+│   ├── status.ts         # The one status vocabulary
 │   └── utils/            # Pure utility functions
 │
 ├── components/           # React components (UI layer)
-│   ├── ui/               # Generic, reusable (Button, Card)
-│   ├── media/            # Media-specific (MediaCard, Hero)
-│   └── layout/           # Layout components (Header, Nav)
+│   ├── ui/               # Design-system primitives (gallery: /dev/ui)
+│   ├── brand/            # Logo and Noir
+│   └── <feature>/        # Feature components
 │
+├── mocks/                # MSW handlers + fixtures for every §6 endpoint
 ├── hooks/                # Custom React hooks
-├── types/                # TypeScript interfaces
+├── types/                # Legacy TypeScript interfaces (v2 types live in lib/api/contract)
 └── config/               # App configuration
 ```
-
 ---
 
 ## Separation of Concerns
@@ -99,6 +104,47 @@ export class TMDBClient {
   }
 }
 ```
+
+### Data fetching (`lib/api/`, TanStack Query)
+
+The browser talks only to the web app's own `/api/*`. Explicit routes in
+`app/api/` handle web-side concerns (auth, TMDB browsing); everything in the
+PLAN §6 contract goes through the catch-all `app/api/[...path]`, which checks
+the session, adds `X-Momoshtrem-Token` and streams the backend's answer back.
+A new backend endpoint needs **no** web route: add its prefix to
+`BACKEND_PREFIXES` if it's a new top-level path.
+
+- **Types** for an endpoint live in `lib/api/contract/<domain>.ts`, exactly as in PLAN §6. If the contract changes, change PLAN.md in the same PR.
+- **Calls, keys and `queryOptions`** live in `lib/api/endpoints/<domain>.ts`. Components use them through TanStack Query:
+
+```typescript
+// Reading: cached, deduplicated, refetched on focus
+const { data, isPending, error } = useQuery(titleQuery('tv', 209867));
+
+// Polling: stops when the job is done and pauses while the tab is hidden
+const job = useQuery(assignmentJobQuery(jobId));
+
+// Writing: invalidate what changed
+const queryClient = useQueryClient();
+const save = useMutation({
+  mutationFn: (patch: ShowSettingsPatch) => titlesApi.patchShow(showId, patch),
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: titleKeys.all }),
+});
+```
+
+- **Never** call `fetch('/api/…')` directly: use `apiJson` (or `apiFetch` where you need the raw `Response`). A 401 then sends the user to `/login?redirect=…` instead of rendering a broken page.
+- **Errors** are `ApiError { status, code, message }` with the contract's `code`. A backend that rejects the web app's token arrives as `502 backend_auth`, never 401.
+- **No `setInterval` polling.** Use `refetchInterval` (it pauses in hidden tabs).
+
+### Mock mode (`mocks/`)
+
+`NEXT_PUBLIC_API_MOCKING=enabled npm run dev` answers every §6 endpoint from
+fixtures in the browser (MSW), so a screen can be built before its backend
+lands. Handlers are per domain in `mocks/handlers/<domain>.ts` with fixtures in
+`mocks/fixtures/` typed against the contract (so `tsc` catches drift).
+Handler paths start with `*` (`'*/api/titles/:mediaType/:tmdbId'`) so they
+match in the browser and in Jest (`mocks/node.ts`). When the backend lands,
+delete nothing: keep the handlers for tests and Playwright.
 
 ### Components (`components/`)
 - **Only** handle UI rendering
