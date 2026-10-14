@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FilterIcon, ChevronLeftIcon, XIcon } from '@/components/ui';
 import type { Genre, MediaType, SortOption } from '@/types/tmdb';
 import { GenreFilter } from './GenreFilter';
 import { SortSelect } from './SortSelect';
+import { ChevronLeft, Funnel, X } from 'lucide-react';
 
 interface FilterSidebarProps {
   mediaType: MediaType;
@@ -88,7 +88,7 @@ export function FilterSidebar({
         "
         aria-label="Toggle filters"
       >
-        <FilterIcon size={20} />
+        <Funnel size={20} />
         <span className="font-medium">Filters</span>
         {hasActiveFilters && (
           <span className="ml-1 w-2 h-2 bg-white rounded-full" />
@@ -122,7 +122,7 @@ export function FilterSidebar({
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <FilterIcon size={20} />
+              <Funnel size={20} />
               Filters
             </h2>
             <button
@@ -130,7 +130,7 @@ export function FilterSidebar({
               className="lg:hidden p-2 text-text-muted hover:text-white transition-colors"
               aria-label="Close filters"
             >
-              <XIcon size={20} />
+              <X size={20} />
             </button>
           </div>
 
@@ -183,7 +183,7 @@ export function FilterSidebar({
           "
           aria-label="Open filters"
         >
-          <ChevronLeftIcon size={20} className="rotate-180" />
+          <ChevronLeft size={20} className="rotate-180" />
         </button>
       )}
     </>

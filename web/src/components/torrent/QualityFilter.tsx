@@ -24,7 +24,7 @@ export function QualityFilter({ selected, onToggle }: QualityFilterProps) {
             className={`
               px-3 py-1.5 rounded-full text-sm font-medium
               transition-colors duration-200
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
               ${
                 isSelected
                   ? 'bg-accent-red text-white'

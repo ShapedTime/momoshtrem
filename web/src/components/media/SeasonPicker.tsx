@@ -1,5 +1,5 @@
-import { ChevronDownIcon } from '@/components/ui';
 import type { Season } from '@/types/tmdb';
+import { ChevronDown } from 'lucide-react';
 
 interface SeasonPickerProps {
   seasons: Season[];
@@ -39,7 +39,7 @@ export function SeasonPicker({
             text-white font-medium
             min-w-[200px]
             cursor-pointer
-            focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
             focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
             disabled:opacity-50 disabled:cursor-not-allowed
             transition-colors duration-200 motion-reduce:transition-none
@@ -54,7 +54,7 @@ export function SeasonPicker({
           ))}
         </select>
         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-          <ChevronDownIcon size={20} className="text-text-secondary" />
+          <ChevronDown size={20} className="text-text-secondary" />
         </div>
       </div>
     </div>

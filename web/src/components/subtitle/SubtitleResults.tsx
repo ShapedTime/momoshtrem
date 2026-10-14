@@ -1,8 +1,8 @@
 'use client';
 
-import { SpinnerIcon, AlertCircleIcon } from '@/components/ui';
 import type { SubtitleSearchResult, SubtitleLanguageCode } from '@/types/subtitle';
 import { SUBTITLE_LANGUAGES } from '@/types/subtitle';
+import { CircleAlert, LoaderCircle } from 'lucide-react';
 
 // Validate if a string is a valid SubtitleLanguageCode
 function isValidLanguageCode(code: string): code is SubtitleLanguageCode {
@@ -39,7 +39,7 @@ export function SubtitleResults({
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
-        <SpinnerIcon className="w-8 h-8 animate-spin mb-3" />
+        <LoaderCircle className="w-8 h-8 animate-spin mb-3" />
         <p>Searching OpenSubtitles...</p>
       </div>
     );
@@ -48,7 +48,7 @@ export function SubtitleResults({
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-red-400">
-        <AlertCircleIcon className="w-8 h-8 mb-3" />
+        <CircleAlert className="w-8 h-8 mb-3" />
         <p>{error}</p>
       </div>
     );

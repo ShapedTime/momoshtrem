@@ -2,8 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { useRecentlyAired } from '@/hooks/useRecentlyAired';
-import { CalendarIcon, RefreshIcon } from '@/components/ui/Icons';
 import type { RecentlyAiredEpisode } from '@/types/momoshtrem';
+import { Calendar, RefreshCw } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -89,7 +89,7 @@ function SyncButton({
       className="flex items-center gap-2 text-sm text-white/60 hover:text-white disabled:opacity-50 transition-colors"
       title={`Last synced: ${lastSyncFormatted}`}
     >
-      <RefreshIcon
+      <RefreshCw
         size={16}
         className={isSyncing ? 'animate-spin' : ''}
       />
@@ -205,7 +205,7 @@ export function RecentlyAiredSection({ className = '' }: RecentlyAiredSectionPro
       <section className={`mb-8 ${className}`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-            <CalendarIcon size={20} />
+            <Calendar size={20} />
             Recently Aired
           </h2>
         </div>
@@ -228,7 +228,7 @@ export function RecentlyAiredSection({ className = '' }: RecentlyAiredSectionPro
       <section className={`mb-8 ${className}`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-            <CalendarIcon size={20} />
+            <Calendar size={20} />
             Recently Aired
           </h2>
         </div>
@@ -250,7 +250,7 @@ export function RecentlyAiredSection({ className = '' }: RecentlyAiredSectionPro
     <section className={`mb-8 ${className}`}>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-          <CalendarIcon size={20} />
+          <Calendar size={20} />
           Recently Aired
         </h2>
         <SyncButton

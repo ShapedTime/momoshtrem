@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSearch } from '@/hooks/useTMDB';
 import { useDebounce } from '@/hooks/useDebounce';
 import { SearchBar, SearchResults, SearchResultsSkeleton } from '@/components/search';
-import { SearchIcon } from '@/components/ui';
 import { DEBOUNCE_DELAY } from '@/config/ui';
+import { Search } from 'lucide-react';
 
 function SearchPageContent() {
   const router = useRouter();
@@ -73,7 +73,7 @@ function SearchPageContent() {
       {/* Empty query state */}
       {showEmptyQueryMessage && (
         <div className="flex flex-col items-center justify-center py-16">
-          <SearchIcon size={64} className="text-text-muted" strokeWidth={1} />
+          <Search size={64} className="text-text-muted" strokeWidth={1} />
           <p className="text-text-secondary text-lg mt-4">
             Start typing to search for movies and TV shows
           </p>

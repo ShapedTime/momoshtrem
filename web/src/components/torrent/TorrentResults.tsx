@@ -1,6 +1,6 @@
 import { TorrentCard, TorrentCardSkeleton } from './TorrentCard';
-import { AlertCircleIcon } from '@/components/ui';
 import type { TorrentResult, TorrentSortField, SortDirection } from '@/types/jackett';
+import { CircleAlert } from 'lucide-react';
 
 interface TorrentResultsProps {
   results: TorrentResult[];
@@ -47,7 +47,7 @@ export function TorrentResults({
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
-        <AlertCircleIcon size={32} className="text-text-muted mb-3" />
+        <CircleAlert size={32} className="text-text-muted mb-3" />
         <p className="text-text-secondary">{error}</p>
       </div>
     );
@@ -90,7 +90,7 @@ export function TorrentResults({
               className={`
                 px-2 py-1 text-xs rounded
                 transition-colors duration-200
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                 ${
                   sortField === option.field
                     ? 'bg-white/20 text-white'

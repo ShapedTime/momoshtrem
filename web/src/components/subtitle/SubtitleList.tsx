@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { SpinnerIcon } from '@/components/ui';
 import type { Subtitle } from '@/types/subtitle';
+import { LoaderCircle } from 'lucide-react';
 
 interface SubtitleListProps {
   subtitles: Subtitle[];
@@ -57,7 +57,7 @@ export function SubtitleList({ subtitles, isLoading, onDelete }: SubtitleListPro
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-text-secondary text-sm">
-        <SpinnerIcon className="w-4 h-4 animate-spin" />
+        <LoaderCircle className="w-4 h-4 animate-spin" />
         <span>Loading subtitles...</span>
       </div>
     );
@@ -103,7 +103,7 @@ export function SubtitleList({ subtitles, isLoading, onDelete }: SubtitleListPro
               title="Delete subtitle"
             >
               {deletingId === subtitle.id ? (
-                <SpinnerIcon className="w-4 h-4 animate-spin" />
+                <LoaderCircle className="w-4 h-4 animate-spin" />
               ) : (
                 <TrashIcon />
               )}

@@ -1,0 +1,111 @@
+'use client';
+
+import type { ReactNode } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import { Drawer } from 'vaul';
+import { X } from 'lucide-react';
+import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
+import { useRestoreFocus } from '@/hooks/useRestoreFocus';
+import { cx } from '@/lib/utils/cx';
+import { IconButton } from './Button';
+
+export interface SheetProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: ReactNode;
+  /** Short line under the title; also the dialog's accessible description. */
+  description?: ReactNode;
+  /**
+   * default: sizes to content. narrow: 480 px panel on desktop.
+   * full: opens at full height immediately so loading never changes the height
+   * (search sheets), and only the grabber drags on touch.
+   */
+  size?: 'default' | 'narrow' | 'full';
+  /** Stacked on another sheet (filters, inspect, pickers). Esc closes only the top one. */
+  nested?: boolean;
+  /** Extra sticky head content: search field, chips. */
+  head?: ReactNode;
+  /** Sticky foot with the primary action (glass, includes the safe area). */
+  footer?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}
+
+/**
+ * One component, three presentations (HANDOFF §4.1): a bottom sheet below
+ * 640 px, a centred bottom sheet up to 1023 px (both Vaul, drag to dismiss),
+ * and a right-hand panel from 1024 px (Radix Dialog). Focus is trapped,
+ * Esc closes, the page doesn't scroll behind, and focus returns to the opener.
+ */
+export function Sheet(props: SheetProps) {
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  return desktop ? <PanelSheet {...props} /> : <DrawerSheet {...props} />;
+}
+
+function sheetClass({ size = 'default', nested, className }: Pick<SheetProps, 'size' | 'nested' | 'className'>) {
+  return cx('sheet', size === 'full' && 'sheet--full', size === 'narrow' && 'sheet--narrow', nested && 'sheet--nested', className);
+}
+
+function SheetHead({ title, description, head, Title, Description, Close }: {
+  title: ReactNode;
+  description?: ReactNode;
+  head?: ReactNode;
+  Title: typeof Dialog.Title;
+  Description: typeof Dialog.Description;
+  Close: typeof Dialog.Close;
+}) {
+  return (
+    <div className="sheet-head">
+      <div className="sheet-title">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <Title className="t-title-3">{title}</Title>
+          {description && <Description className="t-small text-fg-3">{description}</Description>}
+        </div>
+        <Close asChild>
+          <IconButton aria-label="Close" size="sm" className="-mr-2 shrink-0">
+            <X size={20} aria-hidden="true" />
+          </IconButton>
+        </Close>
+      </div>
+      {head}
+    </div>
+  );
+}
+
+function PanelSheet({ open, onOpenChange, title, description, size, nested, head, footer, className, children }: SheetProps) {
+  const focus = useRestoreFocus();
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        {!nested && <Dialog.Overlay className="scrim" />}
+        {/* Without a description, opt out of aria-describedby explicitly (Radix warns otherwise) */}
+        <Dialog.Content className={sheetClass({ size, nested, className })} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
+          <SheetHead title={title} description={description} head={head} Title={Dialog.Title} Description={Dialog.Description} Close={Dialog.Close} />
+          <div className="sheet-body">{children}</div>
+          {footer && <div className="sheet-foot">{footer}</div>}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function DrawerSheet({ open, onOpenChange, title, description, size, nested, head, footer, className, children }: SheetProps) {
+  const focus = useRestoreFocus();
+  const Root = nested ? Drawer.NestedRoot : Drawer.Root;
+  return (
+    <Root open={open} onOpenChange={onOpenChange} handleOnly={size === 'full'} repositionInputs={false}>
+      <Drawer.Portal>
+        <Drawer.Overlay className="scrim" />
+        <Drawer.Content className={sheetClass({ size, nested, className })} {...focus} {...(description ? {} : { 'aria-describedby': undefined })}>
+          {/* Vaul injects unlayered handle styles, hence the important overrides */}
+          <div className="grid h-5 shrink-0 place-items-center">
+            <Drawer.Handle className="w-9! bg-surface-4! opacity-100!" />
+          </div>
+          <SheetHead title={title} description={description} head={head} Title={Drawer.Title} Description={Drawer.Description} Close={Drawer.Close} />
+          <div className="sheet-body">{children}</div>
+          {footer && <div className="sheet-foot">{footer}</div>}
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Root>
+  );
+}

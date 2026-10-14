@@ -1,0 +1,86 @@
+/* ==========================================================================
+   momoshtrem · app shell
+   The shell-level parts of the prototype's css/app.css: skip link, main
+   area, view transitions, phone bar, copy field and how-to steps. Hero and
+   detail-page patterns belong to the title-page work (#4).
+   ========================================================================== */
+
+@layer components {
+  .skip {
+    position: absolute; left: 8px; top: -60px; z-index: 100;
+    padding: 10px 14px; border-radius: var(--r-sm);
+    background: var(--accent); color: var(--accent-ink); font-weight: var(--w-semibold);
+  }
+  .skip:focus-visible { top: 8px; }
+
+  /* Room for the tab bar (+ safe area) on phone and tablet */
+  .main {
+    min-height: 100vh;
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-10));
+  }
+  @media (min-width: 1024px) {
+    .main { padding-bottom: var(--sp-20); }
+    .main.has-hero { margin-top: calc(var(--topbar-h) * -1); }
+  }
+  .main--bare { padding-bottom: 0; }
+
+  .page-sections { display: flex; flex-direction: column; gap: var(--sp-10); }
+  @media (min-width: 1024px) { .page-sections { gap: var(--sp-12); } }
+
+  /* Cat avatar ("Ask momoshtrem", account menu header) */
+  .cat-avatar {
+    display: inline-grid; place-items: center; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+    box-shadow: 0 0 0 1px rgb(242 179 61 / 0.25), 0 0 16px rgb(242 179 61 / 0.15);
+  }
+
+  /* Numbered how-to steps (Infuse setup) */
+  .howto-steps { display: flex; flex-direction: column; gap: var(--sp-5); }
+  .howto-steps li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--sp-3); }
+  .howto-steps .n {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent-text);
+    font-weight: var(--w-semibold); font-size: var(--t-small);
+  }
+
+  /* Copyable value (WebDAV address, paths) */
+  .copy-field {
+    display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 44px;
+    padding: 6px 6px 6px 12px; border-radius: var(--r-sm);
+    background: var(--ink-1); border: 1px solid var(--line-2);
+  }
+  .copy-field code, .copy-field .path { flex: 1; min-width: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+
+  /* Phone top bar: brand + account (the tab bar carries navigation) */
+  .phone-bar {
+    position: relative; z-index: var(--z-sticky);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) var(--gutter) 10px;
+  }
+  .phone-bar.is-over-art { position: absolute; left: 0; right: 0; top: 0; }
+  .phone-bar .brand { display: flex; align-items: center; gap: 8px; font-weight: var(--w-semibold); letter-spacing: -0.03em; font-size: 17px; }
+  .phone-bar .avatar-btn { background: rgb(11 13 18 / 0.5); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  @media (min-width: 1024px) { .phone-bar { display: none; } }
+
+  .pcard.is-dismissed { opacity: 0.35; filter: grayscale(1); transition: opacity var(--d-slow), filter var(--d-slow); }
+
+  /* Skeletons appear only after 150 ms, so cached loads never flash (HANDOFF §4.3) */
+  .skel-delay { animation: fade-in var(--d-base) var(--ease-out) 150ms both; }
+}
+
+/* View transitions: slow, cinematic crossfade; poster morph handled by name */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--d-slower);
+  animation-timing-function: var(--ease-in-out);
+}
+::view-transition-group(hero-poster) {
+  animation-duration: var(--d-slower);
+  animation-timing-function: var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

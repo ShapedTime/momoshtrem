@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { LibraryCard, LibraryCardSkeleton } from './LibraryCard';
 import { EmptyLibrary } from './EmptyLibrary';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 import type { TorrentStatus } from '@/types/torrent';
 
@@ -82,7 +82,7 @@ export function LibraryGrid({
   torrentStatusMap,
 }: LibraryGridProps) {
   const [filter, setFilter] = useState<FilterType>('all');
-  const { showToast } = useToast();
+  const { toast } = useToast();
 
   const handleRemove = useCallback(async (id: number, mediaType: 'movie' | 'tv') => {
     const endpoint = mediaType === 'movie'
@@ -96,15 +96,12 @@ export function LibraryGrid({
         throw new Error('Failed to remove from library');
       }
 
-      showToast('success', 'Removed from library');
+      toast({ tone: 'ready', title: 'Removed from library' });
       onRefresh?.();
     } catch (error) {
-      showToast(
-        'error',
-        error instanceof Error ? error.message : 'Failed to remove'
-      );
+      toast({ tone: 'error', title: error instanceof Error ? error.message : 'Failed to remove' });
     }
-  }, [showToast, onRefresh]);
+  }, [toast, onRefresh]);
 
   // Filter items
   const filteredMovies = filter === 'shows' ? [] : movies;
@@ -162,7 +159,7 @@ export function LibraryGrid({
               className={`
                 px-4 py-2 text-sm font-medium rounded-md
                 transition-colors duration-200 motion-reduce:transition-none
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                 ${isActive
                   ? 'bg-white text-black'
                   : 'bg-bg-hover text-text-secondary hover:text-white hover:bg-bg-active'

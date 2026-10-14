@@ -129,7 +129,7 @@ export default function TorrentsPage() {
               text-white rounded-md
               transition-colors
               disabled:opacity-50 disabled:cursor-not-allowed
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
             "
           >
             <RefreshIcon
@@ -236,7 +236,7 @@ function StatCard({
       className={`
         bg-bg-elevated rounded-lg p-4 transition-all
         ${isClickable ? 'cursor-pointer hover:bg-bg-hover' : ''}
-        ${isSelected ? 'ring-2 ring-accent-blue ring-offset-2 ring-offset-bg-primary' : ''}
+        ${isSelected ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg-primary' : ''}
       `}
     >
       <p className="text-sm text-text-secondary">{label}</p>

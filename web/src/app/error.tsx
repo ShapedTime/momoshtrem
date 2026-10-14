@@ -2,7 +2,8 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
-import { Button, AlertCircleIcon } from '@/components/ui';
+import { Button } from '@/components/ui';
+import { CircleAlert } from 'lucide-react';
 
 interface ErrorProps {
   error: Error & { digest?: string };
@@ -18,7 +19,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
       <div className="text-center max-w-md">
-        <AlertCircleIcon size={48} className="mx-auto mb-4 text-red-400" />
+        <CircleAlert size={48} className="mx-auto mb-4 text-red-400" />
         <h2 className="text-xl font-semibold text-white mb-2">
           Something went wrong
         </h2>

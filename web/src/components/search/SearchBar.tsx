@@ -85,7 +85,7 @@ export function SearchBar({
           flex items-center gap-3
           bg-bg-elevated border border-border rounded-lg
           px-4 h-14
-          focus-within:ring-2 focus-within:ring-accent-blue focus-within:border-transparent
+          focus-within:ring-2 focus-within:ring-accent focus-within:border-transparent
           transition-all
         "
       >
@@ -110,7 +110,7 @@ export function SearchBar({
             className="
               p-1.5 text-text-muted hover:text-white
               transition-colors rounded
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
             "
             aria-label="Clear search"
           >

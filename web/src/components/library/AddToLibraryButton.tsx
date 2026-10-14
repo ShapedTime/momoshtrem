@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui';
+import { STATUS } from '@/lib/status';
 import type { LibraryStatus } from '@/types/momoshtrem';
 
 interface AddToLibraryButtonProps {
@@ -44,40 +45,6 @@ function PlusIcon() {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-  );
-}
-
 function Spinner() {
   return (
     <svg
@@ -114,7 +81,7 @@ export function AddToLibraryButton({
   className = '',
 }: AddToLibraryButtonProps) {
   const [isAdding, setIsAdding] = useState(false);
-  const { showToast } = useToast();
+  const { toast } = useToast();
 
   const handleClick = useCallback(async () => {
     if (status !== 'not_in_library' || isAdding) return;
@@ -136,21 +103,20 @@ export function AddToLibraryButton({
       }
 
       const data = await response.json();
-      showToast('success', `Added "${title}" to library`);
+      toast({ tone: 'ready', title: `Added "${title}" to library` });
       onStatusChange?.('in_library', data.library_id);
     } catch (error) {
-      showToast(
-        'error',
-        error instanceof Error ? error.message : 'Failed to add to library'
-      );
+      toast({ tone: 'error', title: error instanceof Error ? error.message : 'Failed to add to library' });
     } finally {
       setIsAdding(false);
     }
-  }, [mediaType, tmdbId, title, status, isAdding, showToast, onStatusChange]);
+  }, [mediaType, tmdbId, title, status, isAdding, toast, onStatusChange]);
 
   // Determine button appearance based on status
   const isDisabled = status !== 'not_in_library' || isAdding;
 
+  const ReadyIcon = STATUS.ready_infuse.icon;
+  const NeedsTorrentIcon = STATUS.needs_torrent.icon;
   let buttonContent: React.ReactNode;
   let buttonStyle: string;
 
@@ -165,16 +131,16 @@ export function AddToLibraryButton({
   } else if (status === 'has_assignment') {
     buttonContent = (
       <>
-        <PlayIcon />
-        <span>Ready to Stream</span>
+        <ReadyIcon size={14} aria-hidden="true" />
+        <span>{STATUS.ready_infuse.label}</span>
       </>
     );
     buttonStyle = 'bg-accent-green/20 text-accent-green border border-accent-green/30';
   } else if (status === 'in_library') {
     buttonContent = (
       <>
-        <CheckIcon />
-        <span>In Library</span>
+        <NeedsTorrentIcon size={14} aria-hidden="true" />
+        <span>{STATUS.needs_torrent.label}</span>
       </>
     );
     buttonStyle = 'bg-white/10 text-text-secondary border border-white/10';
@@ -196,7 +162,7 @@ export function AddToLibraryButton({
         inline-flex items-center justify-center gap-2
         rounded-md
         transition-colors duration-200 motion-reduce:transition-none
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
         focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
         disabled:cursor-default
         w-full sm:w-auto

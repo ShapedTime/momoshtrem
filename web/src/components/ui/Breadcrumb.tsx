@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRightIcon } from './Icons';
+import { ChevronRight } from 'lucide-react';
 
 export interface BreadcrumbItem {
   label: string;
@@ -31,7 +31,7 @@ export function Breadcrumb({ items, className = '' }: BreadcrumbProps) {
           return (
             <li key={index} className="flex items-center gap-1 sm:gap-2 min-w-0">
               {index > 0 && (
-                <ChevronRightIcon
+                <ChevronRight
                   size={16}
                   className="text-text-muted flex-shrink-0"
                 />
@@ -42,7 +42,7 @@ export function Breadcrumb({ items, className = '' }: BreadcrumbProps) {
                   className="
                     text-text-secondary hover:text-white
                     transition-colors
-                    focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
                     rounded-sm
                   "
                 >

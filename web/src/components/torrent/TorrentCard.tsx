@@ -93,7 +93,7 @@ export function TorrentCard({
           onClick={handleAdd}
           aria-label={isAdded ? `${result.title} already added` : `Add ${result.title}`}
           disabled={isDisabled}
-          isLoading={isAdding && !isAdded}
+          loading={isAdding && !isAdded}
         >
           {isAdded && (
             <svg

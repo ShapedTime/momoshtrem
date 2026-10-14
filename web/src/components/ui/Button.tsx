@@ -1,91 +1,108 @@
-import { ButtonHTMLAttributes, forwardRef } from 'react';
+import Link from 'next/link';
+import type { ButtonHTMLAttributes, ComponentProps, Ref } from 'react';
+import { cx } from '@/lib/utils/cx';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost';
-type ButtonSize = 'sm' | 'md' | 'lg';
+export type ButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'ghost'
+  | 'glass'
+  | 'ready'
+  | 'danger'
+  | 'danger-quiet';
+export type ButtonSize = 'sm' | 'md' | 'lg';
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonStyleProps {
+  /** One `primary` per view: it marks the next thing to do. Solid `danger` lives only in confirm dialogs. */
   variant?: ButtonVariant;
+  /** sm is 36 px (44 px hit area), md 44, lg 52. */
   size?: ButtonSize;
-  isLoading?: boolean;
+  /** Full width. Buttons are never forced full width otherwise. */
+  block?: boolean;
+  /** Square icon-only button; pass an `aria-label`. */
+  iconOnly?: boolean;
 }
 
-const variantStyles: Record<ButtonVariant, string> = {
-  primary:
-    'bg-accent-red hover:bg-red-700 text-white font-semibold',
-  secondary:
-    'bg-white/10 hover:bg-white/20 text-white font-medium border border-white/20',
-  ghost:
-    'bg-transparent hover:bg-white/10 text-white font-medium',
-};
-
-const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'h-9 px-4 text-sm',
-  md: 'h-11 px-6 text-base',
-  lg: 'h-12 px-8 text-lg',
-};
-
-function Spinner({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      className={`animate-spin motion-reduce:animate-none h-5 w-5 ${className}`}
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-      />
-    </svg>
+export function buttonClassName({
+  variant = 'secondary',
+  size = 'md',
+  block = false,
+  iconOnly = false,
+  loading = false,
+  className,
+}: ButtonStyleProps & { loading?: boolean; className?: string }): string {
+  return cx(
+    'btn',
+    `btn-${variant}`,
+    size !== 'md' && `btn-${size}`,
+    block && 'btn-block',
+    iconOnly && 'btn-icon',
+    loading && 'is-loading',
+    className
   );
 }
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  function Button(
-    {
-      variant = 'primary',
-      size = 'md',
-      isLoading = false,
-      disabled,
-      className = '',
-      children,
-      ...props
-    },
-    ref
-  ) {
-    const isDisabled = disabled || isLoading;
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>, ButtonStyleProps {
+  /** Shows a spinner and keeps the label for width; the button is busy and inert. */
+  loading?: boolean;
+  /** @deprecated Use `loading`. */
+  isLoading?: boolean;
+  ref?: Ref<HTMLButtonElement>;
+}
 
-    return (
-      <button
-        ref={ref}
-        disabled={isDisabled}
-        className={`
-          inline-flex items-center justify-center gap-2
-          rounded-md
-          transition-colors duration-200 motion-reduce:transition-none
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue
-          focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
-          disabled:opacity-50 disabled:cursor-not-allowed
-          w-full sm:w-auto
-          ${variantStyles[variant]}
-          ${sizeStyles[size]}
-          ${className}
-        `}
-        {...props}
-      >
-        {isLoading && <Spinner />}
-        {children}
-      </button>
-    );
-  }
-);
+export function Button({
+  variant,
+  size,
+  block,
+  iconOnly,
+  loading,
+  isLoading,
+  disabled,
+  className,
+  type = 'button',
+  children,
+  ref,
+  ...props
+}: ButtonProps) {
+  const busy = Boolean(loading ?? isLoading);
+  return (
+    <button
+      ref={ref}
+      type={type}
+      // A busy button keeps its full colour (the spinner says "working"); .is-loading makes it inert
+      disabled={disabled}
+      aria-busy={busy || undefined}
+      onClickCapture={
+        busy
+          ? (event) => {
+              // Keyboard activation still fires click; swallow it (and form submits) while busy
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          : undefined
+      }
+      className={buttonClassName({ variant, size, block, iconOnly, loading: busy, className })}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export interface IconButtonProps extends Omit<ButtonProps, 'iconOnly' | 'children'> {
+  /** Required: icon-only buttons are named for screen readers. */
+  'aria-label': string;
+  children: React.ReactNode;
+}
+
+/** Square, icon-only button. `variant` defaults to ghost. */
+export function IconButton({ variant = 'ghost', ...props }: IconButtonProps) {
+  return <Button variant={variant} iconOnly {...props} />;
+}
+
+type ButtonLinkProps = ComponentProps<typeof Link> & ButtonStyleProps;
+
+/** A link that looks like a button (navigation, not an action). */
+export function ButtonLink({ variant, size, block, iconOnly, className, ...props }: ButtonLinkProps) {
+  return <Link className={buttonClassName({ variant, size, block, iconOnly, className })} {...props} />;
+}

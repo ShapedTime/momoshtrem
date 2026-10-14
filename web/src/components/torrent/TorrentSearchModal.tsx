@@ -33,7 +33,7 @@ export function TorrentSearchModal({
   const { addTorrent, isAdding, isAdded, error: addError, reset: resetAddState } = useAddTorrent();
 
   // Toast notifications
-  const { showToast } = useToast();
+  const { toast } = useToast();
 
   // Local UI state
   const [searchQuery, setSearchQuery] = useState(context.query);
@@ -117,14 +117,14 @@ export function TorrentSearchModal({
       const mediaType = context.mediaType === 'movie' ? 'movie' : 'tv';
 
       if (!context.tmdbId) {
-        showToast('error', 'Missing TMDB ID - cannot add to library');
+        toast({ tone: 'error', title: 'Missing TMDB ID - cannot add to library' });
         return;
       }
 
       const result = await addTorrent(magnetUri, mediaType, context.tmdbId);
 
       if (!result) {
-        showToast('error', addError || 'Failed to add torrent');
+        toast({ tone: 'error', title: addError || 'Failed to add torrent' });
         return;
       }
 
@@ -134,7 +134,7 @@ export function TorrentSearchModal({
         const message = result.added_to_library
           ? 'Added to library and assigned torrent'
           : 'Torrent assigned to movie';
-        showToast('success', message);
+        toast({ tone: 'ready', title: message });
       } else {
         // TV Show: show assignment results modal
         if (isShowResponse(result) && result.summary) {
@@ -149,17 +149,17 @@ export function TorrentSearchModal({
           // Also show a quick toast
           const matchText = `Matched ${result.summary.matched} of ${result.summary.total_files} files`;
           if (result.added_to_library) {
-            showToast('success', `Added to library. ${matchText}`);
+            toast({ tone: 'ready', title: `Added to library. ${matchText}` });
           } else {
-            showToast('success', matchText);
+            toast({ tone: 'ready', title: matchText });
           }
         } else {
           // Fallback for unexpected response
-          showToast('success', 'Torrent assigned to show');
+          toast({ tone: 'ready', title: 'Torrent assigned to show' });
         }
       }
     },
-    [context.mediaType, context.tmdbId, context.title, addTorrent, addError, showToast]
+    [context.mediaType, context.tmdbId, context.title, addTorrent, addError, toast]
   );
 
   // Handle assignment results modal close
