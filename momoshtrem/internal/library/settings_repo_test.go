@@ -39,7 +39,7 @@ func TestMigrations_AppSettingsAppliedAndIdempotent(t *testing.T) {
 	}
 
 	// Re-running migrations on an up-to-date database is a no-op.
-	if err := db.migrate(); err != nil {
+	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 }
