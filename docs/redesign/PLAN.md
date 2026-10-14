@@ -174,13 +174,14 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `shows`: add the following columns:
   - IDs and names: `imdb_id`, `tvdb_id`, `original_name`.
   - Origin: `original_language`, `origin_country text[]`, `is_anime bool`.
-  - Artwork and status: `poster_path`, `backdrop_path`, `status`.
-  - Episode ordering: `episode_ordering` (`aired`|`absolute`|`episode_group`) and `episode_group_id`.
-  - Matching options: `include_specials bool default true` and `classifier_mode` (`auto`|`rules_only`|`ai_always`).
+  - Artwork and status: `poster_path`, `backdrop_path`, `status`, `genres jsonb`.
+  - Episode ordering: `episode_ordering` (CHECK `aired`|`absolute`|`episode_group`, default `aired`) and `episode_group_id`.
+  - Matching options: `include_specials bool default true` and `classifier_mode` (CHECK `auto`|`rules_only`|`ai_always`).
   - `metadata_updated_at`.
 - `seasons`: allow `season_number = 0`; add `name` and `poster_path`.
-- `episodes`: add `tmdb_episode_id`, `absolute_number`, `episode_type`, `runtime`, `still_path`, `overview`.
-- `tmdb_cache(key text pk, payload jsonb, fetched_at, expires_at)`.
+- `episodes`: add `tmdb_episode_id` (indexed), `absolute_number`, `episode_type`, `runtime`, `still_path`, `overview`. `air_date` stays TEXT (ISO dates compare correctly), NULL instead of `''`.
+- `torrent_assignments`: a partial index on `(item_type, item_id) WHERE is_active`.
+- `tmdb_cache(key text pk, payload jsonb, fetched_at, expires_at)`, indexed on `expires_at`. It also holds the hero colours (`color:w300{path}`, no expiry).
 
 **`004_assignment_jobs.sql` (B2)**
 - `torrent_assignments`: add `confidence` (`high|medium|low`) and `match_source` (`rules|ai|manual`).
@@ -208,6 +209,13 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `ask_threads(id, title, created_at, updated_at)` and `ask_messages(id, thread_id, role, content jsonb, created_at)`.
   - `content` holds the raw API content blocks, append-only. Tool loops and thinking replay need them unchanged.
 
+**`007_subtitles.sql` (B7)**
+- `subtitles`: add `release_name`. Drop `UNIQUE(item_type, item_id, language_code)` (looked up through `pg_get_constraintdef`).
+- Partial unique indexes instead, so a torrent subtitle never overwrites a downloaded one and unknown-language files coexist:
+  - `(item_type, item_id, language_code) WHERE source = 'opensubtitles'`;
+  - `(item_type, item_id, info_hash, file_path) WHERE source = 'torrent'`.
+- CHECK that torrent subtitles have an `info_hash`.
+
 ## 6. API contract (backend, under `/api`)
 
 **Conventions**
@@ -218,10 +226,77 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - The web app exposes the same paths under its own session-checked `/api/*` routes. A catch-all `web/src/app/api/[...path]` forwards any path whose first segment is in `BACKEND_PREFIXES` (`web/src/lib/api/backend-proxy.ts`), adding the token and streaming the response (SSE included); explicit web routes take precedence. Typed browser calls and TanStack Query factories for every endpoint live in `web/src/lib/api/endpoints/`, and MSW fixtures in `web/src/mocks/` (F1).
 
 ### Titles and library (B1)
-- `GET /titles/{movie|tv}/{tmdb_id}`: cached TMDB details, plus library state, assignment summary, watch state (once B5 lands) and the recommendation reason if there is one.
-- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=`: items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls.
-- `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}`.
+- `GET /titles/{movie|tv}/{tmdb_id}`: cached TMDB details, plus library state, watch state (once B5 lands) and the recommendation reason if there is one. Types: `web/src/lib/api/contract/titles.ts`.
+  ```
+  Title = MovieTitle | ShowTitle
+  TitleBase {
+    media_type, tmdb_id, title, original_title, year, overview, poster_path, backdrop_path,
+    backdrop_dominant_color,                 // hex, or null while it's computed
+    genres: [], vote_average, vote_count, original_language,
+    cast: [{name, character, profile_path}], trailer_youtube_key,
+    similar: [SimilarTitle],                 // ≤ 12: TMDB recommendations, else similar
+    library: TitleLibraryState, watch_state, recommendation_reason
+  }
+  MovieTitle += runtime, directors: []
+  ShowTitle  += status, is_anime, episode_ordering, episode_group_id, include_specials, classifier_mode,
+                creators: [], networks: [], end_year, episode_run_time,
+                seasons: [SeasonSummary],    // Specials (season 0) last; left out while include_specials is off
+                default_season               // the season to open; null when there are none
+  SeasonSummary { season_number, name, episodes_total, ready, missing, needs_review, upcoming,
+                  absolute_from, absolute_to }   // not in library: only episodes_total, the rest 0/null
+  TitleLibraryState {
+    in_library, library_id, added_at,        // library_id and added_at are null when not in the library
+    availability_stage: none|needs_torrent|downloading|ready,
+    webdav_path, webdav_url,                 // null until something is assigned (the VFS hides empty titles)
+    download: {pct, speed_bps, eta_seconds, seeders} | null,   // shows: combined over the downloading episodes
+    needs_review, review_job_id,             // review_job_id is filled by B2/#5
+    episodes_total, episodes_ready,          // shows: aired regular episodes, and those with a file
+    missing: {season_number, from, to, count} | null,   // shows: the first frontier run (below)
+    torrent: {info_hash, release_name, file_name, size_bytes, resolution, source, added_at,
+              state: active|idle|not_loaded, seeders} | null   // movies; seeders null unless loaded
+  }
+  SimilarTitle { media_type, tmdb_id, title, year, poster_path,
+                 library: {library_id, availability_stage, episodes_total, episodes_ready} | null }
+  ```
+  `download.eta_seconds` is null (torrents fetch on demand) and `speed_bps` is 0 until B6.
+- `GET /titles/tv/{tmdb_id}/seasons/{n}`: one season at a time, so 1,000-episode shows stay light. `404 not_in_library` for a show that isn't in the library; `404 not_found` for an unknown season (or season 0 while specials are off).
+  ```
+  { season_number, name, episodes: [EpisodeSummary], ranges: [EpisodeRange] }
+  EpisodeSummary { id, season_number, episode_number, absolute_number, name, overview, air_date, still_path,
+                   runtime, episode_type: standard|mid_season|finale|null,
+                   state: watched|ready|downloading|missing|upcoming|needs_review, pct,
+                   webdav_path }             // only while the episode has a file
+  EpisodeRange { label, kind: arc|block, from, to, absolute_from, absolute_to, missing }   // from/to in-season
+  ```
+  Ranges exist only for seasons over 20 episodes: TMDB story-arc groups (type 5) that overlap the season; otherwise split where air dates are more than 45 days apart (not for specials, which air years apart), then cut into blocks of up to 10. Block labels are in-season numbers, e.g. `"21–28"`.
+- **Availability rules.** The server computes `availability_stage`, so the client never infers it.
+  - Movie: `none` not in the library; `needs_torrent` no active assignment; `downloading` the torrent is loaded and active and the file isn't fully cached; `ready` otherwise.
+  - Show: `none` not in the library; `needs_torrent` nothing assigned, or the frontier is non-empty; `downloading` any assigned episode is downloading; `ready` otherwise.
+  - The **frontier** (until B5 knows what was watched): aired regular episodes after the last assigned one. Specials never count, nor do gaps before the last assigned episode. `missing` is its first run, within one season.
+  - Episode: `ready` or `downloading` when assigned; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown. `watched` (B5) and `needs_review` (B2) fill in later.
+  - `default_season`: the frontier's season, else the latest season with a file, else the first regular season.
+- `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
+- `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
+- `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item.
+- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=&q=&page=&page_size=` (50 by default, max 200): items with poster and counts (`episodes_total`, `episodes_ready`, `episodes_watched`, `needs_review`). Replaces the per-item TMDB calls. `status=watching` and `status=needs_review` stay empty until B5 and B2.
+- `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
 - `GET /shows/{id}/episode-groups`: `{items: [{id, name, type, group_count, episode_count}]}`, TMDB episode groups for the ordering picker.
+- Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata); `503 unavailable` without a TMDB key.
+
+### Subtitles (B7)
+Item-scoped under `/movies/{id}` and `/episodes/{id}`; the legacy `/subtitles/*` routes go when F2 drops their callers. Types: `web/src/lib/api/contract/subtitles.ts`.
+- `GET …/subtitles` → `{items: [Subtitle]}`.
+- `GET …/subtitles/search?languages=en,az` → `{items: [SubtitleCandidate], release_name}`, ranked against the assigned release. `release_name` is null when nothing is assigned; every `match` is then `unknown`.
+- `POST …/subtitles` with `{file_id, language_code, release_name?}` → `201 Subtitle`. It replaces the downloaded subtitle in that language.
+- `DELETE …/subtitles/{sid}` → `204`, or `409 conflict` for a subtitle that came with the torrent.
+```
+Subtitle { id, language_code, language_name, format, source: opensubtitles|torrent, release_name, match, created_at }
+SubtitleCandidate { file_id, language_code, language_name, release_name, file_name, downloads,
+                    hearing_impaired, machine_translated, match,
+                    match_score, match_reason }   // 0–100; one line, e.g. "Same group (FLUX) and source (WEB-DL)"
+match: exact_release (score ≥ 90) | same_source (≥ 60) | different_timing (lower) | unknown (a release name is missing)
+```
+A stored subtitle's `match` compares its `release_name` with the current release; torrent subtitles are `exact_release`.
 
 ### Assignment (B2/B3)
 - `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?}}` returns `202 {job_id}`. `?wait=true` keeps the legacy synchronous behaviour until H2.
@@ -575,7 +650,8 @@ Related endpoints:
 - Acceptance: tests for the speed calculation and the merged listing. The Activity view is never empty while the Library has assigned items.
 
 **B7 · Subtitles polish** (small; independent)
-- Owns `internal/subtitle`, `internal/opensubtitles` and a migration amendment in 004 (coordinate with B2) or a separate `007_subtitles.sql`.
+- Owns `internal/subtitle`, `internal/opensubtitles` and `007_subtitles.sql`.
+- Serves the item-scoped endpoints (`/movies/{id}/subtitles…`, `/episodes/{id}/subtitles…`, §6 "Subtitles").
 - Rank OpenSubtitles results by match to the assigned release:
   - movie hash, if available;
   - release-name similarity;
