@@ -15,7 +15,7 @@ const arcsBudget = 3 * time.Second
 // Season builds GET /titles/tv/{tmdb_id}/seasons/{n}: one season's episodes
 // with their state and, for seasons over 20 episodes, jump ranges. Queries:
 // the season (one, with the show), plus two TMDB cache reads for story arcs
-// when the season is long. Returns ErrNotInLibrary when the show isn't in
+// when a regular season is long. Returns ErrNotInLibrary when the show isn't in
 // the library and ErrSeasonNotFound for an unknown season, or specials while
 // they're switched off.
 func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*SeasonDetail, error) {
@@ -59,7 +59,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 	}
 
 	var arcs []Arc
-	if len(episodes) > rangeMinEpisodes {
+	if seasonNumber > 0 && len(episodes) > rangeMinEpisodes { // specials always get blocks
 		arcs = s.storyArcs(ctx, tmdbID, seasonNumber)
 	}
 	return &SeasonDetail{
@@ -71,7 +71,8 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 }
 
 // storyArcs returns the arcs of the show's largest story-arc episode group
-// that overlap the season. Failures are logged: blocks stand in for arcs.
+// that list episodes of the season. Failures are logged: blocks stand in for
+// arcs.
 func (s *Service) storyArcs(ctx context.Context, tmdbID, seasonNumber int) []Arc {
 	ctx, cancel := context.WithTimeout(ctx, arcsBudget)
 	defer cancel()
