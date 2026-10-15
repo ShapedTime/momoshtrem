@@ -43,13 +43,15 @@
     - {path: Subs/English.srt, expect: {kind: subtitle, eps: [S04E05]}}
     - {path: Subs/Spanish.srt, expect: {kind: subtitle, eps: [S04E05]}}
 
+# Two qualities of one episode: the better copy is kept, the other is
+# superseded (it was a conflict before the PR #52 review).
 - id: boys-duplicate-quality
   show: the-boys
   torrent: The.Boys.S01.Multi.Quality.WEB
-  tags: [conflict]
+  tags: [duplicate, quality]
   files:
-    - {path: 1080p/The.Boys.S01E01.1080p.WEB.H264-GRP.mkv, expect: {eps: [S01E01], max_conf: medium}}
-    - {path: 720p/The.Boys.S01E01.720p.WEB.H264-GRP.mkv, size: 700MB, expect: {eps: [S01E01], max_conf: medium}}
+    - {path: 1080p/The.Boys.S01E01.1080p.WEB.H264-GRP.mkv, expect: {eps: [S01E01], min_conf: high}}
+    - {path: 720p/The.Boys.S01E01.720p.WEB.H264-GRP.mkv, size: 700MB, expect: {extra: superseded}}
 
 - id: office-s06
   show: the-office

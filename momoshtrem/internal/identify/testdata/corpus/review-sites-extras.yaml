@@ -1,0 +1,21 @@
+# From the PR #52 review: site prefixes before the show's title, and the
+# show's title (Trailer, Extras) misread as an extra marker.
+# Schema: see anime.yaml.
+
+- id: review-site-prefix-tpb
+  show: trailer-park-boys
+  tags: [review, site-prefix, title-word]
+  files:
+    - {path: www.UIndex.org - Trailer.Park.Boys.Christmas.Special.DVDRip.avi, size: 700MB, expect: {eps: [S00E01]}}
+
+- id: review-site-bracket-tpb
+  show: trailer-park-boys
+  tags: [review, site-prefix, title-word]
+  files:
+    - {path: "[ www.Torrenting.com ] - Trailer Park Boys - Christmas Special.avi", size: 700MB, expect: {eps: [S00E01]}}
+
+- id: review-site-prefix-extras
+  show: extras
+  tags: [review, site-prefix, title-word]
+  files:
+    - {path: www.UIndex.org - Extras.Christmas.Special.1080p.BluRay.mkv, size: 4.4GB, expect: {eps: [S00E01]}}

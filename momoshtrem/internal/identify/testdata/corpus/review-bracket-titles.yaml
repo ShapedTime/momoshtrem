@@ -1,0 +1,51 @@
+# From the PR #52 review: a later season named in brackets between the
+# show's title and the number. Bare numbers there restart per season, so
+# the rules must ask. Schema: see anime.yaml.
+
+- id: review-aot-final-season-17
+  show: attack-on-titan
+  tags: [review, sequel-title, bracket]
+  files:
+    - path: "[SubsPlease] Shingeki no Kyojin (The Final Season) - 17 (1080p) [B3C4D5E6].mkv"
+      ambiguous: true
+      expect: {acceptable: [S04E17, null], max_conf: medium}
+
+- id: review-aot-final-season-28
+  show: attack-on-titan
+  tags: [review, sequel-title, bracket]
+  files:
+    - path: "[SubsPlease] Shingeki no Kyojin (The Final Season) - 28 (1080p) [C4D5E6F7].mkv"
+      ambiguous: true
+      expect: {acceptable: [S04E28, null], max_conf: medium}
+
+- id: review-dr-stone-new-world
+  show: dr-stone
+  tags: [review, sequel-title, bracket]
+  files:
+    - path: "[SubsPlease] Dr. Stone (New World) - 01 (1080p) [ABCD1234].mkv"
+      ambiguous: true
+      expect: {acceptable: [S03E01, null], max_conf: medium}
+
+- id: review-spyxfamily-part2
+  show: spy-x-family
+  tags: [review, sequel-title, bracket]
+  files:
+    - path: "[Group] Spy x Family (Part 2) - 01 [1080p].mkv"
+      ambiguous: true
+      expect: {acceptable: [S01E13, null], max_conf: medium}
+
+- id: review-jjk-shibuya
+  show: jujutsu-kaisen
+  tags: [review, sequel-title, bracket]
+  files:
+    - path: "[Group] Jujutsu Kaisen [Shibuya Incident] - 05 [1080p].mkv"
+      ambiguous: true
+      expect: {acceptable: [null], max_conf: medium}
+
+- id: review-dr-stone-stone-wars
+  show: dr-stone
+  tags: [review, sequel-title, bracket]
+  files:
+    - path: "[Group] Dr. Stone [Stone Wars] - 05 [1080p].mkv"
+      ambiguous: true
+      expect: {acceptable: [S02E05, null], max_conf: medium}

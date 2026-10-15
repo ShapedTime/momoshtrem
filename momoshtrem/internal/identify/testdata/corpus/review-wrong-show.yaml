@@ -1,0 +1,81 @@
+# From the PR #52 review: torrents of another show whose S/E exists in this
+# one. The rules can't tell them from a renamed release, but a title that
+# isn't this show's (or a year more than one off) must keep them from being
+# high. Schema: see anime.yaml.
+
+- id: review-wrong-law-and-order
+  show: law-and-order-svu
+  tags: [review, wrong-torrent, title-prefix]
+  files:
+    - path: Law.and.Order.S20E05.1080p.WEB.H264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S20E05], max_conf: medium}
+
+- id: review-wrong-911-lone-star
+  show: 9-1-1
+  tags: [review, wrong-torrent, spin-off]
+  files:
+    - path: 9-1-1.Lone.Star.S04E05.1080p.WEB.H264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S04E05], max_conf: medium}
+
+- id: review-wrong-boys-diabolical
+  show: the-boys
+  tags: [review, wrong-torrent, spin-off]
+  files:
+    - path: The.Boys.Presents.Diabolical.S01E05.1080p.AMZN.WEB-DL.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E05], max_conf: medium}
+
+- id: review-wrong-gen-v
+  show: the-boys
+  tags: [review, wrong-torrent, spin-off]
+  files:
+    - path: Gen.V.S01E05.1080p.AMZN.WEB-DL.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E05], max_conf: medium}
+
+- id: review-wrong-lost
+  show: the-boys
+  tags: [review, wrong-torrent]
+  files:
+    - path: Lost.S01E05.1080p.BluRay.x264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E05], max_conf: medium}
+
+- id: review-wrong-doctor-who-2023
+  show: doctor-who
+  tags: [review, wrong-torrent, year]
+  files:
+    - path: Doctor.Who.2023.S01E01.Space.Babies.1080p.WEB.H264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E01], max_conf: medium}
+
+- id: review-wrong-doctor-who-1963
+  show: doctor-who
+  tags: [review, wrong-torrent, year]
+  files:
+    - path: Doctor.Who.1963.S01E01.An.Unearthly.Child.DVDRip.x264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E01], max_conf: medium}
+
+- id: review-wrong-office-uk
+  show: the-office
+  tags: [review, wrong-torrent, country]
+  files:
+    - path: The.Office.UK.S01E01.Downsize.DVDRip.x264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E01], max_conf: medium}
+
+# The right show's usual names stay high.
+- id: review-right-doctor-who-2005
+  show: doctor-who
+  tags: [review, year]
+  files:
+    - {path: Doctor.Who.2005.S01E02.The.End.of.the.World.720p.BluRay.x264-GRP.mkv, expect: {eps: [S01E02], min_conf: high}}
+
+- id: review-right-office-us
+  show: the-office
+  tags: [review, country]
+  files:
+    - {path: The.Office.US.S01E02.Diversity.Day.720p.WEB-DL.DD5.1.H.264.mkv, expect: {eps: [S01E02], min_conf: high}}
