@@ -6,41 +6,43 @@
 //
 // The caller decides, and passes the files to look at as
 // identify.ResolveInput.Scope:
-//   - classifier_mode auto: UnsureFiles, the videos the rules left without
-//     a target, below high confidence or in a conflict. Nothing unsure, no
-//     call.
-//   - classifier_mode ai_always: every video (Videos).
-//   - a user's re-check: the proposals the user hasn't decided (all of
-//     them, or the pending ones), with the user's hint.
+//   - classifier_mode auto: Scope(rules, false), the main videos the rules
+//     left without a target, below high confidence or in a conflict.
+//     Nothing unsure, no call.
+//   - classifier_mode ai_always: Scope(rules, true), every main video.
+//   - a user's re-check: the episode files the user hasn't decided (all of
+//     them, or the pending and conflicting ones), with the user's hint.
 //   - rules_only, classifier_enabled off, or no ANTHROPIC_API_KEY: never.
 //     New returns nil without a key; the caller keeps
 //     identify.NoopResolver and reports ai_available false.
 //
-// An empty Scope means UnsureFiles. Non-video files are never asked about.
+// An empty Scope means Scope(rules, false). Non-video files are never
+// asked about.
 //
 // # What the caller does with the answer
 //
 // Resolve returns the model's answers for the files in scope, with their
 // paths mapped back to the torrent's, but not validated. The caller merges
 // them with identify.MergeAI, which rejects targets that aren't episodes of
-// the show and never overrides a high-confidence rules answer. An answer
-// only the AI gives keeps the AI's confidence: the job service sends it to
-// needs_review unless it's high and auto_apply_high_confidence allows
-// applying it. In ai_always the caller also runs identify.FlagDisagreements
-// on the merged proposals: a high rules answer the AI disagrees with keeps
-// its target but goes to review, its reason naming the AI's alternative.
+// the show and never overrides a high-confidence rules answer, then runs
+// identify.FlagDisagreements: a high rules answer the AI disagrees with
+// keeps its target but goes to review, its reason naming the AI's pick. An
+// answer only the AI gives keeps the AI's confidence: the job service sends
+// it to needs_review unless it's high and auto_apply_high_confidence allows
+// applying it.
 //
-// # Cost
+// # Cost and time
 //
-// Before calling, Resolve checks the monthly budget and returns
-// ErrBudgetExceeded when it's spent. Answers are cached by torrent, show,
-// metadata version, hint and scope. Every API call's usage is recorded with
-// its cost from the price table (cost.go), whether or not its answer could
-// be used.
+// Answers are cached by torrent, show, metadata version, hint and scope (a
+// cached answer is free, budget or not). Before calling, Resolve checks the
+// monthly budget and returns ErrBudgetExceeded when it's spent. Every API
+// call's usage is recorded with its cost from the price table (cost.go),
+// whether or not its answer could be used.
 //
-// More than 60 files are split into requests that run side by side (four at
-// most), so a run takes about as long as one request: the caller's context
-// bounds it.
+// More than 60 files are split into requests that run side by side, four
+// at a time: Waves says how many rounds a scope takes, so the caller can
+// scale its time budget. A request that fails doesn't stop the others:
+// Resolve returns the answers it got along with the error.
 package ai
 
 import (
@@ -49,11 +51,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
@@ -61,13 +63,21 @@ import (
 // DefaultModel is the classifier's model (PLAN D6).
 const DefaultModel = "claude-haiku-5-5"
 
-// DefaultTimeout bounds one API request. The SDK retries 429s, 5xx and
-// timeouts twice, so a call can take up to three times as long; the
-// caller's context bounds the whole run.
-const DefaultTimeout = 2 * time.Minute
+// DefaultTimeout bounds one API request, within the time a caller should
+// allow each wave (the job service gives each 90 seconds). The SDK retries
+// 429s, 5xx and timeouts twice; the caller's context bounds the whole run.
+const DefaultTimeout = 75 * time.Second
 
 // maxConcurrentCalls bounds the requests one Resolve runs at once.
 const maxConcurrentCalls = 4
+
+// Waves is how many rounds of requests Resolve makes for n files in
+// scope: requests of up to 60 files, four at a time. A caller scales its
+// time budget by it.
+func Waves(n int) int {
+	chunks := (n + filesPerCall - 1) / filesPerCall
+	return max(1, (chunks+maxConcurrentCalls-1)/maxConcurrentCalls)
+}
 
 // messagesAPI is the one SDK method the resolver uses; tests use a fake.
 type messagesAPI interface {
@@ -144,8 +154,9 @@ func newResolver(client messagesAPI, cfg Config) (*Resolver, error) {
 func (r *Resolver) Model() string { return r.model }
 
 // Resolve asks the model about the files in scope: in.Model, else the
-// resolver's. On an error, the output still carries the usage of the calls
-// that were made.
+// resolver's. On an error the output still carries the usage of the calls
+// that were made and, when the scope was split, the answers of the
+// requests that succeeded: the caller may keep those.
 func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (identify.ResolveOutput, error) {
 	scope := effectiveScope(in)
 	if len(scope) == 0 {
@@ -158,10 +169,8 @@ func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (ident
 	if _, ok := prices[model]; !ok {
 		return identify.ResolveOutput{}, fmt.Errorf("%w: %q", ErrUnknownModel, model)
 	}
-	if err := r.budget.Check(ctx); err != nil {
-		return identify.ResolveOutput{}, err
-	}
 
+	// A cached answer costs nothing: it's served even with the budget spent.
 	key, cacheable := cacheKey(model, in, scope)
 	if cacheable {
 		if files, ok := r.cached(ctx, key); ok {
@@ -169,37 +178,63 @@ func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (ident
 			return identify.ResolveOutput{Files: files, Usage: identify.Usage{Model: model}}, nil
 		}
 	}
+	if err := r.budget.Check(ctx); err != nil {
+		return identify.ResolveOutput{}, err
+	}
 
-	// A big scope is split into requests that run side by side, so the
-	// whole run takes about as long as one request.
+	// A big scope is split into requests that run side by side, four at a
+	// time. One that fails doesn't cancel the others: their answers are
+	// kept.
 	reqs := buildRequests(in, scope)
 	type result struct {
 		files []identify.AIFile
 		usage identify.Usage
+		err   error
 	}
 	results := make([]result, len(reqs))
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(maxConcurrentCalls)
+	sem := make(chan struct{}, maxConcurrentCalls)
+	var wg sync.WaitGroup
 	for i, q := range reqs {
-		g.Go(func() error {
-			files, usage, err := r.call(gctx, model, q, in.JobID)
-			results[i] = result{files, usage}
-			return err
-		})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				results[i].err = apiError(ctx, ctx.Err())
+				return
+			}
+			defer func() { <-sem }()
+			files, usage, err := r.call(ctx, model, q, in.JobID)
+			results[i] = result{files, usage, err}
+		}()
 	}
-	err := g.Wait()
+	wg.Wait()
+
 	out := identify.ResolveOutput{Usage: identify.Usage{Model: model}}
+	var firstErr error
+	failed := 0
 	for _, res := range results {
 		out.Usage = out.Usage.Add(res.usage)
 		out.Files = append(out.Files, res.files...)
+		if res.err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = res.err
+			}
+		}
 	}
-	if err != nil {
-		return identify.ResolveOutput{Usage: out.Usage}, err
+	switch {
+	case failed == 0:
+		if cacheable {
+			r.store(ctx, key, out.Files) // only a complete answer is cached
+		}
+		return out, nil
+	case len(reqs) == 1:
+		return out, firstErr
+	default:
+		return out, fmt.Errorf("%d of %d requests failed: %w", failed, len(reqs), firstErr)
 	}
-	if cacheable {
-		r.store(ctx, key, out.Files)
-	}
-	return out, nil
 }
 
 // call makes one API request and reads its answer. Its usage is recorded

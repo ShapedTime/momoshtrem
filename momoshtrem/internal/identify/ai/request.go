@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
+	"github.com/shapedtime/momoshtrem/internal/identify/token"
 )
 
 const (
@@ -21,8 +23,9 @@ const (
 	// max_tokens without streaming. Bigger scopes are split into several
 	// requests that share (and cache) the context.
 	filesPerCall = 60
-	// collapseOver is the torrent size above which <files> lists only the
-	// files in scope and their neighbours, and collapses the runs between.
+	// collapseOver is the number of videos above which <files> lists only
+	// the files in scope and their neighbours, and collapses the runs
+	// between.
 	collapseOver = 400
 	// windowOver is the catalog size above which <episodes> lists only the
 	// episodes near the numbers in the file names, plus every special.
@@ -85,9 +88,18 @@ func (q request) params(model string) anthropic.MessageNewParams {
 	}
 }
 
+// answerFile is one answer as the schema has it: an AIFile and its number
+// in <resolve>.
+type answerFile struct {
+	N int `json:"n"`
+	identify.AIFile
+}
+
 // parse reads the answer. It checks the stop reason before the content (a
-// refusal or a cut-off answer may not match the schema), maps the paths
-// back to the torrent's, and drops answers for files not asked about.
+// refusal or a cut-off answer may not match the schema), maps each answer
+// to its file by n, with the path as a check (or, when n doesn't fit, by
+// the path alone, Unicode-normalized), and drops answers for files not
+// asked about.
 func (q request) parse(resp *anthropic.Message) ([]identify.AIFile, error) {
 	switch resp.StopReason {
 	case anthropic.StopReasonRefusal:
@@ -105,44 +117,53 @@ func (q request) parse(resp *anthropic.Message) ([]identify.AIFile, error) {
 		}
 	}
 	var answer struct {
-		Files []identify.AIFile `json:"files"`
+		Files []answerFile `json:"files"`
 	}
 	if err := json.Unmarshal([]byte(text.String()), &answer); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadAnswer, err)
 	}
 
-	byListed := make(map[string]string, 2*len(q.paths))
+	// A path names a file by its full path, its listed path or (when no
+	// other file asked about has it) its file name, compared in NFC: macOS
+	// writes NFD, models tend to answer NFC.
+	byName := make(map[string]string, 3*len(q.paths))
 	baseCount := map[string]int{}
 	for _, p := range q.paths {
-		byListed[p] = p
-		byListed[q.listed(p)] = p
-		baseCount[path.Base(p)]++
+		baseCount[nfc(path.Base(p))]++
 	}
+	for _, p := range q.paths {
+		byName[nfc(p)], byName[nfc(q.listed(p))] = p, p
+		if base := nfc(path.Base(p)); baseCount[base] == 1 {
+			byName[base] = p
+		}
+	}
+	names := func(answer, full string) bool {
+		a := nfc(answer)
+		return a == nfc(full) || a == nfc(q.listed(full)) || a == nfc(path.Base(full))
+	}
+
 	seen := map[string]bool{}
 	out := make([]identify.AIFile, 0, len(answer.Files))
 	for _, a := range answer.Files {
-		full, ok := byListed[a.Path]
-		if !ok {
-			full, ok = byListed[strings.TrimSpace(a.Path)]
+		full := ""
+		if a.N >= 1 && a.N <= len(q.paths) && (strings.TrimSpace(a.Path) == "" || names(a.Path, q.paths[a.N-1])) {
+			full = q.paths[a.N-1]
+		} else {
+			full = byName[nfc(a.Path)] // n is off, or names another file: the path decides
 		}
-		if !ok && baseCount[path.Base(a.Path)] == 1 {
-			// A path the model shortened: its file name is enough when
-			// it's unique among the files asked about.
-			for _, p := range q.paths {
-				if path.Base(p) == path.Base(a.Path) {
-					full, ok = p, true
-				}
-			}
-		}
-		if !ok || seen[full] {
+		if full == "" || seen[full] {
 			continue
 		}
 		seen[full] = true
-		a.Path = full
-		out = append(out, a)
+		f := a.AIFile
+		f.Path = full
+		out = append(out, f)
 	}
 	return out, nil
 }
+
+// nfc trims and NFC-normalizes a path for comparing.
+func nfc(s string) string { return norm.NFC.String(strings.TrimSpace(s)) }
 
 // listed is a path as the prompt writes it, without the torrent's folder.
 func (q request) listed(p string) string {
@@ -186,13 +207,16 @@ func buildRequests(in identify.ResolveInput, scope []string) []request {
 	for _, p := range files {
 		byPath[p.Path] = p
 	}
+	// Requests of one wave run side by side, so none reads what another
+	// writes: the shared context is only worth caching for later waves.
+	chunks := (len(sortedScope) + filesPerCall - 1) / filesPerCall
 	var reqs []request
 	for start := 0; start < len(sortedScope); start += filesPerCall {
 		chunk := sortedScope[start:min(start+filesPerCall, len(sortedScope))]
 		q := base
 		q.context, q.paths = context, chunk
-		q.shared = len(sortedScope) > filesPerCall
-		q.ask = writeResolve(q, byPath, start/filesPerCall+1, (len(sortedScope)+filesPerCall-1)/filesPerCall)
+		q.shared = chunks > maxConcurrentCalls
+		q.ask = writeResolve(q, byPath, start/filesPerCall+1, chunks)
 		reqs = append(reqs, q)
 	}
 	return reqs
@@ -404,7 +428,7 @@ func writeEpisodes(b *strings.Builder, cat *identify.ShowCatalog, files []identi
 	})
 	total := len(eps)
 	if total > windowOver {
-		eps = episodeWindow(eps, files, scope)
+		eps = episodeWindow(cat, eps, files, scope)
 		fmt.Fprintf(b, "<episodes listed=\"%d of %d\" note=\"only the episodes near the numbers in the file names, and every special\">\n", len(eps), total)
 	} else {
 		b.WriteString("<episodes>\n")
@@ -441,25 +465,45 @@ func episodeType(t string) string {
 	return strings.ReplaceAll(t, "_", " ")
 }
 
+// wordRe finds the words compared between title-only file names and
+// episode names: four letters or more. digitsRe finds a number inside a
+// word.
 var (
-	crcRe    = regexp.MustCompile(`\[[0-9A-Fa-f]{8}\]`)
-	seRe     = regexp.MustCompile(`(?i)\bs(\d{1,2})[ ._-]?e(\d{1,4})`)
-	nxnnRe   = regexp.MustCompile(`(?i)\b(\d{1,2})x(\d{2,3})\b`)
-	dateRe   = regexp.MustCompile(`\b((?:19|20)\d{2})[ ._-](\d{2})[ ._-](\d{2})\b`)
-	seasonRe = regexp.MustCompile(`(?i)\b(?:s|season[ ._-]?)(\d{1,2})\b`)
-	numberRe = regexp.MustCompile(`\b\d{1,4}\b`)
 	wordRe   = regexp.MustCompile(`[\pL]{4,}`)
+	digitsRe = regexp.MustCompile(`[0-9]{1,4}`)
 )
 
+// stopWords are common words too weak to tie a file to an episode name.
+var stopWords = map[string]bool{
+	"with": true, "from": true, "that": true, "this": true, "what": true, "when": true, "will": true,
+	"your": true, "into": true, "part": true, "episode": true, "special": true, "season": true,
+	"complete": true, "final": true, "english": true, "subs": true, "dubbed": true,
+}
+
+// maxTitleMatches caps the episodes title words may add: a word common to
+// that many names doesn't point at any of them.
+const maxTitleMatches = 40
+
 // episodeWindow picks a long show's episodes worth listing: those near the
-// numbers and air dates in the files' names and the rules' targets, those
-// whose name shares a word with a file named by title, and every special.
-func episodeWindow(eps []identify.Episode, files []identify.Proposal, scope []string) []identify.Episode {
+// rules' targets and the markers in the files' names (episode and absolute
+// numbers, ranges, SxxEyy, air dates, read by identify/token, which
+// already sets resolutions, codecs, CRCs and years aside), those whose name
+// shares enough words with a file named only by its title, and every
+// special.
+func episodeWindow(cat *identify.ShowCatalog, eps []identify.Episode, files []identify.Proposal, scope []string) []identify.Episode {
 	type se struct{ season, episode int }
 	ses := map[se]bool{}
 	abs := map[int]bool{}
+	var spans [][2]int
 	var dates []time.Time
-	words := map[string]bool{}
+	var titled [][]string // the words of each file named only by its title
+
+	showWords := map[string]bool{}
+	for _, name := range append([]string{cat.Title, cat.OriginalTitle}, cat.Aliases...) {
+		for _, w := range wordRe.FindAllString(strings.ToLower(name), -1) {
+			showWords[w] = true
+		}
+	}
 
 	for _, p := range files {
 		for _, t := range p.Targets {
@@ -467,43 +511,73 @@ func episodeWindow(eps []identify.Episode, files []identify.Proposal, scope []st
 		}
 	}
 	for _, p := range scope {
-		name := crcRe.ReplaceAllString(p, " ")
 		found := false
-		for _, m := range seRe.FindAllStringSubmatch(name, -1) {
-			ses[se{atoi(m[1]), atoi(m[2])}] = true
-			found = true
-		}
-		for _, m := range nxnnRe.FindAllStringSubmatch(name, -1) {
-			ses[se{atoi(m[1]), atoi(m[2])}] = true
-			found = true
-		}
-		for _, m := range dateRe.FindAllStringSubmatch(name, -1) {
-			if t, err := time.Parse("2006-01-02", m[1]+"-"+m[2]+"-"+m[3]); err == nil {
-				dates = append(dates, t)
-				found = true
+		var seasons, numbers []int
+		var words, wordNumbers []string
+		segments := strings.Split(p, "/")
+		for i, seg := range segments {
+			if i == len(segments)-1 {
+				seg = strings.TrimSuffix(seg, path.Ext(seg))
+			}
+			for _, t := range token.Tokenize(seg) {
+				switch t.Kind {
+				case token.SxxEyy, token.NxNN:
+					for _, e := range t.Eps {
+						ses[se{t.Season, e}] = true
+					}
+					found = true
+				case token.Season:
+					for s := t.Season; s <= t.LastSeason; s++ {
+						seasons = append(seasons, s)
+					}
+				case token.Episode:
+					numbers = append(numbers, t.Eps...)
+					found = true
+				case token.Num:
+					if t.N > 0 {
+						numbers = append(numbers, t.N)
+						found = true
+					}
+				case token.Range:
+					spans = append(spans, [2]int{t.Lo, t.Hi})
+					found = true
+				case token.Date:
+					for _, d := range t.Dates {
+						if day, err := time.Parse("2006-01-02", d); err == nil {
+							dates = append(dates, day)
+							found = true
+						}
+					}
+				case token.Word:
+					if i == len(segments)-1 {
+						for _, w := range wordRe.FindAllString(t.Norm, -1) {
+							if !showWords[w] && !stopWords[w] && !slices.Contains(words, w) {
+								words = append(words, w)
+							}
+						}
+						wordNumbers = append(wordNumbers, digitsRe.FindAllString(t.Norm, -1)...)
+					}
+				}
 			}
 		}
-		var seasons []int
-		for _, m := range seasonRe.FindAllStringSubmatch(name, -1) {
-			seasons = append(seasons, atoi(m[1]))
-		}
-		rest := dateRe.ReplaceAllString(nxnnRe.ReplaceAllString(seRe.ReplaceAllString(name, " "), " "), " ")
-		for _, m := range numberRe.FindAllString(rest, -1) {
-			n := atoi(m)
-			if n == 0 || (n >= 1900 && n <= 2100) {
-				continue // not an episode number, or a year
+		// A name with no marker may still hide its number inside a word
+		// ("第1071話").
+		if !found && len(numbers) == 0 {
+			for _, d := range wordNumbers {
+				if n, err := strconv.Atoi(d); err == nil && n > 0 {
+					numbers = append(numbers, n)
+					found = true
+				}
 			}
+		}
+		for _, n := range numbers {
 			abs[n] = true
 			for _, s := range seasons {
 				ses[se{s, n}] = true
 			}
-			found = true
 		}
-		if !found {
-			stem := strings.TrimSuffix(path.Base(p), path.Ext(p))
-			for _, w := range wordRe.FindAllString(stem, -1) {
-				words[strings.ToLower(w)] = true
-			}
+		if !found && len(words) > 0 {
+			titled = append(titled, words)
 		}
 	}
 
@@ -521,37 +595,72 @@ func episodeWindow(eps []identify.Episode, files []identify.Proposal, scope []st
 		}
 	}
 
-	near := func(n int, set map[int]bool) bool {
+	nearAbs := func(n int) bool {
 		for d := -window; d <= window; d++ {
-			if set[n+d] {
+			if abs[n+d] {
+				return true
+			}
+		}
+		for _, s := range spans {
+			if n >= s[0]-window && n <= s[1]+window {
 				return true
 			}
 		}
 		return false
 	}
-	var out []identify.Episode
-	for _, ep := range eps {
-		keep := ep.Season == 0 || (ep.Absolute > 0 && near(ep.Absolute, abs))
-		for d := -window; !keep && d <= window; d++ {
-			keep = ses[se{ep.Season, ep.Number + d}]
+	keep := make([]bool, len(eps))
+	for i, ep := range eps {
+		k := ep.Season == 0 || (ep.Absolute > 0 && nearAbs(ep.Absolute))
+		for d := -window; !k && d <= window; d++ {
+			k = ses[se{ep.Season, ep.Number + d}]
 		}
-		if !keep && ep.AirDate != "" && len(dates) > 0 {
+		if !k && ep.AirDate != "" && len(dates) > 0 {
 			if t, err := time.Parse("2006-01-02", ep.AirDate); err == nil {
 				for _, d := range dates {
 					if diff := t.Sub(d); diff <= dateWindow*24*time.Hour && diff >= -dateWindow*24*time.Hour {
-						keep = true
+						k = true
 					}
 				}
 			}
 		}
-		if !keep && len(words) > 0 {
-			for _, w := range wordRe.FindAllString(ep.Name, -1) {
-				if words[strings.ToLower(w)] {
-					keep = true
+		keep[i] = k
+	}
+
+	// A title-only file names an episode that shares two of its words (its
+	// one word, when it has one), not counting the show's own words.
+	if len(titled) > 0 {
+		var byTitle []int
+		for i, ep := range eps {
+			if keep[i] {
+				continue
+			}
+			name := map[string]bool{}
+			for _, w := range wordRe.FindAllString(strings.ToLower(ep.Name), -1) {
+				name[w] = true
+			}
+			for _, words := range titled {
+				shared := 0
+				for _, w := range words {
+					if name[w] {
+						shared++
+					}
+				}
+				if shared >= min(2, len(words)) {
+					byTitle = append(byTitle, i)
+					break
 				}
 			}
 		}
-		if keep {
+		if len(byTitle) <= maxTitleMatches {
+			for _, i := range byTitle {
+				keep[i] = true
+			}
+		}
+	}
+
+	var out []identify.Episode
+	for i, ep := range eps {
+		if keep[i] {
 			out = append(out, ep)
 		}
 	}
@@ -572,7 +681,7 @@ func writeFiles(b *strings.Builder, q request, files []identify.Proposal, inScop
 
 	keep := make([]bool, len(videos))
 	for i, p := range videos {
-		if len(files) <= collapseOver || inScope[p.Path] {
+		if len(videos) <= collapseOver || inScope[p.Path] {
 			keep[i] = true
 			if i > 0 {
 				keep[i-1] = true

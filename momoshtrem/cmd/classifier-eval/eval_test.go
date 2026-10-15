@@ -68,8 +68,9 @@ func TestEvaluateModes(t *testing.T) {
 		t.Errorf("auto: %d calls, %d broke, %d correct\n%s", auto.calls, auto.broke, auto.correct, out.String())
 	}
 	always := rep.modes[2]
-	// Alone, it's right once: Frieren's "01" is S01E01.
-	if a := always.alone; always.calls != 2 || a.videos != 15 || a.right != 1 || a.wrong != 14 || a.wrongHigh != 14 {
+	// It's asked about the 13 main videos (not Frieren's superseded v1 or
+	// AoT's NCOP). Alone, it's right once: Frieren's "01" is S01E01.
+	if a := always.alone; always.calls != 2 || a.videos != 13 || a.right != 1 || a.wrong != 12 || a.wrongHigh != 12 {
 		t.Errorf("ai_always: %d calls, alone %d videos, %d right, %d wrong (%d high)", always.calls, a.videos, a.right, a.wrong, a.wrongHigh)
 	}
 	if always.usage.CostUSD != 0.002 || !strings.Contains(out.String(), "BROKE") {

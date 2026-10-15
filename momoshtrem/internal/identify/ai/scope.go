@@ -4,40 +4,28 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
 
-// UnsureFiles lists the files the AI looks at in classifier_mode auto:
-// the videos the rules left without a target, below high confidence, or in
-// a conflict (sharing an episode with another file). Nothing unsure means
-// no call. MergeAI keeps high answers, so a conflict between two high
-// answers is left to the user.
-//
-// Extras, samples and subtitles aren't asked about: the rules find extras
-// by name and markers, and subtitles follow their video.
-func UnsureFiles(rules []identify.Proposal) []string {
+// Scope lists the files the AI looks at after classification: the main
+// videos (see IsMainVideo) the rules left without a target, below high
+// confidence or in a conflict (classifier_mode auto); with all, every main
+// video (classifier_mode ai_always). Nothing in scope means no call.
+// MergeAI keeps high answers, so a conflict between two high answers is
+// left to the user.
+func Scope(rules []identify.Proposal, all bool) []string {
 	conflicts := identify.Conflicts(rules)
 	var out []string
 	for i, p := range rules {
-		if isEpisodeVideo(p) && (!p.HasTarget() || p.Confidence != identify.ConfidenceHigh || len(conflicts[i]) > 0) {
+		if IsMainVideo(p) && (all || !p.HasTarget() || p.Confidence != identify.ConfidenceHigh || len(conflicts[i]) > 0) {
 			out = append(out, p.Path)
 		}
 	}
 	return out
 }
 
-// Videos lists every video file, extras and samples included: the scope of
-// classifier_mode ai_always.
-func Videos(rules []identify.Proposal) []string {
-	var out []string
-	for _, p := range rules {
-		if identify.ClassOf(p.Path) == identify.ClassVideo {
-			out = append(out, p.Path)
-		}
-	}
-	return out
-}
-
-// isEpisodeVideo reports whether a proposal is a video the rules read as
-// an episode (or tried to).
-func isEpisodeVideo(p identify.Proposal) bool {
+// IsMainVideo reports whether a proposal is a video the rules read as an
+// episode (or tried to): not an extra, a sample or a subtitle. The rules
+// find extras by name and markers, and subtitles follow their video, so
+// the AI is never asked about those.
+func IsMainVideo(p identify.Proposal) bool {
 	if identify.ClassOf(p.Path) != identify.ClassVideo {
 		return false
 	}
@@ -49,10 +37,10 @@ func isEpisodeVideo(p identify.Proposal) bool {
 }
 
 // effectiveScope is the videos to ask about: in.Scope restricted to the
-// torrent's video files, or UnsureFiles when it's empty.
+// torrent's video files, or Scope(in.Rules, false) when it's empty.
 func effectiveScope(in identify.ResolveInput) []string {
 	if len(in.Scope) == 0 {
-		return UnsureFiles(in.Rules)
+		return Scope(in.Rules, false)
 	}
 	want := make(map[string]bool, len(in.Scope))
 	for _, p := range in.Scope {

@@ -180,7 +180,7 @@ func TestResolveSplitsBigScopes(t *testing.T) {
 	}}
 	r := newTest(t, client, Config{Usage: rec})
 	in := bigTorrent(130)
-	in.Scope = Videos(in.Rules)
+	in.Scope = Scope(in.Rules, true)
 	out, err := r.Resolve(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
@@ -197,20 +197,65 @@ func TestResolveSplitsBigScopes(t *testing.T) {
 		t.Errorf("answers out of order: %s, %s, %s", out.Files[0].Path, out.Files[1].Path, out.Files[2].Path)
 	}
 
-	// One failing request fails the run, without answers, but the usage
-	// of those that answered is still returned.
+	// One failing request fails the run, but doesn't stop the others:
+	// their answers come back with the error (and aren't cached), and so
+	// does their usage.
+	cache := &memCache{}
 	failing := &fakeClient{respond: func(_ int, p anthropic.MessageNewParams) (*anthropic.Message, error) {
-		if strings.Contains(p.Messages[0].Content[1].OfText.Text, "Part 2 of 3") {
+		ask := p.Messages[0].Content[1].OfText.Text
+		if strings.Contains(ask, "Part 2 of 3") {
 			return nil, sdkError(529, "overloaded_error")
 		}
-		return answer(t), nil
+		line := ask[strings.Index(ask, "1. ")+3:]
+		return answer(t, identify.AIFile{Path: line[:strings.Index(line, "\n")], Kind: identify.KindEpisode,
+			Season: intp(1), Episodes: []int{1}, Confidence: identify.ConfidenceLow, Reason: "x"}), nil
 	}}
-	out, err = newTest(t, failing, Config{}).Resolve(context.Background(), in)
-	if !errors.Is(err, ErrUnavailable) || len(out.Files) != 0 {
-		t.Errorf("a failing request: %v, %d answers", err, len(out.Files))
+	in.InfoHash, in.ShowID = "abc", 1
+	out, err = newTest(t, failing, Config{Cache: cache}).Resolve(context.Background(), in)
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "1 of 3 requests failed") {
+		t.Errorf("a failing request: %v", err)
 	}
-	if out.Usage.InputTokens == 0 || out.Usage.InputTokens > 2000 {
-		t.Errorf("usage of the requests that answered = %+v", out.Usage)
+	if len(out.Files) != 2 || out.Files[0].Path != "Big/Show - 001.mkv" || out.Files[1].Path != "Big/Show - 121.mkv" {
+		t.Errorf("answers kept = %+v", out.Files)
+	}
+	if out.Usage.InputTokens != 2000 || failing.count() != 3 || len(cache.data) != 0 {
+		t.Errorf("usage %+v after %d calls, %d cached", out.Usage, failing.count(), len(cache.data))
+	}
+}
+
+// A cached answer is free: it's served even with the budget spent.
+func TestResolveCacheBeforeBudget(t *testing.T) {
+	cache := &memCache{}
+	spent := false
+	client := &fakeClient{respond: func(int, anthropic.MessageNewParams) (*anthropic.Message, error) {
+		return answer(t, identify.AIFile{Path: "Frieren S2 - 04.mkv", Kind: identify.KindEpisode, Season: intp(1), Episodes: []int{32}, Confidence: identify.ConfidenceMedium, Reason: "x"}), nil
+	}}
+	r := newTest(t, client, Config{Cache: cache, Budget: budgetFunc(func(context.Context) error {
+		if spent {
+			return ErrBudgetExceeded
+		}
+		return nil
+	})})
+	in := testInput()
+	in.InfoHash, in.ShowID = "abc", 1
+	if _, err := r.Resolve(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	spent = true
+	out, err := r.Resolve(context.Background(), in)
+	if err != nil || len(out.Files) != 1 || client.count() != 1 {
+		t.Errorf("cached, budget spent: %v, %d answers after %d calls", err, len(out.Files), client.count())
+	}
+	in.Hint = "something new"
+	if _, err := r.Resolve(context.Background(), in); !errors.Is(err, ErrBudgetExceeded) || client.count() != 1 {
+		t.Errorf("not cached, budget spent: %v after %d calls", err, client.count())
+	}
+}
+
+// A request takes no longer than a wave of a job's AI run (90 seconds).
+func TestDefaultTimeoutFitsAWave(t *testing.T) {
+	if DefaultTimeout > 90*time.Second {
+		t.Errorf("DefaultTimeout = %v, longer than the job service's 90 s a wave", DefaultTimeout)
 	}
 }
 
@@ -241,7 +286,7 @@ func TestResolveCache(t *testing.T) {
 		change func(*identify.ResolveInput)
 	}{
 		{"another hint", func(in *identify.ResolveInput) { in.Hint = "absolute numbering" }},
-		{"another scope", func(in *identify.ResolveInput) { in.Scope = Videos(in.Rules) }},
+		{"another scope", func(in *identify.ResolveInput) { in.Scope = Scope(in.Rules, true) }},
 		{"newer metadata", func(in *identify.ResolveInput) { in.MetadataUpdatedAt = in.MetadataUpdatedAt.Add(time.Hour) }},
 		{"another torrent", func(in *identify.ResolveInput) { in.InfoHash = "123456" }},
 		{"another show", func(in *identify.ResolveInput) { in.ShowID = 8 }},
@@ -329,19 +374,18 @@ func TestResolveStopReasons(t *testing.T) {
 
 func TestResolveAPIErrors(t *testing.T) {
 	tests := []struct {
-		name      string
-		err       error
-		kind      error
-		retryable bool
-		status    int
+		name   string
+		err    error
+		kind   error
+		status int
 	}{
-		{"rate limited", sdkError(429, "rate_limit_error"), ErrRateLimited, true, 429},
-		{"overloaded", sdkError(529, "overloaded_error"), ErrUnavailable, true, 529},
-		{"server error", sdkError(500, "api_error"), ErrUnavailable, true, 500},
-		{"bad key", sdkError(401, "authentication_error"), ErrRejected, false, 401},
-		{"bad request", sdkError(400, "invalid_request_error"), ErrRejected, false, 400},
-		{"timeout", fmt.Errorf("Post: %w", context.DeadlineExceeded), ErrUnavailable, true, 0},
-		{"network", errors.New("dial tcp: connection refused"), ErrUnavailable, true, 0},
+		{"rate limited", sdkError(429, "rate_limit_error"), ErrRateLimited, 429},
+		{"overloaded", sdkError(529, "overloaded_error"), ErrUnavailable, 529},
+		{"server error", sdkError(500, "api_error"), ErrUnavailable, 500},
+		{"bad key", sdkError(401, "authentication_error"), ErrRejected, 401},
+		{"bad request", sdkError(400, "invalid_request_error"), ErrRejected, 400},
+		{"timeout", fmt.Errorf("Post: %w", context.DeadlineExceeded), ErrUnavailable, 0},
+		{"network", errors.New("dial tcp: connection refused"), ErrUnavailable, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -351,8 +395,8 @@ func TestResolveAPIErrors(t *testing.T) {
 			if !errors.As(err, &apiErr) || !errors.Is(err, tt.kind) {
 				t.Fatalf("err = %v, want an APIError matching %v", err, tt.kind)
 			}
-			if apiErr.Retryable() != tt.retryable || apiErr.StatusCode != tt.status {
-				t.Errorf("retryable %v, status %d; want %v, %d", apiErr.Retryable(), apiErr.StatusCode, tt.retryable, tt.status)
+			if apiErr.StatusCode != tt.status {
+				t.Errorf("status %d, want %d", apiErr.StatusCode, tt.status)
 			}
 			// The message is shown to users: no URL, no response body.
 			if msg := err.Error(); strings.Contains(msg, "anthropic.com") || strings.Contains(msg, "boom") {

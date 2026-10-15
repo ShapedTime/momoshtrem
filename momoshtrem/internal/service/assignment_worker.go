@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
+	"github.com/shapedtime/momoshtrem/internal/identify/ai"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -31,7 +32,7 @@ const (
 	// maxEpisodeGroups caps the episode groups read for alternative
 	// orderings.
 	maxEpisodeGroups = 3
-	// resolveBudget bounds one AI run.
+	// resolveBudget bounds one wave of an AI run (see resolveTime).
 	resolveBudget = 90 * time.Second
 	// dryRunTTL is how long #6's dry-run jobs are kept.
 	dryRunTTL = 24 * time.Hour
@@ -45,6 +46,7 @@ const (
 	msgAIFailed      = "The AI check failed, so nothing changed."
 	msgAIInterrupted = "The AI check was interrupted by a restart, so nothing changed."
 	msgAIBudget      = "This month's AI budget is spent, so nothing changed."
+	msgAIPartial     = "The AI checked only some of the files; the others are unchanged."
 )
 
 // errJobMoved stops processing a job someone else moved on (discarded, or
@@ -289,7 +291,7 @@ func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob
 
 	settings := s.aiSettings(ctx)
 	job.ClassifierMode = show.ClassifierMode
-	scope := unsurePaths(res.Proposals, show.ClassifierMode)
+	scope := ai.Scope(res.Proposals, show.ClassifierMode == library.ClassifierAIAlways)
 	resolving := s.aiAvailable(settings, job) && len(scope) > 0
 	err = s.jobs.Locked(ctx, job.ID, func(t *library.JobTx) error {
 		if t.Job.Status != library.JobClassifying {
@@ -562,7 +564,7 @@ func seasonLikeGroup(t int) bool {
 // reports whether the run succeeded (and the job is still resolving).
 func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJob, show *library.Show, cat *identify.ShowCatalog,
 	info *torrent.TorrentInfo, rules []identify.Proposal, scope []string, settings library.AISettings) bool {
-	rctx, cancel := context.WithTimeout(ctx, resolveBudget)
+	rctx, cancel := context.WithTimeout(ctx, resolveTime(len(scope)))
 	out, aiErr := s.resolver.Resolve(rctx, resolveInput(job, show, cat, info.Name, info.Files, rules, scope, settings))
 	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
 	cancel()
@@ -576,14 +578,16 @@ func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJo
 			return nil // discarded meanwhile
 		}
 		if aiErr != nil {
-			s.log.Warn("AI run failed; keeping the rules' proposals", "job_id", job.ID, "error", aiErr)
-			t.Job.AIError = aiErrorMessage(aiErr, timedOut)
-		} else {
-			merged := showDrafts(s.mergeAnswers(job.ID, rules, out.Files, cat))
-			if err := t.UpdateProposals(mergeFirstRun(t.Proposals, merged)); err != nil {
+			s.log.Warn("AI run failed", "job_id", job.ID, "answers_kept", len(out.Files), "error", aiErr)
+			t.Job.AIError = aiErrorMessage(aiErr, timedOut, len(out.Files) > 0)
+		}
+		// A run that failed partway keeps the answers it got.
+		if aiErr == nil || len(out.Files) > 0 {
+			merged, _ := s.mergeAnswers(job.ID, rules, out.Files, cat)
+			if err := t.UpdateProposals(mergeFirstRun(t.Proposals, showDrafts(merged))); err != nil {
 				return err
 			}
-			ok = true
+			ok = aiErr == nil
 		}
 		t.Job.Status = settledStatus(listed(t.Proposals))
 		return t.SaveJob()
@@ -679,34 +683,9 @@ func refreshDue(show *library.Show, now time.Time) bool {
 // episode past the last one the stored metadata knows.
 func unmatchedVideos(props []identify.Proposal) bool {
 	for _, p := range props {
-		if isMainVideo(p) && !p.HasTarget() {
+		if ai.IsMainVideo(p) && !p.HasTarget() {
 			return true
 		}
-	}
-	return false
-}
-
-// unsurePaths lists the files the AI should look at: videos that aren't
-// extras, without a high-confidence answer or in a conflict (every one
-// with classifier_mode ai_always).
-func unsurePaths(props []identify.Proposal, mode library.ClassifierMode) []string {
-	conflicts := identify.Conflicts(props)
-	var out []string
-	for i, p := range props {
-		if !isMainVideo(p) {
-			continue
-		}
-		if mode == library.ClassifierAIAlways || p.Confidence != identify.ConfidenceHigh || len(conflicts[i]) > 0 {
-			out = append(out, p.Path)
-		}
-	}
-	return out
-}
-
-func isMainVideo(p identify.Proposal) bool {
-	switch p.Kind {
-	case identify.KindEpisode, identify.KindSpecial, identify.KindUnknown:
-		return identify.ClassOf(p.Path) == identify.ClassVideo
 	}
 	return false
 }

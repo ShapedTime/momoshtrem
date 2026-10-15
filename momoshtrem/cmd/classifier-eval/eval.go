@@ -162,9 +162,9 @@ func resolveInput(mode string, r caseRun, scope []string) identify.ResolveInput 
 func scopeFor(mode string, rules []identify.Proposal) []string {
 	switch mode {
 	case modeAuto:
-		return ai.UnsureFiles(rules)
+		return ai.Scope(rules, false)
 	case modeAlways, modeBlind:
-		return ai.Videos(rules)
+		return ai.Scope(rules, true)
 	}
 	return nil
 }
@@ -595,7 +595,7 @@ func printDryRun(w io.Writer, runs []caseRun, modes []string, prompt bool) {
 			}
 		}
 		if requests > 0 {
-			sys := ai.DescribeRequests(resolveInput(modeAlways, runs[0], ai.Videos(runs[0].rules)))
+			sys := ai.DescribeRequests(resolveInput(modeAlways, runs[0], ai.Scope(runs[0].rules, true)))
 			sysTokens := 0
 			if len(sys) > 0 {
 				sysTokens = sys[0].SystemChars / 4

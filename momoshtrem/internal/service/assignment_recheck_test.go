@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/identify/ai"
@@ -219,14 +220,19 @@ func TestReclassify(t *testing.T) {
 	}
 
 	// All: the accepted high match is asked about too. The AI disagrees
-	// with it: it keeps its target and decision, its reason names the
-	// AI's pick. The special is already what the AI says: not updated. The
-	// hint's text goes; updated and hinted reset first.
+	// with it: it keeps its target (and suggestion, so Undo restores it),
+	// its reason names the AI's pick, and it goes back to pending so the
+	// job waits for the user. The special is already what the AI says: not
+	// updated. The hint's text goes; updated and hinted reset first.
 	d = r.recheck(RecheckAll, "")
 	one := proposalByPath(d, "S01E01.1080p.WEB-GRP.mkv")
-	if targetLabels(one) != "S01E01" || one.Decision != "accepted" || one.Source != "rules" || *one.Confidence != "medium" ||
-		one.Reason != "AI suggests S01E03: the third" || !one.Updated || one.Hinted {
+	if targetLabels(one) != "S01E01" || one.Decision != "pending" || one.UserDecided || one.Source != "rules" || *one.Confidence != "medium" ||
+		one.Reason != "AI suggests S01E03: the third" || !one.Updated || one.Hinted ||
+		len(one.SuggestedTargets) != 1 || one.SuggestedTargets[0].Episode != 1 || one.Group != "matched" {
 		t.Errorf("disputed = %+v", one)
+	}
+	if d.Job.Status != library.JobNeedsReview {
+		t.Errorf("with a dispute the job is %s, want needs_review", d.Job.Status)
 	}
 	if strange := proposalByPath(d, "Something Strange.mkv"); strange.Updated || strange.Hinted || targetLabels(strange) != "S00E01" {
 		t.Errorf("unchanged by the second re-check = %+v", strange)
@@ -253,16 +259,124 @@ func TestReclassify(t *testing.T) {
 		t.Errorf("after a failure = %+v", one)
 	}
 
-	// Nothing in scope (the only pending file accepted): the job settles
-	// at once, without asking.
+	// Nothing in scope (the pending files accepted): the job settles at
+	// once, without asking.
 	calls := len(r.resolver.calls)
-	r.decide(r.id, map[string]library.Decision{"Something Strange.mkv": library.DecisionAccepted})
+	r.decide(r.id, map[string]library.Decision{"Something Strange.mkv": library.DecisionAccepted, "S01E01.1080p.WEB-GRP.mkv": library.DecisionAccepted})
 	if err := r.svc.Reclassify(r.ctx, r.id, ReclassifyRequest{Scope: RecheckUnresolved}); err != nil {
 		t.Fatal(err)
 	}
 	r.svc.Close()
 	if d := r.detail(r.id); d.Job.Status.Working() || len(r.resolver.calls) != calls || *d.Job.Progress.AIFiles != 0 {
 		t.Errorf("empty scope: %s after %d calls", d.Job.Status, len(r.resolver.calls)-calls)
+	}
+}
+
+// A second re-check never overrides a high rules answer the first one
+// flagged (and dropped to medium): the rules, run again, still own it.
+func TestReclassify_SecondRecheckKeepsFlaggedHigh(t *testing.T) {
+	r := newRecheckEnv(t)
+	r.resolver.answer(aiEpisode(r.one, 1, 3, identify.ConfidenceHigh, "the third"))
+	for i, label := range []string{"first", "second", "third"} {
+		d := r.recheck(RecheckAll, "")
+		one := proposalByPath(d, "S01E01.1080p.WEB-GRP.mkv")
+		if targetLabels(one) != "S01E01" || one.Source != "rules" || *one.Confidence != "medium" || one.Decision != "pending" ||
+			one.Reason != "AI suggests S01E03: the third" || d.Job.Status != library.JobNeedsReview {
+			t.Errorf("%s re-check: %s %s %s %s %q, job %s", label, targetLabels(one), *one.Confidence, one.Source, one.Decision, one.Reason, d.Job.Status)
+		}
+		// Only the first changes it; the others find it flagged already.
+		if one.Updated != (i == 0) {
+			t.Errorf("%s re-check: updated %v", label, one.Updated)
+		}
+	}
+	in := r.resolver.last()
+	for _, p := range in.Rules {
+		if strings.HasSuffix(p.Path, "S01E01.1080p.WEB-GRP.mkv") && (p.Confidence != identify.ConfidenceHigh || p.Source != identify.SourceRules) {
+			t.Errorf("the AI was shown the flagged rules answer as %s %s", p.Confidence, p.Source)
+		}
+	}
+}
+
+// A PATCH while a re-check is resolving survives the AI's answer.
+func TestReclassify_DecisionDuringResolving(t *testing.T) {
+	r := newRecheckEnv(t)
+	r.resolver.answer(identify.AIFile{Path: r.strange, Kind: identify.KindSpecial, Season: intPtr(0), Episodes: []int{1},
+		Confidence: identify.ConfidenceHigh, Reason: "The special"})
+	r.resolver.gate = make(chan struct{})
+	if err := r.svc.Reclassify(r.ctx, r.id, ReclassifyRequest{Scope: RecheckUnresolved}); err != nil {
+		t.Fatal(err)
+	}
+	// As slice 4's PATCH does during resolving: the decision, not the
+	// status.
+	err := r.jobs.Locked(r.ctx, r.id, func(tx *library.JobTx) error {
+		for _, p := range tx.Proposals {
+			if strings.HasSuffix(p.FilePath, "Something Strange.mkv") {
+				next := *p
+				next.Decision, next.UserDecided = library.DecisionIgnored, true
+				return tx.UpdateProposals([]*library.AssignmentProposal{&next})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(r.resolver.gate)
+	r.svc.Close()
+	d := r.detail(r.id)
+	if s := proposalByPath(d, "Something Strange.mkv"); s.Updated || targetLabels(s) != "" || s.Decision != "ignored" {
+		t.Errorf("the AI overwrote a decision made while it worked: %+v", s)
+	}
+}
+
+// A run that fails partway (one of its requests) keeps the answers it got,
+// with ai_error saying the rest are unchanged.
+func TestReclassify_PartialAnswers(t *testing.T) {
+	r := newRecheckEnv(t)
+	r.resolver.mu.Lock()
+	r.resolver.out = identify.ResolveOutput{Files: []identify.AIFile{{Path: r.strange, Kind: identify.KindSpecial, Season: intPtr(0),
+		Episodes: []int{1}, Confidence: identify.ConfidenceMedium, Reason: "The special"}}}
+	r.resolver.err = fmt.Errorf("1 of 2 requests failed: %w", ai.ErrUnavailable)
+	r.resolver.mu.Unlock()
+	d := r.recheck(RecheckUnresolved, "")
+	if s := proposalByPath(d, "Something Strange.mkv"); targetLabels(s) != "S00E01" || !s.Updated {
+		t.Errorf("the answer it got = %+v", s)
+	}
+	if d.Job.AIError == nil || *d.Job.AIError != msgAIPartial || d.Job.Status.Working() {
+		t.Errorf("ai_error %v, status %s", d.Job.AIError, d.Job.Status)
+	}
+}
+
+// The first run keeps partial answers too, and doesn't apply on its own.
+func TestJob_FirstRunPartialAnswers(t *testing.T) {
+	hash := strings.Repeat("d4", 20)
+	root := "Partial.Show.S01.1080p.WEB-GRP"
+	e := newJobEnv(t, info(hash, root, file("Partial.Show.S01E01.1080p.WEB-GRP.mkv", gb), file("Something Odd.mkv", gb)))
+	showID, _ := e.show("Partial Show", [][3]any{{0, 1, "The Odd Special"}, {1, 1, "One"}})
+	resolver := &scriptedResolver{}
+	resolver.out = identify.ResolveOutput{Files: []identify.AIFile{{Path: root + "/Something Odd.mkv", Kind: identify.KindSpecial,
+		Season: intPtr(0), Episodes: []int{1}, Confidence: identify.ConfidenceHigh, Reason: "The special"}}}
+	resolver.err = fmt.Errorf("1 of 2 requests failed: %w", ai.ErrUnavailable)
+	e.svc = e.service(JobDeps{Resolver: resolver})
+
+	d := e.detail(e.assignShow(showID, hash, nil))
+	if odd := proposalByPath(d, "Something Odd.mkv"); targetLabels(odd) != "S00E01" || odd.Source != "ai" {
+		t.Errorf("the answer it got = %+v", odd)
+	}
+	if d.Job.Status == library.JobApplied || d.Job.AIError == nil || *d.Job.AIError != msgAIPartial {
+		t.Errorf("status %s ai_error %v: a partial run doesn't apply on its own", d.Job.Status, d.Job.AIError)
+	}
+}
+
+// An AI run gets 90 seconds a wave of requests, so a big pack finishes.
+func TestResolveTime(t *testing.T) {
+	for _, tt := range []struct {
+		files int
+		want  time.Duration
+	}{{1, 90 * time.Second}, {240, 90 * time.Second}, {241, 180 * time.Second}, {1000, 450 * time.Second}} {
+		if got := resolveTime(tt.files); got != tt.want {
+			t.Errorf("resolveTime(%d) = %v, want %v", tt.files, got, tt.want)
+		}
 	}
 }
 

@@ -4,7 +4,7 @@
 //   - rules: the rules alone;
 //   - auto: the AI on the files the rules leave unsure (classifier_mode
 //     auto);
-//   - ai_always: the AI on every video (classifier_mode ai_always);
+//   - ai_always: the AI on every main video (classifier_mode ai_always);
 //   - ai_blind (only with -modes): ai_always without the rules' answers in
 //     the prompt, a diagnostic of what the AI does where the rules have
 //     nothing.

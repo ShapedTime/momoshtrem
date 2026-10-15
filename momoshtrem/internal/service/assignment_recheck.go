@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/identify/ai"
@@ -156,17 +157,23 @@ func (s *JobService) runRecheck(ctx context.Context, id int64, scope RecheckScop
 		return err
 	}
 	ps := byJob[id]
-	rules := currentAnswers(ps, cat)
 	files := make([]identify.TorrentFile, len(ps))
 	for i, p := range ps {
 		files[i] = identify.TorrentFile{Path: p.FilePath, Size: p.FileSize}
 	}
+	// The rules, run again (they're pure and cheap), say which answers are
+	// theirs at high confidence: those stay protected whatever an earlier
+	// re-check did to the stored row.
+	fresh := identify.Classify(identify.Input{
+		TorrentName: job.TorrentName, Files: files, Show: cat, Hint: identifyHint(job.Hint), Now: s.now(),
+	}).Proposals
+	rules := currentAnswers(ps, cat, fresh)
 	var paths []string
 	for _, p := range recheckScope(ps, scope) {
 		paths = append(paths, p.FilePath)
 	}
 
-	rctx, cancel := context.WithTimeout(ctx, resolveBudget)
+	rctx, cancel := context.WithTimeout(ctx, resolveTime(len(paths)))
 	out, aiErr := s.resolver.Resolve(rctx, resolveInput(job, show, cat, job.TorrentName, files, rules, paths, settings))
 	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
 	cancel()
@@ -180,20 +187,32 @@ func (s *JobService) runRecheck(ctx context.Context, id int64, scope RecheckScop
 			return nil // discarded meanwhile
 		}
 		if aiErr != nil {
-			s.log.Warn("Re-check failed; the proposals are unchanged", "job_id", id, "error", aiErr)
-			t.Job.AIError = aiErrorMessage(aiErr, timedOut)
-		} else {
-			merged := s.mergeAnswers(id, rules, out.Files, cat)
-			changed := recheckChanges(t.Proposals, rules, merged, scope, hinted)
+			s.log.Warn("Re-check failed", "job_id", id, "answers_kept", len(out.Files), "error", aiErr)
+			t.Job.AIError = aiErrorMessage(aiErr, timedOut, len(out.Files) > 0)
+		}
+		// A run that failed partway keeps the answers it got.
+		if aiErr == nil || len(out.Files) > 0 {
+			merged, disputes := s.mergeAnswers(id, rules, out.Files, cat)
+			disputed := make(map[string]bool, len(disputes))
+			for _, d := range disputes {
+				disputed[d.Path] = true
+			}
+			changed := recheckChanges(t.Proposals, rules, merged, scope, hinted, disputed)
 			if err := t.UpdateProposals(changed); err != nil {
 				return err
 			}
 			s.log.Info("Re-check done", "job_id", id, "asked", len(paths), "answers", len(out.Files),
-				"changed", len(changed), "cost_usd", out.Usage.CostUSD)
+				"changed", len(changed), "disputed", len(disputes), "cost_usd", out.Usage.CostUSD)
 		}
 		t.Job.Status = settledStatus(listed(t.Proposals))
 		return t.SaveJob()
 	})
+}
+
+// resolveTime is the time an AI run over n files gets: resolveBudget per
+// wave of requests (ai.Waves), so a big ai_always pack can finish.
+func resolveTime(n int) time.Duration {
+	return resolveBudget * time.Duration(ai.Waves(n))
 }
 
 // resolveInput is what the resolver gets for a job: the files and the
@@ -218,17 +237,20 @@ func resolveInput(job *library.AssignmentJob, show *library.Show, cat *identify.
 // mergeAnswers merges the AI's answers (identify.MergeAI) and sends the
 // high rules answers it disagrees with to review
 // (identify.FlagDisagreements).
-func (s *JobService) mergeAnswers(jobID int64, rules []identify.Proposal, answers []identify.AIFile, cat *identify.ShowCatalog) []identify.Proposal {
+func (s *JobService) mergeAnswers(jobID int64, rules []identify.Proposal, answers []identify.AIFile, cat *identify.ShowCatalog) ([]identify.Proposal, []identify.Dispute) {
 	merged, disputes := identify.FlagDisagreements(identify.MergeAI(rules, answers, cat), answers, cat)
 	if len(disputes) > 0 {
 		s.log.Info("The AI disagrees with high rules answers; sent to review", "job_id", jobID, "files", len(disputes))
 	}
-	return merged
+	return merged, disputes
 }
 
-// aiErrorMessage is the ai_error a failed AI run leaves.
-func aiErrorMessage(err error, timedOut bool) string {
+// aiErrorMessage is the ai_error a failed AI run leaves; partial when it
+// got some answers before failing.
+func aiErrorMessage(err error, timedOut, partial bool) string {
 	switch {
+	case partial:
+		return msgAIPartial
 	case errors.Is(err, ai.ErrBudgetExceeded):
 		return msgAIBudget
 	case timedOut:
@@ -265,9 +287,12 @@ func recheckScope(ps []*library.AssignmentProposal, scope RecheckScope) []*libra
 }
 
 // currentAnswers is the job's proposals as the classifier's, for the AI's
-// prompt and for MergeAI. An earlier AI answer isn't protected like a high
-// rules one, so a re-check (with the user's hint, say) may replace it.
-func currentAnswers(ps []*library.AssignmentProposal, cat *identify.ShowCatalog) []identify.Proposal {
+// prompt and for MergeAI. fresh is the rules' answer for the same files,
+// run again: a proposal they place with high confidence on the targets it
+// has is theirs, high and protected (even after an earlier re-check flagged
+// it and dropped it to medium). Any other answer isn't protected, so a
+// re-check (with the user's hint, say) may replace an earlier AI answer.
+func currentAnswers(ps []*library.AssignmentProposal, cat *identify.ShowCatalog, fresh []identify.Proposal) []identify.Proposal {
 	episodes := make(map[int64]identify.Episode, len(cat.Episodes))
 	for _, ep := range cat.Episodes {
 		episodes[ep.ID] = ep
@@ -311,18 +336,31 @@ func currentAnswers(ps []*library.AssignmentProposal, cat *identify.ShowCatalog)
 			if p.Source != library.SourceRules && r.Confidence == identify.ConfidenceHigh {
 				r.Confidence = identify.ConfidenceMedium
 			}
+			if i < len(fresh) && rulesHigh(fresh[i], p) {
+				r.Confidence, r.Source, r.Reason = identify.ConfidenceHigh, identify.SourceRules, fresh[i].Reason
+			}
 		}
 		out[i] = r
 	}
 	return out
 }
 
+// rulesHigh reports whether the rules' fresh answer for a file is high
+// confidence on the proposal's own targets.
+func rulesHigh(r identify.Proposal, p *library.AssignmentProposal) bool {
+	return r.Path == p.FilePath && r.Confidence == identify.ConfidenceHigh &&
+		(r.Kind == identify.KindEpisode || r.Kind == identify.KindSpecial) && equalIDs(targetIDs(r.Targets), p.EpisodeIDs)
+}
+
 // recheckChanges returns the proposals a re-check changes: those still in
 // scope (the user may have decided some meanwhile) that the AI's answer
 // touched (the merged answer differs from the one it was shown) and that
-// end up different from what's stored. Kind, group and decision stay; an
-// accepted proposal never loses its target.
-func recheckChanges(current []*library.AssignmentProposal, before, after []identify.Proposal, scope RecheckScope, hinted bool) []*library.AssignmentProposal {
+// end up different from what's stored. Kind and group stay, and an
+// accepted proposal never loses its target. The decision stays too, except
+// that a disputed proposal on its group's default acceptance goes back to
+// pending, as on the first run, so the job waits for the user.
+func recheckChanges(current []*library.AssignmentProposal, before, after []identify.Proposal, scope RecheckScope,
+	hinted bool, disputed map[string]bool) []*library.AssignmentProposal {
 	type pair struct{ before, after identify.Proposal }
 	byPath := make(map[string]pair, len(before))
 	for i := range before {
@@ -352,6 +390,9 @@ func recheckChanges(current []*library.AssignmentProposal, before, after []ident
 		next.SuggestedEpisodeIDs, next.SuggestedConfidence = ids, conf
 		next.SuggestedSource, next.SuggestedReason = next.Source, next.Reason
 		next.Updated, next.Hinted = true, hinted
+		if disputed[p.FilePath] && p.Decision == library.DecisionAccepted && p.Decision == p.Group.DefaultDecision() {
+			next.Decision = library.DecisionPending
+		}
 		changed = append(changed, &next)
 	}
 	return changed

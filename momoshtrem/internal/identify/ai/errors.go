@@ -65,10 +65,6 @@ func (e *APIError) Error() string {
 // Unwrap gives errors.Is both the kind and the cause.
 func (e *APIError) Unwrap() []error { return []error{e.kind, e.err} }
 
-// Retryable reports whether the same request may succeed later: rate
-// limits, server errors and timeouts.
-func (e *APIError) Retryable() bool { return e.kind != ErrRejected }
-
 // apiError classifies an error from the SDK. The SDK has already retried
 // 429s, 5xx and connection errors (twice by default).
 func apiError(ctx context.Context, err error) error {
