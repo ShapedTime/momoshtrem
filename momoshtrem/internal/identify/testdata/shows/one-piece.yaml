@@ -1,0 +1,38 @@
+# Seasons 1-20 hold 992 episodes, so absolute #1071 is S21E79.
+title: One Piece
+original_title: ワンピース
+year: 1999
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Romance Dawn Story", air: 2008-11-24}
+      - {e: 2, name: "Episode of Nami: Tears of a Navigator and the Bonds of Friends", air: 2012-08-25}
+      - {e: 3, name: "Episode of Merry: The Tale of One More Friend", air: 2013-08-24}
+      - {e: 4, name: "3D2Y: Overcome Ace's Death! Luffy's Vow to His Friends", air: 2014-08-30}
+  - n: 1
+    runs: [{count: 61, first_air: 1999-10-20}]
+    names:
+      1: "I'm Luffy! The Man Who's Gonna Be King of the Pirates!"
+      2: "Enter the Great Swordsman! Pirate Hunter Roronoa Zoro!"
+  - {n: 2, runs: [{count: 16}]}
+  - {n: 3, runs: [{count: 14}]}
+  - {n: 4, runs: [{count: 39}]}
+  - {n: 5, runs: [{count: 13}]}
+  - {n: 6, runs: [{count: 52}]}
+  - {n: 7, runs: [{count: 33}]}
+  - {n: 8, runs: [{count: 35}]}
+  - {n: 9, runs: [{count: 73}]}
+  - {n: 10, runs: [{count: 45}]}
+  - {n: 11, runs: [{count: 26}]}
+  - {n: 12, runs: [{count: 14}]}
+  - {n: 13, runs: [{count: 101}]}
+  - {n: 14, runs: [{count: 58}]}
+  - {n: 15, runs: [{count: 62}]}
+  - {n: 16, runs: [{count: 49}]}
+  - {n: 17, runs: [{count: 118}]}
+  - {n: 18, runs: [{count: 33}]}
+  - {n: 19, runs: [{count: 98}]}
+  - {n: 20, runs: [{count: 52}]}
+  - {n: 21, runs: [{count: 130}]}

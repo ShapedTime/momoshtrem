@@ -1,0 +1,13 @@
+# "Extras" is the title: an "Extras.S01E01" file is an episode.
+title: Extras
+year: 2005
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Christmas Special", air: 2007-12-27}
+  - n: 1
+    runs: [{count: 6, first_air: 2005-07-21}]
+    names: {1: "Ben Stiller", 2: "Ross Kemp and Vinnie Jones", 3: "Kate Winslet"}
+  - n: 2
+    runs: [{count: 6, first_air: 2006-09-14}]
+    names: {3: "Daniel Radcliffe", 6: "Ian McKellen"}

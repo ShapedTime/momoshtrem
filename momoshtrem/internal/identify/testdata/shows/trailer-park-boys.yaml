@@ -1,0 +1,22 @@
+# "Trailer" is part of the title: it must never make a file a trailer.
+title: Trailer Park Boys
+year: 2001
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Christmas Special", air: 2004-12-07}
+      - {e: 2, name: "Say Goodnight to the Bad Guys", air: 2008-12-07}
+  - n: 1
+    runs: [{count: 6, first_air: 2001-04-22}]
+    names: {1: "Take Your Little Gun and Get Out of My Trailer", 2: "Freedom 35"}
+  - {n: 2, runs: [{count: 6, first_air: 2002-04-21}]}
+  - {n: 3, runs: [{count: 8, first_air: 2003-04-13}]}
+  - {n: 4, runs: [{count: 8, first_air: 2004-04-18}]}
+  - {n: 5, runs: [{count: 10, first_air: 2005-04-10}]}
+  - {n: 6, runs: [{count: 6, first_air: 2006-04-16}]}
+  - {n: 7, runs: [{count: 10, first_air: 2007-04-08}]}
+  - {n: 8, runs: [{count: 10, first_air: 2014-09-05}]}
+  - {n: 9, runs: [{count: 10, first_air: 2015-03-27}]}
+  - {n: 10, runs: [{count: 10, first_air: 2016-03-28}]}
+  - {n: 11, runs: [{count: 10, first_air: 2017-03-31}]}
+  - {n: 12, runs: [{count: 10, first_air: 2018-03-30}]}

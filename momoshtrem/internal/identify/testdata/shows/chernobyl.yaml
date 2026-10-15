@@ -1,0 +1,12 @@
+# A single-season miniseries.
+title: Chernobyl
+year: 2019
+seasons:
+  - n: 1
+    runs: [{count: 5, first_air: 2019-05-06}]
+    names:
+      1: "1:23:45"
+      2: "Please Remain Calm"
+      3: "Open Wide, O Earth"
+      4: "The Happiness of All Mankind"
+      5: "Vichnaya Pamyat"

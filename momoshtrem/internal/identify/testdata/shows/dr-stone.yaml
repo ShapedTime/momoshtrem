@@ -1,0 +1,11 @@
+# Fansubs name later seasons by their subtitle ("Dr. Stone - New World") and
+# number them from 01, so a bare "- 01" can't tell the season.
+title: Dr. Stone
+original_title: ドクターストーン
+year: 2019
+is_anime: true
+ordering: absolute
+seasons:
+  - {n: 1, runs: [{count: 24, first_air: 2019-07-05}]}
+  - {n: 2, runs: [{count: 11, first_air: 2021-01-14}]}
+  - {n: 3, runs: [{count: 22, first_air: 2023-04-06}]}

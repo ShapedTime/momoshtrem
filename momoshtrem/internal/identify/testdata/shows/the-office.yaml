@@ -1,0 +1,21 @@
+title: The Office
+aliases: [The Office US, The Office (US)]
+year: 2005
+seasons:
+  - n: 1
+    runs: [{count: 6, first_air: 2005-03-24}]
+    names: {1: "Pilot", 2: "Diversity Day"}
+  - {n: 2, runs: [{count: 22, first_air: 2005-09-20}]}
+  - {n: 3, runs: [{count: 23, first_air: 2006-09-21}]}
+  - {n: 4, runs: [{count: 19, first_air: 2007-09-27}]}
+  - n: 5
+    runs: [{count: 28, first_air: 2008-09-25}]
+    names: {10: "Moroccan Christmas"}
+  - n: 6
+    runs: [{count: 26, first_air: 2009-09-17}]
+    names: {1: "Gossip", 2: "The Meeting", 3: "The Promotion", 4: "Niagara (1)", 5: "Niagara (2)", 6: "Mafia"}
+  - n: 7
+    runs: [{count: 26, first_air: 2010-09-23}]
+    names: {25: "Search Committee (1)", 26: "Search Committee (2)"}
+  - {n: 8, runs: [{count: 24, first_air: 2011-09-22}]}
+  - {n: 9, runs: [{count: 25, first_air: 2012-09-20}]}

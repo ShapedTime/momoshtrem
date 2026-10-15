@@ -1,0 +1,27 @@
+title: Friends
+year: 1994
+seasons:
+  - n: 1
+    runs: [{count: 24, first_air: 1994-09-22}]
+    names: {1: "The One Where Monica Gets a Roommate", 2: "The One with the Sonogram at the End"}
+  - n: 2
+    runs: [{count: 24, first_air: 1995-09-21}]
+    names:
+      1: "The One with Ross's New Girlfriend"
+      2: "The One with the Breast Milk"
+      12: "The One After the Super Bowl (1)"
+      13: "The One After the Super Bowl (2)"
+      14: "The One with the Prom Video"
+      24: "The One with Barry and Mindy's Wedding"
+  - {n: 3, runs: [{count: 25, first_air: 1996-09-19}]}
+  - n: 4
+    runs: [{count: 24, first_air: 1997-09-25}]
+    names: {23: "The One with Ross's Wedding (1)", 24: "The One with Ross's Wedding (2)"}
+  - {n: 5, runs: [{count: 24, first_air: 1998-09-24}]}
+  - {n: 6, runs: [{count: 25, first_air: 1999-09-23}]}
+  - {n: 7, runs: [{count: 24, first_air: 2000-10-12}]}
+  - {n: 8, runs: [{count: 24, first_air: 2001-09-27}]}
+  - {n: 9, runs: [{count: 24, first_air: 2002-09-26}]}
+  - n: 10
+    runs: [{count: 18, first_air: 2003-09-25}]
+    names: {17: "The Last One (1)", 18: "The Last One (2)"}

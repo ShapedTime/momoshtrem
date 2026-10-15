@@ -1,0 +1,7 @@
+# A drama whose title contains "Sample".
+title: The Sample
+year: 2021
+seasons:
+  - n: 1
+    runs: [{count: 10, first_air: 2021-02-01}]
+    names: {3: "Control Group"}

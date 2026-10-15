@@ -1,0 +1,19 @@
+# TMDB has one 64-episode season, aired without a break. Blu-ray releases
+# split it into five seasons; the "Blu-ray" episode group maps them.
+title: "Fullmetal Alchemist: Brotherhood"
+original_title: 鋼の錬金術師 FULLMETAL ALCHEMIST
+year: 2009
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 1
+    runs: [{count: 64, first_air: 2009-04-05}]
+    names: {1: "Fullmetal Alchemist", 14: "Those Who Lurk Underground"}
+alt_orderings:
+  - name: Blu-ray
+    groups:
+      - {n: 1, from: S01E01, count: 13}
+      - {n: 2, from: S01E14, count: 13}
+      - {n: 3, from: S01E27, count: 13}
+      - {n: 4, from: S01E40, count: 13}
+      - {n: 5, from: S01E53, count: 12}

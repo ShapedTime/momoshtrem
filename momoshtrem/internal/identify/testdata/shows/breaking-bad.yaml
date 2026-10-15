@@ -1,0 +1,29 @@
+title: Breaking Bad
+year: 2008
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Good Cop Bad Cop", air: 2009-02-17}
+      - {e: 2, name: "Wedding Day", air: 2009-02-24}
+  - n: 1
+    runs: [{count: 7, first_air: 2008-01-20}]
+    names:
+      1: "Pilot"
+      2: "Cat's in the Bag..."
+      3: "...And the Bag's in the River"
+      4: "Cancer Man"
+      5: "Gray Matter"
+      6: "Crazy Handful of Nothin'"
+      7: "A No-Rough-Stuff-Type Deal"
+  - n: 2
+    runs: [{count: 13, first_air: 2009-03-08}]
+    names: {1: "Seven Thirty-Seven", 2: "Grilled", 3: "Bit by a Dead Bee", 13: "ABQ"}
+  - n: 3
+    runs: [{count: 13, first_air: 2010-03-21}]
+    names: {1: "No Más", 7: "One Minute"}
+  - n: 4
+    runs: [{count: 13, first_air: 2011-07-17}]
+    names: {1: "Box Cutter", 5: "Shotgun"}
+  - n: 5
+    runs: [{count: 16, first_air: 2012-07-15}]
+    names: {1: "Live Free or Die", 14: "Ozymandias", 16: "Felina"}

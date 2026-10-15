@@ -1,0 +1,14 @@
+# A daily show: TMDB seasons are years, releases are named by air date.
+# 2024-03-11..14 are S29E37..E40.
+title: The Daily Show
+year: 1996
+seasons:
+  - n: 29
+    runs: [{count: 48, first_air: 2024-01-08, days: [mon, tue, wed, thu]}]
+    names:
+      37: "Brian Tyree Henry"
+      38: "Jane Goodall"
+      39: "Ken Burns"
+      40: "Hasan Minhaj"
+  - n: 30
+    runs: [{count: 20, first_air: 2025-01-06, days: [mon, tue, wed, thu]}]

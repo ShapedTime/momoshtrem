@@ -1,0 +1,247 @@
+# Episode-mapping corpus: the spec for internal/identify. Schema:
+#
+#   - id: unique case name
+#     show: fixture in ../shows (without .yaml)
+#     torrent: torrent name; for a single file it defaults to the file's path
+#     golden: true      whole-torrent case for cmd/classifier-eval (AI eval)
+#     tags: [...]       free-form, for reading the report
+#     now: 2026-10-15   "today" for air-date checks (this is the default)
+#     hint: {season: 2, episode: 5}   assign hint
+#     drop_specials: true   load the show without season 0
+#     files:            paths are relative to the torrent's folder when the
+#                       case has several files; a single file is the torrent
+#       - path: "..."
+#         size: 1.2GB   optional; videos default to 1.2GB
+#         ambiguous: true   only acceptable and max_conf are checked
+#         expect:
+#           kind: episode|special|extra|sample|subtitle|unknown
+#                       (omit: episode, or special when every target is S00;
+#                       extra, or sample, when `extra` is set)
+#           eps: [S01E05, S01E06]   the target episodes, as TMDB numbers them
+#           extra: opening|ending|sample|trailer|featurette|font|info|image|superseded|other
+#           min_conf: high|medium|low   reported when missed
+#           max_conf: high|medium|low   the test fails when exceeded
+#           acceptable: [S00E03, "S01E01+S01E02", null]   ambiguous files
+
+- id: frieren-subsplease-05
+  show: frieren
+  tags: [fansub, absolute]
+  files:
+    - {path: "[SubsPlease] Sousou no Frieren - 05 (1080p) [8C4F1A2B].mkv", size: 1.4GB, expect: {eps: [S01E05], min_conf: high}}
+
+- id: frieren-judas-batch
+  show: frieren
+  golden: true
+  torrent: "[Judas] Sousou no Frieren (Season 1) [1080p][HEVC x265 10bit][Multi-Subs] (Batch)"
+  tags: [fansub, batch, extras]
+  files:
+    - {path: "[Judas] Sousou no Frieren - S01E01.mkv", expect: {eps: [S01E01], min_conf: high}}
+    - {path: "[Judas] Sousou no Frieren - S01E02.mkv", expect: {eps: [S01E02], min_conf: high}}
+    - {path: "[Judas] Sousou no Frieren - S01E27.mkv", expect: {eps: [S01E27], min_conf: high}}
+    - {path: "[Judas] Sousou no Frieren - S01E28.mkv", expect: {eps: [S01E28], min_conf: high}}
+    - {path: "Extras/[Judas] Sousou no Frieren - NCOP01.mkv", size: 120MB, expect: {extra: opening}}
+    - {path: "Extras/[Judas] Sousou no Frieren - NCED01.mkv", size: 120MB, expect: {extra: ending}}
+    - {path: "Extras/[Judas] Sousou no Frieren - NCED02.mkv", size: 120MB, expect: {extra: ending}}
+    - {path: "Fonts/Arial-Bold.ttf", expect: {extra: font}}
+
+- id: frieren-erai-batch
+  show: frieren
+  golden: true
+  torrent: "[Erai-raws] Sousou no Frieren - 01 ~ 28 [1080p][Multiple Subtitle]"
+  tags: [fansub, batch, version]
+  files:
+    - {path: "[Erai-raws] Sousou no Frieren - 01 [1080p][Multiple Subtitle][9F3A1C2B].mkv", expect: {eps: [S01E01], min_conf: high}}
+    - {path: "[Erai-raws] Sousou no Frieren - 02 [1080p][Multiple Subtitle][1D2E3F4A].mkv", expect: {eps: [S01E02], min_conf: high}}
+    - {path: "[Erai-raws] Sousou no Frieren - 13 [1080p][Multiple Subtitle][5B6C7D8E].mkv", expect: {eps: [S01E13], min_conf: high}}
+    - {path: "[Erai-raws] Sousou no Frieren - 14 [1080p][Multiple Subtitle][AAAA0001].mkv", expect: {extra: superseded}}
+    - {path: "[Erai-raws] Sousou no Frieren - 14v2 [1080p][Multiple Subtitle][BBBB0002].mkv", expect: {eps: [S01E14], min_conf: high}}
+    - {path: "[Erai-raws] Sousou no Frieren - 28 [1080p][Multiple Subtitle][0F1E2D3C].mkv", expect: {eps: [S01E28], min_conf: high}}
+
+- id: frieren-subsplease-s2
+  show: frieren
+  golden: true
+  torrent: "[SubsPlease] Sousou no Frieren S2 (01-04) (1080p) [Batch]"
+  tags: [fansub, remap, cour]
+  files:
+    - {path: "[SubsPlease] Sousou no Frieren S2 - 01 (1080p) [5E1F2A3B].mkv", expect: {eps: [S01E29], min_conf: high}}
+    - {path: "[SubsPlease] Sousou no Frieren S2 - 02 (1080p) [6A7B8C9D].mkv", expect: {eps: [S01E30], min_conf: high}}
+    - {path: "[SubsPlease] Sousou no Frieren S2 - 03 (1080p) [0E1F2A3B].mkv", expect: {eps: [S01E31], min_conf: high}}
+    - {path: "[SubsPlease] Sousou no Frieren S2 - 04 (1080p) [4C5D6E7F].mkv", expect: {eps: [S01E32], min_conf: high}}
+
+- id: frieren-recap
+  show: frieren
+  tags: [fansub, special, half]
+  files:
+    - path: "[SubsPlease] Sousou no Frieren - 28.5 (1080p) [3C2B1A0F].mkv"
+      ambiguous: true
+      expect: {acceptable: [S00E03, null], max_conf: medium}
+
+- id: onepiece-batch
+  show: one-piece
+  golden: true
+  torrent: "[Erai-raws] One Piece - 1071 ~ 1075 [1080p][Multiple Subtitle]"
+  tags: [fansub, absolute, batch]
+  files:
+    - {path: "[Erai-raws] One Piece - 1071 [1080p][Multiple Subtitle][0A1B2C3D].mkv", expect: {eps: [S21E79], min_conf: high}}
+    - {path: "[Erai-raws] One Piece - 1072 [1080p][Multiple Subtitle][4E5F6A7B].mkv", expect: {eps: [S21E80], min_conf: high}}
+    - {path: "[Erai-raws] One Piece - 1073 [1080p][Multiple Subtitle][8C9D0E1F].mkv", expect: {eps: [S21E81], min_conf: high}}
+    - {path: "[Erai-raws] One Piece - 1074 [1080p][Multiple Subtitle][2A3B4C5D].mkv", expect: {eps: [S21E82], min_conf: high}}
+    - {path: "[Erai-raws] One Piece - 1075 [1080p][Multiple Subtitle][6E7F8A9B].mkv", expect: {eps: [S21E83], min_conf: high}}
+
+- id: onepiece-subsplease
+  show: one-piece
+  tags: [fansub, absolute]
+  files:
+    - {path: "[SubsPlease] One Piece - 1100 (1080p) [E1F2A3B4].mkv", expect: {eps: [S21E108], min_conf: high}}
+
+- id: onepiece-scene-absolute
+  show: one-piece
+  tags: [scene, absolute]
+  files:
+    - {path: "One.Piece.E1088.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG.mkv", expect: {eps: [S21E96], min_conf: high}}
+
+- id: onepiece-dvd-batch
+  show: one-piece
+  golden: true
+  torrent: "[Kaerizaki-Fansub] One Piece (001-061) [DVD 480p]"
+  tags: [fansub, absolute, batch]
+  files:
+    - {path: "[Kaerizaki-Fansub] One Piece 001 [DVD 480p][A1B2C3D4].mkv", size: 350MB, expect: {eps: [S01E01]}}
+    - {path: "[Kaerizaki-Fansub] One Piece 002 [DVD 480p][B2C3D4E5].mkv", size: 350MB, expect: {eps: [S01E02]}}
+    - {path: "[Kaerizaki-Fansub] One Piece 045 [DVD 480p][C3D4E5F6].mkv", size: 350MB, expect: {eps: [S01E45]}}
+    - {path: "[Kaerizaki-Fansub] One Piece 061 [DVD 480p][D4E5F6A7].mkv", size: 350MB, expect: {eps: [S01E61]}}
+
+- id: onepiece-episode-of-nami
+  show: one-piece
+  tags: [special, title]
+  files:
+    - {path: "[Group] One Piece - Episode of Nami [1080p].mkv", expect: {eps: [S00E02]}}
+
+- id: onepiece-film
+  show: one-piece
+  tags: [movie]
+  files:
+    - path: "[Group] One Piece Film Red (2022) [1080p].mkv"
+      ambiguous: true
+      expect: {acceptable: [null], max_conf: medium}
+
+- id: conan-batch
+  show: detective-conan
+  golden: true
+  torrent: "[Group] Detective Conan 1120-1123 [1080p]"
+  tags: [fansub, absolute, alias, batch]
+  files:
+    - {path: "[Group] Detective Conan - 1120 [1080p].mkv", expect: {eps: [S30E18], min_conf: high}}
+    - {path: "[Group] Detective Conan - 1121 [1080p].mkv", expect: {eps: [S30E19], min_conf: high}}
+    - {path: "[Group] Detective Conan - 1122 [1080p].mkv", expect: {eps: [S30E20], min_conf: high}}
+    - {path: "[Group] Detective Conan - 1123 [1080p].mkv", expect: {eps: [S30E21], min_conf: high}}
+
+- id: conan-meitantei
+  show: detective-conan
+  tags: [absolute, alias]
+  files:
+    - {path: "Meitantei Conan - 1124 [WEB 1080p AVC AAC].mkv", expect: {eps: [S30E22], min_conf: high}}
+
+- id: jjk-continuing
+  show: jujutsu-kaisen
+  golden: true
+  torrent: "[SubsPlease] Jujutsu Kaisen (25-28) (1080p) [Batch]"
+  tags: [fansub, absolute, batch]
+  files:
+    - {path: "[SubsPlease] Jujutsu Kaisen - 25 (1080p) [7A8B9C0D].mkv", expect: {eps: [S02E01], min_conf: high}}
+    - {path: "[SubsPlease] Jujutsu Kaisen - 26 (1080p) [1E2F3A4B].mkv", expect: {eps: [S02E02], min_conf: high}}
+    - {path: "[SubsPlease] Jujutsu Kaisen - 27 (1080p) [5C6D7E8F].mkv", expect: {eps: [S02E03], min_conf: high}}
+    - {path: "[SubsPlease] Jujutsu Kaisen - 28 (1080p) [9A0B1C2D].mkv", expect: {eps: [S02E04], min_conf: high}}
+
+- id: jjk-double
+  show: jujutsu-kaisen
+  tags: [fansub, multi-episode]
+  files:
+    - {path: "[Group] Jujutsu Kaisen - 01-02 [BD 1080p].mkv", size: 2.4GB, expect: {eps: [S01E01, S01E02]}}
+
+- id: jjk-episode-word
+  show: jujutsu-kaisen
+  tags: [absolute]
+  files:
+    - {path: "Jujutsu Kaisen Episode 30 [1080p].mkv", expect: {eps: [S02E06]}}
+
+- id: jjk-subtitles
+  show: jujutsu-kaisen
+  torrent: "[Group] Jujutsu Kaisen - 29-30 [1080p]"
+  tags: [fansub, subtitle, fonts]
+  files:
+    - {path: "[Group] Jujutsu Kaisen - 29 [1080p].mkv", expect: {eps: [S02E05]}}
+    - {path: "[Group] Jujutsu Kaisen - 29 [1080p].eng.ass", expect: {kind: subtitle, eps: [S02E05]}}
+    - {path: "[Group] Jujutsu Kaisen - 30 [1080p].mkv", expect: {eps: [S02E06]}}
+    - {path: "[Group] Jujutsu Kaisen - 30 [1080p].eng.ass", expect: {kind: subtitle, eps: [S02E06]}}
+    - {path: "Fonts/OpenSans-Semibold.ttf", expect: {extra: font}}
+
+- id: spyxfamily-s2
+  show: spy-x-family
+  tags: [fansub, season-marker]
+  files:
+    - {path: "[SubsPlease] Spy x Family S2 - 05 (1080p) [B4D2E1F0].mkv", expect: {eps: [S02E05], min_conf: high}}
+
+- id: spyxfamily-13
+  show: spy-x-family
+  tags: [fansub, absolute]
+  files:
+    - {path: "[SubsPlease] Spy x Family - 13 (1080p) [C0FFEE13].mkv", expect: {eps: [S01E13], min_conf: high}}
+
+- id: spyxfamily-season3
+  show: spy-x-family
+  tags: [fansub, season-marker]
+  files:
+    - {path: "[SubsPlease] Spy x Family Season 3 - 01 (1080p) [5EA50301].mkv", expect: {eps: [S03E01], min_conf: high}}
+
+- id: spyxfamily-bracket-number
+  show: spy-x-family
+  tags: [fansub, bracket]
+  files:
+    - {path: "[Kamigami] Spy x Family [12][1080p][x264 AAC][CHS].mp4", expect: {eps: [S01E12]}}
+
+- id: spyxfamily-recap
+  show: spy-x-family
+  tags: [fansub, half]
+  files:
+    - path: "[SubsPlease] Spy x Family - 12.5 (1080p) [12345678].mkv"
+      ambiguous: true
+      expect: {acceptable: [null], max_conf: medium}
+
+- id: aot-final-season
+  show: attack-on-titan
+  tags: [fansub, sequel-title]
+  files:
+    - path: "[SubsPlease] Shingeki no Kyojin - The Final Season - 01 (1080p) [ABCDEF01].mkv"
+      ambiguous: true
+      expect: {acceptable: [S04E01, null], max_conf: medium}
+
+- id: aot-oad-collection
+  show: attack-on-titan
+  golden: true
+  torrent: "[Group] Shingeki no Kyojin OAD Collection [BD 1080p]"
+  tags: [ova, special, title]
+  files:
+    - {path: "[Group] Shingeki no Kyojin - OAD 01 - Ilse's Notebook [BD 1080p].mkv", expect: {eps: [S00E01]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 02 - The Sudden Visitor [BD 1080p].mkv", expect: {eps: [S00E02]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 03 - Distress [BD 1080p].mkv", expect: {eps: [S00E03]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 04 - No Regrets Part 1 [BD 1080p].mkv", expect: {eps: [S00E04]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 05 - No Regrets Part 2 [BD 1080p].mkv", expect: {eps: [S00E05]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 06 - Lost Girls Part 1 [BD 1080p].mkv", expect: {eps: [S00E06]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 07 - Lost Girls Part 2 [BD 1080p].mkv", expect: {eps: [S00E07]}}
+    - {path: "[Group] Shingeki no Kyojin - OAD 08 - Lost in the Cruel World [BD 1080p].mkv", expect: {eps: [S00E08]}}
+    - {path: "NC/[Group] Shingeki no Kyojin - NCOP [BD 1080p].mkv", size: 90MB, expect: {extra: opening}}
+
+- id: dr-stone-s1
+  show: dr-stone
+  tags: [fansub, absolute]
+  files:
+    - {path: "[HorribleSubs] Dr. Stone - 05 [1080p].mkv", expect: {eps: [S01E05]}}
+
+- id: dr-stone-new-world
+  show: dr-stone
+  tags: [fansub, sequel-title]
+  files:
+    - path: "[SubsPlease] Dr. Stone - New World - 01 (1080p) [D5701E01].mkv"
+      ambiguous: true
+      expect: {acceptable: [S03E01, null], max_conf: medium}
