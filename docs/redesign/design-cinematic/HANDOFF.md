@@ -189,6 +189,7 @@ A four-segment step bar (done green, current amber) sits above, labelled "Add ·
 | Torrent search | `facets` counts **under the current filters** (and a `would_be` count for each disabled option) | Filter chip counts; "Show N results" |
 | Torrent search | `age` or `published_at` (exists) and `release.why_short` (≤ 4 short phrases, e.g. from `score_reasons`) | The best-match "why" line |
 | Library | `size_bytes`, `last_watched_at`, `added_at` and `needs_review` count per item | Sort and list view |
+| Mapping review | Now in PLAN §6 "Assignment": the job's `item`, `torrent` facts, `progress` step details, `suggested_hints`, `ai_available` and live `counts`; per proposal its `group`, `targets`, `replaces`, `updated`/`hinted` and `extra_type`; `GET /shows/{id}/episodes` for the picker | Header facts, named steps, summary line, rows, Re-check chips, picker tags |
 | Activity | `GET /torrents/summary` → `{down_bps, up_bps, active, idle, paused, disk: {used, free}}` | Summary strip |
 | Activity | Per torrent: `readers: [{client: "Infuse", device, file, episode, offset, rate_bps}]` (from WebDAV request User-Agent and range reads), `pieces: bitfield`, `priority_pieces` | "Streaming now", active readers, piece map |
 | Ask | `POST /recommendations/ask` events: add `refinements: [string]` in `done` and `match_tag` per `item` | Refine chips and the one-line match tag on cards |

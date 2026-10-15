@@ -42,14 +42,14 @@ describe('EpisodeRow', () => {
   });
 
   it('needs review: links to the mapping review', () => {
-    renderRow(episode(209867, 1, 26));
+    renderRow(episode(209867, 1, 35));
     expect(screen.getByText('Needs review')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Review the mapping for S01E26' })).toHaveAttribute('href', '/mapping/101');
+    expect(screen.getByRole('link', { name: 'Review the mapping for S01E35' })).toHaveAttribute('href', '/mapping/101');
   });
 
   it('needs review without a job: opens the episode instead', () => {
-    const { onOpen } = renderRow(episode(209867, 1, 26), { reviewHref: null });
-    fireEvent.click(screen.getByRole('button', { name: /^S01E26 options/ }));
+    const { onOpen } = renderRow(episode(209867, 1, 35), { reviewHref: null });
+    fireEvent.click(screen.getByRole('button', { name: /^S01E35 options/ }));
     expect(onOpen).toHaveBeenCalled();
   });
 

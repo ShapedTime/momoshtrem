@@ -1,4 +1,5 @@
-import { assignmentHandlers } from './assignment';
+import { setMockScenario } from '../scenario';
+import { assignmentHandlers, resetMockJobs } from './assignment';
 import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
 import { recommendationsHandlers } from './recommendations';
@@ -29,8 +30,10 @@ export const handlers = [
   ...legacyHandlers,
 ];
 
-/** Tests: forget what earlier requests changed (the library and stored subtitles live per page). */
+/** Tests: forget what earlier requests changed (the library, mapping jobs and stored subtitles live per page). */
 export function resetMockState(): void {
   resetMockLibrary();
+  resetMockJobs();
   resetMockSubtitles();
+  setMockScenario(null);
 }

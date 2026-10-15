@@ -8,6 +8,7 @@ import type {
   MovieTitle,
   SeasonDetail,
   SeasonSummary,
+  ShowEpisodesSeason,
   ShowSettingsPatch,
   ShowTitle,
   SimilarTitle,
@@ -17,8 +18,9 @@ import type {
   TitleLibraryState,
   TitleTorrent,
 } from '@/lib/api/contract';
+import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
 import { type CatalogEntry, findTitle, iso } from './catalog';
-import { MOVIES, type MovieSeed, type SeasonSeed, SHOWS, type ShowSeed, type TitleSeed } from './title-seeds';
+import { absoluteNumbers, episodeIdFor, MOVIES, type MovieSeed, type SeasonSeed, SHOWS, type ShowSeed, type TitleSeed } from './title-seeds';
 
 /**
  * Title and season answers built from the seeds (title-seeds.ts) and the
@@ -43,6 +45,10 @@ export interface MockLibraryEntry {
   files: boolean;
   /** Shows: episodes whose file was unassigned. */
   unassigned: Set<number>;
+  /** Shows: episodes given a file this session (an applied mapping job). */
+  filed: Map<number, EpisodeFile>;
+  /** What the open mapping jobs say about this title (kept in sync by handlers/assignment.ts). */
+  review: MockReview;
   /** Movies: a torrent assigned this session (the legacy add-torrent route); it starts downloading. */
   assigned?: TitleTorrent;
   /** Shows. */
@@ -97,6 +103,8 @@ export function seedLibrary(): MockLibrary {
         added_at: iso(seed.library.added_days_ago),
         files: true,
         unassigned: new Set(),
+        filed: new Map(),
+        review: seededReview(mediaType, seed.library.id),
         settings: defaultSettings(entry),
       });
     }
@@ -114,6 +122,8 @@ export function addToLibrary(library: MockLibrary, entry: CatalogEntry): MockLib
     added_at: new Date().toISOString(),
     files: false,
     unassigned: new Set(),
+    filed: new Map(),
+    review: NO_REVIEW,
     settings: defaultSettings(entry),
   };
   library.set(libraryKey(entry.media_type, entry.tmdb_id), row);
@@ -126,8 +136,6 @@ export function findByLibraryId(library: MockLibrary, mediaType: MediaType, id: 
   const entry = row && findTitle(row.media_type, row.tmdb_id);
   return row && entry ? { key: libraryKey(row.media_type, row.tmdb_id), row, entry } : undefined;
 }
-
-const episodeIdFor = (key: number, season: number, episode: number) => key * 100_000 + season * 1000 + episode;
 
 /** Library id of a seeded episode. */
 export function episodeId(tmdbId: number, season: number, episode: number): number {
@@ -148,6 +156,20 @@ export function findEpisode(id: number): { tmdbId: number; season: number; episo
 // ---- Builders ---------------------------------------------------------------
 
 const hasFile = (state: EpisodeState) => state === 'watched' || state === 'ready' || state === 'downloading';
+const aired = (airDate: string | null) => airDate !== null && airDate <= TODAY;
+
+/**
+ * A file wins (seeded, or from an applied job); without one, an episode an open
+ * mapping job wants to review is needs_review, otherwise missing or upcoming.
+ */
+function episodeState(seed: SeasonSeed['episodes'][number], id: number, row: MockLibraryEntry | undefined): EpisodeState {
+  const kept = row !== undefined && !row.unassigned.has(id);
+  if (kept && row.files && hasFile(seed.state)) return seed.state;
+  if (kept && row.filed.has(id)) return 'ready';
+  if (row?.review.episode_ids.has(id)) return 'needs_review';
+  if (seed.state === 'missing' || seed.state === 'upcoming') return seed.state;
+  return aired(seed.air_date) ? 'missing' : 'upcoming';
+}
 
 function notInLibrary(): TitleLibraryState {
   return {
@@ -175,20 +197,17 @@ interface BuiltSeason {
 /** Seasons as the backend sees them, with the library applied; season 0 only while specials are on. */
 function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry | undefined): BuiltSeason[] {
   const includeSpecials = row?.settings.include_specials ?? true;
-  let absolute = 1;
+  const absolute = absoluteNumbers(show);
   return show.seasons
     .map((season) => {
-      if (season.n > 0) absolute = season.absolute_from ?? absolute;
       const episodes = season.episodes.map((seed): EpisodeSummary => {
         const id = episodeIdFor(show.key, season.n, seed.n);
-        const lost = !row?.files || row.unassigned.has(id);
-        const aired = seed.air_date !== null && seed.air_date <= TODAY;
-        const state = lost && seed.state !== 'missing' && seed.state !== 'upcoming' ? (aired ? 'missing' : 'upcoming') : seed.state;
+        const state = episodeState(seed, id, row);
         return {
           id,
           season_number: season.n,
           episode_number: seed.n,
-          absolute_number: season.n > 0 ? absolute++ : null,
+          absolute_number: absolute.get(id) ?? null,
           name: seed.name,
           overview: seed.overview ?? '',
           air_date: seed.air_date,
@@ -254,14 +273,18 @@ function ranges({ seed, episodes }: BuiltSeason): EpisodeRange[] {
   });
 }
 
-/** The first run of the frontier: aired regular episodes after the last one with a file. */
+/**
+ * The first run of the frontier: aired regular episodes after the last one
+ * with a file. An episode under review has no file yet, so it belongs to it.
+ */
 function frontierRun(seasons: BuiltSeason[]): MissingRun | null {
   const regular = seasons.filter((s) => s.seed.n > 0).flatMap((s) => s.episodes);
   const rest = regular.slice(regular.findLastIndex((e) => hasFile(e.state)) + 1);
-  const start = rest.findIndex((e) => e.state === 'missing');
+  const unfiled = (e: EpisodeSummary | undefined) => e !== undefined && (e.state === 'missing' || (e.state === 'needs_review' && aired(e.air_date)));
+  const start = rest.findIndex(unfiled);
   if (start < 0) return null;
   let end = start;
-  while (rest[end + 1]?.state === 'missing' && rest[end + 1].season_number === rest[start].season_number) end++;
+  while (unfiled(rest[end + 1]) && rest[end + 1].season_number === rest[start].season_number) end++;
   return {
     season_number: rest[start].season_number,
     from: rest[start].episode_number,
@@ -278,7 +301,6 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
   const regular = all.filter((e) => e.season_number > 0);
   const withFile = regular.filter((e) => hasFile(e.state));
   const downloading = all.filter((e) => e.state === 'downloading');
-  const needsReview = all.filter((e) => e.state === 'needs_review').length;
   const missing = frontierRun(seasons);
   const path = all.some((e) => hasFile(e.state)) ? showPath(entry) : null;
   return {
@@ -296,8 +318,8 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
           seeders: show.seeders ?? 0,
         }
       : null,
-    needs_review: needsReview,
-    review_job_id: needsReview ? (show.review_job_id ?? null) : null,
+    needs_review: row.review.files,
+    review_job_id: row.review.job_id,
     episodes_total: regular.filter((e) => e.state !== 'upcoming').length,
     episodes_ready: withFile.length,
     missing,
@@ -318,6 +340,8 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
     in_library: true,
     library_id: row.library_id,
     added_at: row.added_at,
+    needs_review: row.review.files,
+    review_job_id: row.review.job_id,
     availability_stage: !torrent ? 'needs_torrent' : download ? 'downloading' : 'ready',
     webdav_path: path,
     webdav_url: webdavUrl(path),
@@ -326,17 +350,16 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
   };
 }
 
-/** The legacy add-torrent route for a movie: assign a release by its magnet (dn = the release name). */
-export function assignMovieTorrent(row: MockLibraryEntry, magnetUri: string): TitleTorrent {
-  const params = new URLSearchParams(magnetUri.replace(/^magnet:\?/, ''));
-  const releaseName = params.get('dn') ?? 'Unnamed.Release.1080p';
+/** A movie gets a file (the legacy add-torrent route, or an applied mapping job): loaded, nothing fetched yet. */
+export function assignMovieRelease(
+  row: MockLibraryEntry,
+  release: Pick<TitleTorrent, 'info_hash' | 'release_name' | 'file_name' | 'size_bytes'>
+): TitleTorrent {
+  const name = release.release_name;
   const torrent: TitleTorrent = {
-    info_hash: (params.get('xt') ?? '').replace('urn:btih:', '').toLowerCase(),
-    release_name: releaseName,
-    file_name: `${releaseName}.mkv`,
-    size_bytes: 4_200_000_000,
-    resolution: /2160p/i.test(releaseName) ? '2160p' : /1080p/i.test(releaseName) ? '1080p' : null,
-    source: /bluray/i.test(releaseName) ? 'BluRay' : /web/i.test(releaseName) ? 'WEB-DL' : null,
+    ...release,
+    resolution: /2160p/i.test(name) ? '2160p' : /1080p/i.test(name) ? '1080p' : null,
+    source: /bluray/i.test(name) ? 'BluRay' : /web/i.test(name) ? 'WEB-DL' : null,
     added_at: new Date().toISOString(),
     state: 'active',
     seeders: 12,
@@ -344,6 +367,18 @@ export function assignMovieTorrent(row: MockLibraryEntry, magnetUri: string): Ti
   row.assigned = torrent;
   row.files = true;
   return torrent;
+}
+
+/** The legacy add-torrent route for a movie: assign a release by its magnet (dn = the release name). */
+export function assignMovieTorrent(row: MockLibraryEntry, magnetUri: string): TitleTorrent {
+  const params = new URLSearchParams(magnetUri.replace(/^magnet:\?/, ''));
+  const releaseName = params.get('dn') ?? 'Unnamed.Release.1080p';
+  return assignMovieRelease(row, {
+    info_hash: (params.get('xt') ?? '').replace('urn:btih:', '').toLowerCase(),
+    release_name: releaseName,
+    file_name: `${releaseName}.mkv`,
+    size_bytes: 4_200_000_000,
+  });
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
@@ -461,6 +496,44 @@ export function itemRelease(library: MockLibrary, type: SubtitleItemType, id: nu
   }
   const episode = findEpisode(id);
   if (!episode || !library.has(libraryKey('tv', episode.tmdbId))) return undefined;
-  const state = buildSeason(episode.tmdbId, episode.season, library)?.episodes.find((e) => e.id === id)?.state;
-  return state && hasFile(state) ? (SHOWS[episode.tmdbId].release ?? null) : null;
+  return episodeFile(library, id)?.release_name ?? null;
+}
+
+/** An episode's current file (seeded, or from an applied job); null without one. */
+export function episodeFile(library: MockLibrary, id: number): EpisodeFile | null {
+  const episode = findEpisode(id);
+  const row = episode && library.get(libraryKey('tv', episode.tmdbId));
+  if (!episode || !row) return null;
+  const built = buildSeason(episode.tmdbId, episode.season, library)?.episodes.find((e) => e.id === id);
+  if (!built || !hasFile(built.state)) return null;
+  const filed = row.filed.get(id);
+  if (filed) return filed;
+  // A seeded file: named after the show's release, e.g. Doctor.Who.2005.S00E06.1080p.BluRay.x264-SHORTBREHD.mkv
+  const release = SHOWS[episode.tmdbId].release ?? 'Unknown.Release';
+  const code = `S${pad(episode.season)}E${pad(episode.episode)}`;
+  const name = /S\d\d(-S\d\d)?/.test(release) ? release.replace(/S\d\d(-S\d\d)?/, code) : `${release} - ${code}`;
+  return { info_hash: `seed-${SHOWS[episode.tmdbId].key}`, release_name: release, file_path: `${release}/${name}.mkv` };
+}
+
+/** GET /shows/{id}/episodes: every season in number order, Specials whenever the show has season 0 rows (whatever include_specials says). */
+export function showEpisodes(tmdbId: number, library: MockLibrary): ShowEpisodesSeason[] {
+  const entry = findTitle('tv', tmdbId);
+  const show = SHOWS[tmdbId];
+  const row = library.get(libraryKey('tv', tmdbId));
+  if (!entry || !show) return [];
+  const withSpecials = row && { ...row, settings: { ...row.settings, include_specials: true } };
+  return buildSeasons(entry, show, withSpecials)
+    .sort((a, b) => a.seed.n - b.seed.n)
+    .map(({ seed, episodes }) => ({
+      season_number: seed.n,
+      name: seed.name,
+      episodes: episodes.map((e) => ({
+        id: e.id,
+        episode_number: e.episode_number,
+        absolute_number: e.absolute_number,
+        name: e.name,
+        air_date: e.air_date,
+        has_file: hasFile(e.state),
+      })),
+    }));
 }

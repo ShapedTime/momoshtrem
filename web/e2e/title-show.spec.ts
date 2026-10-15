@@ -4,8 +4,9 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
 
 /**
  * The show page (PLAN F2) against the MSW mocks: Frieren needs episodes
- * 29–38 and has files to review, Doctor Who has named specials, The Good
- * Place isn't in the library and One Piece uses absolute numbers.
+ * 29–38 and mapping job 101 has files to review (S01E35 among them), Doctor
+ * Who has named specials and job 103 (a conflict), The Good Place isn't in
+ * the library and One Piece uses absolute numbers.
  */
 
 const FRIEREN = 'Frieren: Beyond Journey’s End';
@@ -46,7 +47,7 @@ test.describe('show page', () => {
     // Absolute numbers that match the in-season ones aren't repeated
     await expect(next).toContainText('S01E29');
     await expect(next).not.toContainText('#29');
-    await expect(list.getByRole('link', { name: 'Review the mapping for S01E26' })).toHaveAttribute('href', '/mapping/101');
+    await expect(list.getByRole('link', { name: 'Review the mapping for S01E35' })).toHaveAttribute('href', '/mapping/101');
     await expectAccessibleAndContained(page);
 
     await seasons(page).getByRole('tab', { name: /Specials/ }).click();
@@ -142,7 +143,8 @@ test.describe('show page', () => {
     await expect(list.getByRole('listitem')).toHaveCount(8);
     await expect(list).toContainText('The Waters of Mars');
     await expect(list.getByRole('button', { name: 'Find a torrent for S00E07' })).toBeVisible();
-    await expect(page.getByText('1 file needs a quick review')).toBeVisible();
+    await expect(page.getByText('3 files need a quick review')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Review mapping' })).toHaveAttribute('href', '/mapping/103');
     await expectAccessibleAndContained(page);
   });
 
@@ -242,7 +244,7 @@ test.describe('show page', () => {
     await signIn(page, '/tv/209867');
     const list = page.getByRole('list', { name: 'Season 1 episodes' });
     const chips = page.getByRole('group', { name: 'Episode ranges' });
-    await expect(chips.getByRole('button')).toHaveText(['1–10', '11–20', '21–28', /^29–38\s*10 missing$/]);
+    await expect(chips.getByRole('button')).toHaveText(['1–10', '11–20', '21–28', /^29–38\s*9 missing$/]);
 
     await chips.getByRole('button', { name: '11–20' }).click();
     await expect(chips.getByRole('button', { name: '11–20' })).toHaveAttribute('aria-pressed', 'true');

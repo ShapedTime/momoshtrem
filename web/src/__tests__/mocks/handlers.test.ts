@@ -54,13 +54,24 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /library', () => libraryApi.list({ type: 'tv' })],
     ['POST /shows/{id}/assign-torrent', () => assignmentApi.assignShow(1, { magnet_uri: 'magnet:?xt=urn:btih:x' })],
     ['POST /movies/{id}/assign-torrent', () => assignmentApi.assignMovie(1, { magnet_uri: 'magnet:?xt=urn:btih:x' })],
+    ['GET /assignment-jobs', () => assignmentApi.jobs()],
     ['GET /assignment-jobs/{id}', () => assignmentApi.job(101)],
-    ['PATCH /assignment-jobs/{id}/proposals/{pid}', () => assignmentApi.patchProposal(101, 20, { kind: 'ignore' })],
+    ['PATCH /assignment-jobs/{id}/proposals', async () => {
+      const { proposals } = await assignmentApi.job(101);
+      return assignmentApi.patchProposals(101, { items: [{ id: proposals[0].id, decision: 'ignored' }] });
+    }],
     ['POST /assignment-jobs/{id}/reclassify', () => assignmentApi.reclassify(101, { scope: 'unresolved', hint: 'absolute numbers' })],
-    ['POST /assignment-jobs/{id}/apply', () => assignmentApi.apply(101)],
+    ['POST /assignment-jobs/{id}/apply', async () => {
+      const { proposals } = await assignmentApi.job(101);
+      const pending = proposals.filter((p) => p.decision === 'pending' && p.targets.length > 0);
+      await assignmentApi.patchProposals(101, { items: pending.map((p) => ({ id: p.id, decision: 'accepted' as const })) });
+      return assignmentApi.apply(101);
+    }],
+    ['POST /assignment-jobs/{id}/discard', () => assignmentApi.discard(103)],
+    ['GET /shows/{id}/episodes', () => assignmentApi.showEpisodes(1)],
     ['PUT /episodes/{id}/assignment', () => assignmentApi.setEpisodeAssignment(1029, { info_hash: 'x', file_path: 'a.mkv' })],
     ['PUT /movies/{id}/assignment', () => assignmentApi.setMovieAssignment(1, { info_hash: 'x', file_path: 'a.mkv' })],
-    ['GET /torrents/{hash}/files', () => assignmentApi.torrentFiles('abc')],
+    ['GET /torrents/{hash}/files', async () => assignmentApi.torrentFiles((await assignmentApi.job(101)).job.torrent.info_hash)],
     ['GET /search/torrents', () => searchApi.torrents({ media_type: 'tv', tmdb_id: 209867, season: 1, episode: 29 })],
     ['POST /search/torrents/inspect', () => searchApi.inspect({ release_id: 'rel-0', media_type: 'tv', tmdb_id: 209867 })],
     ['GET /settings/quality-profile', () => searchApi.qualityProfile()],
@@ -145,7 +156,8 @@ describe('the mock library keeps what the page changed', () => {
       review_job_id: 101,
     });
     const season = await titlesApi.season(209867, 1);
-    expect(season.ranges.map((range) => [range.label, range.missing])).toEqual([['1–10', 0], ['11–20', 0], ['21–28', 0], ['29–38', 10]]);
+    // S01E35 is under review (job 101), so it isn't counted as missing, though it's in the frontier
+    expect(season.ranges.map((range) => [range.label, range.missing])).toEqual([['1–10', 0], ['11–20', 0], ['21–28', 0], ['29–38', 9]]);
   });
 
   it('opens a frontier when the last episode loses its file, but not for a gap', async () => {
