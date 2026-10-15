@@ -115,6 +115,7 @@ func main() {
 	apiOpts := api.Options{
 		APIToken:           cfg.Server.APIToken,
 		CORSAllowedOrigins: cfg.Server.CORSAllowedOrigins,
+		DB:                 db,
 	}
 	api.ValidateOptions(apiOpts)
 
