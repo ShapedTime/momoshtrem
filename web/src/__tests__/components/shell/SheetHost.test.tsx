@@ -64,6 +64,8 @@ function Probe() {
   return (
     <>
       <button onClick={() => sheets.open('infuse-setup')}>open</button>
+      <button onClick={() => sheets.open('torrent', { movie: '157336' })}>open torrents</button>
+      <button onClick={() => sheets.swap('hdrezka')}>swap</button>
       <button onClick={() => sheets.close()}>close</button>
     </>
   );
@@ -79,6 +81,19 @@ describe('useSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'close' }));
     expect(mockRouter.back).toHaveBeenCalled();
     expect(mockRouter.replace).not.toHaveBeenCalled();
+  });
+
+  it('swaps a sibling sheet in place, keeping its params, and Back still closes it', () => {
+    const { rerender } = render(<Probe />);
+    fireEvent.click(screen.getByRole('button', { name: 'open torrents' }));
+    mockSearch = 'sheet=torrent&movie=157336';
+    rerender(<Probe />);
+    fireEvent.click(screen.getByRole('button', { name: 'swap' }));
+    expect(mockRouter.replace).toHaveBeenCalledWith('/library?sheet=hdrezka&movie=157336', { scroll: false });
+    mockSearch = 'sheet=hdrezka&movie=157336';
+    rerender(<Probe />);
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    expect(mockRouter.back).toHaveBeenCalled();
   });
 
   it('forgets the sheet it opened once Back closed it, so a later deep link closes in place', () => {

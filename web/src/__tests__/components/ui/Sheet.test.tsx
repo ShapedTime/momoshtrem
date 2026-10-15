@@ -43,6 +43,16 @@ describe('Sheet', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
+  it('names the dialog with its kicker and title, and the close button with what it keeps', async () => {
+    render(
+      <Sheet open onOpenChange={() => {}} kicker="Find a source · Interstellar" title="2014 · 2h 49m" closeLabel="Close (your choices are kept)">
+        <p>Body</p>
+      </Sheet>
+    );
+    expect(await screen.findByRole('dialog', { name: 'Find a source · Interstellar 2014 · 2h 49m' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close (your choices are kept)' })).toBeInTheDocument();
+  });
+
   it('closes on Escape and returns focus to the opener', async () => {
     render(<Harness />);
     const opener = screen.getByRole('button', { name: 'Open' });

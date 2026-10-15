@@ -35,6 +35,20 @@ export function useSheet() {
     [pathname, router, searchParams]
   );
 
+  /**
+   * Another sheet on the same params (a sibling tab: `torrent` ⇄ `hdrezka`).
+   * It replaces the history entry, so Back still closes the sheet.
+   */
+  const swap = useCallback(
+    (name: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.set('sheet', name);
+      if (pushedSheet !== null && pushedSheet === current) pushedSheet = name;
+      router.replace(`${pathname}?${next}`, { scroll: false });
+    },
+    [current, pathname, router, searchParams]
+  );
+
   const close = useCallback(
     (extraParams: string[] = []) => {
       if (pushedSheet && pushedSheet === current) {
@@ -51,5 +65,5 @@ export function useSheet() {
     [current, pathname, router, searchParams]
   );
 
-  return { current, open, close, params: searchParams };
+  return { current, open, swap, close, params: searchParams };
 }
