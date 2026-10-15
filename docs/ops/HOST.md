@@ -15,8 +15,8 @@ The playbook owns the OS layer (PLAN §4):
 It doesn't own:
 - `.env` and `config.yaml`, which stay hand-managed (D6);
 - the data (#42);
-- the backups (#35);
-- the deploy agent (#38). #35 and #38 add their timers here (§7).
+- the backups (#35), which add their timers here (§7);
+- deploys, which `ops/deploy/deploy.sh` runs from the Mac over SSH (#38, [`DEPLOY.md`](DEPLOY.md)). They need nothing on the host beyond Docker and the folders.
 
 ## 1. What it does
 
@@ -93,7 +93,7 @@ Created with these owners and modes, never recursed into, never deleted:
 | `/mnt/data/momoshtrem/data` | root | 0755 | The torrent cache, `subtitles/` and `cache/`. The container runs as root, and the paths inside are `data/...` (PLAN §11) |
 | `/mnt/data/momoshtrem/pgdata` | 70:70 | 0700 | The Postgres cluster (uid 70 is `postgres` in `postgres:16-alpine`) |
 | `/mnt/data/jackett` | agha | 0755 | Jackett `/config` (`PUID=1000`) |
-| `/opt/momoshtrem` | agha | 0755 | The deployed compose file and `.env` (#38) |
+| `/opt/momoshtrem` | agha | 0755 | The deployed `compose.yml`, `Caddyfile` and `.env`, plus the deploy script's `deploy-state`, `deploy.log` and `dumps/` (#38) |
 
 These replace the old VM's `/mnt/data/3/...` paths (AS-IS §9). `.env` points compose at them (#37):
 
@@ -108,9 +108,11 @@ JACKETT_DATA=/mnt/data/jackett
 
 `momoshtrem-stack.service` runs `docker compose up -d` in `/opt/momoshtrem` at boot. The old VM's unit pointed at a missing folder and failed (AS-IS §11). This one is fixed in three ways:
 
-- **It waits for a deploy.** `ConditionPathExists=/opt/momoshtrem/compose.yml` means that until #38 deploys, the unit is skipped, not failed.
+- **It waits for a deploy.** `ConditionPathExists=/opt/momoshtrem/compose.yml` means that until the first deploy, the unit is skipped, not failed.
 - **It has no `ExecStop`.** Shutdown stops the containers anyway. A `docker compose down` would remove them, and the stack would then depend on this unit to come back.
-- **The contract with #38.** The compose file and `.env` in `app_dir` must describe the deployed commit on their own, image tag included. Nothing is passed on the command line, so a plain `up -d` at boot brings back exactly what was deployed. `app_dir` is a variable, and #38 may move it. Until #38 exists, [`DEPLOY.md`](DEPLOY.md) writes them by hand.
+- **The contract with deploys.** The compose file and `.env` in `app_dir` must describe the deployed commit on their own, image tag included. Nothing is passed on the command line, so a plain `up -d` at boot brings back exactly what was deployed.
+  - `ops/deploy/deploy.sh` (#38) keeps to this. It installs the compose file and Caddyfile from the deployed commit, and sets `MOMOSHTREM_TAG` in `.env`.
+  - The script has `/opt/momoshtrem` fixed as `APP` in `ops/deploy/remote.sh`. If `app_dir` ever moves, change both.
 
 ## 6. Firewall and lockout recovery
 
@@ -126,7 +128,7 @@ JACKETT_DATA=/mnt/data/jackett
 
 ## 7. Adding to it
 
-#35 (backups) and #38 (the deploy agent) install their timers here:
+#35 (the backups and the heartbeat) installs its timers here:
 1. Add a task file under `tasks/`.
 2. Import it in `site.yml` with its own tag.
 3. Put its templates in `templates/`.

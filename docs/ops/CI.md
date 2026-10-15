@@ -14,7 +14,7 @@
 
 The commands are the ones in `CLAUDE.md` "Commands". A new push to a PR cancels that PR's older run. `main` runs are never cancelled, so every commit gets its images.
 
-**A green `main` commit** is one whose `publish` jobs succeeded. Its images exist, and its checks passed on that exact commit. The Deploy button (#38) offers only these. Until it exists, [`DEPLOY.md`](DEPLOY.md) deploys them by hand.
+**A green `main` commit** is one whose `publish` jobs succeeded. Its images exist, and its checks passed on that exact commit. `ops/deploy/deploy.sh` deploys only these: it checks GHCR for both images first ([`DEPLOY.md`](DEPLOY.md)). GitHub never deploys (PLAN D3).
 
 ## 2. Images
 

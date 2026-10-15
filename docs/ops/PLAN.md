@@ -1,6 +1,6 @@
 # momoshtrem ops: reproducible server, CI/CD and backups
 
-> Status: agreed plan · 2026-10-14, updated 2026-10-15 · Epic #32
+> Status: agreed plan · 2026-10-14, updated 2026-10-15 (D3 and §8 by #38) · Epic #32
 > A separate track from v2 (`docs/redesign/PLAN.md`). Issues are labelled `ops`.
 
 ## 0. How to use this plan
@@ -10,13 +10,13 @@
 - If an implementation has to break a decision here, update this file in the same PR and explain why on the issue.
 - **Keep it small.** The whole setup is one VM, Docker Compose, a few systemd timers and one Ansible playbook. If a step seems to need a new service or platform, stop and ask.
 - **The repo is public.** No secrets, no public hostname and no personal data in commits, workflows or logs.
-- When an issue needs the user (Proxmox snapshot, router, accounts, the password manager, pressing Deploy), add `blocked` and say exactly what's needed.
+- When an issue needs the user (Proxmox snapshot, router, accounts, the password manager), add `blocked` and say exactly what's needed.
 
 ## 1. Goals and non-goals
 
 **Goals**
 1. **Reproducible.** The server can be rebuilt from the repo, a few password-manager entries and the latest backup.
-2. **CI/CD.** PRs are checked, and every commit on `main` produces versioned images. Deploying is a button, and rolling back is the same button with an older version.
+2. **CI/CD.** PRs are checked, and every commit on `main` produces versioned images. Deploying is one command on the Mac, and rolling back is the same command with an older version.
 3. **Backups.** They run nightly, are encrypted and stored off-site, alert on failure, and have been proven by a restore.
 
 **Non-goals (this round)**
@@ -32,14 +32,14 @@
 | # | Decision | Notes |
 |---|---|---|
 | D1 | Backups go to **Backblaze B2**, encrypted on the VM | Nightly, plus before every deploy. restic is the recommended tool. |
-| D2 | Alerts go through **Healthchecks.io** | The backup, deploy and heartbeat jobs ping it, and it notifies the user when a ping fails or doesn't arrive. Nothing extra runs on the VM. |
-| D3 | **Manual promote; the VM pulls** | CI checks PRs and publishes images for every `main` commit. A GitHub **Deploy** button records the desired version, and a timer on the VM notices it and deploys. No inbound ports. No self-hosted runner, because PRs from forks could run code on it. |
+| D2 | Alerts go through **Healthchecks.io** | The backup and heartbeat jobs ping it, and it notifies the user when a ping fails or doesn't arrive. Nothing extra runs on the VM. A deploy runs in a terminal, so it reports there. |
+| D3 | **Deploys run from the Mac over SSH; GitHub never reaches the VM** | CI checks PRs and publishes images for every `main` commit. `ops/deploy/deploy.sh` deploys a chosen commit (§8). The repo is public, so no workflow can touch the VM and GitHub holds no deploy secret: no Deploy workflow, no self-hosted runner (fork PRs could run code on it), no inbound ports. Changed on 2026-10-15 (#38), replacing a GitHub Deploy button and a pull timer on the VM. |
 | D4 | **Ansible** configures the VM, run from the Mac | The VM itself is created by hand in Proxmox from a documented spec. The Proxmox host is out of scope. |
-| D5 | **Build a fresh VM and cut over** | Reversed on 2026-10-15 (#42): the as-is inventory found too much to fix in place. The new VM is created by hand from [`VM.md`](VM.md), configured by Ansible and deployed from scratch, and the data is copied across. It keeps its own IP, 192.168.0.99: at cutover the router forwards (36911 and 3000) move to it, and the old VM keeps the .81 reservation. The old VM stays, stopped, as the way back until the new one is proven. The user takes Proxmox snapshots by hand before risky steps. |
+| D5 | **Build a fresh VM and cut over** | Reversed on 2026-10-15 (#42): the as-is inventory found too much to fix in place. The new VM is created by hand from [`VM.md`](VM.md), configured by Ansible and deployed from scratch, and the data is copied across. It keeps its own IP, 192.168.0.99: at cutover the router forwards (36911, and 443 since #19) move to it, and the old VM keeps the .81 reservation. The old VM stays, stopped, as the way back until the new one is proven. The user takes Proxmox snapshots by hand before risky steps. |
 | D6 | **Secrets live only on the VM** and in the encrypted backup | `.env` is managed by hand on the VM. Secrets never go in the repo or in GitHub, and there is no Ansible Vault. The break-glass values the VM can't hold live in the user's password manager (§7). |
 | D7 | **Images live on GHCR, tagged by the full commit SHA** | The images are public, since the code is public anyway. Tags are immutable, and the VM never builds. |
 | D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | compose publishes them on the VM's loopback only (`127.0.0.1:9117` and `127.0.0.1:9090`, and the web app's `127.0.0.1:3000` since #19), so an SSH tunnel reaches them: `ssh -L 9117:localhost:9117 momoshtrem-v2`. |
-| D9 | **Go-live happens at cutover** | The first deploy is current `main` (v2). The old VM went down before #35 and #38 existed (§9), so it's deployed by hand and protected by the #33 copy and a Proxmox snapshot. Later deploys go through the pipeline, behind a pre-deploy dump and the B2 backup. |
+| D9 | **Go-live happens at cutover** | The first deploy is current `main` (v2). The old VM went down before #35 and #38 existed (§9), so it's deployed by hand and protected by the #33 copy and a Proxmox snapshot. Later deploys use `ops/deploy/deploy.sh`, behind its pre-deploy dump and the B2 backup (#35). |
 
 ## 3. Current state: findings that drive this plan
 
@@ -80,16 +80,15 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
  merge to main ─► CI builds images ─► GHCR  ghcr.io/shapedtime/momoshtrem:<sha>
                                             ghcr.io/shapedtime/momoshtrem-web:<sha>
 
- "Deploy" button (workflow_dispatch, pick a sha)
-      └─► moves the `production` ref to <sha>
-                       │  VM polls with plain git: no token, no inbound ports
-                       ▼
- momoshtrem-vm
-   deploy timer:  lock ─► pre-deploy backup ─► pull <sha> ─► compose up
-                       ─► wait healthy ─► record ─► ping Healthchecks.io
-   backup timer:  lock ─► backup ─► B2 ─► ping Healthchecks.io      (nightly)
+ Mac ── ops/deploy/deploy.sh <host> [<sha>] ── SSH ──► momoshtrem VM
+          picks a green main commit,            lock ─► pre-deploy dump ─► pull <sha>
+          prints the plan, asks                 ─► compose up ─► wait healthy ─► record
 
- Mac ── ansible-playbook ──► momoshtrem-vm   (OS, Docker, folders, timers)
+ momoshtrem VM
+   backup timer:  lock ─► backup ─► B2 ─► ping Healthchecks.io      (nightly)
+   heartbeat:     every container healthy ─► ping Healthchecks.io
+
+ Mac ── ansible-playbook ──► momoshtrem VM   (OS, Docker, folders, timers)
 ```
 
 | Owner | Owns |
@@ -110,7 +109,8 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 | momoshtrem `config.yaml` | `.../momoshtrem/config` | Back up | Tuning: cache size, ports, metrics. |
 | Downloaded subtitles | `.../data/data/subtitles` | Back up | DB rows point at these files, and downloading them again uses up OpenSubtitles quota. |
 | `caddy_data` volume | `momoshtrem_caddy_data`, a Docker named volume | Back up | The Let's Encrypt account and certificate (#19), and the old internal CA, now unused. If it's lost, Caddy gets a new certificate when it starts; nothing has to be trusted again. The pinned project name fixes the volume's name (#37). |
-| Deploy state | new in #38 | Back up | The current, previous and last-failed commit. |
+| Deploy state | `/opt/momoshtrem/deploy-state` and `deploy.log` (#38) | Back up | The current, previous and last-failed commit, and one line per deploy. |
+| Pre-deploy dumps | `/opt/momoshtrem/dumps` (#38) | Excluded | The newest 10 `pg_dump`s, one per deploy, for a rollback across a migration. The nightly backup covers the same data. |
 | Caddyfile | the repo (#37) | Tracked | Its host values and the WebDAV hash come from `.env`. |
 | Torrent cache | `.../data/data/torrents` (90 GB) | Excluded | Rebuilds itself. Never move it; delete it if the space is needed. |
 | `vfs_tree.gob` | `.../data/data/cache` | Excluded | Rebuilt from the DB. |
@@ -128,10 +128,10 @@ From least to most effort:
 
 | Layer | When | How |
 |---|---|---|
-| **App** | A deploy misbehaves | Press Deploy with the previous commit. Images are immutable, and the VM keeps the previous ones. |
+| **App** | A deploy misbehaves | Deploy the previous commit: `ops/deploy/deploy.sh <host> <sha>`. Images are immutable, and the VM keeps the previous ones. |
 | **Data** | The rollback crosses a migration, or the data went bad | Also restore the dump that deploy took beforehand. Migrations only go forward, and an old binary on a newer schema only warns. |
 | **Machine** | An OS or Ansible change broke the host | Revert to the Proxmox snapshot taken before the change (D5). Without one, rebuild as in the next row. |
-| **Disaster** | The VM or its disk is gone | Create a VM from [`VM.md`](VM.md), run Ansible ([`HOST.md`](HOST.md)), restore from B2 (including `.env`), then deploy the last good commit in the order of [`DEPLOY.md`](DEPLOY.md) §2. #42 does this once with the old VM's data. |
+| **Disaster** | The VM or its disk is gone | Create a VM from [`VM.md`](VM.md), run Ansible ([`HOST.md`](HOST.md)), restore from B2 (including `.env`), then deploy the last good commit in the order of [`DEPLOY.md`](DEPLOY.md) §3. #42 does this once with the old VM's data. |
 
 At cutover (#42), the old VM is the only way back to the old version, because `e063821` has no images on GHCR. It stays stopped, not deleted, until the new VM has three green nightly backups. Rolling back means shutting the new VM down, pointing the router forwards back at .81 and starting the old VM; anything written on the new VM in between is lost.
 
@@ -143,30 +143,41 @@ At cutover (#42), the old VM is the only way back to the old version, because `e
 - **The password manager holds what the VM can't**: the backup repository password, the B2 key ID and secret, the bucket name, and the Healthchecks.io login. With these plus the repo, a rebuild can start from nothing.
 - **Ansible asks for the sudo password at run time.** It is never stored in the repo.
   - An agent can't answer the prompt. When an agent runs the playbook, the user may put the password in a gitignored file for that session only, and delete it afterwards ([`HOST.md`](HOST.md) §2).
-- **GitHub holds no deploy secrets.** CI pushes images with the built-in token, and the VM only reads the public repo and the public images.
+- **GitHub holds no deploy secrets.** CI pushes images with the built-in token, and the VM only pulls the public images. Deploys use the Mac's SSH key (D3).
 - **Secret rotation is out of scope for now.** The comments in `.env.example` are enough to rotate a secret by hand.
 
-## 8. Deploy agent requirements
+## 8. Deploys
 
-This is the contract for #38. How it's built is up to the implementing agent.
+`ops/deploy/deploy.sh` (#38) meets this contract. It runs on the Mac and reaches the VM over SSH. Runbook: [`DEPLOY.md`](DEPLOY.md).
 
-- **Desired version.** It is a single git ref (for example `production`) that the Deploy workflow moves to a full `main` commit SHA. The workflow refuses any commit whose images aren't on GHCR. The VM reads the ref with plain `git fetch`: no token and no API limits.
-- **Compose matches the images.** The agent uses the compose file and Caddyfile from the same commit as the images. The VM never builds.
-- **Idempotent.** A state file records the current, previous and last-failed commit.
-  - If the desired commit is already running, the agent does nothing.
-  - A failed commit isn't retried until the desired commit changes.
-- **One thing at a time.** Deploy and backup share one lock.
+- **The target** is a full `main` commit SHA. It's either given on the command line or, by default, the newest `main` commit whose two images are on GHCR.
+  - The script refuses a commit that isn't on `main` or has no images.
+  - GitHub's only part is hosting the repo and the images (D3).
+- **Compose matches the images.** The compose file and Caddyfile come from the same commit as the images. The VM never builds.
+- **The plan comes first.** Before changing anything, the script prints:
+  - the commits added or removed;
+  - the migrations crossed;
+  - whether the compose file and Caddyfile change;
+  - the `.env.example` diff.
+
+  Then it asks. `-n` stops after the plan and a preflight on the VM.
+- **Idempotent.** `/opt/momoshtrem/deploy-state` records the current, previous and last-failed commit. If the target is already current, the script does nothing.
+- **One thing at a time.** Deploy and backup share one lock, `/run/lock/momoshtrem.lock` (`flock`). A deploy refuses to start while the lock is held.
 - **Order:**
   1. Take the lock.
-  2. Run the pre-deploy backup. Stop if it fails.
-  3. Pull the images. Stop if this fails; nothing has changed yet.
-  4. Run `up`.
-  5. Wait until every service is healthy, with a timeout.
-  6. Record the result and ping Healthchecks.io.
-- **On failure:** no automatic rollback. Leave the stack as it is, send a failure ping with the end of the log, and wait for a human to roll back with the button.
-- **Heartbeat.** The same timer pings a heartbeat check, but only when every container is healthy. That way both a dead VM and a broken stack raise an alert.
-- **Image retention.** Keep the current and previous images, and prune the rest.
-- **One-time steps stay manual and documented.** Running `backfill-metadata` and deleting `vfs_tree.gob` for v2 are examples. The agent doesn't run arbitrary hooks.
+  2. Preflight: the target's compose file accepts `.env`.
+  3. Dump the database into `/opt/momoshtrem/dumps`. Stop if that fails.
+  4. Pull the images. Stop if that fails: nothing has changed yet.
+  5. Install the compose file, the Caddyfile and `MOMOSHTREM_TAG`, then run `up`.
+  6. Wait until every service is healthy, with a timeout. Reload Caddy if its file changed.
+  7. Check that `/api/status` reports the commit, then record the result.
+- **On failure:** no automatic rollback.
+  - The stack is left as it is, and the commit is recorded as last failed.
+  - The script prints the unhealthy services' logs and the rollback command.
+  - A human decides what happens next.
+- **Image retention.** Keep the images the containers use, plus ours at the previous commit. Remove older versions of the stack's images.
+- **One-time steps stay manual and documented.** Examples are running `backfill-metadata` and deleting `vfs_tree.gob` for v2. The script doesn't run arbitrary hooks.
+- **Heartbeat.** A timer on the VM pings Healthchecks.io when every container is healthy, so both a dead VM and a broken stack raise an alert. It's installed with #35's backup timer.
 
 ## 9. Workstreams and waves
 
@@ -174,34 +185,33 @@ This is the contract for #38. How it's built is up to the implementing agent.
 |---|---|---|
 | #33 | **0 · Safety net and as-is inventory**: take a Proxmox snapshot, copy everything in §5 to the Mac, and document today's setup | (none); blocks #34 |
 | #34 | **A · Ansible baseline** for the new VM: packages, Docker log limits, journald cap, guest agent, host firewall, folders, boot unit | #33, the VM (#42) |
-| #35 | **B · Backups to B2**: nightly encrypted backups, retention, alerts, the shared lock, and the restore runbook and drill | #34 |
+| #35 | **B · Backups to B2**: nightly encrypted backups, retention, alerts, the heartbeat (§8), and the restore runbook and drill. It takes #38's lock | #34 |
 | #36 | **C · CI**: PR checks, images on GHCR by SHA, `.dockerignore`, Dependabot | (none) |
 | #37 | **D · Production compose**: GHCR images, pinned versions, required paths, pinned project name, fewer published ports, tracked Caddyfile, liveness endpoint and healthchecks | #36 |
-| #38 | **E · Deploy button and pull agent** (§8), plus the deploy and rollback runbook | #34, #35, #37 |
+| #38 | **E · Deploy script** run from the Mac (§8), plus the deploy and rollback runbook | #34, #37 |
 | #42 | **F · New VM and cutover**: build the VM from the spec, deploy `main` on it, copy the data, cut over, practise a rollback, retire the old VM, finish the runbook. Supersedes #39 | #34, #35, #37, #38 |
 
 ```
-0 (#33) ──► A (#34) ──► B (#35) ──┐
-                                  ├──► E (#38) ──► F (#42)
-C (#36) ──► D (#37) ──────────────┘
+0 (#33) ──► A (#34) ──┬──────────► B (#35) ──┐
+                      ▼                      ├──► F (#42)
+C (#36) ──► D (#37) ──► E (#38) ─────────────┘
 ```
 
 The waves:
 1. **#33 and #36** can start now, in parallel.
 2. **#34 and #37** come next.
-3. **#35** follows.
-4. **#38** after that.
+3. **#35 and #38** follow. #38 no longer waits for #35: the backup job takes its lock.
 5. **#42** is last. #39 (converge the old VM) is superseded by it.
 
-The old VM was shut down early, on 2026-10-15. So #42 deploys by hand ([`DEPLOY.md`](DEPLOY.md)) with #37 folded in, before #35 and #38 exist. Until #35 lands, Proxmox snapshots and the #33 copy on the Mac are the safety net.
+The old VM was shut down early, on 2026-10-15. So #42 deployed by hand ([`DEPLOY.md`](DEPLOY.md) §3) with #37 folded in, before #35 and #38 existed. Later deploys use #38's script. Until #35 lands, Proxmox snapshots and the #33 copy on the Mac are the safety net.
 
 ## 10. Verification
 
 Epic #32 is done when all of these hold:
 
 1. **Reproducible.** A check-mode Ansible run against the live VM shows no changes, and the VM spec plus the runbook describe a rebuild from nothing.
-2. **CI/CD.** A PR shows green checks, and a merge publishes images. Pressing Deploy puts that commit live, and `/api/status` reports it.
-3. **Rollback.** A rollback between two commits has been practised once with the button.
+2. **CI/CD.** A PR shows green checks, and a merge publishes images. `ops/deploy/deploy.sh` puts that commit live, and `/api/status` reports it.
+3. **Rollback.** A rollback between two commits has been practised once with the script.
 4. **Backups.**
    - Three nightly runs in a row are green.
    - A forced failure raised an alert.
@@ -225,7 +235,7 @@ Epic #32 is done when all of these hold:
 - **Postgres major upgrade.** Stay on 16, and upgrade by dump and restore when the time comes.
 - **GHCR image cleanup.** Public images cost nothing to store.
 - **Tooling for secret rotation.**
-- **GitHub deployment statuses and automatic rollback.**
+- **Automatic rollback.**
 - **Security review of the new VM**, including SSH root login (#43).
 - **The doubled `/data/data` path.** It comes from relative defaults combined with `WORKDIR /data`. It's harmless and documented.
 - **Remote streaming speed.** It needs measuring first: home upload, the torrent swarm, the proxy.
