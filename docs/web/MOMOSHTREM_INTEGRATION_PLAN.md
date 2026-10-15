@@ -38,6 +38,9 @@ User on movie detail page → Clicks "Search Torrents"
 ```
 
 ### Flow 3: Add TV Show Torrent (from TV Detail Page)
+
+> **Superseded (#5).** Adding a show's torrent now starts a mapping job and goes to its review, `/mapping/{job_id}`. A movie's applies on its own when one file is plausibly the film, and otherwise goes to the review to pick it. PLAN §6 "Assignment" has the contract.
+
 ```
 User on TV show detail page → Clicks "Search Torrents" (for season/show)
     → Modal opens, searches Jackett

@@ -1,6 +1,9 @@
 # TMDB keeps the 2005 revival's specials in season 0. Scene releases number
-# them their own way (S04E00, S04E14, ...).
+# them their own way (S04E00, S04E14, ...). The aliases are TMDB's GB
+# alternative titles: one carries the revival's years, as a release's
+# "Doctor.Who.2005" does.
 title: Doctor Who
+aliases: [Dr Who, "Doctor Who (2005-2022)"]
 year: 2005
 seasons:
   - n: 0

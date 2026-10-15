@@ -213,7 +213,7 @@ func (fi *fileInfo) extract(ix *catalogIndex) {
 // finish records the show title before the marker at m and the episode
 // title after it.
 func (fi *fileInfo) finish(ix *catalogIndex, m, after int) {
-	fi.region = ix.regionOf(ix.regionWords(fi.body[:m]))
+	fi.region = ix.region(fi.body[:m])
 	fi.titleText = titleWordsFrom(fi.body, after)
 }
 
@@ -262,7 +262,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 		if k > 0 && k < i {
 			end = k // "Extras.Christmas.Special": the title is "Extras"
 		}
-		fi.region = ix.regionOf(ix.regionWords(body[:end]))
+		fi.region = ix.region(body[:end])
 		if len(c.eps) > 0 {
 			fi.titleText = titleWordsFrom(body, after)
 		} else {
@@ -275,7 +275,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 	for i := from; i < specialEnd; i++ {
 		if t := body[i]; t.Kind == token.Num && t.Half && !t.Bracket {
 			fi.special, fi.half, fi.specialText = true, true, t.Text
-			fi.region = ix.regionOf(ix.regionWords(body[:i]))
+			fi.region = ix.region(body[:i])
 			return
 		}
 	}
@@ -292,7 +292,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 			}
 		}
 		end = max(end, from)
-		fi.region = ix.regionOf(ix.regionWords(body[:end]))
+		fi.region = ix.region(body[:end])
 		fi.titleText = titleWordsFrom(body, end)
 		return
 	}
@@ -311,7 +311,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 	if n.Kind == token.Num && len(n.Text) >= 3 && len(n.Text) <= 4 && n.N%100 > 0 && n.N >= 100 && !ix.absPreferred() {
 		fi.cands = append(fi.cands, candidate{kind: candConcat, season: n.N / 100, eps: []int{n.N % 100}, text: n.Text})
 	}
-	fi.region = ix.regionOf(ix.regionWords(body[:j]))
+	fi.region = ix.region(body[:j])
 	fi.titleText = titleWordsFrom(body, j+1)
 }
 

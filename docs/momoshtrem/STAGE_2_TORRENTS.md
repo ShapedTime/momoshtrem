@@ -101,6 +101,8 @@ The classifier maps every file of a torrent to the show's episodes, with a confi
 
 ## Step 2.5: Assignment API (Auto-Detection)
 
+> **Superseded (#5).** Assigning no longer waits for the torrent: it starts a mapping job and answers `202 {job_id}`. The job classifies the files, waits for review when it's unsure, and applies (momoshtrem README, "Episode mapping"; PLAN §6 "Assignment"). The responses below are what the legacy `?wait=true` still answers, plus `job_id`, until H2.
+
 **Note**: API handlers already implemented in Stage 1. Needs torrent service implementation.
 
 The assignment API uses auto-detection instead of requiring manual file paths.
@@ -296,8 +298,8 @@ Verify end-to-end streaming.
 
 **Show test flow**:
 1. Add show: `POST /api/shows {"tmdb_id": 1396}` (Breaking Bad)
-2. Assign torrent: `POST /api/shows/1/assign-torrent {"magnet_uri": "..."}`
-3. Check response for matched/unmatched episodes
+2. Assign torrent: `POST /api/shows/1/assign-torrent {"magnet_uri": "..."}` → `202 {job_id}`
+3. Follow the job: `GET /api/assignment-jobs/{job_id}`, or review it at `/mapping/{job_id}` in the web app
 4. Mount WebDAV, navigate to show
 5. Play episode → should stream
 
