@@ -1,0 +1,37 @@
+# Caddy in front of momoshtrem. The values come from .env through compose
+# (see .env.example), so this file is the same on every host.
+{
+	# Every site uses Caddy's internal CA, which Infuse trusts. It lives in
+	# the momoshtrem_caddy_data volume: losing it means trusting a new one.
+	local_certs
+
+	# The compose healthcheck polls the admin API: keep those lines out
+	log default {
+		exclude admin.api
+	}
+}
+
+# WebDAV for Infuse, at home and through the router's forward
+{$WEBDAV_HOST}:36911 {
+	tls internal
+
+	# The only WebDAV auth: momoshtrem's own is off. The hash comes from
+	# `caddy hash-password` and is used as-is.
+	basic_auth * {
+		{$WEBDAV_USER} {$WEBDAV_PASSWORD_HASH}
+	}
+
+	reverse_proxy momoshtrem:36911
+
+	log {
+		output stdout
+	}
+}
+
+# pgAdmin, LAN only. No hostname, so any LAN address of the host works.
+http://:5050 {
+	@denied not remote_ip {$LAN_CIDR}
+	abort @denied
+
+	reverse_proxy pgadmin:80
+}

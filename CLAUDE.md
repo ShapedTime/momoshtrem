@@ -43,7 +43,9 @@ Server setup, CI/CD and backups are a separate track from v2: issues labelled `o
 ## Commands
 
 ```bash
-# Start all services (compose.yml)
+# Start all services (compose.yml). .env must set the data paths and the WebDAV
+# values; cp .env.example .env covers them locally. Without MOMOSHTREM_TAG the
+# momoshtrem and web images are built as :dev
 docker compose up -d
 
 # Rebuild and start
