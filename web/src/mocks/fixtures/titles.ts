@@ -1,6 +1,7 @@
 import type {
   DownloadProgress,
   EpisodeRange,
+  EpisodeStream,
   EpisodeState,
   EpisodeSummary,
   MediaType,
@@ -16,6 +17,7 @@ import type {
   Timestamp,
   Title,
   TitleLibraryState,
+  TitleStream,
   TitleTorrent,
 } from '@/lib/api/contract';
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
@@ -51,6 +53,10 @@ export interface MockLibraryEntry {
   review: MockReview;
   /** Movies: a torrent assigned this session (an applied mapping job); it starts downloading. */
   assigned?: TitleTorrent;
+  /** Movies: an HDRezka stream assigned this session (#63); it replaces any torrent. */
+  stream?: TitleStream;
+  /** Shows: episodes playing from HDRezka (#63). */
+  streamed: Map<number, EpisodeStream>;
   /** Shows. */
   settings: ShowSettings;
 }
@@ -74,8 +80,9 @@ function moviePath(entry: CatalogEntry, fileName: string): string {
 
 const showPath = (entry: CatalogEntry) => `/TV Shows/${folder(entry)}/`;
 
-const episodePath = (entry: CatalogEntry, season: number, episode: number, name: string) =>
-  `/TV Shows/${folder(entry)}/Season ${pad(season)}/${sanitize(entry.title)} - S${pad(season)}E${pad(episode)} - ${sanitize(name)}.mkv`;
+/** HDRezka files are always MP4 (#63). */
+const episodePath = (entry: CatalogEntry, season: number, episode: number, name: string, ext = '.mkv') =>
+  `/TV Shows/${folder(entry)}/Season ${pad(season)}/${sanitize(entry.title)} - S${pad(season)}E${pad(episode)} - ${sanitize(name)}${ext}`;
 
 const webdavUrl = (path: string | null) => (path === null ? null : WEBDAV_PUBLIC_URL + path.split('/').map(encodeURIComponent).join('/'));
 
@@ -104,6 +111,7 @@ export function seedLibrary(): MockLibrary {
         files: true,
         unassigned: new Set(),
         filed: new Map(),
+        streamed: new Map(),
         review: seededReview(mediaType, seed.library.id),
         settings: defaultSettings(entry),
       });
@@ -123,6 +131,7 @@ export function addToLibrary(library: MockLibrary, entry: CatalogEntry): MockLib
     files: false,
     unassigned: new Set(),
     filed: new Map(),
+    streamed: new Map(),
     review: NO_REVIEW,
     settings: defaultSettings(entry),
   };
@@ -165,7 +174,7 @@ const aired = (airDate: string | null) => airDate !== null && airDate <= TODAY;
 function episodeState(seed: SeasonSeed['episodes'][number], id: number, row: MockLibraryEntry | undefined): EpisodeState {
   const kept = row !== undefined && !row.unassigned.has(id);
   if (kept && row.files && hasFile(seed.state)) return seed.state;
-  if (kept && row.filed.has(id)) return 'ready';
+  if (kept && (row.filed.has(id) || row.streamed.has(id))) return 'ready';
   if (row?.review.episode_ids.has(id)) return 'needs_review';
   if (seed.state === 'missing' || seed.state === 'upcoming') return seed.state;
   return aired(seed.air_date) ? 'missing' : 'upcoming';
@@ -186,6 +195,7 @@ function notInLibrary(): TitleLibraryState {
     episodes_ready: null,
     missing: null,
     torrent: null,
+    stream: null,
   };
 }
 
@@ -203,6 +213,7 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
       const episodes = season.episodes.map((seed): EpisodeSummary => {
         const id = episodeIdFor(show.key, season.n, seed.n);
         const state = episodeState(seed, id, row);
+        const stream = (state === 'ready' && row?.streamed.get(id)) || null;
         return {
           id,
           season_number: season.n,
@@ -216,7 +227,9 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
           episode_type: seed.episode_type ?? 'standard',
           state,
           pct: state === 'downloading' ? (seed.pct ?? 0) : null,
-          webdav_path: hasFile(state) ? episodePath(entry, season.n, seed.n, seed.name) : null,
+          webdav_path: hasFile(state) ? episodePath(entry, season.n, seed.n, seed.name, stream ? '.mp4' : '.mkv') : null,
+          source: stream ? 'hdrezka' : hasFile(state) ? 'torrent' : null,
+          stream,
         };
       });
       return { seed: season, episodes };
@@ -324,6 +337,7 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
     episodes_ready: withFile.length,
     missing,
     torrent: null,
+    stream: null,
   };
 }
 
@@ -332,9 +346,11 @@ const JUST_ADDED: DownloadProgress = { pct: 0, speed_bps: 0, eta_seconds: null, 
 
 function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEntry | undefined): TitleLibraryState {
   if (!row) return notInLibrary();
-  const torrent = row.assigned ?? (row.files ? (movie.torrent ?? null) : null);
+  // A stream replaces the torrent, and is never downloading: it plays from the CDN
+  const stream = row.stream ?? null;
+  const torrent = stream ? null : (row.assigned ?? (row.files ? (movie.torrent ?? null) : null));
   const download = row.assigned ? JUST_ADDED : torrent ? (movie.download ?? null) : null;
-  const path = torrent ? moviePath(entry, torrent.file_name) : null;
+  const path = stream ? moviePath(entry, 'stream.mp4') : torrent ? moviePath(entry, torrent.file_name) : null;
   return {
     ...notInLibrary(),
     in_library: true,
@@ -342,11 +358,12 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
     added_at: row.added_at,
     needs_review: row.review.files,
     review_job_id: row.review.job_id,
-    availability_stage: !torrent ? 'needs_torrent' : download ? 'downloading' : 'ready',
+    availability_stage: stream ? 'ready' : !torrent ? 'needs_torrent' : download ? 'downloading' : 'ready',
     webdav_path: path,
     webdav_url: webdavUrl(path),
     download,
     torrent,
+    stream,
   };
 }
 
@@ -365,8 +382,24 @@ export function assignMovieRelease(
     seeders: 12,
   };
   row.assigned = torrent;
+  row.stream = undefined;
   row.files = true;
   return torrent;
+}
+
+/** A movie plays from HDRezka (#63): the stream replaces its torrent. */
+export function assignMovieStream(row: MockLibraryEntry, stream: Omit<TitleStream, 'added_at' | 'provider'>): TitleStream {
+  row.stream = { provider: 'hdrezka', ...stream, added_at: new Date().toISOString() };
+  row.assigned = undefined;
+  row.files = true;
+  return row.stream;
+}
+
+/** Episodes play from HDRezka (#63): each replaces the episode's torrent file. */
+export function assignEpisodeStream(row: MockLibraryEntry, episodeId: number, stream: EpisodeStream): void {
+  row.streamed.set(episodeId, stream);
+  row.filed.delete(episodeId);
+  row.unassigned.delete(episodeId);
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
@@ -480,10 +513,14 @@ export function itemRelease(library: MockLibrary, type: SubtitleItemType, id: nu
   if (type === 'movie') {
     const found = findByLibraryId(library, 'movie', id);
     if (!found) return undefined;
+    // An HDRezka item has no release name until #68
+    if (found.row.stream) return null;
     return found.row.files ? (found.row.assigned?.release_name ?? MOVIES[found.entry.tmdb_id]?.torrent?.release_name ?? null) : null;
   }
   const episode = findEpisode(id);
-  if (!episode || !library.has(libraryKey('tv', episode.tmdbId))) return undefined;
+  const row = episode && library.get(libraryKey('tv', episode.tmdbId));
+  if (!row) return undefined;
+  if (row.streamed.has(id)) return null;
   return episodeFile(library, id)?.release_name ?? null;
 }
 
@@ -494,6 +531,9 @@ export function episodeFile(library: MockLibrary, id: number): EpisodeFile | nul
   if (!episode || !row) return null;
   const built = buildSeason(episode.tmdbId, episode.season, library)?.episodes.find((e) => e.id === id);
   if (!built || !hasFile(built.state)) return null;
+  // PLAN §6 "HDRezka": what a mapping proposal would replace
+  const stream = row.streamed.get(id);
+  if (stream) return { info_hash: '', release_name: `HDRezka · ${stream.translator} · ${stream.quality}`, file_path: '' };
   const filed = row.filed.get(id);
   if (filed) return filed;
   // A seeded file: named after the show's release, e.g. Doctor.Who.2005.S00E06.1080p.BluRay.x264-SHORTBREHD.mkv

@@ -23,6 +23,7 @@ export const BACKEND_PREFIXES = new Set([
   'me',
   'recommendations',
   'status',
+  'hdrezka',
 ]);
 
 /** Response headers worth passing back to the browser. */

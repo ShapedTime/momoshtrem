@@ -4,6 +4,7 @@ import { resetMockState } from '@/mocks/handlers';
 import {
   assignmentApi,
   askStream,
+  hdrezkaApi,
   libraryApi,
   parseSseFrame,
   recApi,
@@ -16,6 +17,8 @@ import {
   traktApi,
 } from '@/lib/api/endpoints';
 import type { AskEvent } from '@/lib/api/contract';
+import { setMockScenario } from '@/mocks/scenario';
+import { episodeId } from '@/mocks/fixtures/titles';
 
 // The endpoint modules call relative /api/* URLs, as the browser does; resolve
 // them against a base. Wrap the fetch MSW installs on listen(), not the original.
@@ -31,6 +34,10 @@ afterAll(() => {
   global.fetch = mswFetch;
   server.close();
 });
+
+const INTERSTELLAR = 'https://rezka.ag/films/fiction/2259-interstellar-2014.html';
+const SEVERANCE = 'https://hdrezka.me/series/thriller/47283-razdelenie-2022.html';
+const BATTLE = 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html';
 
 describe('mock mode answers every PLAN §6 endpoint', () => {
   it.each([
@@ -92,6 +99,12 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /settings/ai/usage', () => settingsApi.aiUsage()],
     ['GET /status', () => systemApi.status()],
     ['GET /torrents/summary', () => torrentsApi.summary()],
+    ['GET /hdrezka/search', () => hdrezkaApi.search({ media_type: 'movie', tmdb_id: 157336 })],
+    ['GET /hdrezka/titles', () => hdrezkaApi.title({ url: INTERSTELLAR, movie_id: 2 })],
+    ['GET /hdrezka/streams', () => hdrezkaApi.streams({ url: INTERSTELLAR, translator_id: 238 })],
+    ['POST /movies/{id}/assign-hdrezka', () => hdrezkaApi.assignMovie(2, { url: INTERSTELLAR, translator_id: 238, quality: '1080p' })],
+    ['POST /shows/{id}/assign-hdrezka', () =>
+      hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 238, quality: '720p', items: [{ episode_id: episodeId(95396, 2, 9), season: 2, episode: 9 }] })],
   ])('%s', async (_name, call) => {
     await call(); // throws an ApiError on any non-2xx answer
   });
@@ -227,6 +240,87 @@ describe('the mock library keeps what the page changed', () => {
     expect(new Set(search.items.map((item) => item.match))).toEqual(new Set(['unknown']));
     const { items: stored } = await subtitlesApi.list('movie', 1);
     expect(stored.map((s) => `${s.language_code}:${s.source}:${s.match}`)).toEqual(['ru:opensubtitles:unknown']);
+  });
+});
+
+describe('HDRezka in mock mode (#63)', () => {
+  it('finds the TMDB title best first, and nothing for "zzz"', async () => {
+    const { items, query } = await hdrezkaApi.search({ media_type: 'movie', tmdb_id: 693134 });
+    expect(query).toBe('Dune: Part Two');
+    expect(items.map((item) => [item.title, item.year, item.match])).toEqual([
+      ['Дюна: Часть вторая', 2024, 'exact'],
+      ['Дюна', 2021, 'likely'],
+      ['Дюна', 1984, 'weak'],
+    ]);
+    expect((await hdrezkaApi.search({ media_type: 'movie', tmdb_id: 693134, q: 'interstellar 2014' })).items[0]).toMatchObject({ title: 'Интерстеллар', match: 'exact' });
+    expect((await hdrezkaApi.search({ media_type: 'movie', tmdb_id: 693134, q: 'zzz' })).items).toEqual([]);
+  });
+
+  it('opens a title on any mirror, flags its voice-overs and prices each quality', async () => {
+    const title = await hdrezkaApi.title({ url: BATTLE.replace('rezka.ag', 'hdrezka.me'), movie_id: 3 });
+    expect(title).toMatchObject({ post_id: 78655, kind: 'movie', translator_id: 111, seasons: [] });
+    expect(title.translators.filter((t) => t.premium || t.ads || t.camrip || t.director).map((t) => t.name)).toEqual(['Дубляж', 'TVShows', 'Red Head Sound', 'Jaskier']);
+    const streams = await hdrezkaApi.streams({ url: BATTLE, translator_id: 405 });
+    expect(streams.qualities.map((q) => [q.label, q.available && !q.premium])).toEqual([
+      ['360p', true],
+      ['480p', true],
+      ['720p', true],
+      ['1080p', false],
+      ['1080p Ultra', false],
+    ]);
+    expect((await hdrezkaApi.streams({ url: BATTLE, translator_id: 238 })).subtitles.map((s) => s.language_name)).toEqual(['English', 'Русский']);
+    await expect(hdrezkaApi.title({ url: 'https://rezka.ag/films/drama/1-nope.html' })).rejects.toMatchObject({ status: 404, code: 'not_found' });
+  });
+
+  it('streams a movie: ready at once, the torrent replaced, an .mp4 in Infuse, and no release to rank subtitles against', async () => {
+    await hdrezkaApi.assignMovie(1, { url: 'https://rezka.ag/films/fiction/64829-dyuna-chast-vtoraya-2024.html', translator_id: 238, quality: '1080p' });
+    const { library } = await titlesApi.get('movie', 693134);
+    expect(library).toMatchObject({
+      availability_stage: 'ready',
+      torrent: null,
+      stream: { provider: 'hdrezka', title: 'Дюна: Часть вторая', translator: 'Оригинал (+субтитры)', quality: '1080p', size_bytes: 4_453_333_333 },
+      webdav_path: '/Movies/Dune- Part Two (2024)/Dune- Part Two (2024).mp4',
+    });
+    expect((await subtitlesApi.search('movie', 1, ['en'])).release_name).toBeNull();
+    // The movie's current voice-over comes back first when the sheet reopens
+    expect((await hdrezkaApi.title({ url: library.stream?.url ?? '', movie_id: 1 })).translator_id).toBe(238);
+    await titlesApi.unassignMovie(1);
+    expect((await titlesApi.get('movie', 693134)).library).toMatchObject({ availability_stage: 'needs_torrent', stream: null });
+  });
+
+  it('refuses premium voice-overs and qualities with 409 premium_only', async () => {
+    await expect(hdrezkaApi.assignMovie(3, { url: BATTLE, translator_id: 56, quality: '1080p' })).rejects.toMatchObject({ status: 409, code: 'premium_only' });
+    await expect(hdrezkaApi.assignMovie(3, { url: BATTLE, translator_id: 238, quality: '1080p Ultra' })).rejects.toMatchObject({ status: 409, code: 'premium_only' });
+    setMockScenario('hdrezka-premium');
+    expect((await hdrezkaApi.title({ url: BATTLE })).translators.every((t) => t.premium)).toBe(true);
+  });
+
+  it.each([
+    ['hdrezka-blocked', 503, 'hdrezka_blocked'],
+    ['hdrezka-down', 502, 'hdrezka_unavailable'],
+    ['hdrezka-off', 503, 'unavailable'],
+  ] as const)('%s: every call fails with %s %s, never 401 or 403', async (name, status, code) => {
+    setMockScenario(name);
+    await expect(hdrezkaApi.search({ media_type: 'movie', tmdb_id: 1054867 })).rejects.toMatchObject({ status, code });
+    await expect(hdrezkaApi.assignMovie(3, { url: BATTLE, translator_id: 238, quality: '1080p' })).rejects.toMatchObject({ status, code });
+    expect((await systemApi.status()).hdrezka).toMatchObject({ configured: name !== 'hdrezka-off', reachable: false });
+  });
+
+  it('streams episodes, marks their source and reports the ones that failed', async () => {
+    setMockScenario('hdrezka-partial');
+    const items = [5, 6, 7].map((episode) => ({ episode_id: episodeId(95396, 2, episode), season: 2, episode }));
+    const result = await hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 10, quality: '1080p', items });
+    expect(result.assigned.map((a) => a.episode_id)).toEqual([items[0].episode_id, items[1].episode_id]);
+    expect(result.failed).toEqual([{ episode_id: items[2].episode_id, code: 'timeout', message: expect.any(String) }]);
+    const season = await titlesApi.season(95396, 2);
+    expect(season.episodes.slice(4, 7).map((e) => [e.source, e.stream?.translator ?? null])).toEqual([
+      ['hdrezka', 'LostFilm'],
+      ['hdrezka', 'LostFilm'],
+      ['torrent', null],
+    ]);
+    const title = await hdrezkaApi.title({ url: SEVERANCE, show_id: 4, translator_id: 10 });
+    expect(title.seasons[1].episodes[4].library).toMatchObject({ season: 2, episode: 5, has_file: true, source: 'hdrezka', stream: { quality: '1080p' } });
+    await expect(hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 10, quality: '1080p', items: [] })).rejects.toMatchObject({ status: 422 });
   });
 });
 

@@ -9,3 +9,4 @@ export * from './recommendations';
 export * from './settings';
 export * from './system';
 export * from './torrents';
+export * from './hdrezka';
