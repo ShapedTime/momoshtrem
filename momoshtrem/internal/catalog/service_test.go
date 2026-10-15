@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
@@ -316,6 +318,70 @@ func TestSeason_Golden(t *testing.T) {
 	}
 }
 
+// hdrezkaAssignment is an HDRezka stream as the item's file.
+func hdrezkaAssignment(itemType library.ItemType, itemID int64, ref library.StreamRef, size int64) *library.TorrentAssignment {
+	return &library.TorrentAssignment{ID: 900, ItemType: itemType, ItemID: itemID, Kind: library.AssignmentKindHDRezka,
+		FilePath: ref.FilePath(), FileSize: size, Resolution: "1080p", Stream: &ref, IsActive: true, CreatedAt: addedAt.Add(2 * time.Hour)}
+}
+
+func TestMovieTitle_HDRezkaStream(t *testing.T) {
+	ref := library.StreamRef{Provider: "hdrezka", Path: "/films/fiction/12345-dyuna-chast-vtoraya-2024.html", PostID: 12345,
+		Title: "Dune: Part Two", TranslatorID: 238, TranslatorName: "Оригинал (+субтитры)", Quality: "1080p"}
+	for _, tt := range []struct{ base, want string }{
+		{"", "https://rezka.ag/films/fiction/12345-dyuna-chast-vtoraya-2024.html"},
+		{"https://hdrezka.me/", "https://hdrezka.me/films/fiction/12345-dyuna-chast-vtoraya-2024.html"},
+	} {
+		f := newFixture()
+		f.svc.hdrezkaURL = New(Deps{HDRezkaURL: tt.base}).hdrezkaURL
+		f.store.movies[duneTMDB].Assignment = hdrezkaAssignment(library.ItemTypeMovie, 7, ref, 3_322_740_623)
+		title, err := f.svc.MovieTitle(context.Background(), duneTMDB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lib := title.Library
+		want := &TitleStream{Provider: "hdrezka", Title: "Dune: Part Two", URL: tt.want, Translator: "Оригинал (+субтитры)",
+			Quality: "1080p", SizeBytes: 3_322_740_623, AddedAt: addedAt.Add(2 * time.Hour)}
+		if !reflect.DeepEqual(lib.Stream, want) {
+			t.Errorf("stream = %+v, want %+v", lib.Stream, want)
+		}
+		if lib.Torrent != nil || lib.Download != nil || lib.AvailabilityStage != StageReady ||
+			*lib.WebDAVPath != "/Movies/Dune- Part Two (2024)/Dune- Part Two (2024).mp4" {
+			t.Errorf("library = %+v", lib)
+		}
+	}
+
+	// A torrent movie has no stream.
+	f := newFixture()
+	title, _ := f.svc.MovieTitle(context.Background(), duneTMDB)
+	if title.Library.Stream != nil || title.Library.Torrent == nil {
+		t.Errorf("torrent movie: stream %+v, torrent %+v", title.Library.Stream, title.Library.Torrent)
+	}
+}
+
+func TestSeason_Sources(t *testing.T) {
+	f := newFixture()
+	ref := library.StreamRef{Provider: "hdrezka", PostID: 77, TranslatorID: 238, TranslatorName: "Оригинал (+субтитры)",
+		Season: 1, Episode: 2, Quality: "720p"}
+	s1 := &f.store.seasons[3][1]
+	s1.Episodes[1].Assignment = hdrezkaAssignment(library.ItemTypeEpisode, s1.Episodes[1].ID, ref, 500)
+
+	season, err := f.svc.Season(context.Background(), frierenTMDB, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e1, e2, e30 := season.Episodes[0], season.Episodes[1], season.Episodes[29]
+	if e1.Source == nil || *e1.Source != SourceTorrent || e1.Stream != nil {
+		t.Errorf("E1 (torrent) = %v %+v", e1.Source, e1.Stream)
+	}
+	if e2.Source == nil || *e2.Source != SourceHDRezka || !reflect.DeepEqual(e2.Stream, &EpisodeStream{"Оригинал (+субтитры)", "720p"}) ||
+		e2.State != EpisodeReady || e2.Pct != nil || !strings.HasSuffix(*e2.WebDAVPath, " - S01E02 - Episode 2.mp4") {
+		t.Errorf("E2 (HDRezka) = %+v, stream %+v", e2, e2.Stream)
+	}
+	if e30.Source != nil || e30.Stream != nil {
+		t.Errorf("E30 (no file) = %v %+v", e30.Source, e30.Stream)
+	}
+}
+
 func TestSeason_Errors(t *testing.T) {
 	f := newFixture()
 	if _, err := f.svc.Season(context.Background(), 1, 1); !errors.Is(err, ErrNotInLibrary) {
@@ -594,7 +660,7 @@ func TestContractFields(t *testing.T) {
 		"backdrop_dominant_color", "genres", "vote_average", "vote_count", "original_language", "cast", "trailer_youtube_key",
 		"similar", "library", "watch_state", "recommendation_reason"}
 	libraryState := []string{"in_library", "library_id", "added_at", "availability_stage", "webdav_path", "webdav_url", "download",
-		"needs_review", "review_job_id", "episodes_total", "episodes_ready", "missing", "torrent"}
+		"needs_review", "review_job_id", "episodes_total", "episodes_ready", "missing", "torrent", "stream"}
 
 	tests := []struct {
 		name string
@@ -616,7 +682,9 @@ func TestContractFields(t *testing.T) {
 			"upcoming", "absolute_from", "absolute_to"}},
 		{"SeasonDetail", season, []string{"season_number", "name", "episodes", "ranges"}},
 		{"EpisodeSummary", season.Episodes[0], []string{"id", "season_number", "episode_number", "absolute_number", "name", "overview",
-			"air_date", "still_path", "runtime", "episode_type", "state", "pct", "webdav_path"}},
+			"air_date", "still_path", "runtime", "episode_type", "state", "pct", "webdav_path", "source", "stream"}},
+		{"TitleStream", TitleStream{}, []string{"provider", "title", "url", "translator", "quality", "size_bytes", "added_at"}},
+		{"EpisodeStream", EpisodeStream{}, []string{"translator", "quality"}},
 		{"EpisodeRange", season.Ranges[0], []string{"label", "kind", "from", "to", "absolute_from", "absolute_to", "missing"}},
 		{"Paginated", page, []string{"items", "total", "page", "page_size"}},
 		{"LibraryItem", page.Items[0], []string{"id", "media_type", "tmdb_id", "title", "year", "poster_path", "availability_stage",

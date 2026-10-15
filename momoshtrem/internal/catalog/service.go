@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -87,19 +89,23 @@ type Deps struct {
 	// WebDAVPublicURL is the address Infuse reaches WebDAV at
 	// (WEBDAV_PUBLIC_URL); webdav_url is it plus the escaped path.
 	WebDAVPublicURL string
-	Now             func() time.Time // nil: time.Now
+	// HDRezkaURL is the HDRezka mirror (HDREZKA_URL, no trailing slash);
+	// a stream's url is it plus the title page's path. "": rezka.ag.
+	HDRezkaURL string
+	Now        func() time.Time // nil: time.Now
 }
 
 // Service builds title pages and the library list.
 type Service struct {
-	store     Store
-	tmdb      TMDB
-	torrents  Torrents
-	colors    Colors
-	settings  SettingsApplier
-	publicURL string
-	now       func() time.Time
-	log       *slog.Logger
+	store      Store
+	tmdb       TMDB
+	torrents   Torrents
+	colors     Colors
+	settings   SettingsApplier
+	publicURL  string
+	hdrezkaURL string
+	now        func() time.Time
+	log        *slog.Logger
 }
 
 // New creates a Service.
@@ -108,15 +114,20 @@ func New(d Deps) *Service {
 	if now == nil {
 		now = time.Now
 	}
+	hdrezkaURL := strings.TrimRight(d.HDRezkaURL, "/")
+	if hdrezkaURL == "" {
+		hdrezkaURL = hdrezka.DefaultBaseURL
+	}
 	return &Service{
-		store:     d.Store,
-		tmdb:      d.TMDB,
-		torrents:  d.Torrents,
-		colors:    d.Colors,
-		settings:  d.Settings,
-		publicURL: d.WebDAVPublicURL,
-		now:       now,
-		log:       slog.With("component", "catalog"),
+		store:      d.Store,
+		tmdb:       d.TMDB,
+		torrents:   d.Torrents,
+		colors:     d.Colors,
+		settings:   d.Settings,
+		publicURL:  d.WebDAVPublicURL,
+		hdrezkaURL: hdrezkaURL,
+		now:        now,
+		log:        slog.With("component", "catalog"),
 	}
 }
 
