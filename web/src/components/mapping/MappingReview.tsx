@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useTaskPage } from '@/components/shell/ShellContext';
+import { useRouter } from 'next/navigation';
+import { ChevronLeft } from 'lucide-react';
 import { NotFoundView } from '@/components/system/NotFoundView';
 import { Banner, Button, ButtonLink, EmptyState, LoadingRegion, Skeleton } from '@/components/ui';
 import { useMappingActions } from '@/hooks/useMappingJob';
@@ -18,28 +19,47 @@ import { ReviewScreen } from './ReviewScreen';
 /** How long "Done. Here's the plan." shows before the review. */
 const DONE_MS = 1200;
 
+/**
+ * Before the job is known there's no title to go back to: Back (or For You).
+ * A task page has no tab bar on phone, so this is the way out.
+ */
+function BackButton() {
+  const router = useRouter();
+  return (
+    <div className="map-head-top">
+      <Button variant="ghost" size="sm" className="map-back" onClick={() => (window.history.length > 1 ? router.back() : router.push('/'))}>
+        <ChevronLeft size={18} aria-hidden="true" />
+        Back
+      </Button>
+    </div>
+  );
+}
+
 function MappingSkeleton() {
   return (
-    <LoadingRegion label="Loading the mapping">
+    <>
       <div className="map-skel-head page">
-        <Skeleton shape="line" width={96} />
-        <Skeleton shape="line" width="40%" />
-        <Skeleton height={40} width="min(520px, 100%)" />
-        <Skeleton height={44} width="min(720px, 100%)" />
-        <Skeleton shape="line" width={220} />
+        <BackButton />
+        <LoadingRegion label="Loading the mapping" className="flex flex-col gap-3">
+          <Skeleton shape="line" width="40%" />
+          <Skeleton height={40} width="min(520px, 100%)" />
+          <Skeleton height={44} width="min(720px, 100%)" />
+          <Skeleton shape="line" width={220} />
+        </LoadingRegion>
       </div>
-      <div className="page flex flex-col gap-4" aria-hidden="true">
+      <div className="page skel-delay flex flex-col gap-4" aria-hidden="true">
         {[180, 120, 260].map((height, i) => (
           <Skeleton key={i} height={height} className="rounded-lg" />
         ))}
       </div>
-    </LoadingRegion>
+    </>
   );
 }
 
 function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="page map-skel-head">
+      <BackButton />
       <Banner
         tone="error"
         role="alert"
@@ -112,7 +132,6 @@ function CancelledJob({ detail }: { detail: AssignmentJobDetail }) {
  * "Ready in Infuse." once applied; failed, discarded and missing jobs say so.
  */
 export function MappingReview({ jobId }: { jobId: number }) {
-  useTaskPage();
   const query = useQuery(assignmentJobQuery(jobId));
   const detail = query.data;
   const status = detail?.job.status;

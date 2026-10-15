@@ -166,7 +166,11 @@ describe('codes and ranges', () => {
     const frieren = seeded(101);
     const matched = frieren.proposals.filter((p) => p.group === 'matched');
     expect(seasonRangeSummary(matched)).toBe('S01 E29–E34, E36–E38');
-    expect(extrasPeek(frieren.proposals.filter((p) => p.group === 'extras'))).toBe('Font, Ending (creditless), Opening (creditless)');
+    const extras = frieren.proposals.filter((p) => p.group === 'extras');
+    expect(extrasPeek(extras)).toBe('Font, Ending (creditless), Opening (creditless)');
+    // Each kind once: three fonts and an opening read "Font, Opening (creditless)"
+    const fonts = [extras[0], { ...extras[0], id: -1 }, { ...extras[0], id: -2 }, extras[2]];
+    expect(extrasPeek(fonts)).toBe('Font, Opening (creditless)');
   });
 
   it('writes multi-episode targets as one range', () => {

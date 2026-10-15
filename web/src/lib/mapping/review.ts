@@ -8,6 +8,7 @@ import type {
   ProposalGroup,
   ProposalTarget,
 } from '@/lib/api/contract';
+import { isJobWorking } from '@/lib/api/endpoints/assignment';
 import { STATUS, type StatusTone } from '@/lib/status';
 import { episodeCode } from '@/lib/title/episodes';
 import { plural } from '@/lib/title/format';
@@ -288,12 +289,10 @@ export function ignoredLabel(p: Pick<Proposal, 'kind' | 'extra_type'>): string {
   return p.kind === 'extra' ? EXTRA_LABEL.other : STATUS.ignored.label;
 }
 
-/** A collapsed Extras group's peek: its first three kinds. */
+/** A collapsed Extras group's peek: its first three kinds, each once ("Font, Sample", not "Font, Font, Font"). */
 export function extrasPeek(proposals: Proposal[]): string {
-  return proposals
-    .slice(0, 3)
-    .map((p) => (p.decision === 'ignored' ? ignoredLabel(p) : p.targets.length ? targetCode(p.targets) : ignoredLabel(p)))
-    .join(', ');
+  const kinds = proposals.map((p) => (p.decision !== 'ignored' && p.targets.length ? targetCode(p.targets) : ignoredLabel(p)));
+  return [...new Set(kinds)].slice(0, 3).join(', ');
 }
 
 // ---- Actions -----------------------------------------------------------------------------------
@@ -470,11 +469,9 @@ export type ViewStage = 'progress' | 'done' | 'settled';
 export function nextStage(stage: ViewStage | null, status: JobStatus | undefined): ViewStage | null {
   if (status === undefined) return stage;
   if (status === 'failed' || status === 'cancelled') return 'settled';
-  if (JOB_WORKING.includes(status)) return stage === 'settled' || stage === 'done' ? stage : 'progress';
+  if (isJobWorking(status)) return stage === 'settled' || stage === 'done' ? stage : 'progress';
   return stage === 'progress' || stage === 'done' ? 'done' : 'settled';
 }
-
-const JOB_WORKING: readonly JobStatus[] = ['queued', 'fetching_metadata', 'classifying', 'resolving'];
 
 // ---- The job ---------------------------------------------------------------------------------
 

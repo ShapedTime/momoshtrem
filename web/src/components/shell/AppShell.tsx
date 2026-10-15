@@ -25,11 +25,10 @@ function isTyping(target: EventTarget | null): boolean {
 export function AppShell({ username, children }: { username: string; children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [overArt, setOverArt] = useState(false);
-  const [taskPage, setTaskPage] = useState(false);
   const activeCount = useActiveTorrentCount();
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
-  const shell = useMemo(() => ({ openPalette, setOverArt, setTaskPage }), [openPalette]);
+  const shell = useMemo(() => ({ openPalette, setOverArt }), [openPalette]);
 
   // ⌘K / Ctrl K anywhere; "/" when not typing
   useEffect(() => {
@@ -54,13 +53,13 @@ export function AppShell({ username, children }: { username: string; children: R
         Skip to content
       </a>
       <TopBar username={username} overArt={overArt} activeCount={activeCount} />
-      {/* Hero pages draw their own phone bar (Back, More) over the artwork; task pages their own header */}
-      {!overArt && !taskPage && <PhoneBar username={username} />}
-      <main id="main" tabIndex={-1} className={cx('main outline-none', overArt && 'has-hero', taskPage && 'main--task')}>
+      {/* Hero pages draw their own phone bar (Back, More) over the artwork */}
+      {!overArt && <PhoneBar username={username} />}
+      <main id="main" tabIndex={-1} className={cx('main outline-none', overArt && 'has-hero')}>
         <ConnectionBanner />
         <PageTransition>{children}</PageTransition>
       </main>
-      {!taskPage && <TabBar activeCount={activeCount} />}
+      <TabBar activeCount={activeCount} />
       <Suspense fallback={null}>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
         <SheetHost />

@@ -205,7 +205,6 @@ function Actions({ p, short, movie, actions }: { p: Proposal; short: string; mov
         <EyeOff size={16} aria-hidden="true" />
         Ignore
       </Button>
-      <span className="grow" />
       {canToggleAccept(p) &&
         (accepted ? (
           <Button variant="ready" size="sm" data-action="accept" aria-pressed="true" aria-label={`Accepted: ${short}. Tap to undo`} onClick={() => actions.unaccept(p)}>

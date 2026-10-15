@@ -58,8 +58,9 @@ test.describe('mapping review', () => {
     await expect(page.getByRole('heading', { name: 'Check the episodes', level: 1 })).toBeVisible();
     await expect(page.getByText('[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]')).toBeVisible();
     await expect(page.locator('.map-summary')).toHaveText(/9 matched\s*2 need review\s*1 special\s*3 ignored\s*1 unmatched/);
-    // A task page: no tab bar, the foot sits at the bottom
-    await expect(page.locator('.tabbar')).toHaveCount(0);
+    // A task page: no phone bar or tab bar, the foot sits at the bottom
+    await expect(page.locator('.tabbar')).toBeHidden();
+    await expect(page.locator('.phone-bar')).toBeHidden();
     await expect(applyButton(page)).toHaveAttribute('aria-disabled', 'true');
     await expect(page.locator('.map-foot-msg')).toHaveText('Decide on 2 files to apply');
     // Below 1024 px the long, settled groups start collapsed, with a peek
@@ -88,8 +89,11 @@ test.describe('mapping review', () => {
 
     // Ignore the unmatched file: unmatched files never block, but now everything has a place
     await expect(page.locator('.map-foot-msg')).toHaveText('1 file stays unmapped. You can map it later.');
-    await page.getByRole('button', { name: 'Ignore Special Extra' }).click();
+    // By keyboard: the Ignore button goes away, so focus moves to the row's Undo
+    await page.getByRole('button', { name: 'Ignore Special Extra' }).focus();
+    await page.keyboard.press('Enter');
     await expect(row(page, 'Special Extra')).toContainText(/Ignored\s*· not in Infuse/);
+    await expect(row(page, 'Special Extra').getByRole('button', { name: 'Undo: map Special Extra again' })).toBeFocused();
     await expect(page.locator('.map-foot-msg')).toHaveText('Everything has a place');
     await expect(applyButton(page)).toHaveAttribute('aria-disabled', 'false');
 
@@ -97,10 +101,16 @@ test.describe('mapping review', () => {
     await expect(page.getByRole('heading', { name: 'Ready in Infuse.', level: 1 })).toBeVisible();
     const done = page.getByRole('list', { name: 'Mapped to Infuse' });
     await expect(done.getByRole('listitem')).toHaveText([/Season 1\s*E29–E38\s*10 ready/, /Specials\s*E05, E06\s*2 ready/, /Left out\s*4 ignored/]);
-    await expect(toast(page, 'Frieren S01E29–E38 are ready')).toBeVisible();
+    const ready = toast(page, 'Frieren S01E29–E38 are ready');
+    await expect(ready).toBeVisible();
     await expectAccessibleAndContained(page);
+    // The sticky toast never covers Applied's buttons (on phone it sits at the top)
+    const back = page.getByRole('link', { name: 'Back to Frieren' });
+    const [toastBox, backBox] = [await ready.boundingBox(), await back.boundingBox()];
+    if (!toastBox || !backBox) throw new Error('No toast or Back link');
+    expect(toastBox.y + toastBox.height <= backBox.y || backBox.y + backBox.height <= toastBox.y || toastBox.x >= backBox.x + backBox.width).toBe(true);
 
-    await page.getByRole('link', { name: 'Back to Frieren' }).click();
+    await back.click();
     await expect(page).toHaveURL(/\/tv\/209867$/);
     await expect(page.getByRole('heading', { name: 'Frieren: Beyond Journey’s End', level: 1 })).toBeVisible();
     await expect(page.getByText(/need a quick review|needs a quick review/)).toHaveCount(0);
@@ -142,7 +152,7 @@ test.describe('mapping review', () => {
     await expect(steps.nth(1)).toHaveAttribute('aria-current', 'step');
     await expect(steps.nth(1)).toContainText('16 files · 13 videos');
     await expect(steps.nth(2)).not.toHaveClass(/is-done|is-active/);
-    await expect(page.locator('.tabbar')).toHaveCount(0);
+    await expect(page.locator('.tabbar')).toBeHidden();
     await expectAccessibleAndContained(page);
 
     // Lift the hold: the job finishes, the AI step reports, then the plan
@@ -188,10 +198,42 @@ test.describe('mapping review', () => {
     else await page.getByRole('menuitem', { name: 'Discard this mapping…' }).click();
     const confirm = page.getByRole('alertdialog', { name: 'Discard this mapping?' });
     await expect(confirm).toContainText('Nothing is added to Infuse.');
+    // The page leaves without flashing the job's new, discarded state
+    await page.evaluate(() => {
+      const seen = { discarded: false };
+      Object.assign(window, { seen });
+      new MutationObserver(() => {
+        if (document.body.textContent?.includes('This mapping was discarded')) seen.discarded = true;
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
     await confirm.getByRole('button', { name: 'Discard mapping' }).click();
     await expect(page).toHaveURL(/\/tv\/209867$/);
     await expect(toast(page, 'Mapping discarded')).toBeVisible();
     await expect(page.getByText(/need a quick review/)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { seen: { discarded: boolean } }).seen.discarded)).toBe(false);
+  });
+
+  test('keyboard: Accept all hands focus to the first file it accepted', async ({ page }) => {
+    await signIn(page, '/mapping/101');
+    await page.getByRole('button', { name: 'Accept all 2' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', { name: 'Accepted: #35v2. Tap to undo' })).toBeFocused();
+    await expect(page.getByRole('button', { name: /^Accept all/ })).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+  });
+
+  test('a cold load never shows the phone bar or tab bar, not even before hydration', async ({ page }) => {
+    await signIn(page, '/tv/209867');
+    // The server's HTML already hides them (CSS on .task-page), so nothing jumps when the page hydrates
+    await page.goto('/mapping/101', { waitUntil: 'domcontentloaded' });
+    const shown = await page.evaluate(() =>
+      ['.tabbar', '.phone-bar'].map((selector) => {
+        const element = document.querySelector(selector);
+        return element ? getComputedStyle(element).display !== 'none' : false;
+      })
+    );
+    expect(shown).toEqual([false, false]);
+    await expect(page.getByRole('heading', { name: 'Check the episodes' })).toBeVisible();
   });
 
   test('a missing job is a 404; a failed one says why', async ({ page }) => {

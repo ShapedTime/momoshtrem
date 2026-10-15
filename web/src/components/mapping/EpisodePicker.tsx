@@ -324,7 +324,7 @@ function PickerList({ rows, virtual, disabled, query, startSeason, onPick, ref }
   );
 }
 
-// ---- Search and tools --------------------------------------------------------------------------
+// ---- Search, tools and list ------------------------------------------------------------------
 
 interface PickerProps {
   catalog: PickerCatalog;
@@ -341,25 +341,36 @@ interface PickerProps {
 
 interface PickerParts {
   head: ReactNode;
-  list: ReactNode;
+  /** The list once the catalog is in; its loading or error state until then. */
+  body: ReactNode;
+  loaded: boolean;
 }
 
-/** Search, season jump, Hide taken and the list, sharing one query. */
+const NO_SEASONS: ShowEpisodesSeason[] = [];
+
+/**
+ * Search, season jump, Hide taken and the list, sharing one query. The parts
+ * stay mounted while the catalog loads; only the list waits for it, and it
+ * opens on the file's episode when it first shows.
+ */
 function usePickerParts({
-  seasons,
+  catalog,
   proposal,
   taken,
   hideTaken,
   onHideTaken,
   onPick,
   searchRef,
-}: Omit<PickerProps, 'catalog' | 'path'> & { seasons: ShowEpisodesSeason[]; searchRef?: RefObject<HTMLInputElement | null> }): PickerParts {
+}: Omit<PickerProps, 'path'> & { searchRef?: RefObject<HTMLInputElement | null> }): PickerParts {
+  const seasons = catalog.status === 'success' ? catalog.seasons : NO_SEASONS;
   const listRef = useRef<ListHandle>(null);
   const [query, setQuery] = useState('');
   const current = useMemo(() => new Set(proposal?.targets.map((t) => t.episode_id) ?? []), [proposal]);
   const rows = useMemo(() => pickerRows(seasons, { query, hideTaken, current, taken }), [seasons, query, hideTaken, current, taken]);
-  const [season, setSeason] = useState(() => initialSeason(seasons, proposal));
-  const [startSeason] = useState(season);
+  // The file's season until you jump to another
+  const [chosenSeason, setChosenSeason] = useState<number | null>(null);
+  const startSeason = initialSeason(seasons, proposal);
+  const season = chosenSeason ?? startSeason;
 
   const head = (
     <>
@@ -385,7 +396,7 @@ function usePickerParts({
             options={seasons.map((s) => ({ value: String(s.season_number), label: seasonShortLabel(s) }))}
             value={season === null ? '' : String(season)}
             onChange={(value) => {
-              setSeason(Number(value));
+              setChosenSeason(Number(value));
               listRef.current?.scrollToSeason(Number(value));
             }}
           />
@@ -398,18 +409,21 @@ function usePickerParts({
       </div>
     </>
   );
-  const list = (
-    <PickerList
-      ref={listRef}
-      rows={rows}
-      virtual={episodeCount(seasons) > PICKER_VIRTUALIZE_ABOVE}
-      disabled={proposal === null}
-      query={query}
-      startSeason={startSeason}
-      onPick={onPick}
-    />
-  );
-  return { head, list };
+  const body =
+    catalog.status === 'success' ? (
+      <PickerList
+        ref={listRef}
+        rows={rows}
+        virtual={episodeCount(seasons) > PICKER_VIRTUALIZE_ABOVE}
+        disabled={proposal === null}
+        query={query}
+        startSeason={startSeason}
+        onPick={onPick}
+      />
+    ) : (
+      <CatalogState catalog={catalog} />
+    );
+  return { head, body, loaded: catalog.status === 'success' };
 }
 
 function CatalogState({ catalog }: { catalog: Exclude<PickerCatalog, { status: 'success' }> }) {
@@ -457,37 +471,20 @@ function PickerFor({ proposal, path, label }: { proposal: Proposal | null; path:
 
 // ---- Pane (desktop) --------------------------------------------------------------------------
 
-function PaneBody({ path, ...props }: Omit<PickerProps, 'catalog'> & { seasons: ShowEpisodesSeason[]; searchRef: RefObject<HTMLInputElement | null> }) {
-  const { head, list } = usePickerParts(props);
-  return (
-    <>
-      <div className="pk-head">
-        <PickerFor proposal={props.proposal} path={path} label="Episode for" />
-        {head}
-      </div>
-      {list}
-    </>
-  );
-}
-
 /**
  * Desktop (≥ 1024 px): the sticky right-hand pane, linked to the selected
  * row. Key it by the selected proposal, so a new selection starts on its episode.
  */
-export function EpisodePickerPane({ catalog, searchRef, ...props }: PickerProps & { searchRef: RefObject<HTMLInputElement | null> }) {
+export function EpisodePickerPane({ path, ...props }: PickerProps & { searchRef: RefObject<HTMLInputElement | null> }) {
+  const { head, body } = usePickerParts(props);
   return (
     <aside className="map-pane" aria-label="Episode picker">
       <div className="picker">
-        {catalog.status === 'success' ? (
-          <PaneBody {...props} seasons={catalog.seasons} searchRef={searchRef} />
-        ) : (
-          <>
-            <div className="pk-head">
-              <PickerFor proposal={props.proposal} path={props.path} label="Episode for" />
-            </div>
-            <CatalogState catalog={catalog} />
-          </>
-        )}
+        <div className="pk-head">
+          <PickerFor proposal={props.proposal} path={path} label="Episode for" />
+          {head}
+        </div>
+        {body}
         <p className="pk-legend t-small text-fg-3">
           <Info size={14} aria-hidden="true" />
           Click an episode to assign it to the selected file.
@@ -505,15 +502,25 @@ interface SheetProps extends PickerProps {
   onIgnore: () => void;
 }
 
-function SheetBody({ open, onOpenChange, onIgnore, path, ...props }: Omit<SheetProps, 'catalog'> & { seasons: ShowEpisodesSeason[] }) {
-  const { head, list } = usePickerParts(props);
-  const listHost = useRef<HTMLDivElement>(null);
+/**
+ * Phone and tablet: a tall sheet with a stable height. A plain sheet, not
+ * nested: this page has no parent sheet. One sheet from loading to loaded
+ * (only its body changes). Key it per opening, so the query starts empty and
+ * the list opens on the file's episode.
+ */
+export function EpisodePickerSheet({ open, onOpenChange, onIgnore, path, ...props }: SheetProps) {
+  const { head, body, loaded } = usePickerParts(props);
+  const bodyHost = useRef<HTMLDivElement>(null);
   // Focus goes to the current option, not the search, so the keyboard doesn't cover the list
+  // (once the list is there; not if you've started typing meanwhile)
   useLayoutEffect(() => {
-    if (!open) return;
-    const timer = window.setTimeout(() => listHost.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus({ preventScroll: true }), 60);
+    if (!open || !loaded) return;
+    const timer = window.setTimeout(() => {
+      if (document.activeElement instanceof HTMLInputElement) return;
+      bodyHost.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus({ preventScroll: true });
+    }, 60);
     return () => window.clearTimeout(timer);
-  }, [open]);
+  }, [open, loaded]);
   return (
     <Sheet
       open={open}
@@ -538,23 +545,9 @@ function SheetBody({ open, onOpenChange, onIgnore, path, ...props }: Omit<SheetP
         </>
       }
     >
-      <div ref={listHost} className="contents">
-        {list}
+      <div ref={bodyHost} className="contents">
+        {body}
       </div>
-    </Sheet>
-  );
-}
-
-/**
- * Phone and tablet: a tall sheet with a stable height. A plain sheet, not
- * nested: this page has no parent sheet. Key it per opening, so the query
- * starts empty and the list opens on the file's episode.
- */
-export function EpisodePickerSheet({ catalog, ...props }: SheetProps) {
-  if (catalog.status === 'success') return <SheetBody {...props} seasons={catalog.seasons} />;
-  return (
-    <Sheet open={props.open} onOpenChange={props.onOpenChange} title="Choose an episode" size="full" className="map-sheet">
-      <CatalogState catalog={catalog} />
     </Sheet>
   );
 }

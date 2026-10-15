@@ -57,10 +57,9 @@ afterEach(() => {
 });
 
 function renderPage(jobId: number) {
-  const setTaskPage = jest.fn();
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <ShellContext.Provider value={{ openPalette: jest.fn(), setOverArt: jest.fn(), setTaskPage }}>
+      <ShellContext.Provider value={{ openPalette: jest.fn(), setOverArt: jest.fn() }}>
         <ToastProvider>
           <ConfirmProvider>
             <MappingReview jobId={jobId} />
@@ -69,17 +68,24 @@ function renderPage(jobId: number) {
       </ShellContext.Provider>
     </QueryClientProvider>
   );
-  return { setTaskPage };
 }
 
 const apply = () => screen.getByRole('button', { name: /^Apply \d+ mappings?$/ });
 
 describe('MappingReview', () => {
-  it('is a task page: no tab bar while it shows', async () => {
+  it('hands focus on when the button you pressed goes away: Ignore → Undo, Accept all → the first Accepted', async () => {
     stubBackend(seeded(101));
-    const { setTaskPage } = renderPage(101);
-    expect(await screen.findByRole('heading', { name: 'Check the episodes', level: 1 })).toBeInTheDocument();
-    expect(setTaskPage).toHaveBeenCalledWith(true);
+    renderPage(101);
+    const ignore = await screen.findByRole('button', { name: 'Ignore Special Extra' });
+    ignore.focus();
+    fireEvent.click(ignore);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Undo: map Special Extra again' })).toHaveFocus());
+
+    const acceptAll = screen.getByRole('button', { name: 'Accept all 2' });
+    acceptAll.focus();
+    fireEvent.click(acceptAll);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Accepted: #35v2. Tap to undo' })).toHaveFocus());
+    expect(screen.queryByRole('button', { name: /^Accept all/ })).not.toBeInTheDocument();
   });
 
   it('accepts at once and sends the batch PATCH; the foot follows', async () => {

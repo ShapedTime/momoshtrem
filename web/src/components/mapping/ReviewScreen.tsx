@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 import { useMappingActions } from '@/hooks/useMappingJob';
@@ -30,11 +30,15 @@ import { ProposalGroup } from './ProposalGroup';
 import { type RowActions, ProposalRow, rowId } from './ProposalRow';
 
 const FLASH_MS = 1200;
+/** How long a focus move waits for its target to render. */
+const FOCUS_WAIT_MS = 2000;
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const isDesktop = () => typeof window !== 'undefined' && window.matchMedia(DESKTOP_QUERY).matches;
 
-/** After React has painted the change: the row's button to focus, or the row to scroll to. */
+/** After React has painted the change: the row to scroll to. */
 const afterPaint = (run: () => void) => window.requestAnimationFrame(() => window.requestAnimationFrame(run));
+
+type FocusTarget = { kind: 'row'; id: number; actions: string[] } | { kind: 'search' };
 
 /**
  * The review (PLAN F4): groups by urgency with full and compact rows, the
@@ -95,15 +99,40 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
     : catalogQuery.isError ? { status: 'error', message: catalogQuery.error.message, retry: () => void catalogQuery.refetch() }
     : { status: 'success', seasons: catalogQuery.data.items };
 
-  const focusInRow = (id: number, action: string) =>
-    afterPaint(() => document.querySelector<HTMLElement>(`#${rowId(id)} [data-action="${action}"]`)?.focus());
+  /**
+   * Where focus goes once a change has rendered (the button you pressed may be
+   * gone): a row's action, the first that exists, or the pane's search. Kept
+   * briefly, so a change that never renders (a failed PATCH) doesn't move focus later.
+   */
+  const pendingFocus = useRef<{ target: FocusTarget; scroll: boolean; until: number } | null>(null);
+  const focusAfterRender = (target: FocusTarget, scroll = false) => {
+    pendingFocus.current = { target, scroll, until: Date.now() + FOCUS_WAIT_MS };
+  };
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending) return;
+    if (Date.now() > pending.until) {
+      pendingFocus.current = null;
+      return;
+    }
+    const { target } = pending;
+    const row = target.kind === 'row' ? document.getElementById(rowId(target.id)) : null;
+    const element =
+      target.kind === 'search'
+        ? searchRef.current
+        : target.actions.map((action) => row?.querySelector<HTMLElement>(`[data-action="${action}"]`)).find((found) => found);
+    if (!element) return;
+    pendingFocus.current = null;
+    element.focus({ preventScroll: true });
+    if (pending.scroll) row?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  });
 
   const rowActions: RowActions = {
     select: (p, focusSearch = false) => {
       if (movie) return;
       setSelectedId(p.id);
       if (desktop) {
-        if (focusSearch) afterPaint(() => searchRef.current?.focus({ preventScroll: true }));
+        if (focusSearch) focusAfterRender({ kind: 'search' });
       } else setSheet((current) => ({ id: p.id, open: true, key: (current?.key ?? 0) + 1 }));
     },
     accept: (p) => {
@@ -117,18 +146,25 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
     unaccept: (p) => void change([{ id: p.id, decision: 'pending' }]),
     ignore: (p) => {
       if (sheet?.id === p.id) setSheet({ ...sheet, open: false });
+      focusAfterRender({ kind: 'row', id: p.id, actions: ['restore'] });
       void change([{ id: p.id, decision: 'ignored' }]);
       flashRow(p.id);
-      focusInRow(p.id, 'restore');
     },
     restore: (p) => {
       // An extra with no episode becomes pending, and you pick one
       const decision = restoredDecision(p);
+      if (p.group === 'extras' && !maps(p)) rowActions.select(p);
+      else focusAfterRender({ kind: 'row', id: p.id, actions: ['accept', 'change', 'ignore'] });
       void change([{ id: p.id, decision }]);
       flashRow(p.id);
-      if (p.group === 'extras' && !maps(p)) rowActions.select(p);
-      else focusInRow(p.id, decision === 'accepted' && p.group !== 'needs_review' ? 'change' : 'accept');
     },
+  };
+
+  /** Accept all: focus moves to the first of them, now "Accepted" (the button you pressed goes away). */
+  const acceptAll = (pending: Proposal[]) => {
+    if (pending.length === 0) return;
+    focusAfterRender({ kind: 'row', id: pending[0].id, actions: ['accept'] });
+    void change(pending.map((p) => ({ id: p.id, decision: 'accepted' as const })));
   };
 
   const pick = async (p: Proposal, episode: PickerEpisode) => {
@@ -140,7 +176,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
     if (!desktop) afterPaint(() => document.getElementById(rowId(p.id))?.scrollIntoView({ block: 'center' }));
   };
 
-  const apply = async () => {
+  const apply = () => {
     if (foot.blocked) {
       const blocker = firstBlocker(proposals);
       if (!blocker) return;
@@ -148,17 +184,13 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
       setOpened((current) => ({ ...current, [proposal.group]: true }));
       if (desktop && !movie) setSelectedId(proposal.id);
       flashRow(proposal.id);
-      afterPaint(() => {
-        const row = document.getElementById(rowId(proposal.id));
-        row?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-        const action = blocker.reason === 'conflict' && !movie ? 'change' : 'accept';
-        (row?.querySelector<HTMLElement>(`[data-action="${action}"]`) ?? row?.querySelector<HTMLElement>('[data-action]'))?.focus({ preventScroll: true });
-      });
+      const first = blocker.reason === 'conflict' && !movie ? 'change' : 'accept';
+      focusAfterRender({ kind: 'row', id: proposal.id, actions: [first, 'change', 'accept', 'ignore'] }, true);
       return;
     }
     setApplyError(null);
-    const message = await actions.apply();
-    if (message) setApplyError({ message, edits });
+    const at = edits;
+    void actions.apply((message) => setApplyError({ message, edits: at }));
   };
 
   return (
@@ -175,7 +207,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
                 proposals={rows}
                 open={isOpen(group)}
                 onToggle={() => setOpened((current) => ({ ...current, [group]: !isOpen(group) }))}
-                onAcceptAll={(pending) => void change(pending.map((p) => ({ id: p.id, decision: 'accepted' as const })))}
+                onAcceptAll={acceptAll}
                 movie={movie}
               >
                 {rows.map((p) => {
@@ -217,7 +249,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
         error={applyError && applyError.edits === edits ? applyError.message : null}
         cancelHref={titleHref(job)}
         applying={actions.applying}
-        onApply={() => void apply()}
+        onApply={apply}
       />
       {!desktop && sheet && sheetProposal && (
         <EpisodePickerSheet

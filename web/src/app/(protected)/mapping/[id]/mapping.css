@@ -88,7 +88,8 @@
   .mrow-arrow .a-wide { display: none; }
   .mrow-target { grid-area: target; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .mrow-actions { grid-area: actions; display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; margin: 0 calc(var(--sp-1) * -1) calc(var(--sp-1) * -1); }
-  .mrow-actions .grow { flex: 1; }
+  /* Accept sits at the end of the row, also when the row wraps at 320 px */
+  .mrow-actions .mt-accept, .mrow-actions .btn-ready { margin-left: auto; }
 
   .mt-ep { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; flex-wrap: wrap; }
   .mt-se { font-family: var(--font-mono); font-size: 13px; font-weight: var(--w-medium); color: var(--text-1); letter-spacing: -0.01em; padding: 1px 6px; border-radius: var(--r-xs); background: var(--surface-3); }
@@ -117,7 +118,6 @@
   .mrow.is-conflict { border-color: var(--st-error-line); box-shadow: inset 3px 0 0 var(--st-error); }
   .mrow.is-ignored { background: transparent; border-style: dashed; }
   .mrow.is-ignored .path, .mrow.is-ignored .mrow-size { color: var(--text-3); }
-  .mrow.is-ignored .path .dir { color: var(--text-3); }
   .mrow.is-flash { animation: map-flash 1.2s var(--ease-out); }
   @keyframes map-flash { 0% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: 0 0 0 2px rgb(242 179 61 / 0); } }
 
@@ -132,9 +132,8 @@
     .mrow-arrow .a-stack { display: none; }
     .mrow-arrow .a-wide { display: block; }
     .mrow--full .mrow-actions { flex-direction: column; align-items: stretch; flex-wrap: nowrap; margin: 0; min-width: 132px; }
-    .mrow--full .mrow-actions .grow { display: none; }
     .mrow--full .mrow-actions .btn { justify-content: flex-start; }
-    .mrow--full .mrow-actions .mt-accept, .mrow--full .mrow-actions .btn-ready { order: -1; justify-content: center; }
+    .mrow--full .mrow-actions .mt-accept, .mrow--full .mrow-actions .btn-ready { order: -1; justify-content: center; margin-left: 0; }
   }
 
   /* Desktop: the selected file is linked to the episode pane */
@@ -206,10 +205,9 @@
     .map-foot-actions { flex-shrink: 0; }
     .map-foot-actions .map-apply { flex: 0 0 auto; padding: 0 var(--sp-6); }
   }
-  /* No tab bar on this page: toasts sit at the bottom, and clear the foot while it shows */
-  @media (max-width: 1023px) { body:has(.map-page) .toast-region { bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); } }
-  body:has(.map-foot) .toast-region { bottom: calc(env(safe-area-inset-bottom, 0px) + 124px); }
-  @media (min-width: 640px) { body:has(.map-foot) .toast-region { bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); } }
+  /* Toasts clear the foot while it shows (a task page's toasts otherwise sit at the bottom, shell.css) */
+  body:has(.map-page .map-foot) .toast-region { bottom: calc(env(safe-area-inset-bottom, 0px) + 124px); }
+  @media (min-width: 640px) { body:has(.map-page .map-foot) .toast-region { bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); } }
 
   /* ---- Progress phase ---------------------------------------------------------------- */
   .map-progress { display: flex; flex-direction: column; align-items: center; gap: var(--sp-6); padding-bottom: var(--sp-12); }
@@ -239,8 +237,10 @@
   .done-list .list-row { min-height: 64px; }
   .done-ic { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--st-ready-bg); color: var(--st-ready); flex-shrink: 0; }
   .done-ic--muted { background: var(--surface-3); color: var(--text-3); }
-  /* Room to scroll the actions clear of the sticky ready toast on phones */
-  @media (max-width: 1023px) { .map-done { padding-bottom: calc(var(--sp-16) + 96px + env(safe-area-inset-bottom, 0px)); } }
+  /* Phone and tablet: the sticky ready toast goes to the top, clear of Applied's buttons */
+  @media (max-width: 1023px) {
+    body:has(.map-page .map-done) .toast-region { top: calc(env(safe-area-inset-top, 0px) + 12px); bottom: auto; }
+  }
   .done-actions { display: flex; flex-direction: column; gap: var(--sp-2); width: 100%; margin-top: var(--sp-2); }
   @media (min-width: 640px) { .done-actions { flex-direction: row; justify-content: center; width: auto; } }
 

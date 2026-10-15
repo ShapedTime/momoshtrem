@@ -111,19 +111,17 @@ export function setJobDetail(queryClient: QueryClient, detail: AssignmentJobDeta
  * After apply, discard or a re-check: refetch the job (polling restarts while
  * it works), the jobs list, and everything an applied mapping changes: titles,
  * the library, subtitles, the picker's episodes and torrent files.
+ * `refetchJob: false` only marks the job stale, for a page that is leaving
+ * it (discard), so it doesn't flash the job's new state on the way out.
  */
-export function invalidateAfterJob(queryClient: QueryClient, jobId: number): Promise<unknown> {
-  return Promise.all(
-    [
-      assignmentKeys.job(jobId),
-      assignmentKeys.lists,
-      titleKeys.all,
-      libraryKeys.all,
-      subtitleKeys.all,
-      assignmentKeys.allEpisodes,
-      torrentKeys.all,
-    ].map(
-      (queryKey) => queryClient.invalidateQueries({ queryKey })
-    )
-  );
+export function invalidateAfterJob(queryClient: QueryClient, jobId: number, { refetchJob = true }: { refetchJob?: boolean } = {}): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: assignmentKeys.job(jobId), refetchType: refetchJob ? 'active' : 'none' }),
+    ...[assignmentKeys.lists, titleKeys.all, libraryKeys.all, subtitleKeys.all, assignmentKeys.allEpisodes, torrentKeys.all].map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey })
+    ),
+  ]);
 }
+
+/** Every write to one job (PATCH, apply, discard) runs in order: Apply never overtakes a PATCH still on its way. */
+export const jobMutationScope = (jobId: number) => ({ id: `assignment-job-${jobId}` });

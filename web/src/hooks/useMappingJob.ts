@@ -8,7 +8,7 @@ import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useConfirm, useToast } from '@/components/ui';
 import type { AssignmentJob, AssignmentJobDetail, ProposalChange, Title } from '@/lib/api/contract';
 import { isApiError } from '@/lib/api/client';
-import { assignmentApi, assignmentKeys, invalidateAfterJob, setJobDetail, titleKeys } from '@/lib/api/endpoints';
+import { assignmentApi, assignmentKeys, invalidateAfterJob, jobMutationScope, setJobDetail, titleKeys } from '@/lib/api/endpoints';
 import { applyErrorMessage, readyToastTitle, shortTitle, titleHref, withDecisions } from '@/lib/mapping/review';
 import { useSheet } from '@/lib/sheets/useSheet';
 
@@ -26,8 +26,9 @@ export function useHowToPlay(job: Pick<AssignmentJob, 'item'>) {
 
 /**
  * A mapping job's writes (PLAN §6 "Assignment"): batch PATCH, apply and
- * discard. Decisions show at once (the answer replaces them); only the latest
- * answer lands in the cache, and a failed change refetches the job.
+ * discard, in one mutation scope so they run in order. Decisions show at
+ * once (the answer replaces them); only the latest answer lands in the
+ * cache, and a failed change refetches the job.
  */
 export function useMappingActions(job: AssignmentJob) {
   const queryClient = useQueryClient();
@@ -37,15 +38,12 @@ export function useMappingActions(job: AssignmentJob) {
   const howToPlay = useHowToPlay(job);
   const latest = useRef(0);
   const jobId = job.id;
+  const scope = jobMutationScope(jobId);
   const refetchJob = useCallback(() => queryClient.invalidateQueries({ queryKey: assignmentKeys.job(jobId) }), [queryClient, jobId]);
 
   const patch = useMutation({
+    scope,
     mutationFn: ({ items }: { items: ProposalChange[]; seq: number }) => assignmentApi.patchProposals(jobId, { items }),
-    onMutate: async ({ items }) => {
-      const key = assignmentKeys.job(jobId);
-      await queryClient.cancelQueries({ queryKey: key });
-      queryClient.setQueryData<AssignmentJobDetail>(key, (detail) => detail && { ...detail, proposals: withDecisions(detail.proposals, items) });
-    },
     onSuccess: (detail, { seq }) => {
       if (seq === latest.current) void setJobDetail(queryClient, detail);
     },
@@ -56,20 +54,28 @@ export function useMappingActions(job: AssignmentJob) {
   });
   const { mutateAsync: patchAsync } = patch;
 
-  /** Resolves with the new detail, or null when it failed (a toast says so). */
+  /**
+   * Shows decisions in the same tick (so focus can move to what replaces the
+   * button you pressed), then resolves with the server's detail, or null when
+   * it failed (a toast says so).
+   */
   const change = useCallback(
     async (items: ProposalChange[]): Promise<AssignmentJobDetail | null> => {
+      const key = assignmentKeys.job(jobId);
       latest.current += 1;
+      void queryClient.cancelQueries({ queryKey: key });
+      queryClient.setQueryData<AssignmentJobDetail>(key, (detail) => detail && { ...detail, proposals: withDecisions(detail.proposals, items) });
       try {
         return await patchAsync({ items, seq: latest.current });
       } catch {
         return null;
       }
     },
-    [patchAsync]
+    [patchAsync, queryClient, jobId]
   );
 
   const applyMutation = useMutation({
+    scope,
     mutationFn: () => assignmentApi.apply(jobId),
     onSuccess: (detail) => {
       queryClient.setQueryData(assignmentKeys.job(jobId), detail);
@@ -83,35 +89,41 @@ export function useMappingActions(job: AssignmentJob) {
       });
     },
   });
-  const { mutateAsync: applyAsync, mutate: applyAgain } = applyMutation;
+  const { mutateAsync: applyAsync } = applyMutation;
 
   /**
-   * Resolves with the line to show under the button when the server still
-   * says no (a 409), else null; other failures are a toast with Retry.
+   * Apply. When the server still says no (a 409), `onRefused` gets the line
+   * for under the button; other failures are a toast whose Retry runs this again.
    */
-  const apply = useCallback(async (): Promise<string | null> => {
-    try {
-      await applyAsync();
-      return null;
-    } catch (error) {
-      void refetchJob();
-      if (isApiError(error) && error.status === 409) return applyErrorMessage(error.code);
-      toast({
-        tone: 'error',
-        title: 'Couldn’t apply the mapping',
-        body: error instanceof Error ? error.message : undefined,
-        action: { label: 'Retry', onClick: () => applyAgain() },
-      });
-      return null;
-    }
-  }, [applyAsync, applyAgain, refetchJob, toast]);
+  const apply = useCallback(
+    async function run(onRefused: (message: string) => void): Promise<void> {
+      try {
+        await applyAsync();
+      } catch (error) {
+        void refetchJob();
+        if (isApiError(error) && error.status === 409) {
+          onRefused(applyErrorMessage(error.code));
+          return;
+        }
+        toast({
+          tone: 'error',
+          title: 'Couldn’t apply the mapping',
+          body: error instanceof Error ? error.message : undefined,
+          action: { label: 'Retry', onClick: () => void run(onRefused) },
+        });
+      }
+    },
+    [applyAsync, refetchJob, toast]
+  );
 
   const discardMutation = useMutation({
+    scope,
     mutationFn: () => assignmentApi.discard(jobId),
-    onSuccess: async () => {
-      await invalidateAfterJob(queryClient, jobId);
+    onSuccess: () => {
+      // Leave first: refetching the job here would flash "This mapping was discarded" on the way out
       router.push(titleHref(job));
       toast({ tone: 'info', icon: EyeOff, title: 'Mapping discarded', body: 'Nothing was added to Infuse.' });
+      void invalidateAfterJob(queryClient, jobId, { refetchJob: false });
     },
     onError: (error) => {
       toast({ tone: 'error', title: 'Couldn’t discard the mapping', body: error.message });

@@ -6,8 +6,6 @@ export interface ShellContextValue {
   openPalette: () => void;
   /** Hero pages draw the top bar transparent over their artwork until you scroll. */
   setOverArt: (overArt: boolean) => void;
-  /** Task pages with their own back link and sticky foot hide the phone bar and tab bar. */
-  setTaskPage: (taskPage: boolean) => void;
 }
 
 export const ShellContext = createContext<ShellContextValue | null>(null);
@@ -31,19 +29,4 @@ export function useOverArt(enabled = true) {
     setOverArt(true);
     return () => setOverArt(false);
   }, [setOverArt, enabled]);
-}
-
-/**
- * Call from a focused task page (the mapping review; the prototype's
- * `noTabbar`): below 1024 px the shell's phone bar and tab bar step aside, so
- * the page's own back link leads and its sticky foot sits at the bottom of the
- * screen. The desktop top bar stays.
- */
-export function useTaskPage(enabled = true) {
-  const { setTaskPage } = useShell();
-  useEffect(() => {
-    if (!enabled) return;
-    setTaskPage(true);
-    return () => setTaskPage(false);
-  }, [setTaskPage, enabled]);
 }
