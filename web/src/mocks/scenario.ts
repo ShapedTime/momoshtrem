@@ -11,11 +11,26 @@
  *   `fetching_metadata`, `classifying` or `resolving`) and stay there, so each
  *   progress step can be asserted and screenshotted. A job that skips the step
  *   stops at its last one before it; `job-hold:resolving` holds re-checks too.
+ * - `hdrezka-off`: HDRezka isn't set up (/status says so; /hdrezka/* answer 503 `unavailable`).
+ * - `hdrezka-blocked`: HDRezka answers with its anti-bot page (503 `hdrezka_blocked`).
+ * - `hdrezka-down`: HDRezka doesn't answer (502 `hdrezka_unavailable`).
+ * - `hdrezka-premium`: every voice-over needs Premium; assigning answers 409 `premium_only`.
+ * - `hdrezka-partial`: assigning episodes fails for every third one (504 `timeout` per item).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
 
-export type MockScenario = 'backend-down' | 'ai-off' | 'ai-error' | 'job-failed' | `job-hold:${HoldStep}`;
+export type MockScenario =
+  | 'backend-down'
+  | 'ai-off'
+  | 'ai-error'
+  | 'job-failed'
+  | `job-hold:${HoldStep}`
+  | 'hdrezka-off'
+  | 'hdrezka-blocked'
+  | 'hdrezka-down'
+  | 'hdrezka-premium'
+  | 'hdrezka-partial';
 
 let override: MockScenario | null = null;
 

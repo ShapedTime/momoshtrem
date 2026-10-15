@@ -127,6 +127,8 @@ function applyJob(job: MockJob): void {
       for (const target of p.targets) {
         row.filed.set(target.episode_id, { info_hash: job.info_hash, release_name: job.name, file_path: p.file_path });
         row.unassigned.delete(target.episode_id);
+        // One active source per item: the torrent replaces an HDRezka stream
+        row.streamed.delete(target.episode_id);
       }
     }
   } else if (found) {

@@ -1,8 +1,10 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { SheetProps } from '@/components/ui';
+import { HDRezkaSheet } from '@/components/hdrezka/HDRezkaSheet';
 import { InfuseSetupSheet } from '@/components/shell/InfuseSetupSheet';
 import { EpisodeSheet } from '@/components/title/show/EpisodeSheet';
 import { ShowSettingsSheet } from '@/components/title/show/ShowSettingsSheet';
+import { SOURCE_PARAMS } from '@/lib/source/context';
 
 interface SheetBase {
   /** Other URL params this sheet owns; removed when it closes from a deep link. */
@@ -39,6 +41,8 @@ export type SheetDefinition = ContentSheet | SelfRenderingSheet;
 /**
  * Sheets that open from the URL (`?sheet=<name>`). Feature issues register
  * theirs here: `torrent` (#6), `inspect` (#6), `episode` (#4), …
+ * `torrent` and `hdrezka` are the source sheet's tabs: same params, same head
+ * (`components/source`), swapped with `useSheet().swap`.
  */
 export const SHEETS: Record<string, SheetDefinition> = {
   'infuse-setup': {
@@ -52,6 +56,8 @@ export const SHEETS: Record<string, SheetDefinition> = {
   // A show's episode: `tmdb` (the show) and `se` ("S01E05"); `season` is the page's tab and stays
   episode: { params: ['tmdb', 'se'], Component: EpisodeSheet },
   'show-settings': { params: ['tmdb'], Component: ShowSettingsSheet },
+  // Find a source, HDRezka tab (#67): `movie`, or `show` with `season` (the page's tab, so it stays) and `se`
+  hdrezka: { params: SOURCE_PARAMS, Component: HDRezkaSheet },
 };
 
 /** The sheet registered as `name`. Own keys only, so `?sheet=toString` opens nothing. */

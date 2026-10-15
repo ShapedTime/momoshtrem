@@ -89,6 +89,12 @@ describe('proxyToBackend', () => {
     expect(await response.text()).toContain('"delta":"hi"');
   });
 
+  it('forwards HDRezka (#63), query included', async () => {
+    const response = await proxyToBackend(request('/api/hdrezka/search?media_type=movie&tmdb_id=157336'), ['hdrezka', 'search']);
+    expect(response.status).toBe(200);
+    expect(seen[0].url).toBe(`${BACKEND}/api/hdrezka/search?media_type=movie&tmdb_id=157336`);
+  });
+
   it('only exposes the contract prefixes', async () => {
     const response = await proxyToBackend(request('/api/debug/pprof'), ['debug', 'pprof']);
     expect(response.status).toBe(404);

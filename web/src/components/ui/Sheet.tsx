@@ -13,6 +13,10 @@ export interface SheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: ReactNode;
+  /** Small line above the title, part of its accessible name: "Find a source · Interstellar". */
+  kicker?: ReactNode;
+  /** The close button's name when closing keeps something: "Close (your choices are kept)". */
+  closeLabel?: string;
   /** Short line under the title; also the dialog's accessible description. */
   description?: ReactNode;
   /**
@@ -51,8 +55,10 @@ function keepOpenForToasts(event: Event) {
   if (event.target instanceof Element && event.target.closest('.toast-region')) event.preventDefault();
 }
 
-function SheetHead({ title, description, head, Title, Description, Close }: {
+function SheetHead({ title, kicker, closeLabel = 'Close', description, head, Title, Description, Close }: {
   title: ReactNode;
+  kicker?: ReactNode;
+  closeLabel?: string;
   description?: ReactNode;
   head?: ReactNode;
   Title: typeof Dialog.Title;
@@ -63,11 +69,18 @@ function SheetHead({ title, description, head, Title, Description, Close }: {
     <div className="sheet-head">
       <div className="sheet-title">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <Title className="t-title-3">{title}</Title>
+          <Title className="t-title-3 min-w-0">
+            {kicker && (
+              <>
+                <span className="sheet-kicker">{kicker}</span>{' '}
+              </>
+            )}
+            {title}
+          </Title>
           {description && <Description className="t-small text-fg-3">{description}</Description>}
         </div>
         <Close asChild>
-          <IconButton aria-label="Close" size="sm" className="-mr-2 shrink-0">
+          <IconButton aria-label={closeLabel} size="sm" className="-mr-2 shrink-0">
             <X size={20} aria-hidden="true" />
           </IconButton>
         </Close>
@@ -77,7 +90,7 @@ function SheetHead({ title, description, head, Title, Description, Close }: {
   );
 }
 
-function PanelSheet({ open, onOpenChange, title, description, size, nested, head, footer, className, children }: SheetProps) {
+function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, size, nested, head, footer, className, children }: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true });
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -91,7 +104,16 @@ function PanelSheet({ open, onOpenChange, title, description, size, nested, head
           {...focus}
           {...(description ? {} : { 'aria-describedby': undefined })}
         >
-          <SheetHead title={title} description={description} head={head} Title={Dialog.Title} Description={Dialog.Description} Close={Dialog.Close} />
+          <SheetHead
+            title={title}
+            kicker={kicker}
+            closeLabel={closeLabel}
+            description={description}
+            head={head}
+            Title={Dialog.Title}
+            Description={Dialog.Description}
+            Close={Dialog.Close}
+          />
           <div className="sheet-body">{children}</div>
           {footer && <div className="sheet-foot">{footer}</div>}
         </Dialog.Content>
@@ -100,7 +122,7 @@ function PanelSheet({ open, onOpenChange, title, description, size, nested, head
   );
 }
 
-function DrawerSheet({ open, onOpenChange, title, description, size, nested, head, footer, className, children }: SheetProps) {
+function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, size, nested, head, footer, className, children }: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true });
   const Root = nested ? Drawer.NestedRoot : Drawer.Root;
   return (
@@ -118,7 +140,16 @@ function DrawerSheet({ open, onOpenChange, title, description, size, nested, hea
           <div className="grid h-5 shrink-0 place-items-center">
             <Drawer.Handle className="w-9! bg-surface-4! opacity-100!" />
           </div>
-          <SheetHead title={title} description={description} head={head} Title={Drawer.Title} Description={Drawer.Description} Close={Drawer.Close} />
+          <SheetHead
+            title={title}
+            kicker={kicker}
+            closeLabel={closeLabel}
+            description={description}
+            head={head}
+            Title={Drawer.Title}
+            Description={Drawer.Description}
+            Close={Drawer.Close}
+          />
           <div className="sheet-body">{children}</div>
           {footer && <div className="sheet-foot">{footer}</div>}
         </Drawer.Content>

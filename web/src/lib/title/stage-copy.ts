@@ -4,19 +4,21 @@ import { releaseHighlights } from './release';
 
 /**
  * The primary action state machine on title pages (HANDOFF §5.3):
- * Add → Torrent → Download → Ready. The server decides the stage
+ * Add → Source → Download → Ready. The server decides the stage
  * (`library.availability_stage`); this only turns it into words and
  * buttons, with the prototype's copy (design-cinematic/js/screens/title.js).
+ * A file comes from a torrent or, when it's set up, HDRezka (#63); the stage
+ * keeps its name, `needs_torrent`.
  */
 
-export const STAGE_STEPS = ['Add', 'Torrent', 'Download', 'Ready'] as const;
+export const STAGE_STEPS = ['Add', 'Source', 'Download', 'Ready'] as const;
 
 const STEP_INDEX: Record<AvailabilityStage, number> = { none: 0, needs_torrent: 1, downloading: 2, ready: 3 };
 
-export type StageIcon = 'plus' | 'search' | 'activity' | 'tv';
+export type StageIcon = 'plus' | 'search' | 'activity' | 'tv' | 'stream';
 
 /** What a button does; the page maps each intent to a handler. */
-export type StageIntent = 'add' | 'find' | 'view_download' | 'how_to_play';
+export type StageIntent = 'add' | 'find' | 'hdrezka' | 'view_download' | 'how_to_play';
 
 export interface StageButton {
   label: string;
@@ -45,12 +47,18 @@ export interface StageCopy {
   primary: StageButton;
   /** A quieter second action under the primary (desktop panel only). */
   secondary: StageButton | null;
-  /** The phone dock: one button, plus a copy-path icon when ready. */
-  dock: { button: StageButton; copyPath: boolean };
+  /** The phone dock: one button, plus one icon action: copy the path when ready, or HDRezka while a file is needed. */
+  dock: { button: StageButton; copyPath: boolean; icon: StageButton | null };
+}
+
+export interface StageOptions {
+  /** HDRezka is set up (`status.hdrezka.configured`): offer it next to torrents. */
+  hdrezka?: boolean;
 }
 
 const ADD: StageButton = { label: 'Add to library', icon: 'plus', intent: 'add', variant: 'primary' };
 const FIND: StageButton = { label: 'Find a torrent', icon: 'search', intent: 'find', variant: 'primary' };
+const HDREZKA: StageButton = { label: 'Stream from HDRezka', icon: 'stream', intent: 'hdrezka', variant: 'secondary' };
 const VIEW_DOWNLOAD: StageButton = { label: 'View download', icon: 'activity', intent: 'view_download', variant: 'secondary', href: '/torrents' };
 const HOW_TO_PLAY: StageButton = { label: 'How to play in Infuse', icon: 'tv', intent: 'how_to_play', variant: 'primary' };
 const PLAY_IN_INFUSE: StageButton = { ...HOW_TO_PLAY, label: 'Play in Infuse' };
@@ -119,26 +127,29 @@ function readyFacts(title: Title): string[] {
     const { episodes_ready, episodes_total } = title.library;
     return episodes_ready !== null && episodes_total !== null ? [`${episodes_ready} of ${plural(episodes_total, 'episode')} ready`] : [];
   }
-  const torrent = title.library.torrent;
+  const { torrent, stream } = title.library;
+  if (stream) return ['HDRezka', stream.translator, stream.quality, formatBytes(stream.size_bytes)];
   if (!torrent) return [];
   return [torrent.resolution, formatBytes(torrent.size_bytes), ...releaseHighlights(torrent.release_name)].filter(
     (fact): fact is string => Boolean(fact)
   );
 }
 
-/** The panel, buttons and dock for a title's stage. Pure: same title, same copy. */
-export function primaryActionFor(title: Title): StageCopy {
+/** The panel, buttons and dock for a title's stage. Pure: same title and options, same copy. */
+export function primaryActionFor(title: Title, options: StageOptions = {}): StageCopy {
   const stage = title.library.availability_stage;
   const base = { stage, step: STEP_INDEX[stage], facts: [], lead: null, pct: null, path: null, secondary: null };
 
   switch (stage) {
     case 'none': {
       const copy = noneCopy(title);
-      return { ...base, ...copy, dock: { button: copy.primary, copyPath: false } };
+      return { ...base, ...copy, dock: { button: copy.primary, copyPath: false, icon: null } };
     }
     case 'needs_torrent': {
       const copy = needsTorrentCopy(title);
-      return { ...base, ...copy, dock: { button: copy.primary, copyPath: false } };
+      // Movies for now: a show's HDRezka flow (seasons, episodes) comes with #67's second part
+      const hdrezka = options.hdrezka && title.media_type === 'movie' ? HDREZKA : null;
+      return { ...base, ...copy, secondary: hdrezka, dock: { button: copy.primary, copyPath: false, icon: hdrezka } };
     }
     case 'downloading':
       // Torrents fetch on demand, so there's no finish time to promise: say it streams now
@@ -151,7 +162,7 @@ export function primaryActionFor(title: Title): StageCopy {
         pct: Math.round(title.library.download?.pct ?? 0),
         primary: VIEW_DOWNLOAD,
         secondary: { ...HOW_TO_PLAY, variant: 'ghost' },
-        dock: { button: VIEW_DOWNLOAD, copyPath: false },
+        dock: { button: VIEW_DOWNLOAD, copyPath: false, icon: null },
       };
     case 'ready': {
       const { webdav_path, webdav_url } = title.library;
@@ -163,7 +174,7 @@ export function primaryActionFor(title: Title): StageCopy {
         hint: '',
         path,
         primary: HOW_TO_PLAY,
-        dock: { button: PLAY_IN_INFUSE, copyPath: path !== null },
+        dock: { button: PLAY_IN_INFUSE, copyPath: path !== null, icon: null },
       };
     }
   }

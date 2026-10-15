@@ -91,6 +91,7 @@ export const titlesHandlers = [
     if (!found) return notFound('No such movie');
     found.row.files = false;
     found.row.assigned = undefined;
+    found.row.stream = undefined;
     return noContent();
   }),
   http.delete('*/api/episodes/:id/assign', ({ params }) => {
@@ -100,6 +101,7 @@ export const titlesHandlers = [
     if (!row) return notFound('No such episode');
     row.unassigned.add(id);
     row.filed.delete(id);
+    row.streamed.delete(id);
     return noContent();
   }),
   http.patch('*/api/shows/:id', async ({ params, request }) => {

@@ -364,6 +364,7 @@
   .sheet-grabber::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--surface-4); }
   .sheet-head { flex-shrink: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-3); border-bottom: 1px solid var(--line-1); }
   .sheet-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 44px; }
+  .sheet-kicker { display: block; font-size: var(--t-small); line-height: 1.4; font-weight: var(--w-regular); letter-spacing: 0; color: var(--text-3); }
   .sheet-body { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-4); min-height: 0; }
   .sheet-foot { flex-shrink: 0; display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-1); background: var(--glass-bg-strong); backdrop-filter: blur(var(--blur-md)); }
   @media (min-width: 640px) {

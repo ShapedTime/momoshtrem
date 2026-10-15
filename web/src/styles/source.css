@@ -1,0 +1,39 @@
+/* ---- Source sheet: Torrents · HDRezka (#67) ---------------------------------
+   The shared head comes from <Sheet kicker> and <SourceSheet>; candidate cards
+   reuse the torrent result card (.release); voice-overs and qualities reuse
+   .radio-card (title.css). */
+@layer components {
+  .source-sheet .sheet-head .tabs { margin-top: calc(var(--sp-1) * -1); }
+  /* The field has its own clear button */
+  .source-sheet input[type="search"]::-webkit-search-cancel-button { appearance: none; display: none; }
+
+  /* A hit's names: the site's (Russian) title, then the original */
+  .hd-name { font-weight: var(--w-semibold); color: var(--text-1); overflow-wrap: anywhere; }
+
+  /* Weak hits look weaker without fading the text (it keeps AA contrast) */
+  .release.is-weak { background: transparent; border-style: dashed; }
+  .release .best-head + div .hd-name { font-size: var(--t-body-l); }
+
+  /* "Open on HDRezka": an icon on phone, with its word in the desktop column */
+  .hd-open { min-width: 44px; padding-inline: 10px; color: var(--text-2); }
+  .hd-open .lbl { display: none; }
+  @media (min-width: 1024px) {
+    .hd-candidate > .actions { width: 132px; }
+    .hd-open .lbl { display: inline; }
+  }
+
+  /* The match in use, collapsed */
+  .hd-picked { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
+
+  /* Voice-overs: rows on phone, two columns on wide sheets */
+  .hd-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); align-items: start; gap: var(--sp-2); }
+  .hd-option { align-items: flex-start; min-height: 50px; }
+  /* Qualities: cards with the size under the label */
+  .hd-qualities { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 136px), 1fr)); gap: var(--sp-2); }
+  .hd-quality { align-items: flex-start; padding: var(--sp-3); }
+  .radio-card.is-blocked { cursor: not-allowed; background: transparent; border-style: dashed; color: var(--text-3); }
+
+  /* The sticky foot: what's picked, then Use HDRezka */
+  .source-sheet .sheet-foot { align-items: center; }
+  .hd-foot-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

@@ -12,5 +12,6 @@ export function systemStatus(): SystemStatus {
     trakt: { configured: true, connected: false },
     ai: { configured: true, mtd_cost_usd: 3.12 },
     opensubtitles: { configured: true },
+    hdrezka: { configured: true, reachable: true, latency_ms: 340 },
   };
 }

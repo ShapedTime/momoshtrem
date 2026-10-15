@@ -20,6 +20,8 @@ export interface SystemStatus {
   trakt: { configured: boolean; connected: boolean };
   ai: { configured: boolean; mtd_cost_usd: number | null };
   opensubtitles: { configured: boolean };
+  /** HDRezka as a second source (#63). Missing from a backend older than #66: read it as off. */
+  hdrezka?: ProbeStatus;
   /** Added by the web app's /api/status route. */
   web?: { version: string };
 }

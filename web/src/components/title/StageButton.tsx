@@ -1,8 +1,8 @@
-import { Activity, type LucideIcon, Plus, Search, Tv } from 'lucide-react';
+import { Activity, type LucideIcon, MonitorPlay, Plus, Search, Tv } from 'lucide-react';
 import { Button, ButtonLink } from '@/components/ui';
 import type { StageButton as StageButtonSpec, StageIcon, StageIntent } from '@/lib/title/stage-copy';
 
-const ICONS: Record<StageIcon, LucideIcon> = { plus: Plus, search: Search, activity: Activity, tv: Tv };
+export const STAGE_ICONS: Record<StageIcon, LucideIcon> = { plus: Plus, search: Search, activity: Activity, tv: Tv, stream: MonitorPlay };
 
 export type StageActionHandler = (intent: StageIntent) => void;
 
@@ -17,7 +17,7 @@ interface StageButtonProps {
 
 /** One stage button: a link when it navigates, otherwise an action handed to `onAction`. */
 export function StageButton({ spec, onAction, busy, block, className }: StageButtonProps) {
-  const Icon = ICONS[spec.icon];
+  const Icon = STAGE_ICONS[spec.icon];
   const content = (
     <>
       <Icon size={20} aria-hidden="true" /> {spec.label}

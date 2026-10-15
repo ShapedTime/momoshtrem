@@ -44,6 +44,18 @@ describe('PrimaryPanel', () => {
     expect(onAction).toHaveBeenCalledWith('find');
   });
 
+  it('needs a torrent, with HDRezka set up: Stream from HDRezka under Find a torrent', () => {
+    const onAction = jest.fn();
+    render(
+      <ToastProvider>
+        <PrimaryPanel copy={primaryActionFor(movie(1054867), { hdrezka: true })} onAction={onAction} titleName="One Battle After Another" />
+      </ToastProvider>
+    );
+    expect(screen.getByText('Source', { selector: 'b' })).toHaveAttribute('aria-current', 'step');
+    fireEvent.click(screen.getByRole('button', { name: 'Stream from HDRezka' }));
+    expect(onAction).toHaveBeenCalledWith('hdrezka');
+  });
+
   it('downloading: progress, View download and How to play', () => {
     const onAction = renderPanel(movie(157336));
     expect(screen.getByRole('heading', { name: 'Downloading' })).toBeInTheDocument();
@@ -84,5 +96,17 @@ describe('ActionDock', () => {
     );
     expect(screen.getByRole('link', { name: 'View download' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy WebDAV path' })).not.toBeInTheDocument();
+  });
+
+  it('puts Stream from HDRezka beside Find a torrent while HDRezka is set up', () => {
+    const onAction = jest.fn();
+    render(
+      <ToastProvider>
+        <ActionDock copy={primaryActionFor(movie(1054867), { hdrezka: true })} onAction={onAction} />
+      </ToastProvider>
+    );
+    expect(screen.getByRole('button', { name: 'Find a torrent' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Stream from HDRezka' }));
+    expect(onAction).toHaveBeenCalledWith('hdrezka');
   });
 });

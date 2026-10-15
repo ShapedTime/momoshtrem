@@ -46,6 +46,31 @@ export interface TitleTorrent {
   seeders: number | null;
 }
 
+/** Where an item's file comes from (#63): one active source per item. */
+export type FileSource = 'torrent' | 'hdrezka';
+
+/** A movie playing from HDRezka (#63); `torrent` is null while it's set. */
+export interface TitleStream {
+  provider: 'hdrezka';
+  /** The site's title, e.g. "Интерстеллар". */
+  title: string;
+  /** The title page, to open on HDRezka. */
+  url: string;
+  /** The voice-over's name, e.g. "Оригинал (+субтитры)". */
+  translator: string;
+  /** The quality's label, e.g. "1080p". */
+  quality: string;
+  /** Measured when it was assigned. */
+  size_bytes: number;
+  added_at: Timestamp;
+}
+
+/** An episode playing from HDRezka. */
+export interface EpisodeStream {
+  translator: string;
+  quality: string;
+}
+
 /** The first run of aired, unassigned regular episodes after the last assigned one. */
 export interface MissingRun {
   season_number: number;
@@ -78,8 +103,10 @@ export interface TitleLibraryState {
   episodes_ready: number | null;
   /** Shows: what "Find episodes 29–38" offers. */
   missing: MissingRun | null;
-  /** Movies only. */
+  /** Movies only; null while the movie plays from a stream. */
   torrent: TitleTorrent | null;
+  /** Movies playing from HDRezka (#63). */
+  stream: TitleStream | null;
 }
 
 export interface CastMember {
@@ -165,6 +192,10 @@ export interface EpisodeSummary {
   pct: number | null;
   /** Only while the episode has a file. */
   webdav_path: string | null;
+  /** The file's source (#63); null without one. */
+  source: FileSource | null;
+  /** Set while it plays from HDRezka. */
+  stream: EpisodeStream | null;
 }
 
 /** A jump target in a long season: a TMDB story arc, or a block of up to 10 episodes. */
