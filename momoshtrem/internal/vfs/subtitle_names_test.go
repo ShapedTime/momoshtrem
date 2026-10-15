@@ -15,7 +15,7 @@ func TestSubtitleFileNames(t *testing.T) {
 	sub := func(id int64, lang string, source subtitle.Source, format string) *subtitle.Subtitle {
 		return &subtitle.Subtitle{ID: id, LanguageCode: lang, Source: source, Format: format}
 	}
-	dl, tor := subtitle.SourceOpenSubtitles, subtitle.SourceTorrent
+	dl, tor, rezka := subtitle.SourceOpenSubtitles, subtitle.SourceTorrent, subtitle.SourceHDRezka
 
 	tests := []struct {
 		name string
@@ -47,6 +47,12 @@ func TestSubtitleFileNames(t *testing.T) {
 			"unknown-language files don't overwrite each other",
 			[]*subtitle.Subtitle{sub(1, "unknown", tor, "srt"), sub(2, "unknown", tor, "srt"), sub(3, "", tor, "")},
 			map[int64]string{1: base + ".unknown.srt", 2: base + ".2.unknown.srt", 3: base + ".3.unknown.srt"},
+		},
+		{
+			// HDRezka's "Русский (альтернативный)" has no code: a second Russian track.
+			"an HDRezka track named after a language",
+			[]*subtitle.Subtitle{sub(1, "ru", rezka, "srt"), sub(2, "русский-альтернативный", rezka, "srt"), sub(3, "en", rezka, "srt")},
+			map[int64]string{1: base + ".ru.srt", 2: base + ".2.ru.srt", 3: base + ".en.srt"},
 		},
 		{"none", nil, map[int64]string{}},
 	}

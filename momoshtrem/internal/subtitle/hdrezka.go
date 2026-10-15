@@ -197,6 +197,26 @@ func hdrezkaLanguage(code, name string) (string, string) {
 	return c, name
 }
 
+// FileLanguage is the language code the subtitle's file is named with
+// next to the video: its own, but for an HDRezka track the site sent
+// without a code, stored under a slug of its name. When that name starts
+// with a language ("Русский (альтернативный)"), it's that language's
+// code, so players see a second Russian track ("….2.ru.srt") rather than
+// an unknown one.
+func (s *Subtitle) FileLanguage() string {
+	if s.Source != SourceHDRezka {
+		return s.LanguageCode
+	}
+	if _, known := languageNames[s.LanguageCode]; known {
+		return s.LanguageCode
+	}
+	first, _, _ := strings.Cut(s.LanguageCode, "-")
+	if code, ok := hdrezkaLanguages[first]; ok {
+		return code
+	}
+	return s.LanguageCode
+}
+
 // slug lowercases s and keeps its letters and digits, the rest becoming
 // single dashes: "Português (BR)" is "português-br". It never holds a dot
 // or a path separator.

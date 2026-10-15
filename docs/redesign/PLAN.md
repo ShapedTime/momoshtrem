@@ -508,7 +508,7 @@ POST /shows/{id}/assign-hdrezka  {url, translator_id, quality, items: [{episode_
   - **Timing:** the subtitles are recorded before the tree is rebuilt when they're in within the assign's 25 s budget. Otherwise the tree is rebuilt at once and again when they're in; they carry on in the background for up to 2 minutes. 30 episodes with three tracks each needn't fit in the budget, and the answer, which doesn't change, never waits past it.
   - **Failures:** a track that fails is logged and never fails the assign.
   - **Refreshing:** assigning the same stream again refreshes them in place. Another file (a translator, a quality or a torrent) drops them through the writer, and the next stream's replace them, its files too. Recording holds the item's stream row until it commits, so an assign that comes meanwhile waits and drops them; one that came first leaves them unrecorded.
-  - **Showing:** they show only while the item plays from HDRezka (`GET …/subtitles`, and WebDAV as `{video}.{lang}.srt` next to the `.mp4`), and can be deleted.
+  - **Showing:** they show only while the item plays from HDRezka (`GET …/subtitles`, and WebDAV as `{video}.{lang}.srt` next to the `.mp4`), and can be deleted. A track stored under a slug is named in WebDAV after the language its name starts with, so Infuse sees Breaking Bad's "Русский (альтернативный)" as a second Russian track, `….2.ru.srt`.
   - **Searching:** an HDRezka item has no release name to rank OpenSubtitles results against, so their matches are `unknown`.
 - **`GET /status`** adds `hdrezka: {configured, reachable, latency_ms?, error?}`: one GET of the mirror's home page, only while HDRezka is on. The anti-bot page reports `error: "HDRezka asks for a browser check"`.
 

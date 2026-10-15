@@ -39,3 +39,27 @@ func TestHDRezkaLanguage(t *testing.T) {
 		})
 	}
 }
+
+// A track HDRezka sends without a code, like Breaking Bad's "Русский
+// (альтернативный)", is named after the language its name starts with.
+func TestFileLanguage(t *testing.T) {
+	alternative, _ := hdrezkaLanguage("", "Русский (альтернативный)")
+	tests := []struct {
+		source Source
+		code   string
+		want   string
+	}{
+		{SourceHDRezka, "en", "en"},
+		{SourceHDRezka, alternative, "ru"},
+		{SourceHDRezka, "қазақ-тілі-субтитры", "қазақ-тілі-субтитры"},
+		{SourceHDRezka, "xx", "xx"},
+		{SourceTorrent, "unknown", "unknown"},
+		{SourceOpenSubtitles, "pt-br", "pt-br"},
+	}
+	for _, tt := range tests {
+		sub := &Subtitle{Source: tt.source, LanguageCode: tt.code}
+		if got := sub.FileLanguage(); got != tt.want {
+			t.Errorf("%s %q: FileLanguage = %q, want %q", tt.source, tt.code, got, tt.want)
+		}
+	}
+}

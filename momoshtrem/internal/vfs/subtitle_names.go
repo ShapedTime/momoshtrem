@@ -72,10 +72,11 @@ func subtitleFileNames(base string, subs []*subtitle.Subtitle) []namedSubtitle {
 }
 
 func subtitleLanguage(sub *subtitle.Subtitle) string {
-	if sub.LanguageCode == "" {
+	lang := sub.FileLanguage()
+	if lang == "" {
 		return "unknown"
 	}
-	return strings.ToLower(sub.LanguageCode)
+	return strings.ToLower(lang)
 }
 
 // sourceRank puts downloaded subtitles before those that came with the
