@@ -227,17 +227,10 @@ func (r *ShowRepository) GetWithSeasonsAndEpisodesContext(ctx context.Context, i
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT sn.id, sn.season_number, COALESCE(sn.name, ''), COALESCE(sn.poster_path, ''),
 		       `+episodeColumns+`,
-		       ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size,
-		       ta.resolution, ta.source, ta.created_at
+		       `+assignmentColumns+`
 		FROM seasons sn
 		LEFT JOIN episodes e ON e.season_id = sn.id
-		LEFT JOIN LATERAL (
-			SELECT t.id, t.info_hash, t.magnet_uri, t.file_path, t.file_size, t.resolution, t.source, t.created_at
-			FROM torrent_assignments t
-			WHERE t.item_type = 'episode' AND t.item_id = e.id AND t.is_active
-			ORDER BY t.created_at DESC, t.id DESC
-			LIMIT 1
-		) ta ON TRUE
+		`+activeAssignmentLateral("episode", "e.id")+`
 		WHERE sn.show_id = $1
 		ORDER BY sn.season_number, e.episode_number
 	`, id)
@@ -249,14 +242,11 @@ func (r *ShowRepository) GetWithSeasonsAndEpisodesContext(ctx context.Context, i
 	for rows.Next() {
 		var season Season
 		var ep Episode
-		var taID, taSize sql.NullInt64
-		var taHash, taMagnet, taPath, taResolution, taSource sql.NullString
-		var taCreated sql.NullTime
 
 		epDest, finish := episodeScanDest(&ep)
+		taDest, taFinish := assignmentDest(ItemTypeEpisode)
 		dest := append([]any{&season.ID, &season.SeasonNumber, &season.Name, &season.PosterPath}, epDest...)
-		dest = append(dest, &taID, &taHash, &taMagnet, &taPath, &taSize, &taResolution, &taSource, &taCreated)
-		if err := rows.Scan(dest...); err != nil {
+		if err := rows.Scan(append(dest, taDest...)...); err != nil {
 			return nil, fmt.Errorf("failed to scan season row: %w", err)
 		}
 
@@ -268,21 +258,7 @@ func (r *ShowRepository) GetWithSeasonsAndEpisodesContext(ctx context.Context, i
 		if !finish() {
 			continue // season without episodes
 		}
-		if taID.Valid {
-			ep.Assignment = &TorrentAssignment{
-				ID:         taID.Int64,
-				ItemType:   ItemTypeEpisode,
-				ItemID:     ep.ID,
-				InfoHash:   taHash.String,
-				MagnetURI:  taMagnet.String,
-				FilePath:   taPath.String,
-				FileSize:   taSize.Int64,
-				Resolution: taResolution.String,
-				Source:     taSource.String,
-				IsActive:   true,
-				CreatedAt:  taCreated.Time,
-			}
-		}
+		ep.Assignment = taFinish(ep.ID)
 		last := &show.Seasons[len(show.Seasons)-1]
 		last.Episodes = append(last.Episodes, ep)
 	}
@@ -496,12 +472,12 @@ func (r *ShowRepository) GetSeasonsWithAssignedEpisodes(showID int64) ([]Season,
 	return seasons, rows.Err()
 }
 
-// GetEpisodesWithAssignments returns all episodes for a season that have active torrent assignments
+// GetEpisodesWithAssignments returns all episodes for a season that have
+// active assignments (the VFS tree), torrent files and HDRezka streams
+// alike.
 func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, error) {
 	rows, err := r.db.Query(`
-		SELECT e.id, e.season_id, e.episode_number, e.name,
-		       ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size,
-		       ta.resolution, ta.source, ta.confidence, ta.match_source, ta.created_at
+		SELECT e.id, e.season_id, e.episode_number, e.name, `+assignmentColumns+`
 		FROM episodes e
 		INNER JOIN torrent_assignments ta ON ta.item_type = 'episode' AND ta.item_id = e.id AND ta.is_active = TRUE
 		WHERE e.season_id = $1
@@ -515,26 +491,15 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 	var episodes []Episode
 	for rows.Next() {
 		var episode Episode
-		var name, resolution, source, confidence, matchSource sql.NullString
-		assignment := &TorrentAssignment{ItemType: ItemTypeEpisode}
-
-		if err := rows.Scan(
-			&episode.ID, &episode.SeasonID, &episode.EpisodeNumber, &name,
-			&assignment.ID, &assignment.InfoHash, &assignment.MagnetURI,
-			&assignment.FilePath, &assignment.FileSize,
-			&resolution, &source, &confidence, &matchSource, &assignment.CreatedAt,
-		); err != nil {
+		var name sql.NullString
+		taDest, finish := assignmentDest(ItemTypeEpisode)
+		dest := append([]any{&episode.ID, &episode.SeasonID, &episode.EpisodeNumber, &name}, taDest...)
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("failed to scan episode: %w", err)
 		}
 
 		episode.Name = name.String
-		assignment.ItemID = episode.ID
-		assignment.Resolution = resolution.String
-		assignment.Source = source.String
-		assignment.Confidence = confidence.String
-		assignment.MatchSource = matchSource.String
-		assignment.IsActive = true
-		episode.Assignment = assignment
+		episode.Assignment = finish(episode.ID)
 
 		episodes = append(episodes, episode)
 	}

@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -22,27 +23,32 @@ type scanner interface {
 
 // assignmentSelect lists a torrent_assignments row's columns in the order
 // scanAssignment reads them.
-const assignmentSelect = `id, item_type, item_id, info_hash, magnet_uri, file_path, file_size,
-	resolution, source, confidence, match_source, is_active, created_at`
+const assignmentSelect = `id, item_type, item_id, kind, info_hash, magnet_uri, file_path, file_size,
+	resolution, source, confidence, match_source, stream_ref, is_active, created_at`
 
-// scanAssignment scans assignmentSelect into a TorrentAssignment
+// scanAssignment scans assignmentSelect into a TorrentAssignment. An HDRezka
+// row has no info hash or magnet: they read as "".
 func scanAssignment(s scanner) (*TorrentAssignment, error) {
 	assignment := &TorrentAssignment{}
-	var resolution, source, confidence, matchSource sql.NullString
+	var hash, magnet, resolution, source, confidence, matchSource sql.NullString
+	var stream nullStreamRef
 
 	err := s.Scan(
-		&assignment.ID, &assignment.ItemType, &assignment.ItemID,
-		&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
-		&resolution, &source, &confidence, &matchSource, &assignment.IsActive, &assignment.CreatedAt,
+		&assignment.ID, &assignment.ItemType, &assignment.ItemID, &assignment.Kind,
+		&hash, &magnet, &assignment.FilePath, &assignment.FileSize,
+		&resolution, &source, &confidence, &matchSource, &stream, &assignment.IsActive, &assignment.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	assignment.InfoHash = hash.String
+	assignment.MagnetURI = magnet.String
 	assignment.Resolution = resolution.String
 	assignment.Source = source.String
 	assignment.Confidence = confidence.String
 	assignment.MatchSource = matchSource.String
+	assignment.Stream = stream.Ref
 
 	return assignment, nil
 }
@@ -54,6 +60,35 @@ const assignmentUpsert = `ON CONFLICT (item_type, item_id, info_hash, file_path)
 		is_active = TRUE, magnet_uri = EXCLUDED.magnet_uri, file_size = EXCLUDED.file_size,
 		resolution = EXCLUDED.resolution, source = EXCLUDED.source,
 		confidence = EXCLUDED.confidence, match_source = EXCLUDED.match_source, created_at = NOW()`
+
+// WriteStream makes HDRezka streams the items' files (w.Rows: ItemID,
+// Stream, FileSize and Resolution), in its own transaction, through the
+// same writer as Apply and the overrides: the title's lock, each item's
+// other active rows deactivated (a torrent file too), and its torrent and
+// HDRezka subtitles dropped when its file changes. A stream the item had
+// before is reactivated; another translator or quality is a new row. The
+// write is partial: the title's other items keep their files. It returns
+// ErrShowNotFound or ErrMovieNotFound when the title is gone.
+func (r *AssignmentRepository) WriteStream(ctx context.Context, w AssignmentWrite) error {
+	w.Kind, w.Partial = AssignmentKindHDRezka, true
+	return r.write(ctx, w)
+}
+
+// write runs writeAssignments in its own transaction.
+func (r *AssignmentRepository) write(ctx context.Context, w AssignmentWrite) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if err := writeAssignments(ctx, tx, w); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+	return nil
+}
 
 // GetByID retrieves an assignment by its ID
 func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
@@ -196,7 +231,7 @@ func (r *AssignmentRepository) Delete(id int64) error {
 // ListDistinctTorrents returns all unique torrents that have active assignments
 func (r *AssignmentRepository) ListDistinctTorrents() ([]string, error) {
 	rows, err := r.db.Query(
-		`SELECT DISTINCT info_hash FROM torrent_assignments WHERE is_active = TRUE`,
+		`SELECT DISTINCT info_hash FROM torrent_assignments WHERE is_active = TRUE AND kind = 'torrent'`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list torrents: %w", err)

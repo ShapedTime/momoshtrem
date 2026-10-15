@@ -104,6 +104,10 @@ type PickerEpisode struct {
 	Name           string
 	AirDate        string // "" when unknown
 	HasFile        bool   // it has an active assignment
+	// Source is the kind of its newest active assignment; "" without one.
+	Source AssignmentKind
+	// Stream is that assignment's HDRezka stream; nil for a torrent file.
+	Stream *StreamRef
 }
 
 // EpisodeList returns every season of the show (Specials included, as
@@ -114,11 +118,11 @@ func (r *ShowRepository) EpisodeList(ctx context.Context, showID int64) ([]Picke
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT sn.id, sn.season_number, COALESCE(sn.name, ''),
 		       e.id, COALESCE(e.episode_number, 0), e.absolute_number, COALESCE(e.name, ''), COALESCE(e.air_date, ''),
-		       EXISTS (SELECT 1 FROM torrent_assignments t
-		               WHERE t.item_type = 'episode' AND t.item_id = e.id AND t.is_active)
+		       ta.id IS NOT NULL, COALESCE(ta.kind, ''), ta.stream_ref
 		FROM shows s
 		LEFT JOIN seasons sn ON sn.show_id = s.id
 		LEFT JOIN episodes e ON e.season_id = sn.id
+		`+activeAssignmentLateral("episode", "e.id")+`
 		WHERE s.id = $1
 		ORDER BY sn.season_number, e.episode_number, e.id
 	`, showID)
@@ -137,10 +141,12 @@ func (r *ShowRepository) EpisodeList(ctx context.Context, showID int64) ([]Picke
 		var seasonName string
 		var ep PickerEpisode
 		var absolute sql.NullInt32
+		var stream nullStreamRef
 		if err := rows.Scan(&seasonID, &number, &seasonName,
-			&epID, &ep.Number, &absolute, &ep.Name, &ep.AirDate, &ep.HasFile); err != nil {
+			&epID, &ep.Number, &absolute, &ep.Name, &ep.AirDate, &ep.HasFile, &ep.Source, &stream); err != nil {
 			return nil, fmt.Errorf("failed to scan an episode: %w", err)
 		}
+		ep.Stream = stream.Ref
 		if !seasonID.Valid {
 			continue // a show without seasons
 		}
@@ -322,17 +328,6 @@ func (r *AssignmentJobRepository) ActiveMappings(ctx context.Context, infoHash s
 // The write is partial: the torrent's other rows on the title stay. It
 // returns ErrShowNotFound or ErrMovieNotFound when the title is gone.
 func (r *AssignmentRepository) WriteOverride(ctx context.Context, w AssignmentWrite) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
 	w.Partial = true
-	if err := writeAssignments(ctx, tx, w); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
-	}
-	return nil
+	return r.write(ctx, w)
 }
