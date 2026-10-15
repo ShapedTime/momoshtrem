@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	// cacheVersion 3 names a file a job mapped to several episodes once
-	// ("S01E01-E02"); v2 added subtitle files. An older cache is ignored
-	// and the tree rebuilt from the database.
-	cacheVersion = 3
+	// cacheVersion 4 splits such a file at gaps in its episodes (E07 and
+	// E09 are two entries); v3 named a file a job mapped to several
+	// episodes once ("S01E01-E02"); v2 added subtitle files. An older
+	// cache is ignored and the tree rebuilt from the database.
+	cacheVersion = 4
 	cacheFile    = "vfs_tree.gob"
 )
 

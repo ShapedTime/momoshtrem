@@ -77,6 +77,23 @@ func TestSeasonEntries(t *testing.T) {
 			},
 		},
 		{
+			name:   "a gap splits a file's episodes into runs",
+			season: 1,
+			eps: []SeasonEpisode{
+				{Number: 9, Name: "Nine", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+				{Number: 7, Name: "Seven", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+				{Number: 8, Name: "Eight", InfoHash: "h", FilePath: "other.mkv", Grouped: true},
+				{Number: 10, Name: "Ten", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+				{Number: 12, Name: "Twelve", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+			},
+			want: []SeasonEntry{
+				{FileName: "Show - S01E07 - Seven.mkv", Episodes: []int{1}},
+				{FileName: "Show - S01E08 - Eight.mkv", Episodes: []int{2}},
+				{FileName: "Show - S01E09-E10 - Nine.mkv", Episodes: []int{0, 3}},
+				{FileName: "Show - S01E12 - Twelve.mkv", Episodes: []int{4}},
+			},
+		},
+		{
 			name:   "specials group in Season 00 too",
 			season: 0,
 			eps: []SeasonEpisode{
