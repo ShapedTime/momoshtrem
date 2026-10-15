@@ -23,6 +23,8 @@
     .main.has-hero { margin-top: calc(var(--topbar-h) * -1); }
   }
   .main--bare { padding-bottom: 0; }
+  /* Task pages (useTaskPage): no tab bar to clear; their sticky foot sits at the bottom */
+  .main.main--task { padding-bottom: 0; }
 
   .page-sections { display: flex; flex-direction: column; gap: var(--sp-10); }
   @media (min-width: 1024px) { .page-sections { gap: var(--sp-12); } }
