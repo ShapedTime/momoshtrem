@@ -109,7 +109,8 @@ func TestSpecialWordInEpisodeTitle(t *testing.T) {
 
 // High needs the name's title to be the show's: another show's torrent,
 // a spin-off, a strict prefix of a longer title or a year more than one off
-// can't be sure. The right show's usual names stay high.
+// can't be sure. The right show's usual names stay high, also when an alias
+// carries years: doctor-who has TMDB's "Doctor Who (2005-2022)".
 func TestWrongShowGuard(t *testing.T) {
 	tests := []struct {
 		show, path string
@@ -122,9 +123,11 @@ func TestWrongShowGuard(t *testing.T) {
 		{"the-boys", "Lost.S01E05.1080p.BluRay.mkv", ConfidenceMedium},
 		{"doctor-who", "Doctor.Who.2023.S01E01.Space.Babies.1080p.mkv", ConfidenceMedium},
 		{"doctor-who", "Doctor.Who.1963.S01E01.An.Unearthly.Child.mkv", ConfidenceMedium},
+		{"doctor-who", "Doctor.Who.2022.S01E01.mkv", ConfidenceMedium}, // the alias's year, not the show's
 		{"the-office", "The.Office.UK.S01E01.Downsize.mkv", ConfidenceMedium},
 		{"doctor-who", "Doctor.Who.2005.S01E01.Rose.mkv", ConfidenceHigh},
 		{"doctor-who", "Doctor.Who.2006.S02E01.mkv", ConfidenceHigh}, // one year off
+		{"doctor-who", "Doctor.Who.2005.S02E12E13.Army.of.Ghosts.and.Doomsday.1080p.BluRay.x264-GRP.mkv", ConfidenceHigh},
 		{"the-office", "The.Office.US.S01E01.Pilot.mkv", ConfidenceHigh},
 		{"the-office", "The.Office.S01E01.Pilot.mkv", ConfidenceHigh},
 		{"law-and-order-svu", "Law.and.Order.SVU.S20E05.1080p.WEB.mkv", ConfidenceHigh},

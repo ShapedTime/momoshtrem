@@ -151,18 +151,49 @@ var sequelWords = map[string]bool{
 	"iii": true, "iv": true, "2nd": true, "3rd": true, "4th": true, "5th": true, "6th": true,
 }
 
+// region reads a name's title part (regionWords, then regionOf). A year one
+// of the show's titles uses stays a title word ("1923", "Space: 1999"),
+// unless the name is a title without it: with TMDB's alias "Doctor Who
+// (2005-2022)", "Doctor.Who.2005" is still "Doctor Who" and the year 2005.
+func (ix *catalogIndex) region(toks []token.Token) titleRegion {
+	words, years, titleYears := ix.regionWords(toks)
+	r := ix.regionOf(words, years)
+	if r.match == regionExact || len(titleYears) == 0 {
+		return r
+	}
+	rest := make([]string, 0, len(words))
+	moved := append([]int(nil), years...)
+	for i, w := range words {
+		if n, ok := titleYears[i]; ok {
+			moved = append(moved, n)
+			continue
+		}
+		rest = append(rest, w)
+	}
+	if alt := ix.regionOf(rest, moved); alt.match == regionExact {
+		return alt
+	}
+	return r
+}
+
 // regionWords returns the words and years of a name's title part. Tags,
 // markers and dashes are skipped; bracketed words count ("(The Final
-// Season)") unless they describe the release. A year is a title word when a
-// title is that year ("1923").
-func (ix *catalogIndex) regionWords(toks []token.Token) (words []string, years []int) {
+// Season)") unless they describe the release. A year a title uses is a
+// title word; titleYears maps those words' indexes to their years.
+func (ix *catalogIndex) regionWords(toks []token.Token) (words []string, years []int, titleYears map[int]int) {
 	for _, t := range toks {
 		if t.IsTag() || t.IsMarker() || t.Kind == token.Dash {
 			continue
 		}
-		if t.Kind == token.Year && !ix.titleWords[t.Norm] {
-			years = append(years, t.N)
-			continue
+		if t.Kind == token.Year {
+			if !ix.titleWords[t.Norm] {
+				years = append(years, t.N)
+				continue
+			}
+			if titleYears == nil {
+				titleYears = map[int]int{}
+			}
+			titleYears[len(words)] = t.N
 		}
 		for _, w := range normWords(t.Text) {
 			if !releaseWords[w] {
@@ -170,7 +201,7 @@ func (ix *catalogIndex) regionWords(toks []token.Token) (words []string, years [
 			}
 		}
 	}
-	return words, years
+	return words, years, titleYears
 }
 
 // regionOf compares the words of a name's title part with the show's
@@ -313,7 +344,7 @@ func (ix *catalogIndex) folderTitleNote(seg string) (note string, present bool) 
 			break
 		}
 	}
-	words, years := ix.regionWords(toks[:end])
+	words, years, _ := ix.regionWords(toks[:end])
 	k := 0
 	for _, title := range ix.titles {
 		if len(title) <= len(words) && len(title) > k && equalWords(words[:len(title)], title) {
