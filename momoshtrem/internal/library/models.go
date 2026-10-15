@@ -144,8 +144,15 @@ type TorrentAssignment struct {
 	FileSize   int64
 	Resolution string // Optional: 1080p, 4K, etc.
 	Source     string // Optional: BluRay, WEB-DL, etc.
-	IsActive   bool
-	CreatedAt  time.Time
+	// Confidence is the classifier's (high, medium, low); "" for manual
+	// picks and rows written before assignment jobs.
+	Confidence string
+	// MatchSource is who mapped the file: rules, ai or manual; "" for rows
+	// written before assignment jobs. The VFS groups a multi-episode file
+	// into one entry only when it's set.
+	MatchSource string
+	IsActive    bool
+	CreatedAt   time.Time
 }
 
 // RecentlyAiredEpisode represents an episode with show context for the recently-aired API

@@ -501,7 +501,7 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 	rows, err := r.db.Query(`
 		SELECT e.id, e.season_id, e.episode_number, e.name,
 		       ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size,
-		       ta.resolution, ta.source, ta.created_at
+		       ta.resolution, ta.source, ta.confidence, ta.match_source, ta.created_at
 		FROM episodes e
 		INNER JOIN torrent_assignments ta ON ta.item_type = 'episode' AND ta.item_id = e.id AND ta.is_active = TRUE
 		WHERE e.season_id = $1
@@ -515,14 +515,14 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 	var episodes []Episode
 	for rows.Next() {
 		var episode Episode
-		var name, resolution, source sql.NullString
+		var name, resolution, source, confidence, matchSource sql.NullString
 		assignment := &TorrentAssignment{ItemType: ItemTypeEpisode}
 
 		if err := rows.Scan(
 			&episode.ID, &episode.SeasonID, &episode.EpisodeNumber, &name,
 			&assignment.ID, &assignment.InfoHash, &assignment.MagnetURI,
 			&assignment.FilePath, &assignment.FileSize,
-			&resolution, &source, &assignment.CreatedAt,
+			&resolution, &source, &confidence, &matchSource, &assignment.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan episode: %w", err)
 		}
@@ -531,6 +531,8 @@ func (r *ShowRepository) GetEpisodesWithAssignments(seasonID int64) ([]Episode, 
 		assignment.ItemID = episode.ID
 		assignment.Resolution = resolution.String
 		assignment.Source = source.String
+		assignment.Confidence = confidence.String
+		assignment.MatchSource = matchSource.String
 		assignment.IsActive = true
 		episode.Assignment = assignment
 

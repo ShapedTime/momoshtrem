@@ -20,15 +20,20 @@ type scanner interface {
 	Scan(dest ...interface{}) error
 }
 
-// scanAssignment scans a row into a TorrentAssignment
+// assignmentSelect lists a torrent_assignments row's columns in the order
+// scanAssignment reads them.
+const assignmentSelect = `id, item_type, item_id, info_hash, magnet_uri, file_path, file_size,
+	resolution, source, confidence, match_source, is_active, created_at`
+
+// scanAssignment scans assignmentSelect into a TorrentAssignment
 func scanAssignment(s scanner) (*TorrentAssignment, error) {
 	assignment := &TorrentAssignment{}
-	var resolution, source sql.NullString
+	var resolution, source, confidence, matchSource sql.NullString
 
 	err := s.Scan(
 		&assignment.ID, &assignment.ItemType, &assignment.ItemID,
 		&assignment.InfoHash, &assignment.MagnetURI, &assignment.FilePath, &assignment.FileSize,
-		&resolution, &source, &assignment.IsActive, &assignment.CreatedAt,
+		&resolution, &source, &confidence, &matchSource, &assignment.IsActive, &assignment.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -36,11 +41,22 @@ func scanAssignment(s scanner) (*TorrentAssignment, error) {
 
 	assignment.Resolution = resolution.String
 	assignment.Source = source.String
+	assignment.Confidence = confidence.String
+	assignment.MatchSource = matchSource.String
 
 	return assignment, nil
 }
 
-// Create adds a new torrent assignment
+// assignmentUpsert reactivates the row an item already has for the same
+// file (UNIQUE(item_type, item_id, info_hash, file_path)) instead of
+// failing. A re-assignment is a new assignment, so it's stamped now.
+const assignmentUpsert = `ON CONFLICT (item_type, item_id, info_hash, file_path) DO UPDATE SET
+		is_active = TRUE, magnet_uri = EXCLUDED.magnet_uri, file_size = EXCLUDED.file_size,
+		resolution = EXCLUDED.resolution, source = EXCLUDED.source,
+		confidence = EXCLUDED.confidence, match_source = EXCLUDED.match_source, created_at = NOW()`
+
+// Create makes assignment the item's only active one. Assigning a file the
+// item had before reactivates that row.
 func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -48,21 +64,26 @@ func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
 	}
 	defer tx.Rollback()
 
-	// Deactivate any existing active assignments for this item
+	// Deactivate the item's other active assignments
 	_, err = tx.Exec(
-		`UPDATE torrent_assignments SET is_active = FALSE WHERE item_type = $1 AND item_id = $2 AND is_active = TRUE`,
-		assignment.ItemType, assignment.ItemID,
+		`UPDATE torrent_assignments SET is_active = FALSE
+		 WHERE item_type = $1 AND item_id = $2 AND is_active = TRUE
+		   AND NOT (info_hash = $3 AND file_path = $4)`,
+		assignment.ItemType, assignment.ItemID, assignment.InfoHash, assignment.FilePath,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to deactivate existing assignments: %w", err)
 	}
 
-	// Create new assignment
 	err = tx.QueryRow(
-		`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE) RETURNING id, created_at`,
+		`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size,
+		                                  resolution, source, confidence, match_source, is_active)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
+		 `+assignmentUpsert+`
+		 RETURNING id, created_at`,
 		assignment.ItemType, assignment.ItemID, assignment.InfoHash, assignment.MagnetURI,
 		assignment.FilePath, assignment.FileSize, nullString(assignment.Resolution), nullString(assignment.Source),
+		nullString(assignment.Confidence), nullString(assignment.MatchSource),
 	).Scan(&assignment.ID, &assignment.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create assignment: %w", err)
@@ -75,7 +96,7 @@ func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
 // GetByID retrieves an assignment by its ID
 func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
 	row := r.db.QueryRow(
-		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
+		`SELECT `+assignmentSelect+`
 		 FROM torrent_assignments WHERE id = $1`,
 		id,
 	)
@@ -94,7 +115,7 @@ func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
 // GetActiveForItem retrieves the active assignment for a library item
 func (r *AssignmentRepository) GetActiveForItem(itemType ItemType, itemID int64) (*TorrentAssignment, error) {
 	row := r.db.QueryRow(
-		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
+		`SELECT `+assignmentSelect+`
 		 FROM torrent_assignments WHERE item_type = $1 AND item_id = $2 AND is_active = TRUE`,
 		itemType, itemID,
 	)
@@ -113,7 +134,7 @@ func (r *AssignmentRepository) GetActiveForItem(itemType ItemType, itemID int64)
 // GetByInfoHash retrieves all assignments using a specific torrent
 func (r *AssignmentRepository) GetByInfoHash(infoHash string) ([]*TorrentAssignment, error) {
 	rows, err := r.db.Query(
-		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
+		`SELECT `+assignmentSelect+`
 		 FROM torrent_assignments WHERE info_hash = $1`,
 		infoHash,
 	)
@@ -137,7 +158,7 @@ func (r *AssignmentRepository) GetByInfoHash(infoHash string) ([]*TorrentAssignm
 // GetActiveByInfoHash retrieves all active assignments using a specific torrent
 func (r *AssignmentRepository) GetActiveByInfoHash(infoHash string) ([]*TorrentAssignment, error) {
 	rows, err := r.db.Query(
-		`SELECT id, item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, source, is_active, created_at
+		`SELECT `+assignmentSelect+`
 		 FROM torrent_assignments WHERE info_hash = $1 AND is_active = TRUE`,
 		infoHash,
 	)
