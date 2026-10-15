@@ -75,6 +75,20 @@ func TestEvaluateModes(t *testing.T) {
 	if always.usage.CostUSD != 0.002 || !strings.Contains(out.String(), "BROKE") {
 		t.Errorf("ai_always usage %+v; report:\n%s", always.usage, out.String())
 	}
+	// Every high rules answer other than S01E01 is disputed and goes to
+	// review with its target kept; the rules were right on each. Frieren's
+	// "01" (S01E01) agrees.
+	if len(always.disputes) == 0 || always.rulesRight != len(always.disputes) || always.aiRight != 0 {
+		t.Errorf("ai_always disputes: %d, rules right %d, AI right %d", len(always.disputes), always.rulesRight, always.aiRight)
+	}
+	for _, d := range always.disputes {
+		if strings.Contains(d.where, "Sousou no Frieren - 01 ") {
+			t.Errorf("an agreement was disputed: %s", d.where)
+		}
+	}
+	if !strings.Contains(out.String(), "the AI disagreed with") || !strings.Contains(out.String(), "[rules right]") {
+		t.Errorf("the report lacks the disagreements:\n%s", out.String())
+	}
 
 	silent := fakeResolver(func(identify.ResolveInput) []identify.AIFile { return nil })
 	rep = evaluate(context.Background(), runs, cfg, silent)

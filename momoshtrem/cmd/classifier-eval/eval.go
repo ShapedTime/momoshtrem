@@ -182,11 +182,38 @@ type outcome struct {
 	err     error
 	// alone scores the AI's own answers (ai_always).
 	alone aloneScore
+	// disputes are the high rules answers the AI disagreed with (ai_always).
+	disputes []dispute
 }
 
 type change struct {
 	where, before, after string
 	beforeOK, afterOK    bool
+}
+
+// dispute is a high rules answer the AI disagreed with, and who was right.
+type dispute struct {
+	where, rules, ai    string
+	rulesRight, aiRight bool
+}
+
+// judgeDisputes scores both sides of each dispute against the corpus: the
+// rules' answer, and the AI's as MergeAI applies it with nothing protected.
+func judgeDisputes(r caseRun, ds []identify.Dispute, open []identify.Proposal) []dispute {
+	index := make(map[string]int, len(r.rules))
+	for i, p := range r.rules {
+		index[p.Path] = i
+	}
+	out := make([]dispute, 0, len(ds))
+	for _, d := range ds {
+		i := index[d.Path]
+		f := r.c.Files[i]
+		out = append(out, dispute{
+			where: r.c.ID + ": " + f.Path, rules: describe(r.rules[i]), ai: describe(open[i]),
+			rulesRight: f.Correct(gotOf(r.rules[i])), aiRight: f.Correct(gotOf(open[i])),
+		})
+	}
+	return out
 }
 
 // aloneScore is how the AI's answers fare without MergeAI's protection of
@@ -247,7 +274,13 @@ func evaluateOne(ctx context.Context, mode string, r caseRun, resolver identify.
 		if err == nil {
 			final = identify.MergeAI(r.rules, res.Files, r.in.Show)
 			if mode == modeAlways || mode == modeBlind {
-				o.alone = scoreAlone(r, scope, res.Files)
+				// As the job service does in ai_always: the AI's
+				// disagreements with high rules answers go to review.
+				var open []identify.Proposal
+				var disputes []identify.Dispute
+				o.alone, open = scoreAlone(r, scope, res.Files)
+				final, disputes = identify.FlagDisagreements(final, res.Files, r.in.Show)
+				o.disputes = judgeDisputes(r, disputes, open)
 			}
 		}
 	}
@@ -271,8 +304,8 @@ func evaluateOne(ctx context.Context, mode string, r caseRun, resolver identify.
 
 // scoreAlone merges the AI's answers into the rules with nothing protected,
 // and scores the videos in scope: an answer the AI didn't give (or that
-// MergeAI rejected) is unanswered.
-func scoreAlone(r caseRun, scope []string, files []identify.AIFile) aloneScore {
+// MergeAI rejected) is unanswered. It returns the merged proposals too.
+func scoreAlone(r caseRun, scope []string, files []identify.AIFile) (aloneScore, []identify.Proposal) {
 	open := make([]identify.Proposal, len(r.rules))
 	for i, p := range r.rules {
 		if p.Confidence == identify.ConfidenceHigh {
@@ -306,7 +339,7 @@ func scoreAlone(r caseRun, scope []string, files []identify.AIFile) aloneScore {
 			s.wrongs = append(s.wrongs, fmt.Sprintf("%s: %s\n      AI %s %q; want %s", r.c.ID, f.Path, describe(p), p.Reason, want(f)))
 		}
 	}
-	return s
+	return s, merged
 }
 
 func gotOf(p identify.Proposal) corpus.Got {
@@ -351,6 +384,8 @@ type modeSummary struct {
 	fixed, broke, unchanged int
 	misses, errs            []string
 	alone                   aloneScore
+	disputes                []dispute
+	aiRight, rulesRight     int // disputes each side got right
 }
 
 func summarize(mode string, outs []outcome) modeSummary {
@@ -385,6 +420,15 @@ func summarize(mode string, outs []outcome) modeSummary {
 		s.alone.unanswered += a.unanswered
 		s.alone.wrongHigh += a.wrongHigh
 		s.alone.wrongs = append(s.alone.wrongs, a.wrongs...)
+		for _, d := range o.disputes {
+			s.disputes = append(s.disputes, d)
+			if d.aiRight {
+				s.aiRight++
+			}
+			if d.rulesRight {
+				s.rulesRight++
+			}
+		}
 	}
 	return s
 }
@@ -432,6 +476,8 @@ func (r *report) print(w io.Writer, verbose bool) {
 			a := m.alone
 			fmt.Fprintf(w, "%s, the AI's own answers (before MergeAI keeps the rules' high ones): %d/%d videos right (%.1f%%), %d wrong (%d of them high), %d unanswered.\n",
 				m.mode, a.right, a.videos, 100*ratio(a.right, a.videos), a.wrong, a.wrongHigh, a.unanswered)
+			fmt.Fprintf(w, "%s: the AI disagreed with %d high rules answers, sent to review: the AI was right on %d, the rules on %d.\n",
+				m.mode, len(m.disputes), m.aiRight, m.rulesRight)
 		}
 		for _, e := range m.errs {
 			fmt.Fprintf(w, "%s error: %s\n", m.mode, e)
@@ -452,6 +498,21 @@ func (r *report) print(w io.Writer, verbose bool) {
 					verdict = "still right"
 				}
 				fmt.Fprintf(w, "  - %s [%s]\n      %s -> %s\n", c.where, verdict, c.before, c.after)
+			}
+		}
+		if len(m.disputes) > 0 {
+			fmt.Fprintf(w, "\n%s: disagreements with high rules answers (%d):\n", m.mode, len(m.disputes))
+			for _, d := range m.disputes {
+				verdict := "neither right"
+				switch {
+				case d.aiRight && d.rulesRight:
+					verdict = "both right"
+				case d.aiRight:
+					verdict = "AI right"
+				case d.rulesRight:
+					verdict = "rules right"
+				}
+				fmt.Fprintf(w, "  - %s [%s]\n      rules %s, AI %s\n", d.where, verdict, d.rules, d.ai)
 			}
 		}
 		if verbose && len(m.misses) > 0 {

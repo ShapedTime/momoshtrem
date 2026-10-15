@@ -129,6 +129,94 @@ func TestMergeAIExtrasAndReasons(t *testing.T) {
 	}
 }
 
+func TestFlagDisagreements(t *testing.T) {
+	cat := show(t, "frieren")
+	rules := func() []Proposal {
+		return []Proposal{
+			{Path: "a.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 28), 1, 28}}, Confidence: ConfidenceHigh, Method: MethodAbsolute, Source: SourceRules, Reason: "rules a"},
+			{Path: "a.en.srt", Kind: KindSubtitle, LinkedVideo: "a.mkv", Targets: []Target{{fixtureID(1, 28), 1, 28}}, Confidence: ConfidenceHigh, Source: SourceRules},
+			{Path: "b.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 5), 1, 5}}, Confidence: ConfidenceMedium, Source: SourceRules, Reason: "rules b"},
+			{Path: "c.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 1), 1, 1}, {fixtureID(1, 2), 1, 2}}, Confidence: ConfidenceHigh, Source: SourceRules, Reason: "rules c"},
+		}
+	}
+	tests := []struct {
+		name   string
+		ai     []AIFile
+		path   string
+		conf   Confidence
+		reason string // a prefix; empty means unchanged
+		want   string // the targets, always the rules'
+	}{
+		{"another episode goes to review", []AIFile{{Path: "a.mkv", Kind: KindSpecial, Season: intp(0), Episodes: []int{3}, Confidence: ConfidenceMedium, Reason: "AI: a recap special"}},
+			"a.mkv", ConfidenceMedium, "AI suggests S00E03: a recap special", "S01E28"},
+		{"its subtitle follows", []AIFile{{Path: "a.mkv", Kind: KindSpecial, Season: intp(0), Episodes: []int{3}, Confidence: ConfidenceHigh, Reason: "recap"}},
+			"a.en.srt", ConfidenceMedium, "", "S01E28"},
+		{"an extra goes to review", []AIFile{{Path: "a.mkv", Kind: KindExtra, Confidence: ConfidenceHigh, Reason: "a creditless ending"}},
+			"a.mkv", ConfidenceMedium, "AI suggests an extra: a creditless ending", "S01E28"},
+		{"a multi-episode file the AI reads as one", []AIFile{{Path: "c.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{1}, Confidence: ConfidenceHigh, Reason: "01"}},
+			"c.mkv", ConfidenceMedium, "AI suggests S01E01: 01", "S01E01+S01E02"},
+		{"agreement changes nothing", []AIFile{{Path: "c.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{2, 1}, Confidence: ConfidenceHigh, Reason: "x"}},
+			"c.mkv", ConfidenceHigh, "", "S01E01+S01E02"},
+		{"agreement by absolute number", []AIFile{{Path: "a.mkv", Kind: KindEpisode, AbsoluteNumber: intp(28), Confidence: ConfidenceHigh, Reason: "x"}},
+			"a.mkv", ConfidenceHigh, "", "S01E28"},
+		{"a low-confidence answer changes nothing", []AIFile{{Path: "a.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{27}, Confidence: ConfidenceLow, Reason: "x"}},
+			"a.mkv", ConfidenceHigh, "", "S01E28"},
+		{"an episode that doesn't exist changes nothing", []AIFile{{Path: "a.mkv", Kind: KindEpisode, Season: intp(2), Episodes: []int{1}, Confidence: ConfidenceHigh, Reason: "x"}},
+			"a.mkv", ConfidenceHigh, "", "S01E28"},
+		{"unknown changes nothing", []AIFile{{Path: "a.mkv", Kind: KindUnknown, Confidence: ConfidenceHigh, Reason: "x"}},
+			"a.mkv", ConfidenceHigh, "", "S01E28"},
+		{"answers on files below high are MergeAI's", []AIFile{{Path: "b.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{6}, Confidence: ConfidenceHigh, Reason: "x"}},
+			"b.mkv", ConfidenceMedium, "", "S01E05"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := rules()
+			out, disputes := FlagDisagreements(in, tt.ai, cat)
+			var got Proposal
+			for _, p := range out {
+				if p.Path == tt.path {
+					got = p
+				}
+			}
+			if targetLabel(got.Targets) != tt.want || got.Confidence != tt.conf || got.Source != SourceRules {
+				t.Errorf("%s = %s [%s] %s, want %s [%s] rules", tt.path, targetLabel(got.Targets), got.Confidence, got.Source, tt.want, tt.conf)
+			}
+			changed := tt.conf != ConfidenceHigh && tt.path != "b.mkv"
+			if changed != (len(disputes) == 1) {
+				t.Errorf("disputes = %+v", disputes)
+			}
+			if tt.reason != "" && got.Reason != tt.reason {
+				t.Errorf("reason = %q, want %q", got.Reason, tt.reason)
+			}
+			if tt.reason == "" && got.Kind != KindSubtitle && got.Reason != rules()[indexOf(in, tt.path)].Reason {
+				t.Errorf("reason changed to %q", got.Reason)
+			}
+			if !reflectEqualProposals(in, rules()) {
+				t.Error("FlagDisagreements modified its input")
+			}
+		})
+	}
+
+	out, disputes := FlagDisagreements(rules(), []AIFile{{Path: "a.mkv", Kind: KindEpisode, Season: intp(0), Episodes: []int{3},
+		Confidence: ConfidenceHigh, Reason: strings.Repeat("a very long reason ", 20)}}, cat)
+	if n := utf8.RuneCountInString(out[0].Reason); n > MaxReasonRunes {
+		t.Errorf("reason has %d runes", n)
+	}
+	if d := disputes[0]; d.Path != "a.mkv" || targetLabel(d.Rules) != "S01E28" || targetLabel(d.AI) != "S00E03" ||
+		d.AIKind != KindEpisode || d.AIConfidence != ConfidenceHigh {
+		t.Errorf("dispute = %+v", d)
+	}
+}
+
+func indexOf(ps []Proposal, path string) int {
+	for i, p := range ps {
+		if p.Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
 func reflectEqualProposals(a, b []Proposal) bool {
 	if len(a) != len(b) {
 		return false

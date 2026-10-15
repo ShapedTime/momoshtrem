@@ -2,6 +2,7 @@ package identify
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -196,6 +197,118 @@ func MergeAI(rules []Proposal, ai []AIFile, cat *ShowCatalog) []Proposal {
 		out[i] = p
 	}
 	return out
+}
+
+// Dispute is a high-confidence rules answer the AI disagrees with.
+type Dispute struct {
+	Path string
+	// Rules are the rules' targets, which the proposal keeps.
+	Rules []Target
+	// AI is the AI's answer: its targets (none for an extra or a sample),
+	// kind and confidence.
+	AI           []Target
+	AIKind       Kind
+	AIConfidence Confidence
+}
+
+// FlagDisagreements is for classifier_mode ai_always, where the AI also
+// sees the files the rules matched with high confidence. MergeAI never
+// overrides those; FlagDisagreements finds the ones the AI answers
+// differently, at medium or high confidence (another episode that exists,
+// or an extra or a sample), and sends them to review instead: each keeps
+// its targets and source, drops to medium confidence (so auto-apply waits
+// for the user), and its reason names the AI's alternative ("AI suggests
+// S00E03: a recap special"). Subtitles linked to a flagged video drop with
+// it. Agreement, a low-confidence or "unknown" answer, or a target that
+// doesn't exist changes nothing.
+//
+// Run it on MergeAI's output with the same answers. It returns the
+// proposals and the disputes; merged is not modified.
+func FlagDisagreements(merged []Proposal, ai []AIFile, cat *ShowCatalog) ([]Proposal, []Dispute) {
+	out := make([]Proposal, len(merged))
+	index := make(map[string]int, len(merged))
+	for i, p := range merged {
+		out[i] = p
+		index[p.Path] = i
+	}
+	ix := newIndex(cat, time.Time{})
+
+	var disputes []Dispute
+	flagged := map[string]bool{}
+	seen := map[string]bool{}
+	for _, a := range ai {
+		i, ok := index[a.Path]
+		if !ok || seen[a.Path] {
+			continue
+		}
+		seen[a.Path] = true
+		p := out[i]
+		if p.Source != SourceRules || p.Confidence != ConfidenceHigh || ClassOf(p.Path) != ClassVideo ||
+			(p.Kind != KindEpisode && p.Kind != KindSpecial) {
+			continue
+		}
+		if a.Confidence != ConfidenceHigh && a.Confidence != ConfidenceMedium {
+			continue
+		}
+		var alt []Target
+		var suggestion string
+		switch a.Kind {
+		case KindExtra:
+			suggestion = "an extra"
+		case KindSample:
+			suggestion = "a sample clip"
+		case KindEpisode, KindSpecial:
+			eps := ix.resolveAI(a)
+			if eps == nil {
+				continue
+			}
+			alt = targetsOf(eps)
+			if sameTargets(alt, p.Targets) {
+				continue
+			}
+			labels := make([]string, len(alt))
+			for k, t := range alt {
+				labels[k] = fmt.Sprintf("S%02dE%02d", t.Season, t.Episode)
+			}
+			suggestion = strings.Join(labels, "+")
+		default:
+			continue
+		}
+		reason := "AI suggests " + suggestion
+		if why := aiReason(a.Reason); why != "" {
+			reason += ": " + why
+		}
+		disputes = append(disputes, Dispute{Path: p.Path, Rules: append([]Target(nil), p.Targets...),
+			AI: alt, AIKind: a.Kind, AIConfidence: a.Confidence})
+		p.Targets = append([]Target(nil), p.Targets...)
+		p.Confidence, p.Reason = ConfidenceMedium, clipReason(reason)
+		out[i] = p
+		flagged[p.Path] = true
+	}
+
+	for i, p := range out {
+		if p.Kind == KindSubtitle && flagged[p.LinkedVideo] && p.Confidence == ConfidenceHigh {
+			out[i].Confidence = ConfidenceMedium
+		}
+	}
+	return out, disputes
+}
+
+// sameTargets reports whether two target lists name the same episodes.
+func sameTargets(a, b []Target) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ids := make(map[int64]bool, len(a))
+	for _, t := range a {
+		ids[t.EpisodeID] = true
+	}
+	for _, t := range b {
+		if !ids[t.EpisodeID] {
+			return false
+		}
+	}
+	return true
 }
 
 // aiReason trims an AI reason. The UI labels AI reasons from the source, so

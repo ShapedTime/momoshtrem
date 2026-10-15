@@ -13,7 +13,9 @@
 // expectations, after identify.MergeAI as the job service merges the
 // answers; the files the AI changed and whether each change was right;
 // tokens; cost per torrent; and latency. For ai_always it also scores the
-// AI's own answers, before MergeAI keeps the rules' high ones.
+// AI's own answers, before MergeAI keeps the rules' high ones, and counts
+// the high rules answers the AI disagreed with (identify.FlagDisagreements
+// sends those to review) and who was right.
 //
 // The AI modes call the Anthropic API and cost money, so this never runs in
 // tests or CI. They need ANTHROPIC_API_KEY, from the environment or read

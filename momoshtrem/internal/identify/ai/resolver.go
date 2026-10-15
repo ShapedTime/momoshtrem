@@ -26,7 +26,9 @@
 // the show and never overrides a high-confidence rules answer. An answer
 // only the AI gives keeps the AI's confidence: the job service sends it to
 // needs_review unless it's high and auto_apply_high_confidence allows
-// applying it.
+// applying it. In ai_always the caller also runs identify.FlagDisagreements
+// on the merged proposals: a high rules answer the AI disagrees with keeps
+// its target but goes to review, its reason naming the AI's alternative.
 //
 // # Cost
 //
