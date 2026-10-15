@@ -118,7 +118,7 @@ func episodePaths(showTitle string, showYear, season int, episodes []library.Epi
 		eps = append(eps, vfs.SeasonEpisode{
 			Number: ep.EpisodeNumber, Name: ep.Name,
 			InfoHash: ep.Assignment.InfoHash, FilePath: ep.Assignment.FilePath,
-			Grouped: ep.Assignment.MatchSource != "",
+			Grouped: ep.Assignment.Groupable(),
 		})
 	}
 	out := make(map[int64]string, len(ids))

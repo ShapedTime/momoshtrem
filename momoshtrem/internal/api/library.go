@@ -267,7 +267,8 @@ func (s *Server) unassignMovieTorrent(c *gin.Context) {
 
 	// Invalidate cached file handles before deactivating assignment
 	if s.treeUpdater != nil {
-		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, id); err == nil && assignment != nil {
+		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, id); err == nil &&
+			assignment != nil && assignment.IsTorrent() {
 			s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
 		}
 	}
@@ -450,10 +451,12 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	grouped := false
 	if s.treeUpdater != nil {
 		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, id); err == nil && assignment != nil {
-			s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
+			if assignment.IsTorrent() {
+				s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
+			}
 			// A job's row may share a grouped entry ("S01E01-E02") with
 			// other episodes of the file: they get renamed.
-			grouped = assignment.MatchSource != ""
+			grouped = assignment.Groupable()
 		}
 	}
 

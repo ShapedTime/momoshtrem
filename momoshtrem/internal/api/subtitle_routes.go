@@ -111,7 +111,9 @@ func (r *libraryItemResolver) ResolveSubtitleItem(_ context.Context, item subtit
 	if err != nil {
 		return nil, err
 	}
-	if assignment != nil {
+	// An HDRezka stream has no torrent and no release name to rank against:
+	// its matches are unknown.
+	if assignment != nil && assignment.IsTorrent() {
 		out.InfoHash = assignment.InfoHash
 		out.Release = subtitle.AssignedRelease(assignment.MagnetURI, assignment.FilePath)
 	}

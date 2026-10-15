@@ -193,6 +193,31 @@ func (it *integration) assign(itemType library.ItemType, itemID int64, hash, pat
 	it.t.Cleanup(func() { _, _ = it.db.Exec(`DELETE FROM torrent_assignments WHERE id = $1`, id) })
 }
 
+// streamSize is the size of every HDRezka stream stream() assigns.
+const streamSize = 700
+
+// stream makes an HDRezka stream the item's file through the writer:
+// titleID is the show (for an episode) or the movie, episode the stream's
+// episode (0 for a movie).
+func (it *integration) stream(itemType library.ItemType, titleID, itemID int64, episode int) {
+	it.t.Helper()
+	ref := &library.StreamRef{Provider: "hdrezka", Path: "/series/646-show.html", PostID: 646, Title: it.tag,
+		TranslatorID: 56, TranslatorName: "LostFilm", Season: 1, Episode: episode, Quality: "1080p"}
+	w := library.AssignmentWrite{ItemType: itemType,
+		Rows: []library.TorrentAssignment{{ItemID: itemID, Stream: ref, FileSize: streamSize, Resolution: "1080p"}}}
+	if itemType == library.ItemTypeEpisode {
+		w.ShowID = titleID
+	} else {
+		w.MovieID = titleID
+	}
+	if err := library.NewAssignmentRepository(it.db).WriteStream(context.Background(), w); err != nil {
+		it.t.Fatal(err)
+	}
+	it.t.Cleanup(func() {
+		_, _ = it.db.Exec(`DELETE FROM torrent_assignments WHERE item_type = $1 AND item_id = $2 AND kind = 'hdrezka'`, itemType, itemID)
+	})
+}
+
 func (it *integration) queries(fn func()) int {
 	before := it.counter.n.Load()
 	fn()
@@ -343,59 +368,87 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 	ctx := context.Background()
 
 	type variant struct {
-		name   string
-		build  func(*library.Show)
-		active map[string]torrent.FileProgress // files of the show's loaded, active torrent
+		name  string
+		build func(*library.Show)
+		// The files of the show's loaded, active torrent (hash+activeHash).
+		active     map[string]torrent.FileProgress
+		activeHash string
+		size       int64  // the library's size_bytes: each file once
+		want       string // "stage ready/total", when set
 	}
 	hash := "hash-variant-" + it.tag
 	variants := []variant{
-		{"nothing assigned", func(s *library.Show) { it.season(s, 1, 4, "2020-01-03") }, nil},
+		{"nothing assigned", func(s *library.Show) { it.season(s, 1, 4, "2020-01-03") }, nil, "", 0, ""},
 		{"frontier", func(s *library.Show) {
 			ids := it.season(s, 1, 4, "2020-01-03")
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-f", "E01.mkv")
-		}, nil},
+		}, nil, "", 1000, ""},
 		{"gap before the last file", func(s *library.Show) {
 			ids := it.season(s, 1, 4, "2020-01-03")
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-g", "E01.mkv")
 			it.assign(library.ItemTypeEpisode, ids[4], hash+"-g", "E04.mkv")
-		}, nil},
+		}, nil, "", 2000, ""},
 		{"upcoming after the last file", func(s *library.Show) {
 			ids := it.season(s, 1, 3, time.Now().AddDate(0, 0, -7).Format(time.DateOnly))
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-u", "E01.mkv")
 			it.assign(library.ItemTypeEpisode, ids[2], hash+"-u", "E02.mkv")
-		}, nil},
+		}, nil, "", 2000, ""},
 		{"downloading", func(s *library.Show) {
 			ids := it.season(s, 1, 2, "2020-01-03")
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-d", "E01.mkv")
 			it.assign(library.ItemTypeEpisode, ids[2], hash+"-d", "E02.mkv")
-		}, map[string]torrent.FileProgress{"E02.mkv": {Length: 10, BytesCompleted: 3}}},
+		}, map[string]torrent.FileProgress{"E02.mkv": {Length: 10, BytesCompleted: 3}}, "-d", 2000, ""},
 		{"specials hidden", func(s *library.Show) {
 			it.exec(`UPDATE shows SET include_specials = FALSE WHERE id = $1`, s.ID)
 			it.season(s, 1, 2, "2099-01-01")
 			ids := it.season(s, 0, 1, "2020-01-03")
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-s", "SP01.mkv")
-		}, nil},
+		}, nil, "", 0, ""},
 		{"special file only", func(s *library.Show) {
 			it.season(s, 1, 2, "2099-01-01")
 			ids := it.season(s, 0, 1, "2020-01-03")
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-o", "SP01.mkv")
-		}, nil},
+		}, nil, "", 1000, ""},
+		// HDRezka files have no info hash and are never downloading.
+		{"hdrezka only", func(s *library.Show) {
+			ids := it.season(s, 1, 2, "2020-01-03")
+			it.stream(library.ItemTypeEpisode, s.ID, ids[1], 1)
+			it.stream(library.ItemTypeEpisode, s.ID, ids[2], 2)
+		}, nil, "", 2 * streamSize, "ready 2/2"},
+		{"mixed sources", func(s *library.Show) {
+			ids := it.season(s, 1, 4, "2020-01-03")
+			it.stream(library.ItemTypeEpisode, s.ID, ids[1], 1)
+			it.assign(library.ItemTypeEpisode, ids[2], hash+"-m", "E02.mkv")
+			it.stream(library.ItemTypeEpisode, s.ID, ids[3], 3)
+		}, nil, "", 2*streamSize + 1000, "needs_torrent 3/4"},
+		{"mixed sources downloading", func(s *library.Show) {
+			ids := it.season(s, 1, 2, "2020-01-03")
+			it.stream(library.ItemTypeEpisode, s.ID, ids[1], 1)
+			it.assign(library.ItemTypeEpisode, ids[2], hash+"-md", "E02.mkv")
+		}, map[string]torrent.FileProgress{"E02.mkv": {Length: 10, BytesCompleted: 3}}, "-md", streamSize + 1000, "downloading 2/2"},
 	}
 
 	routes := map[string]any{}
+	byTitle := map[string]variant{}
 	for i, v := range variants {
 		show := it.show(it.id(10+i), fmt.Sprintf("Variant %s %s", it.tag, v.name))
 		v.build(show)
+		byTitle[show.Title] = v
 		routes[fmt.Sprintf("/tv/%d", show.TMDBID)] = tmdb.ShowDetails{ID: show.TMDBID, Name: show.Title}
 		if v.active != nil {
-			it.torrents.loaded[hash+"-d"] = fakeTorrent{active: true, files: v.active}
+			it.torrents.loaded[hash+v.activeHash] = fakeTorrent{active: true, files: v.active}
 		}
 	}
+	// And a movie that plays from HDRezka.
+	movie := it.movie(it.id(30), fmt.Sprintf("Variant %s hdrezka movie", it.tag), "")
+	it.stream(library.ItemTypeMovie, movie.ID, movie.ID, 0)
+	routes[fmt.Sprintf("/movie/%d", movie.TMDBID)] = tmdb.MovieDetails{ID: movie.TMDBID, Title: movie.Title}
 	srv := fakeTMDBServer(t, routes)
 	t.Cleanup(func() {
 		for i := range variants {
 			_, _ = it.db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, fmt.Sprintf("%%/tv/%d", it.id(10+i)))
 		}
+		_, _ = it.db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, fmt.Sprintf("%%/movie/%d", movie.TMDBID))
 	})
 	it.svc = New(Deps{
 		Store:    library.NewCatalogRepository(it.db),
@@ -421,9 +474,33 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			t.Errorf("%s: title %s %d/%d, library %s %d/%d", item.Title, lib.AvailabilityStage, *lib.EpisodesReady, *lib.EpisodesTotal,
 				item.AvailabilityStage, *item.EpisodesReady, *item.EpisodesTotal)
 		}
+		v := byTitle[item.Title]
+		if item.SizeBytes != v.size {
+			t.Errorf("%s: size %d, want %d", item.Title, item.SizeBytes, v.size)
+		}
+		if got := fmt.Sprintf("%s %d/%d", item.AvailabilityStage, *item.EpisodesReady, *item.EpisodesTotal); v.want != "" && got != v.want {
+			t.Errorf("%s: %s, want %s", item.Title, got, v.want)
+		}
 		seen[item.AvailabilityStage] = true
 	}
 	if !seen[StageNeedsTorrent] || !seen[StageReady] || !seen[StageDownloading] {
 		t.Errorf("stages covered = %v, want all three", seen)
+	}
+
+	// The HDRezka movie is ready on both, with no torrent.
+	movies, err := it.svc.Library(ctx, LibraryParams{MediaType: "movie", Query: "Variant " + it.tag})
+	if err != nil || movies.Total != 1 {
+		t.Fatalf("movies = %+v, %v", movies, err)
+	}
+	movieTitle, err := it.svc.MovieTitle(ctx, movie.TMDBID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib := movieTitle.Library
+	if item := movies.Items[0]; item.AvailabilityStage != StageReady || lib.AvailabilityStage != StageReady || item.SizeBytes != streamSize {
+		t.Errorf("HDRezka movie: library %s %d, title %s", item.AvailabilityStage, item.SizeBytes, lib.AvailabilityStage)
+	}
+	if lib.Torrent != nil || lib.Download != nil || lib.WebDAVPath == nil || !strings.HasSuffix(*lib.WebDAVPath, ").mp4") {
+		t.Errorf("HDRezka movie library = %+v", lib)
 	}
 }

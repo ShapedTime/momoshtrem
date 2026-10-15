@@ -47,9 +47,10 @@ type SeasonEpisode struct {
 	Name     string
 	InfoHash string
 	FilePath string // the file inside the torrent
-	// Grouped is set for rows written by assignment jobs (match_source
-	// set): episodes that share a file become one entry. Older rows keep
-	// one entry per episode, so their paths never change.
+	// Grouped is set for torrent rows written by assignment jobs
+	// (TorrentAssignment.Groupable): episodes that share a file become one
+	// entry. Older rows and HDRezka streams keep one entry per episode, so
+	// their paths never change.
 	Grouped bool
 }
 

@@ -51,8 +51,9 @@ func (v *torrentView) state(hash string) *torrentSnapshot {
 
 // fileProgress is how far along an assigned file is. downloading is true
 // while its torrent is loaded and active and the file isn't all on disk.
+// An HDRezka stream is never downloading: it plays from the CDN.
 func (v *torrentView) fileProgress(a *library.TorrentAssignment) (downloading bool, done, length int64, seeders int) {
-	if a == nil {
+	if a == nil || !a.IsTorrent() {
 		return false, 0, 0, 0
 	}
 	st := v.state(a.InfoHash)
