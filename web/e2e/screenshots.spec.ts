@@ -153,6 +153,63 @@ test.describe('movie page', () => {
   });
 });
 
+test.describe('HDRezka sheet', () => {
+  const BEST = 'Use Битва за битвой (2025)';
+  const open = async (page: Page) => {
+    await signIn(page, '/movie/1054867?sheet=hdrezka&movie=1054867');
+    await page.getByRole('dialog', { name: /^Find a source/ }).waitFor();
+  };
+  const settle = async (page: Page) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(600);
+  };
+
+  test('match', async ({ page }, testInfo) => {
+    await open(page);
+    await page.getByRole('button', { name: BEST }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/match');
+  });
+
+  test('voice-over and quality', async ({ page }, testInfo) => {
+    await open(page);
+    await page.getByRole('button', { name: BEST }).click();
+    await page.getByRole('radio', { name: 'Оригинал (+субтитры)' }).check();
+    await page.getByText('Subtitles: English, Русский').waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/steps');
+  });
+
+  test('none', async ({ page }, testInfo) => {
+    await open(page);
+    await page.getByRole('button', { name: BEST }).waitFor();
+    await page.getByRole('searchbox', { name: 'Search HDRezka, or paste a link' }).fill('zzz Battle 2025');
+    await page.keyboard.press('Enter');
+    await page.getByText('No match for “zzz Battle 2025”').waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/none');
+  });
+
+  test('blocked', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'hdrezka-blocked'));
+    await open(page);
+    await page.getByText('HDRezka is showing its bot check').waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/blocked');
+  });
+
+  test('ready with the stream', async ({ page }, testInfo) => {
+    await open(page);
+    await page.getByRole('button', { name: BEST }).click();
+    await page.getByRole('radio', { name: 'Оригинал (+субтитры)' }).check();
+    await page.getByRole('button', { name: 'Use HDRezka' }).click();
+    await page.getByRole('heading', { name: 'Current stream' }).waitFor();
+    await page.getByRole('status').filter({ hasText: 'Streaming from HDRezka' }).waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'movie/stream', { fullPage: true });
+  });
+});
+
 test.describe('show page', () => {
   for (const [state, path, ready] of [
     ['frieren', '/tv/209867', 'Episodes 29–38 have no torrent'],
