@@ -177,3 +177,67 @@ test.describe('show page', () => {
     await shoot(page, testInfo, 'show/settings');
   });
 });
+
+test.describe('mapping review', () => {
+  const phone = (testInfo: TestInfo) => testInfo.project.name === 'mobile';
+
+  test('progress', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'job-hold:classifying'));
+    await signIn(page, '/tv/209867');
+    // A new job, opened without a reload so the browser's mock keeps it
+    const jobId = await page.evaluate(async () => {
+      const response = await fetch('/api/shows/1/assign-torrent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ magnet_uri: 'magnet:?xt=urn:btih:aaaabbbbccccddddeeeeffff0000111122223333', indexer: 'Nyaa' }),
+      });
+      return ((await response.json()) as { job_id: number }).job_id;
+    });
+    await page.evaluate((id) => (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push(`/mapping/${id}`), jobId);
+    await page.getByText('16 files · 13 videos').waitFor();
+    await shoot(page, testInfo, 'mapping/progress', { fullPage: true });
+  });
+
+  test('review', async ({ page }, testInfo) => {
+    await signIn(page, '/mapping/101');
+    await page.getByRole('button', { name: /^Needs review/ }).waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'mapping/review', { fullPage: true });
+  });
+
+  test('picker', async ({ page }, testInfo) => {
+    await signIn(page, '/mapping/101');
+    if (phone(testInfo)) {
+      await page.getByRole('button', { name: 'Change episode for #35v2' }).click();
+      await page.getByRole('dialog', { name: 'Choose an episode' }).getByRole('option', { name: /S01E35/ }).waitFor();
+    } else {
+      await page.getByRole('button', { name: 'Change episode for #28.5' }).click();
+      await page.getByRole('searchbox', { name: 'Search episodes' }).fill('recap');
+    }
+    await page.waitForTimeout(700);
+    await shoot(page, testInfo, 'mapping/picker');
+  });
+
+  test('conflict', async ({ page }, testInfo) => {
+    await signIn(page, '/mapping/103');
+    await page.getByText('Two files point at the same episode. Keep one.').waitFor();
+    await shoot(page, testInfo, 'mapping/conflict', { fullPage: true });
+  });
+
+  test('applied', async ({ page }, testInfo) => {
+    await signIn(page, '/mapping/101');
+    await page.getByRole('button', { name: 'Accept all 2' }).click();
+    await page.getByText('1 file stays unmapped. You can map it later.').waitFor();
+    await page.getByRole('button', { name: 'Apply 12 mappings' }).click();
+    await page.getByRole('heading', { name: 'Ready in Infuse.' }).waitFor();
+    await page.waitForTimeout(900);
+    await shoot(page, testInfo, 'mapping/applied');
+  });
+
+  test('onepiece', async ({ page }, testInfo) => {
+    await signIn(page, '/mapping/102');
+    await page.getByRole('button', { name: /^Needs review/ }).waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'mapping/onepiece', { fullPage: true });
+  });
+});
