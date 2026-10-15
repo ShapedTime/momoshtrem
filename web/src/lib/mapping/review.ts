@@ -74,7 +74,13 @@ export const defaultGroupOpen = (group: ProposalGroup, desktop: boolean): boolea
 
 /** Full rows (decide here) vs compact ones (spot-check). */
 export const isFullRow = (p: Proposal): boolean =>
-  (p.group === 'needs_review' || p.group === 'unmatched') && p.decision !== 'ignored';
+  p.decision !== 'ignored' && (p.group === 'needs_review' || p.group === 'unmatched' || isDisputed(p));
+
+/**
+ * A file outside Needs review that waits for a decision: a re-check's AI disagreed with a high rules
+ * answer, so it went back to pending in its own group (PLAN §6 "Re-check"). It gets a full row, to accept.
+ */
+export const isDisputed = (p: Proposal): boolean => p.group !== 'needs_review' && p.group !== 'unmatched' && p.decision === 'pending' && maps(p);
 
 // ---- Mapping, conflicts and counts --------------------------------------------------------
 

@@ -379,6 +379,25 @@ describe('reviewing', () => {
     expect((await assignmentApi.job(103)).job.progress.ai_files).toBe(4);
   });
 
+  it('a re-check never overrides a high rules answer: the dispute keeps its episode and goes back to pending', async () => {
+    const before = named(await assignmentApi.job(102), '/One.Piece.897.');
+    expect(before).toMatchObject({ group: 'matched', decision: 'accepted', confidence: 'high', source: 'rules' });
+    await assignmentApi.reclassify(102, { scope: 'all' });
+    expect(await statuses(102, 2)).toEqual(['resolving', 'needs_review']);
+    const disputed = named(await assignmentApi.job(102), '/One.Piece.897.');
+    expect(disputed).toMatchObject({
+      targets: before.targets,
+      suggested_targets: before.targets,
+      confidence: 'medium',
+      source: 'rules',
+      reason: 'AI suggests S21E07: TMDB’s air order puts #897 a week later',
+      decision: 'pending',
+      group: 'matched',
+      user_decided: false,
+      updated: true,
+    });
+  });
+
   it('a re-check with nothing in scope settles at once, without resolving', async () => {
     const detail = await assignmentApi.job(102);
     const pending = detail.proposals.filter((p) => p.decision === 'pending');

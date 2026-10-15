@@ -341,6 +341,8 @@ function onePiece(): Template {
           group: 'matched',
           at: [[21, 2 + i]],
           reason: `Absolute #${abs} → S21E${pad(2 + i)} (same offset as #892)`,
+          // A re-check of all files disputes this one: it goes back to review, keeping its episode
+          ...(abs === 897 && { recheck: { confidence: 'medium' as const, at: [[21, 7]] as Ref[], reason: 'TMDB’s air order puts #897 a week later' } }),
         })
       ),
       {
@@ -696,7 +698,15 @@ export function patchProposals(job: MockJob, items: ProposalChange[]): string | 
 export const inScope = (p: Proposal, scope: 'unresolved' | 'all', conflicts: Set<number>) =>
   !p.user_decided && p.kind === 'episode' && (scope === 'all' || p.decision === 'pending' || conflicts.has(p.id));
 
-/** A re-check's AI writes: the scripted suggestion for every proposal still in scope. */
+const codes = (targets: ProposalTarget[]) => targets.map((t) => `S${pad(t.season)}E${pad(t.episode)}`).join('+');
+const clip = (reason: string) => (reason.length > 120 ? `${reason.slice(0, 119)}…` : reason);
+
+/**
+ * A re-check's AI writes: the scripted suggestion for every proposal still in scope. As the backend
+ * (PLAN §6 "Re-check"), a `high` rules answer is never overridden: the AI's other pick keeps its
+ * targets, drops it to medium and names the pick in its reason, and a dispute still on its group's
+ * default acceptance goes back to pending. An accepted proposal never loses its target.
+ */
 export function finishRecheck(job: MockJob, scope: 'unresolved' | 'all'): void {
   const show = SHOWS[job.tmdb_id];
   const hinted = Boolean(job.hint?.text);
@@ -704,6 +714,12 @@ export function finishRecheck(job: MockJob, scope: 'unresolved' | 'all'): void {
   job.proposals = job.proposals.map((p) => {
     if (!p.recheck || !inScope(p, scope, conflicts)) return p;
     const targets = p.recheck.at && show ? p.recheck.at.map((ref) => target(show, ref)) : p.targets;
+    if (p.source === 'rules' && p.confidence === 'high' && ids(targets) !== ids(p.targets)) {
+      const suggestion = { confidence: 'medium' as const, source: 'rules' as const, reason: clip(`AI suggests ${codes(targets)}: ${p.recheck.reason}`) };
+      const decision = p.decision === 'accepted' && p.decision === defaultDecision(p.group) ? 'pending' : p.decision;
+      return { ...p, ...suggestion, suggestion, decision, updated: true, hinted };
+    }
+    if (targets.length === 0 && p.decision === 'accepted') return p;
     const suggestion = { confidence: p.recheck.confidence, source: 'ai' as const, reason: p.recheck.reason };
     return { ...p, ...suggestion, suggestion, targets, suggested_targets: targets, updated: true, hinted };
   });

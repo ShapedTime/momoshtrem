@@ -19,7 +19,7 @@ import {
 import { Button, Chip, Confidence, FilePath } from '@/components/ui';
 import type { Proposal } from '@/lib/api/contract';
 import { canHaveEpisodes } from '@/lib/mapping/files';
-import { canToggleAccept, ignoredLabel, isFullRow, maps, targetCode, targetName } from '@/lib/mapping/review';
+import { canToggleAccept, ignoredLabel, isDisputed, isFullRow, maps, targetCode, targetName } from '@/lib/mapping/review';
 import { formatBytes, plural } from '@/lib/title/format';
 import { cx } from '@/lib/utils/cx';
 
@@ -255,7 +255,7 @@ export function ProposalRow({ proposal: p, path, short, conflictWith, movieTitle
       className={cx(
         'mrow',
         full ? 'mrow--full' : 'mrow--compact',
-        p.group === 'needs_review' && pending && 'is-review',
+        (p.group === 'needs_review' || isDisputed(p)) && pending && 'is-review',
         p.group === 'needs_review' && !pending && !ignored && 'is-resolved',
         p.group === 'unmatched' && pending && !maps(p) && 'is-unmatched',
         ignored && 'is-ignored',

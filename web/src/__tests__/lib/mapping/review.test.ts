@@ -14,6 +14,8 @@ import {
   groupDefault,
   groupProposals,
   ignoredLabel,
+  isDisputed,
+  isFullRow,
   movieUndo,
   nextStage,
   openJobLine,
@@ -220,6 +222,16 @@ describe('decisions', () => {
     expect(restoredDecision(named(frieren, 'Special Extra'))).toBe('pending');
     // An extra with no episode becomes pending, to pick one
     expect(restoredDecision(named(frieren, 'NCOP2'))).toBe('pending');
+  });
+
+  it('a matched file a re-check disputed waits in a full row, to accept', () => {
+    const matched = named(frieren, ' - 29 ');
+    expect(isFullRow(matched)).toBe(false);
+    const disputed: Proposal = { ...matched, decision: 'pending', confidence: 'medium', reason: 'AI suggests S01E30: …' };
+    expect(isDisputed(disputed)).toBe(true);
+    expect(isFullRow(disputed)).toBe(true);
+    expect(isDisputed(named(frieren, '35v2'))).toBe(false);
+    expect(isDisputed(named(frieren, 'Special Extra'))).toBe(false);
   });
 
   it('can’t un-accept a picked unmatched file (the contract never empties targets)', () => {
