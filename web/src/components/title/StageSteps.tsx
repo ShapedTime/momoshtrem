@@ -1,7 +1,7 @@
 import { STAGE_STEPS } from '@/lib/title/stage-copy';
 import { cx } from '@/lib/utils/cx';
 
-/** Four segments (done green, current amber) and "Add · Torrent · Download · Ready", the current step in bold. */
+/** Four segments (done green, current amber) and "Add · Source · Download · Ready", the current step in bold. */
 export function StageSteps({ step }: { step: number }) {
   return (
     <>

@@ -13,6 +13,7 @@ export { CastRow } from './CastRow';
 export { TrailerCard } from './TrailerCard';
 export { MoreLikeThis, titleHref } from './MoreLikeThis';
 export { CurrentTorrentPanel } from './CurrentTorrentPanel';
+export { CurrentStreamPanel } from './CurrentStreamPanel';
 export { SubtitlesPanel } from './SubtitlesPanel';
 export type { SubtitlesPanelProps, SubtitleSearchState } from './SubtitlesPanel';
 export { WatchStateLine, OnTraktCard } from './WatchState';

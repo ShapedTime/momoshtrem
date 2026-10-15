@@ -4,7 +4,7 @@ import { systemStatus } from '@/mocks/fixtures/system';
 describe('System status model', () => {
   it('lists every service, healthy when everything answers', () => {
     const rows = serviceRows(systemStatus());
-    expect(rows.map((r) => r.name)).toEqual(['momoshtrem backend', 'WebDAV', 'Jackett', 'TMDB', 'Trakt', 'AI', 'OpenSubtitles']);
+    expect(rows.map((r) => r.name)).toEqual(['momoshtrem backend', 'WebDAV', 'Jackett', 'HDRezka', 'TMDB', 'Trakt', 'AI', 'OpenSubtitles']);
     expect(summarize(rows)).toMatchObject({ tone: 'ready', title: 'All good', attention: false });
   });
 
@@ -20,6 +20,14 @@ describe('System status model', () => {
     const rows = serviceRows(status);
     expect(rows.find((r) => r.id === 'jackett')).toMatchObject({ health: 'error', detail: 'timeout after 3s', pill: { status: 'unreachable' } });
     expect(summarize(rows)).toMatchObject({ tone: 'error', title: 'Jackett isn’t working', short: '1 problem', attention: true });
+  });
+
+  it('shows HDRezka next to Jackett: off unless it’s set up, and left out by an older backend', () => {
+    const off = serviceRows({ ...systemStatus(), hdrezka: { configured: false, reachable: false } });
+    expect(off.find((r) => r.id === 'hdrezka')).toMatchObject({ health: 'off', pill: { status: 'not_configured' } });
+    const blocked = serviceRows({ ...systemStatus(), hdrezka: { configured: true, reachable: false, error: 'HDRezka answered with its anti-bot page' } });
+    expect(blocked.find((r) => r.id === 'hdrezka')).toMatchObject({ health: 'error', detail: 'HDRezka answered with its anti-bot page' });
+    expect(serviceRows({ ...systemStatus(), hdrezka: undefined }).map((r) => r.id)).not.toContain('hdrezka');
   });
 
   it('flags a database outage on the backend row', () => {

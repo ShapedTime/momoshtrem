@@ -1,5 +1,5 @@
-import { Captions, Globe, Link2, type LucideIcon, Search, Server, Sparkles, Tv } from 'lucide-react';
-import type { SystemStatus } from '@/lib/api/contract';
+import { Captions, Globe, Link2, type LucideIcon, MonitorPlay, Search, Server, Sparkles, Tv } from 'lucide-react';
+import type { ProbeStatus, SystemStatus } from '@/lib/api/contract';
 import type { StatusKey } from '@/lib/status';
 import { formatBytes } from '@/types/torrent';
 
@@ -59,7 +59,7 @@ export function serviceRows(status: SystemStatus): ServiceRow[] {
     pill: { status: 'ok' },
   });
 
-  const probe = (id: string, name: string, icon: LucideIcon, value: SystemStatus['jackett'], okDetail: string, offDetail: string): ServiceRow => {
+  const probe = (id: string, name: string, icon: LucideIcon, value: ProbeStatus, okDetail: string, offDetail: string): ServiceRow => {
     if (!value.configured) return { id, name, icon, detail: offDetail, health: 'off', pill: { status: 'not_configured' } };
     if (!value.reachable) {
       return { id, name, icon, detail: value.error ?? 'Not answering', health: 'error', pill: { status: 'unreachable' } };
@@ -67,6 +67,10 @@ export function serviceRows(status: SystemStatus): ServiceRow[] {
     return { id, name, icon, detail: `${okDetail}${latency(value.latency_ms)}`, health: 'ok', pill: { status: 'ok' } };
   };
   rows.push(probe('jackett', 'Jackett', Search, status.jackett, 'Answering', 'Not set up: torrent search needs JACKETT_URL and JACKETT_API_KEY'));
+  // Opt-in (#63); a backend older than #66 doesn't report it
+  if (status.hdrezka) {
+    rows.push(probe('hdrezka', 'HDRezka', MonitorPlay, status.hdrezka, 'Answering', 'Off: set HDREZKA_ENABLED=true to stream from HDRezka'));
+  }
   rows.push(probe('tmdb', 'TMDB', Globe, status.tmdb, 'API v3', 'Not set up: titles and artwork need TMDB_API_KEY'));
 
   rows.push({

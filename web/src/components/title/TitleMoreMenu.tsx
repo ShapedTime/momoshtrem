@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Ellipsis, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { Ellipsis, ExternalLink, MonitorPlay, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, IconButton, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Sheet } from '@/components/ui';
 import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 import type { Title } from '@/lib/api/contract';
@@ -13,19 +13,23 @@ interface TitleMoreMenuProps {
   onRefresh: () => void;
   /** Asks for confirmation itself (useConfirm). */
   onRemove: () => void;
+  /** Opens the HDRezka sheet; given only while HDRezka is set up and the title can use it. */
+  onStreamFromHDRezka?: () => void;
 }
 
 const tmdbUrl = (title: Title) => `https://www.themoviedb.org/${title.media_type}/${title.tmdb_id}`;
 const traktUrl = (title: Title) => `https://trakt.tv/search/tmdb/${title.tmdb_id}?id_type=${title.media_type === 'movie' ? 'movie' : 'show'}`;
 
 /**
- * The title's ⋯ menu: Refresh from TMDB, Open on TMDB / Trakt, and Remove
- * from library (quiet, confirmed). A popover on desktop, a sheet on phone.
+ * The title's ⋯ menu: Stream from HDRezka (when set up), Refresh from TMDB,
+ * Open on TMDB / Trakt, and Remove from library (quiet, confirmed). A
+ * popover on desktop, a sheet on phone.
  */
-export function TitleMoreMenu({ title, placement, onRefresh, onRemove }: TitleMoreMenuProps) {
+export function TitleMoreMenu({ title, placement, onRefresh, onRemove, onStreamFromHDRezka }: TitleMoreMenuProps) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const [sheetOpen, setSheetOpen] = useState(false);
   const inLibrary = title.library.in_library;
+  const hdrezka = inLibrary ? onStreamFromHDRezka : undefined;
   const trigger = {
     variant: 'glass' as const,
     size: placement === 'desktop' ? ('sm' as const) : ('md' as const),
@@ -40,6 +44,11 @@ export function TitleMoreMenu({ title, placement, onRefresh, onRemove }: TitleMo
           <IconButton {...trigger}>{icon}</IconButton>
         </MenuTrigger>
         <MenuContent aria-label="More actions">
+          {hdrezka && (
+            <MenuItem icon={<MonitorPlay size={18} aria-hidden="true" />} onSelect={() => window.setTimeout(hdrezka, 0)}>
+              Stream from HDRezka…
+            </MenuItem>
+          )}
           {inLibrary && (
             <MenuItem icon={<RefreshCw size={18} aria-hidden="true" />} onSelect={onRefresh}>
               Refresh from TMDB
@@ -76,6 +85,12 @@ export function TitleMoreMenu({ title, placement, onRefresh, onRemove }: TitleMo
       </IconButton>
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="More" size="narrow">
         <div className="flex flex-col gap-1">
+          {hdrezka && (
+            <button type="button" className="list-row rounded-md text-left" onClick={() => run(hdrezka)}>
+              <MonitorPlay size={20} className="text-fg-3" aria-hidden="true" />
+              <span className="grow font-medium">Stream from HDRezka…</span>
+            </button>
+          )}
           {inLibrary && (
             <button type="button" className="list-row rounded-md text-left" onClick={() => run(onRefresh)}>
               <RefreshCw size={20} className="text-fg-3" aria-hidden="true" />

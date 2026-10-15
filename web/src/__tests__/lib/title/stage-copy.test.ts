@@ -1,6 +1,6 @@
 import type { MovieTitle, ShowTitle, Title } from '@/lib/api/contract';
-import { primaryActionFor } from '@/lib/title/stage-copy';
-import { addToLibrary, buildTitle, episodeId, libraryKey, type MockLibrary, seedLibrary } from '@/mocks/fixtures/titles';
+import { primaryActionFor, STAGE_STEPS } from '@/lib/title/stage-copy';
+import { addToLibrary, assignMovieStream, buildTitle, episodeId, libraryKey, type MockLibrary, seedLibrary } from '@/mocks/fixtures/titles';
 import { findTitle } from '@/mocks/fixtures/catalog';
 
 function title(mediaType: 'movie' | 'tv', tmdbId: number, library: MockLibrary = seedLibrary()): Title {
@@ -72,6 +72,39 @@ describe('primaryActionFor: movies', () => {
       secondary: null,
       dock: { button: { label: 'Play in Infuse', intent: 'how_to_play' }, copyPath: true },
     });
+  });
+});
+
+describe('primaryActionFor: a second source (HDRezka, #63)', () => {
+  it('names the step “Source”, whatever the file comes from', () => {
+    expect(STAGE_STEPS).toEqual(['Add', 'Source', 'Download', 'Ready']);
+  });
+
+  it('offers Stream from HDRezka next to Find a torrent, only while it’s set up', () => {
+    const needs = movie(1054867);
+    expect(primaryActionFor(needs)).toMatchObject({ secondary: null, dock: { icon: null } });
+    const hdrezka = { label: 'Stream from HDRezka', intent: 'hdrezka', icon: 'stream', variant: 'secondary' };
+    expect(primaryActionFor(needs, { hdrezka: true })).toMatchObject({
+      title: 'In your library · no torrent yet',
+      primary: { label: 'Find a torrent', variant: 'primary' },
+      secondary: hdrezka,
+      dock: { button: { label: 'Find a torrent' }, copyPath: false, icon: hdrezka },
+    });
+  });
+
+  it('leaves it off other stages, and off shows until their flow lands', () => {
+    expect(primaryActionFor(movie(693134), { hdrezka: true })).toMatchObject({ secondary: null, dock: { icon: null } });
+    expect(primaryActionFor(show(209867), { hdrezka: true })).toMatchObject({ stage: 'needs_torrent', secondary: null, dock: { icon: null } });
+  });
+
+  it('describes a stream once ready: provider, voice-over, quality and size', () => {
+    const library = seedLibrary();
+    const row = library.get(libraryKey('movie', 1054867));
+    if (!row) throw new Error('No One Battle After Another');
+    assignMovieStream(row, { title: 'Битва за битвой', url: 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html', translator: 'Оригинал (+субтитры)', quality: '1080p', size_bytes: 4_320_000_000 });
+    const copy = primaryActionFor(title('movie', 1054867, library), { hdrezka: true });
+    expect(copy).toMatchObject({ stage: 'ready', title: 'Ready in Infuse', facts: ['HDRezka', 'Оригинал (+субтитры)', '1080p', '4.3 GB'], secondary: null });
+    expect(copy.path?.display).toBe('/Movies/One Battle After Another (2025)/One Battle After Another (2025).mp4');
   });
 });
 

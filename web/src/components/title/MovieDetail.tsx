@@ -4,6 +4,7 @@ import { NotFoundView } from '@/components/system/NotFoundView';
 import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useOverArt } from '@/components/shell/ShellContext';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
 import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { useTitle, useTitleActions } from '@/hooks/useTitle';
@@ -14,6 +15,7 @@ import { legacySearchContext } from '@/lib/title/legacy-search';
 import { primaryActionFor, type StageIntent } from '@/lib/title/stage-copy';
 import { ActionDock } from './ActionDock';
 import { CastRow } from './CastRow';
+import { CurrentStreamPanel } from './CurrentStreamPanel';
 import { CurrentTorrentPanel } from './CurrentTorrentPanel';
 import { DetailsAside } from './DetailsAside';
 import { LegacySearchHost } from './LegacySearchHost';
@@ -30,16 +32,21 @@ import { OnTraktCard } from './WatchState';
 function MovieDetailView({ movie }: { movie: MovieTitle }) {
   const actions = useTitleActions(movie);
   const sheets = useSheet();
+  const hdrezka = useHDRezkaEnabled();
   const { library } = movie;
   const ready = library.availability_stage === 'ready';
-  const subtitles = useItemSubtitles('movie', ready ? library.library_id : null, library.torrent?.info_hash ?? null);
-  const copy = primaryActionFor(movie);
+  // A new file (another torrent, or a stream) re-grades subtitle matches
+  const fileKey = library.torrent?.info_hash ?? library.stream?.added_at ?? null;
+  const subtitles = useItemSubtitles('movie', ready ? library.library_id : null, fileKey);
+  const copy = primaryActionFor(movie, { hdrezka });
   useDocumentTitle(movie.title);
 
   const findTorrent = () => openLegacySearch(legacySearchContext(movie));
+  const streamFromHDRezka = () => sheets.open('hdrezka', { movie: String(movie.tmdb_id) });
   const onAction = (intent: StageIntent) => {
     if (intent === 'add') actions.add();
     else if (intent === 'find') findTorrent();
+    else if (intent === 'hdrezka') streamFromHDRezka();
     else if (intent === 'how_to_play') sheets.open('infuse-setup', infuseSetupParams({ path: library.webdav_path, url: library.webdav_url }));
   };
   const busy = actions.adding ? 'add' : null;
@@ -50,7 +57,13 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
         title={movie}
         panel={<PrimaryPanel copy={copy} onAction={onAction} busy={busy} titleName={movie.title} />}
         renderMore={(placement) => (
-          <TitleMoreMenu title={movie} placement={placement} onRefresh={actions.refresh} onRemove={actions.remove} />
+          <TitleMoreMenu
+            title={movie}
+            placement={placement}
+            onRefresh={actions.refresh}
+            onRemove={actions.remove}
+            onStreamFromHDRezka={hdrezka ? streamFromHDRezka : undefined}
+          />
         )}
       />
       <div className="page detail-body">
@@ -58,7 +71,12 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
           {/* A torrent with several plausible files waits for a pick (#5) */}
           {library.in_library && <NeedsReviewBanner movie count={library.needs_review} jobId={library.review_job_id} />}
           {/* Once it's ready, what Infuse plays from comes first (HANDOFF §5.3) */}
-          {ready && library.torrent && <CurrentTorrentPanel torrent={library.torrent} onReplace={findTorrent} />}
+          {ready && library.torrent && (
+            <CurrentTorrentPanel torrent={library.torrent} onReplace={findTorrent} onStreamFromHDRezka={hdrezka ? streamFromHDRezka : undefined} />
+          )}
+          {ready && library.stream && (
+            <CurrentStreamPanel stream={library.stream} onChange={hdrezka ? streamFromHDRezka : undefined} onReplaceWithTorrent={findTorrent} />
+          )}
           {ready && <SubtitlesPanel {...subtitles} />}
           <CastRow cast={movie.cast} />
           <TrailerCard youtubeKey={movie.trailer_youtube_key} backdropPath={movie.backdrop_path} titleName={movie.title} />

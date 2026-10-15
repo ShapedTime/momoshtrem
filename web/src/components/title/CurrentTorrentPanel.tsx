@@ -1,4 +1,5 @@
 import { RefreshCw } from 'lucide-react';
+import { ReplaceMenu } from '@/components/source/ReplaceMenu';
 import { Button, ButtonLink, Chip, ReleaseName, StatusPill } from '@/components/ui';
 import type { TitleTorrent } from '@/lib/api/contract';
 import type { StatusKey } from '@/lib/status';
@@ -16,10 +17,12 @@ interface CurrentTorrentPanelProps {
   torrent: TitleTorrent;
   /** Opens torrent search to pick another release. */
   onReplace: () => void;
+  /** With HDRezka set up, Replace becomes a menu: a torrent, or a stream (#63). */
+  onStreamFromHDRezka?: () => void;
 }
 
 /** The release Infuse plays from, once a title is ready: name, attributes, facts, Replace. */
-export function CurrentTorrentPanel({ torrent, onReplace }: CurrentTorrentPanelProps) {
+export function CurrentTorrentPanel({ torrent, onReplace, onStreamFromHDRezka }: CurrentTorrentPanelProps) {
   const source = torrent.source?.toLowerCase() ?? '';
   const chips = [
     torrent.resolution && { label: torrent.resolution, hi: true },
@@ -72,9 +75,13 @@ export function CurrentTorrentPanel({ torrent, onReplace }: CurrentTorrentPanelP
         </div>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={onReplace}>
-          <RefreshCw size={15} aria-hidden="true" /> Replace
-        </Button>
+        {onStreamFromHDRezka ? (
+          <ReplaceMenu onFindTorrent={onReplace} onStreamFromHDRezka={onStreamFromHDRezka} />
+        ) : (
+          <Button size="sm" onClick={onReplace}>
+            <RefreshCw size={15} aria-hidden="true" /> Replace
+          </Button>
+        )}
         <ButtonLink href={statsHref} variant="ghost" size="sm">
           Files &amp; stats
         </ButtonLink>
