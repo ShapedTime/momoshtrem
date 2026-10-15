@@ -141,7 +141,7 @@ export interface AssignmentJobCounts {
   to_apply: number;
   /** Maps and `pending`: they block Apply. */
   pending: number;
-  /** Non-ignored proposals whose targets share an episode with another: they block Apply. */
+  /** Non-ignored proposals whose targets share an episode with another (subtitles never do): they block Apply. */
   conflicts: number;
   /** Pending and maps, or in a conflict: the files the title's `needs_review` counts. */
   needs_review: number;

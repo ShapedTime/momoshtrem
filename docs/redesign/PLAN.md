@@ -168,6 +168,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 
 **`002_app_settings.sql` (G2)**
 - `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults.
+  - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`) and `auto_apply_high_confidence` (true). `library.SettingsRepository.AISettings` reads it; #9 serves the endpoints.
 
 **`003_metadata.sql` (B1)**
 - `movies`: add `imdb_id`, `poster_path`, `backdrop_path`, `runtime`, `genres jsonb`, `metadata_updated_at`.
@@ -187,7 +188,8 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `torrent_assignments`: add `confidence` (`high|medium|low`; NULL for manual and legacy rows) and `match_source` (`rules|ai|manual`; NULL for legacy rows). The VFS groups a multi-episode file into one entry only for rows that have a `match_source` (§6 "Assignment").
 - `assignment_jobs`:
   - The item: `media_type` (`movie|tv`) and `tmdb_id`, plus nullable `show_id` and `movie_id` FKs with `ON DELETE CASCADE`. Both are NULL for a dry run on a title that isn't in the library (#6 Inspect).
-  - The torrent: `info_hash`, `magnet_uri`, `torrent_name`, `indexer`, plus `size_bytes`, `file_count` and `video_count`, written when the file list arrives (`torrent.*` comes from them before proposals exist).
+  - The torrent: `info_hash`, `magnet_uri`, `torrent_name` (the magnet's `dn`, else the hash, until the file list arrives), `indexer`, `release_group`, plus `size_bytes`, `file_count` and `video_count`, written when the file list arrives (`torrent.*` comes from them before proposals exist).
+  - `file_path`: movies, the file the assign request picked up front.
   - `status` (CHECK `queued|fetching_metadata|classifying|resolving|needs_review|ready|applied|failed|cancelled`; flow in §6), `dry_run bool`.
   - `hint jsonb` (`{season, episode, text}`), `suggested_hints jsonb`, `ai_files int`, `error`, `ai_error`.
   - `created_at`, `updated_at`, `applied_at`.
@@ -403,7 +405,7 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
 - **Movie jobs.** Candidates are `kind: movie` with no targets, ranked: one plausible file is `matched`, several are `needs_review`. The user picks one by accepting it, which ignores the others. Candidates never conflict.
 - **`confidence`** is null with no target and for a manual pick.
 - **`reason`** is at most 120 characters and never starts with "AI:": the UI labels AI reasons from `source`.
-- **Conflicts:** two or more non-ignored proposals whose targets share an episode. They block Apply.
+- **Conflicts:** two or more non-ignored proposals whose targets share an episode. They block Apply. Subtitles never conflict: one that no video claims can be accepted onto an episode a video also maps to.
 - **`replaces`.** An episode that already has a file from elsewhere isn't a conflict. The proposal gets a `replaces` note for its first target instead, computed when read; it never blocks.
 - **`superseded_by`** points from a v1 file to its v2 in the same torrent; the v1 sits in `extras` as `superseded`.
 - **`updated`/`hinted`:** the latest re-check changed this proposal (and had a hint). Both reset when the next re-check starts.
@@ -437,7 +439,7 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - episode ids are re-validated;
   - then the VFS tree is rebuilt (`InvalidateTree`).
 - **Unmatched and ignored files** are left out. They never block.
-- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry, `Show - S01E01-E02 - FirstName.ext`; subtitle sidecars follow that name. Legacy rows keep their per-episode paths.
+- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry per season folder, `Show - S01E01-E02 - FirstName.ext` (first and last episode, the first one's name); the subtitle sidecars of all its episodes follow that name, and the catalog's `webdav_path` too. Legacy rows keep their per-episode paths. Unassigning one episode of such a file rebuilds the tree, which renames the rest.
 
 **Discard** cancels the job. It removes the torrent when no active assignment or other open job uses it.
 
