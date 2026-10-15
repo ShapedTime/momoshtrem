@@ -378,7 +378,7 @@ AssignmentJob {
   ai_available, ai_error,                                  // ai_error: the latest AI run failed, so its proposals are unchanged; cleared when a re-check starts
   suggested_hints: [string],                               // ≤ 5 chips for "Re-check with AI"
   counts: {files, to_apply, pending, conflicts, needs_review, matched, specials, ignored, unmatched},
-  created_at, updated_at, applied_at
+  created_at, updated_at, applied_at                       // updated_at never goes backwards (clock time, at least the last)
 }
 Proposal {
   id, file_path, file_size,
@@ -431,7 +431,8 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - an unknown proposal id;
   - an episode outside the show;
   - `episode_ids` on a movie job;
-  - accepting without targets.
+  - accepting without targets;
+  - episodes for a file that isn't a video (fonts, images, info files; a subtitle may take one).
 
 **Re-check (reclassify)**
 - **Scope.** `scope: "unresolved"` re-checks the pending proposals the user hasn't decided; `"all"` re-checks every proposal the user hasn't decided. AI writes use `WHERE NOT user_decided` (plus `decision = 'pending'` for `unresolved`), so the user's decisions always survive.
@@ -444,18 +445,19 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - the episode's other active rows are deactivated;
   - it's authoritative for the item and info hash: earlier rows from this torrent that the job no longer maps are deactivated;
   - subtitles go to their video's first episode;
-  - episode ids are re-validated;
+  - episode ids are re-validated, and only videos become episode files;
+  - an episode moving to another file (even of the same torrent) drops its torrent subtitles: they belong to the old file, and the new file's are recorded;
   - then the VFS tree is rebuilt (`InvalidateTree`).
 - **Unmatched and ignored files** are left out. They never block.
-- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry per season folder and run of consecutive episodes, `Show - S01E01-E02 - FirstName.ext` (first and last episode, the first one's name); a file mapped to E07 and E09 is two entries, `S01E07` and `S01E09`, never `S01E07-E09`; the subtitle sidecars of all its episodes follow that name, and the catalog's `webdav_path` too. Legacy rows keep their per-episode paths. Unassigning one episode of such a file rebuilds the tree, which renames the rest.
+- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry per season folder and run of consecutive episodes, `Show - S01E01-E02 - FirstName.ext` (first and last episode, the first one's name); a file mapped to E07 and E09 is two entries, `S01E07` and `S01E09`, never `S01E07-E09`, and the file's torrent subtitles sit next to each; the subtitle sidecars of all its episodes follow that name, and the catalog's `webdav_path` too. Legacy rows keep their per-episode paths. Unassigning one episode of such a file rebuilds the tree, which renames the rest.
 
 **Discard** cancels the job. It removes the torrent when no active assignment or other open job uses it.
 
 **`GET /shows/{id}/episodes`** feeds the episode picker. It lists every season in number order, so Specials (season 0) come first. Specials are listed whenever season 0 rows exist, even with `include_specials` off. `has_file` means the episode has an active assignment. A season's `name` is TMDB's, else "Specials" or "Season N". One query.
 
-**Manual overrides** (`PUT /episodes/{id}/assignment`, `PUT /movies/{id}/assignment`) make one file of a torrent the item's file, outside any job. They write through Apply's writer (the title's lock, the upsert, the item's other active rows deactivated) with `match_source: manual` and no `confidence`, then rebuild the VFS tree. Unlike Apply they're not authoritative for the torrent: its other rows on the title stay. A pair the item had before is reactivated. The answer is `204`; refetch the title.
+**Manual overrides** (`PUT /episodes/{id}/assignment`, `PUT /movies/{id}/assignment`) make one file of a torrent the item's file, outside any job. They write through Apply's writer (the title's lock, the upsert, the item's other active rows deactivated) with `match_source: manual` and no `confidence`, then rebuild the VFS tree. Unlike Apply they're not authoritative for the torrent: its other rows on the title stay. A pair the item had before is reactivated. When the item's file changes its torrent subtitles go, and the subtitles a job linked to the new file are recorded. The answer is `204`; refetch the title.
 
-**A torrent's file list** (overrides and `GET /torrents/{hash}/files`) comes from the newest job that stored it as proposals, else from the loaded torrent, else the torrent is added again with a magnet an assignment or a job has, waiting at most 30 s (`504` past that; the add carries on, so asking again later finds it loaded). A torrent added only to list its files is dropped again when nothing uses it. The hash may be hex in either case, or base32. `mapped_to` comes from the active assignments: `{movie_id}` for a movie's file, else its episodes in order.
+**A torrent's file list** (overrides and `GET /torrents/{hash}/files`) comes from the newest job that stored it as proposals, else from the loaded torrent, else the torrent is added again with a magnet an assignment or a job has, waiting at most 25 s, under the web proxy's 30 s (`504` past that). The add carries on; a torrent added only to list its files, or whose add lands after the request gave up, is dropped again when nothing uses it. The hash may be hex in either case, or base32. `mapped_to` comes from the active assignments: `{movie_id}` for a movie's file, else its episodes in order.
 
 ### Search (B4)
 
