@@ -61,7 +61,7 @@ CORS is off unless `CORS_ALLOWED_ORIGINS` lists origins, each exactly as the bro
 
 Errors use one shape: `{"error": {"code": "not_found", "message": "Movie not found"}}`.
 
-`GET /api/status` reports the version, uptime, database health and size, the WebDAV URL, and whether Jackett and TMDB are reachable. Results are cached for 30 s (5 s while the database is down), and `?refresh=1` forces a new check at most once every 5 s. It returns `503` only when the database is down.
+`GET /api/status` reports the version, uptime, database health and size, the WebDAV URL, whether Jackett and TMDB are reachable, and this month's AI spend (`ai.mtd_cost_usd`, every AI feature). Results are cached for 30 s (5 s while the database is down), and `?refresh=1` forces a new check at most once every 5 s. It returns `503` only when the database is down.
 
 The Docker image stamps the version from the `VERSION` build arg (`MOMOSHTREM_VERSION` in compose).
 
@@ -101,9 +101,23 @@ DATABASE_URL=postgres://... TMDB_API_KEY=... ./momoshtrem backfill-metadata
 
 It is resumable. An item is marked done (`metadata_updated_at`) only after it fully synced. A rerun, or a run after Ctrl-C, picks up the rest. Failures are logged and counted, and the exit code is `1` when any item failed, so run it again.
 
+## Episode mapping
+
+Assigning a torrent (`POST /api/shows/{id}/assign-torrent`, or `/movies/{id}/…`) starts a mapping job and answers `202 {job_id}`; nothing blocks on the torrent. A worker (`internal/service/assignment_worker.go`) takes it from there:
+
+1. It fetches the file list, refreshing the show's metadata when it's stale.
+2. The rules classifier (`internal/identify`) maps every file to episodes, with a confidence and a reason.
+3. Claude Haiku looks at the files the rules aren't sure of (`internal/identify/ai`; only with `ANTHROPIC_API_KEY`, and never over a `high` rules answer).
+4. A job where everything that maps is `high`, with no conflict and no unmatched video, applies on its own. Any other job waits for the review screen (`/mapping/{id}` in the web app): accept, change or ignore files, re-check with AI with a hint, then Apply.
+
+Apply writes the assignments in one transaction and rebuilds the WebDAV tree. A file that holds several episodes is one entry, `Show - S01E01-E02 - Name.ext`. Assignments made before #5 (`match_source` NULL) keep their per-episode names, so their Infuse paths don't move. `?wait=true` keeps the old synchronous call until H2. The state machine, endpoints and rules are in [PLAN §6 "Assignment"](../redesign/PLAN.md).
+
+- **AI settings** are the `ai` key of `app_settings`, with defaults: the classifier on, `claude-haiku-5-5`, auto-apply at high confidence, no monthly budget. #9 serves the endpoints to change them.
+- **Accuracy** is measured on the corpus in `internal/identify/testdata/`: `go test ./internal/identify` checks the gates (≥ 95% exact, zero wrong `high`). `go run ./cmd/classifier-eval` runs the golden torrents through the rules and the AI and reports accuracy, cost and latency. Its AI modes cost cents; `-modes rules` and `-dry-run` are free.
+
 ## Tests
 
-`go vet ./... && go test ./...` needs no services: TMDB tests use an `httptest` server and fixtures in `internal/tmdb/testdata/`. The Postgres tests in `internal/library` and `internal/metadata` skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB tests use an `httptest` server and fixtures in `internal/tmdb/testdata/`, and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service` and `internal/subtitle`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine

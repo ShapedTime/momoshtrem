@@ -330,7 +330,7 @@ A stored subtitle's `match` compares its `release_name` with the current release
 ### Assignment (B2/B3)
 Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a **job**. The worker fetches the file list and classifies every file: rules first, then the AI resolver for the files it's unsure about. The job stops for review, or applies on its own when nothing needs a look.
 
-**State machine.** `queued → fetching_metadata → classifying → [resolving] → needs_review ⇄ ready → applied`. Any open state can end in `failed` or `cancelled`.
+**State machine.** `queued → fetching_metadata → classifying → [resolving] → needs_review ⇄ ready → applied`. A working job can end in `failed`; Discard moves any open job to `cancelled`.
 - *Working* means `queued…resolving`, *open* means working plus `needs_review` and `ready`, and *closed* means `applied`, `failed` or `cancelled`.
 - `fetching_metadata` loads the torrent's file list. Meanwhile it refreshes the show's metadata when it was never synced or is over 24 h old, and reads TMDB's alternative titles (the classifier's aliases) and season-like episode groups (its alternative orderings). When a video then stays unmatched (perhaps an episode that just aired), it refreshes once more and reclassifies, unless a refresh was tried in this job or ran within the last hour.
 - `resolving` runs the AI resolver on the unsure main videos (every main video with `classifier_mode` `ai_always`; never extras, samples or subtitles). It's skipped when nothing needs asking or AI is unavailable: no key, `classifier_enabled` off, the show's `classifier_mode` is `rules_only`, or it's a movie job. The AI never overrides a `high` rules answer: when it answers one differently (another episode that exists, or an extra, at medium or high confidence), the proposal keeps its targets (and suggestion, so Undo restores them) but drops to `medium`, so it lands in `needs_review` (pending) and auto-apply waits; its reason names the AI's pick ("AI suggests S00E03: …"). A run gets 90 s per wave of requests (up to 60 files a request, four at a time), at most 15 minutes, so a big pack can finish; when some requests fail, the answers of the others are kept and `ai_error` says the rest are unchanged (the job isn't auto-applied).
@@ -375,7 +375,7 @@ AssignmentJob {
   progress: {seasons, episodes, files, videos, ai_files},  // the progress steps' details; each null until its step has run
   // video_count and videos: video files that aren't extras (Frieren's batch: 16 files · 13 videos)
   hint: {season, episode, text} | null,                    // a re-check's hint replaces text
-  ai_available, ai_error,                                  // ai_error: the latest AI run failed, so its proposals are unchanged; cleared when a re-check starts
+  ai_available, ai_error,                                  // ai_error: why the latest AI run failed, whole or in part (what it couldn't answer is unchanged); cleared when a re-check starts
   suggested_hints: [string],                               // ≤ 5 chips for "Re-check with AI"
   counts: {files, to_apply, pending, conflicts, needs_review, matched, specials, ignored, unmatched},
   created_at, updated_at, applied_at                       // updated_at never goes backwards (clock time, at least the last)
@@ -397,7 +397,7 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
 **Proposals**
 - **One per file**, except subtitles that belong to a video: those are counted in its `subtitle_count` and follow its mapping. `file_path` is the torrent's own path; a multi-file torrent's paths start with `{torrent.name}/`, and the UI shows them without that prefix.
 - **Order:** by group (needs_review, unmatched, specials, matched, extras), then first target (regular seasons before Specials), then confidence, then path.
-- **Groups** are set at classification and never change, so rows don't jump. Each group starts with a default decision:
+- **Groups** are set when the job is classified (the rules, then the first AI run in `resolving`, which may move a file between groups or make it an extra) and never change after that, so rows don't jump. Each group starts with a default decision:
 
   | Group | What's in it | Starts |
   |---|---|---|

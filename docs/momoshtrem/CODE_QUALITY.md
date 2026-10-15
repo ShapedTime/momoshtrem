@@ -21,7 +21,8 @@ internal/
 ├── vfs/           # Virtual filesystem for WebDAV
 ├── webdav/        # WebDAV server wrapper
 ├── streaming/     # Piece prioritization, format detection
-├── identify/      # Episode identification from filenames
+├── identify/      # Episode mapping from file names: pure rules classifier (ai/: Haiku resolver)
+├── service/       # Assignment jobs: worker, review, re-check, Apply
 ├── subtitle/      # Subtitle storage & management
 ├── opensubtitles/ # OpenSubtitles API client
 └── common/        # Shared utilities

@@ -61,7 +61,9 @@ cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx p
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 cd momoshtrem && go vet ./... && go test ./...
 docker compose run --rm momoshtrem backfill-metadata [--dry-run]   # fill TMDB metadata for titles added before #4 (never renames WebDAV paths)
-cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-v]   # episode-mapping eval on the golden corpus: calls Claude, costs cents; -dry-run is free
+# Episode-mapping eval on the corpus's golden torrents: accuracy, cost and latency per mode.
+# The AI modes (auto, ai_always) call Claude and cost cents; -modes rules and -dry-run (request sizes only) are free
+cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-modes rules,auto,ai_always] [-cases id,…] [-dry-run] [-v]
 
 # Deploy (from the Mac): the newest green main commit, or a given one, to a VM over SSH
 ops/deploy/deploy.sh -n momoshtrem-v2            # dry run: print the plan, change nothing
@@ -91,7 +93,7 @@ AppleTV/Infuse ─────────────────────�
 
 The v2 target architecture is in PLAN.md §4.
 
-**Flow**: Browse TMDB → Add to library → Search torrents via Jackett → Assign torrent → Stream via WebDAV (Infuse)
+**Flow**: Browse TMDB → Add to library → Search torrents via Jackett → Assign torrent (a mapping job: rules, then AI for unsure files; review at `/mapping/{id}` unless all high) → Stream via WebDAV (Infuse)
 
 **Key design**: momoshtrem is library-first. The VFS structure is driven by the database (movies, shows, episodes), not by torrent contents. Migrations are embedded from `momoshtrem/internal/library/migrations/`. The root `momoshtrem/migrations/` folder is a legacy SQLite schema.
 
@@ -104,12 +106,20 @@ GET  /api/titles/tv/{tmdb_id}/seasons/{n}   # One season's episodes and ranges
 GET  /api/library             # Library list with counts (filters, sort, search)
 POST /api/movies              # Add movie by TMDB ID
 POST /api/shows               # Add show by TMDB ID
-POST /api/movies/{id}/assign-torrent   # Assign torrent to movie
-POST /api/shows/{id}/assign-torrent    # Auto-detect episodes from torrent
+POST /api/{shows|movies}/{id}/assign-torrent   # Start a mapping job: 202 {job_id} (legacy ?wait=true applies it and answers the old shape)
+GET  /api/assignment-jobs/{id}                 # The job and one proposal per file; poll while it works
+GET  /api/assignment-jobs?status=open          # Open jobs, newest first (the /torrents banner)
+PATCH /api/assignment-jobs/{id}/proposals      # Accept, ignore or re-target files, in one batch
+POST /api/assignment-jobs/{id}/reclassify      # Re-check with AI, with a hint (503 without AI)
+POST /api/assignment-jobs/{id}/apply           # Write the assignments and rebuild the VFS (409 while anything blocks)
+POST /api/assignment-jobs/{id}/discard         # Cancel; drops the torrent when nothing else uses it
+PUT  /api/{episodes|movies}/{id}/assignment    # Manual override: one file of a torrent, outside any job
+GET  /api/torrents/{hash}/files                # A torrent's files and what each one is mapped to
+GET  /api/shows/{id}/episodes                  # Every season's episodes, Specials included (the episode picker)
 GET  /api/torrents            # List active torrents
 GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
 ```
-Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6.
+Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment").
 
 ### Jackett Torznab API (port 9117)
 ```
@@ -139,7 +149,11 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/metadata/` - TMDB sync into the library (specials, absolute numbering, anime detection) and `backfill-metadata`
 - `internal/tmdb/` - TMDB client with retries, rate limit and the `tmdb_cache` cache
 - `internal/artwork/` - Backdrop dominant colour for the hero glow
-- `internal/identify/` - Episode mapping rules (`Classify`, `MergeAI`); `ai/` asks Claude Haiku about the files the rules can't place; `corpus/` loads the corpus in `testdata/`
+- `internal/identify/` - Pure rules classifier: `Classify` maps a torrent's files to episodes with a confidence and a reason, `RankMovieFiles`, `MergeAI`; `token/` tokenizer; `corpus/` loads the corpus in `testdata/` (gates: ≥95% exact, zero wrong `high`)
+- `internal/identify/ai/` - The Haiku resolver: asks Claude about the files the rules can't place (prompt, scope, cost)
+- `internal/service/assignment_*.go` - Mapping jobs: create and worker (`_jobs`, `_worker`), the contract's rules (`_rules`), PATCH (`_review`), re-check (`_recheck`), Apply and its VFS writer (`_apply`), overrides and torrent files (`_override`), legacy `?wait=true` (`_legacy`), library show → classifier catalog (`_catalog`)
+- `internal/library/assignment_job*.go`, `ai_store.go`, `settings_ai.go` - Jobs and proposals (claimed with `FOR UPDATE SKIP LOCKED`), `ai_usage` and `ai_cache`, AI settings in `app_settings`
+- `cmd/classifier-eval/` - The classifier on the golden corpus, rules and AI modes (Commands above)
 - `internal/subtitle/` - Subtitles: OpenSubtitles search ranked by release match, downloads, torrent subtitles
 - `internal/vfs/library_fs.go` - Virtual filesystem
 - `internal/torrent/service.go` - Torrent service interface

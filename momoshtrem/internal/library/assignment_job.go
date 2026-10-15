@@ -11,7 +11,8 @@ var ErrJobNotFound = errors.New("assignment job not found")
 
 // JobStatus is where an assignment job is (PLAN §6 "Assignment"):
 // queued → fetching_metadata → classifying → [resolving] → needs_review ⇄
-// ready → applied; any open status can end in failed or cancelled.
+// ready → applied. A working job can end in failed; Discard cancels any open
+// job.
 type JobStatus string
 
 const (
@@ -133,7 +134,8 @@ const (
 	KindSubtitle ProposalKind = "subtitle"
 )
 
-// ProposalGroup is a proposal's review group, set at classification.
+// ProposalGroup is a proposal's review group, set at classification (the
+// rules, then the first AI run).
 type ProposalGroup string
 
 const (

@@ -10,7 +10,7 @@ import type { MediaType, Timestamp } from './common';
 
 /**
  * `queued → fetching_metadata → classifying → [resolving] → needs_review ⇄ ready → applied`;
- * any open state can end in `failed` or `cancelled`.
+ * a working job can end in `failed`, and Discard moves any open job to `cancelled`.
  * Working: `queued…resolving`. Open: working plus `needs_review`, `ready`. Closed: the last three.
  */
 export type JobStatus =
@@ -36,7 +36,7 @@ export const isJobOpen = (status: JobStatus) => JOB_OPEN_STATUSES.includes(statu
 export type ProposalKind = 'episode' | 'movie' | 'extra' | 'subtitle';
 
 /**
- * Set when the job is classified and never changed, so rows don't jump.
+ * Set when the job is classified (the rules, then the first AI run) and never changed after, so rows don't jump.
  * Starting (default) decision: matched and specials `accepted`, needs_review and unmatched `pending`, extras `ignored`.
  */
 export type ProposalGroup = 'matched' | 'needs_review' | 'specials' | 'extras' | 'unmatched';
