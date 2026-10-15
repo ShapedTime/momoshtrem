@@ -208,7 +208,7 @@ export function QualityStep({ status, streams, error, onRetry, selected, onSelec
                         Premium
                       </Chip>
                     ) : (
-                      <span className="t-small text-fg-3 tabular-nums">{qualityNote(q)}</span>
+                      <span className="t-small text-fg-2 tabular-nums">{qualityNote(q)}</span>
                     )}
                   </span>
                 </label>

@@ -4,6 +4,8 @@
    .radio-card (title.css). */
 @layer components {
   .source-sheet .sheet-head .tabs { margin-top: calc(var(--sp-1) * -1); }
+  /* The field has its own clear button */
+  .source-sheet input[type="search"]::-webkit-search-cancel-button { appearance: none; display: none; }
 
   /* A hit's names: the site's (Russian) title, then the original */
   .hd-name { font-weight: var(--w-semibold); color: var(--text-1); overflow-wrap: anywhere; }
