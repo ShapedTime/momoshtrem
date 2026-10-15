@@ -24,6 +24,14 @@ export type JobStatus =
   | 'failed'
   | 'cancelled';
 
+/** The worker is still on it (first run or a re-check): poll. Plain values, so pure code can share them. */
+export const JOB_WORKING_STATUSES: readonly JobStatus[] = ['queued', 'fetching_metadata', 'classifying', 'resolving'];
+/** Not finished: working, or waiting for the user to review and apply. */
+export const JOB_OPEN_STATUSES: readonly JobStatus[] = [...JOB_WORKING_STATUSES, 'needs_review', 'ready'];
+
+export const isJobWorking = (status: JobStatus) => JOB_WORKING_STATUSES.includes(status);
+export const isJobOpen = (status: JobStatus) => JOB_OPEN_STATUSES.includes(status);
+
 /** What a file is. Subtitles that belong to a video aren't listed (see `subtitle_count`). */
 export type ProposalKind = 'episode' | 'movie' | 'extra' | 'subtitle';
 

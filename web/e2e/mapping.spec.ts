@@ -222,18 +222,15 @@ test.describe('mapping review', () => {
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   });
 
-  test('a cold load never shows the phone bar or tab bar, not even before hydration', async ({ page }) => {
-    await signIn(page, '/tv/209867');
-    // The server's HTML already hides them (CSS on .task-page), so nothing jumps when the page hydrates
-    await page.goto('/mapping/101', { waitUntil: 'domcontentloaded' });
-    const shown = await page.evaluate(() =>
-      ['.tabbar', '.phone-bar'].map((selector) => {
-        const element = document.querySelector(selector);
-        return element ? getComputedStyle(element).display !== 'none' : false;
-      })
-    );
-    expect(shown).toEqual([false, false]);
+  test('a task page hides the phone bar and tab bar with CSS, not by unmounting them', async ({ page }) => {
+    // The route's .task-page marker is server-rendered (mock mode renders nothing on the server, so check the result):
+    // the shell still renders both bars and CSS hides them, so outside mock mode they never paint and nothing shifts
+    await signIn(page, '/mapping/101');
     await expect(page.getByRole('heading', { name: 'Check the episodes' })).toBeVisible();
+    for (const bar of [page.locator('.tabbar'), page.locator('.phone-bar')]) {
+      await expect(bar).toHaveCount(1);
+      await expect(bar).toBeHidden();
+    }
   });
 
   test('a missing job is a 404; a failed one says why', async ({ page }) => {

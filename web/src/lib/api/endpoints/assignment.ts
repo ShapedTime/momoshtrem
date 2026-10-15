@@ -7,13 +7,13 @@ import type {
   AssignmentJobDetail,
   JobAccepted,
   JobListFilter,
-  JobStatus,
   ManualAssignment,
   ProposalsPatch,
   ReclassifyRequest,
   ShowEpisodesSeason,
   TorrentFileEntry,
 } from '../contract';
+import { JOB_OPEN_STATUSES, JOB_WORKING_STATUSES, isJobOpen, isJobWorking } from '../contract/assignment';
 import { libraryKeys } from './library';
 import { subtitleKeys } from './subtitles';
 import { titleKeys } from './titles';
@@ -30,13 +30,8 @@ export const assignmentKeys = {
   torrentFiles: (infoHash: string) => ['torrents', infoHash, 'files'] as const,
 };
 
-/** The worker is still on it (first run or a re-check): poll. */
-export const JOB_WORKING_STATUSES: readonly JobStatus[] = ['queued', 'fetching_metadata', 'classifying', 'resolving'];
-/** Not finished: working, or waiting for the user to review and apply. */
-export const JOB_OPEN_STATUSES: readonly JobStatus[] = [...JOB_WORKING_STATUSES, 'needs_review', 'ready'];
-
-export const isJobWorking = (status: JobStatus) => JOB_WORKING_STATUSES.includes(status);
-export const isJobOpen = (status: JobStatus) => JOB_OPEN_STATUSES.includes(status);
+// The status groups live with the contract (pure code shares them); re-exported for existing imports
+export { JOB_WORKING_STATUSES, JOB_OPEN_STATUSES, isJobWorking, isJobOpen };
 
 const JOB_POLL_MS = 1500;
 const JOBS_POLL_MS = 3000;

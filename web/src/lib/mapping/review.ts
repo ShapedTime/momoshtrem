@@ -1,14 +1,14 @@
-import type {
-  AssignmentJob,
-  ExtraType,
-  JobStatus,
-  Proposal,
-  ProposalChange,
-  ProposalDecision,
-  ProposalGroup,
-  ProposalTarget,
+import {
+  type AssignmentJob,
+  type ExtraType,
+  isJobWorking,
+  type JobStatus,
+  type Proposal,
+  type ProposalChange,
+  type ProposalDecision,
+  type ProposalGroup,
+  type ProposalTarget,
 } from '@/lib/api/contract';
-import { isJobWorking } from '@/lib/api/endpoints/assignment';
 import { STATUS, type StatusTone } from '@/lib/status';
 import { episodeCode } from '@/lib/title/episodes';
 import { plural } from '@/lib/title/format';
