@@ -4,7 +4,7 @@ import { useId, type ReactNode } from 'react';
 import { Check, CheckCheck, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui';
 import type { Proposal, ProposalGroup as Group } from '@/lib/api/contract';
-import { extrasPeek, GROUPS, maps, MOVIE_GROUPS, seasonRangeSummary } from '@/lib/mapping/review';
+import { extrasPeek, GROUPS, MOVIE_GROUPS, pendingInGroup, seasonRangeSummary } from '@/lib/mapping/review';
 import { cx } from '@/lib/utils/cx';
 
 interface ProposalGroupProps {
@@ -19,11 +19,11 @@ interface ProposalGroupProps {
 }
 
 function Peek({ group, proposals, open }: { group: Group; proposals: Proposal[]; open: boolean }) {
+  // Needs review always says how many wait; another group only when a re-check disputed a file in it
+  const pending = pendingInGroup(proposals).length;
+  if (pending > 0) return <span className="mg-peek mg-peek--review">{pending} to decide</span>;
   if (group === 'needs_review') {
-    const pending = proposals.filter((p) => p.decision === 'pending' && maps(p)).length;
-    return pending > 0 ? (
-      <span className="mg-peek mg-peek--review">{pending} to decide</span>
-    ) : (
+    return (
       <span className="mg-peek mg-peek--ok">
         <Check size={14} aria-hidden="true" />
         All decided
@@ -44,7 +44,7 @@ export function ProposalGroup({ group, proposals, open, onToggle, onAcceptAll, m
   const copy = GROUPS[group];
   const description = (movie && MOVIE_GROUPS[group]?.description) || copy.description;
   // A movie job keeps one file: there's nothing to accept in bulk
-  const acceptable = group === 'needs_review' && !movie ? proposals.filter((p) => p.decision === 'pending' && maps(p)) : [];
+  const acceptable = group === 'needs_review' && !movie ? pendingInGroup(proposals) : [];
   return (
     <section className={cx('mgroup', `mgroup--${copy.tone}`, open && 'is-open')} aria-labelledby={`${id}-title`}>
       <div className="mgroup-head">

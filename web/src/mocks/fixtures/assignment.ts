@@ -15,6 +15,7 @@ import type {
   ProposalTarget,
   Timestamp,
 } from '@/lib/api/contract';
+import { canHaveEpisodes } from '@/lib/mapping/files';
 import { type CatalogEntry, findTitle, iso } from './catalog';
 import { absoluteNumbers, episodeIdFor, SHOWS, type ShowSeed } from './title-seeds';
 
@@ -42,11 +43,12 @@ const TODAY = iso(0).slice(0, 10);
 
 type Ref = [season: number, episode: number];
 
-/** What a re-check with AI does to one proposal (scripted per fixture, as in the prototype). */
+/** What a re-check with AI answers for one proposal (scripted per fixture, as in the prototype); `next` is the following re-check's answer. */
 export interface RecheckScript {
   confidence: MatchConfidence | null;
   reason: string;
   at?: Ref[];
+  next?: RecheckScript;
 }
 
 interface FileDraft {
@@ -78,6 +80,8 @@ interface Template {
 export interface MockProposal extends Proposal {
   suggestion: { confidence: MatchConfidence | null; source: MatchSource; reason: string };
   recheck: RecheckScript | null;
+  /** The rules' own `high` answer, which no AI run overrides (the backend runs the rules again to know it). */
+  rules: { targets: ProposalTarget[]; reason: string } | null;
 }
 
 /** The statuses a job still has to pass through (mock-only). */
@@ -315,6 +319,19 @@ function frieren(): Template {
   };
 }
 
+/** One Piece #897 (rules: S21E06, high) over four re-checks: a dispute, another, a low answer that changes nothing, then agreement. */
+const DISPUTED_897: RecheckScript = {
+  confidence: 'medium',
+  at: [[21, 7]],
+  reason: 'TMDB’s air order puts #897 a week later',
+  next: {
+    confidence: 'high',
+    at: [[21, 8]],
+    reason: 'the runtime fits S21E08 better',
+    next: { confidence: 'low', at: [[21, 9]], reason: 'maybe S21E09', next: { confidence: 'high', at: [[21, 6]], reason: 'the air date matches S21E06' } },
+  },
+};
+
 function onePiece(): Template {
   const file = (abs: number) => `One.Piece.${abs}.1080p.WEB.x264-GROUP.mkv`;
   return {
@@ -341,8 +358,8 @@ function onePiece(): Template {
           group: 'matched',
           at: [[21, 2 + i]],
           reason: `Absolute #${abs} → S21E${pad(2 + i)} (same offset as #892)`,
-          // A re-check of all files disputes this one: it goes back to review, keeping its episode
-          ...(abs === 897 && { recheck: { confidence: 'medium' as const, at: [[21, 7]] as Ref[], reason: 'TMDB’s air order puts #897 a week later' } }),
+          // Re-checks of all files dispute this one (it goes back to review, keeping its episode), then agree
+          ...(abs === 897 && { recheck: DISPUTED_897 }),
         })
       ),
       {
@@ -544,6 +561,7 @@ function proposal(id: number, root: string, draft: FileDraft, show: ShowSeed | u
     superseded_by: null,
     suggestion: { confidence, source, reason: draft.reason },
     recheck: draft.recheck ?? null,
+    rules: source === 'rules' && confidence === 'high' && targets.length > 0 ? { targets, reason: draft.reason } : null,
   };
 }
 
@@ -677,6 +695,10 @@ export function patchProposals(job: MockJob, items: ProposalChange[]): string | 
     }
     if (item.decision !== undefined) p.decision = item.decision;
     if (p.decision === 'accepted' && !maps(p)) return `Proposal ${item.id}: pick an episode before accepting it.`;
+    // As the backend's takesEpisodes: fonts, info files and images can't play an episode
+    if (p.targets.length > 0 && (item.episode_ids !== undefined || p.decision === 'accepted') && !canHaveEpisodes(p)) {
+      return `"${p.file_path.split('/').pop()}" isn't a video, so it can't play an episode.`;
+    }
     next.set(p.id, p);
   }
   // A movie job maps one file: the first candidate accepted here wins, and the others are ignored
@@ -702,26 +724,46 @@ const codes = (targets: ProposalTarget[]) => targets.map((t) => `S${pad(t.season
 const clip = (reason: string) => (reason.length > 120 ? `${reason.slice(0, 119)}…` : reason);
 
 /**
- * A re-check's AI writes: the scripted suggestion for every proposal still in scope. As the backend
- * (PLAN §6 "Re-check"), a `high` rules answer is never overridden: the AI's other pick keeps its
- * targets, drops it to medium and names the pick in its reason, and a dispute still on its group's
- * default acceptance goes back to pending. An accepted proposal never loses its target.
+ * One proposal after the AI answered `script`, as the backend works it out (PLAN §6 "Re-check"), or
+ * itself when nothing changes.
+ * - A `high` rules answer on its own targets is protected, also once an earlier re-check flagged it:
+ *   a medium or high AI answer for other episodes keeps the targets, drops it to medium and names the
+ *   AI's pick; a dispute still on its group's default acceptance goes back to pending. A low answer
+ *   changes nothing. When the AI agrees with a flagged answer, the flag lifts: the rules' high and
+ *   reason come back, and the decision stays.
+ * - Any other answer takes the AI's, except that an accepted proposal never loses its target.
  */
+function recheckAnswer(p: MockProposal, script: RecheckScript, aiTargets: ProposalTarget[], hinted: boolean): MockProposal {
+  const changed = (fields: Partial<MockProposal>): MockProposal => ({ ...p, ...fields, updated: true, hinted });
+  if (p.rules && ids(p.rules.targets) === ids(p.targets)) {
+    if (ids(aiTargets) === ids(p.targets)) {
+      const flagged = p.confidence !== 'high' || p.reason !== p.rules.reason;
+      if (!flagged) return p;
+      const suggestion = { confidence: 'high' as const, source: 'rules' as const, reason: p.rules.reason };
+      return changed({ ...suggestion, suggestion });
+    }
+    if (script.confidence !== 'high' && script.confidence !== 'medium') return p;
+    const reason = clip(`AI suggests ${codes(aiTargets)}: ${script.reason}`);
+    if (p.confidence === 'medium' && p.reason === reason) return p;
+    const suggestion = { confidence: 'medium' as const, source: 'rules' as const, reason };
+    const decision = p.decision === 'accepted' && p.decision === defaultDecision(p.group) ? 'pending' : p.decision;
+    return changed({ ...suggestion, suggestion, decision });
+  }
+  if (aiTargets.length === 0 && p.decision === 'accepted') return p;
+  const suggestion = { confidence: script.confidence, source: 'ai' as const, reason: script.reason };
+  return changed({ ...suggestion, suggestion, targets: aiTargets, suggested_targets: aiTargets });
+}
+
+/** A re-check's AI writes: each proposal still in scope gets its scripted answer, and the script moves on to the next one. */
 export function finishRecheck(job: MockJob, scope: 'unresolved' | 'all'): void {
   const show = SHOWS[job.tmdb_id];
   const hinted = Boolean(job.hint?.text);
   const conflicts = conflictIds(job.proposals);
   job.proposals = job.proposals.map((p) => {
-    if (!p.recheck || !inScope(p, scope, conflicts)) return p;
-    const targets = p.recheck.at && show ? p.recheck.at.map((ref) => target(show, ref)) : p.targets;
-    if (p.source === 'rules' && p.confidence === 'high' && ids(targets) !== ids(p.targets)) {
-      const suggestion = { confidence: 'medium' as const, source: 'rules' as const, reason: clip(`AI suggests ${codes(targets)}: ${p.recheck.reason}`) };
-      const decision = p.decision === 'accepted' && p.decision === defaultDecision(p.group) ? 'pending' : p.decision;
-      return { ...p, ...suggestion, suggestion, decision, updated: true, hinted };
-    }
-    if (targets.length === 0 && p.decision === 'accepted') return p;
-    const suggestion = { confidence: p.recheck.confidence, source: 'ai' as const, reason: p.recheck.reason };
-    return { ...p, ...suggestion, suggestion, targets, suggested_targets: targets, updated: true, hinted };
+    const script = p.recheck;
+    if (!script || !inScope(p, scope, conflicts)) return p;
+    const aiTargets = script.at && show ? script.at.map((ref) => target(show, ref)) : p.targets;
+    return { ...recheckAnswer(p, script, aiTargets, hinted), recheck: script.next ?? script };
   });
 }
 

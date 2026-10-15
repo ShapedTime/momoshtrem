@@ -171,7 +171,7 @@ function Actions({ p, short, movie, actions }: { p: Proposal; short: string; mov
     );
   }
   // An extra can't become the movie, and only videos and subtitles can have episodes
-  if (p.decision === 'ignored' && !maps(p) && (movie || !canHaveEpisodes(p.file_path))) return null;
+  if (p.decision === 'ignored' && !maps(p) && (movie || !canHaveEpisodes(p))) return null;
   if (p.decision === 'ignored') {
     const include = p.group === 'extras';
     return (
@@ -266,7 +266,7 @@ export function ProposalRow({ proposal: p, path, short, conflictWith, movieTitle
     >
       <div className="mrow-file">
         {/* Movies have no episodes, and fonts, info files and images can't have one */}
-        {movie || !canHaveEpisodes(p.file_path) ? (
+        {movie || !canHaveEpisodes(p) ? (
           <span className="mrow-name">
             <FilePath path={path} />
           </span>

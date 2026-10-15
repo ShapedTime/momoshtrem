@@ -65,11 +65,12 @@ describe('file classes', () => {
     expect(fileClass('README')).toBe('other');
   });
 
-  it('only videos and subtitles can have episodes (Include)', () => {
-    expect(canHaveEpisodes('NCOP2 (1080p).mkv')).toBe(true);
-    expect(canHaveEpisodes('Show.S00E01.srt')).toBe(true);
-    expect(canHaveEpisodes('Fonts/OpenSans-Semibold.ttf')).toBe(false);
-    expect(canHaveEpisodes('Show.nfo')).toBe(false);
+  it('only videos, and subtitle files listed as subtitles, can have episodes (Include, the picker)', () => {
+    expect(canHaveEpisodes({ file_path: 'NCOP2 (1080p).mkv', kind: 'extra' })).toBe(true);
+    expect(canHaveEpisodes({ file_path: 'Show.S00E01.srt', kind: 'subtitle' })).toBe(true);
+    expect(canHaveEpisodes({ file_path: 'Show.S00E01.srt', kind: 'extra' })).toBe(false);
+    expect(canHaveEpisodes({ file_path: 'Fonts/OpenSans-Semibold.ttf', kind: 'extra' })).toBe(false);
+    expect(canHaveEpisodes({ file_path: 'Show.nfo', kind: 'extra' })).toBe(false);
   });
 });
 

@@ -68,9 +68,17 @@ export function groupProposals(proposals: Proposal[]): Array<{ group: ProposalGr
   );
 }
 
-/** Everything is open on desktop; below 1024 px the long, settled groups start collapsed. */
-export const defaultGroupOpen = (group: ProposalGroup, desktop: boolean): boolean =>
-  desktop || (group !== 'matched' && group !== 'extras');
+/** Everything is open on desktop; below 1024 px the long, settled groups start collapsed, unless a file in them waits. */
+export const defaultGroupOpen = (group: ProposalGroup, desktop: boolean, waiting = false): boolean =>
+  desktop || waiting || (group !== 'matched' && group !== 'extras');
+
+/** Files in a group that wait for a decision: pending and mapping somewhere ("2 to decide"). */
+export const pendingInGroup = (proposals: Proposal[]): Proposal[] => proposals.filter((p) => p.decision === 'pending' && maps(p));
+
+/** The groups with a file that waits for a decision (a disputed one can sit in Matched or Specials). */
+export function groupsWaiting(proposals: Proposal[]): Set<ProposalGroup> {
+  return new Set(pendingInGroup(proposals).map((p) => p.group));
+}
 
 /** Full rows (decide here) vs compact ones (spot-check). */
 export const isFullRow = (p: Proposal): boolean =>
@@ -91,12 +99,13 @@ const isSpecial = (p: Proposal) => p.targets[0]?.season === 0;
 
 /**
  * Two or more non-ignored proposals whose targets share an episode: for each
- * proposal in a conflict, the others it collides with. Movie candidates never conflict.
+ * proposal in a conflict, the others it collides with. Movie candidates and subtitles never conflict.
  */
 export function conflictMap(proposals: Proposal[]): Map<number, Proposal[]> {
   const byEpisode = new Map<number, Proposal[]>();
   for (const p of proposals) {
-    if (p.decision === 'ignored' || p.kind === 'movie') continue;
+    // Subtitles never conflict: one no video claims can go onto an episode a video maps to
+    if (p.decision === 'ignored' || p.kind === 'movie' || p.kind === 'subtitle') continue;
     for (const id of new Set(p.targets.map((t) => t.episode_id))) byEpisode.set(id, [...(byEpisode.get(id) ?? []), p]);
   }
   const out = new Map<number, Proposal[]>();

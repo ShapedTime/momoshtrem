@@ -327,10 +327,11 @@ export const assignmentHandlers = [
   }),
   http.patch('*/api/assignment-jobs/:id/proposals', async ({ params, request }) => {
     await latency();
-    const job = findJob(params.id);
-    if (!job) return noJob();
+    // As the backend: the body is checked first (400), then the job (404, 409)
     const body = await jsonBody(request);
     if (!isPatch(body)) return apiError(400, 'bad_request', 'Send {items: [{id, decision?, episode_ids?}]}, each with a decision or a non-empty episode_ids.');
+    const job = findJob(params.id);
+    if (!job) return noJob();
     if (CLOSED.includes(job.status)) return closed(job);
     if (UNCLASSIFIED.includes(job.status)) return working();
     const error = patchProposals(job, body.items);

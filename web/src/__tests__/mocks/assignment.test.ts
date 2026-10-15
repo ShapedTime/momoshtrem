@@ -285,6 +285,16 @@ describe('reviewing', () => {
     for (const items of invalid) {
       await expect(assignmentApi.patchProposals(101, { items })).rejects.toMatchObject({ status: 422, code: 'validation_error' });
     }
+    // A font can't play an episode
+    const font = named(detail, 'OpenSans-Semibold.ttf');
+    await expect(assignmentApi.patchProposals(101, { items: [{ id: font.id, episode_ids: [episodeId(FRIEREN, 1, 30)], decision: 'accepted' }] })).rejects.toMatchObject({
+      status: 422,
+      message: '"OpenSans-Semibold.ttf" isn\'t a video, so it can\'t play an episode.',
+    });
+    // The body is checked before the job: 400 for a job that doesn't exist
+    const unknown = await fetch('/api/assignment-jobs/999/proposals', { method: 'PATCH', body: JSON.stringify({ items: [] }) });
+    expect(unknown.status).toBe(400);
+    await expect(assignmentApi.patchProposals(999, { items: [{ id: v2.id, decision: 'accepted' }] })).rejects.toMatchObject({ status: 404 });
     expect(named(await assignmentApi.job(101), '35v2').decision).toBe('pending');
     const reclassify = await fetch('/api/assignment-jobs/101/reclassify', { method: 'POST', body: JSON.stringify({ scope: 'some' }) });
     expect(reclassify.status).toBe(400);
@@ -394,6 +404,32 @@ describe('reviewing', () => {
       decision: 'pending',
       group: 'matched',
       user_decided: false,
+      updated: true,
+    });
+
+    // Still protected though it's medium now: another pick only changes what the reason names
+    await assignmentApi.reclassify(102, { scope: 'all' });
+    await statuses(102, 2);
+    expect(named(await assignmentApi.job(102), '/One.Piece.897.')).toMatchObject({
+      targets: before.targets,
+      confidence: 'medium',
+      reason: 'AI suggests S21E08: the runtime fits S21E08 better',
+      decision: 'pending',
+      updated: true,
+    });
+    // A low answer disputes nothing
+    await assignmentApi.reclassify(102, { scope: 'all' });
+    await statuses(102, 2);
+    expect(named(await assignmentApi.job(102), '/One.Piece.897.')).toMatchObject({ reason: 'AI suggests S21E08: the runtime fits S21E08 better', updated: false });
+    // The AI agrees: the flag lifts, the rules' high and reason come back, and it stays yours to accept
+    await assignmentApi.reclassify(102, { scope: 'all' });
+    await statuses(102, 2);
+    expect(named(await assignmentApi.job(102), '/One.Piece.897.')).toMatchObject({
+      targets: before.targets,
+      confidence: 'high',
+      source: 'rules',
+      reason: before.reason,
+      decision: 'pending',
       updated: true,
     });
   });

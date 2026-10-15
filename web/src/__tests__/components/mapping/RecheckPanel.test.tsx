@@ -237,6 +237,8 @@ describe('Re-check with AI', () => {
     await waitFor(() => expect(panel().querySelector('.map-ai-note')).toHaveTextContent(/AI isn’t available right now/));
     await waitFor(() => expect(panel().querySelector('.map-ai-note')).toHaveFocus());
     expect(live()).toHaveTextContent('AI isn’t available right now');
+    // Not "Noir can take another look" right above "Noir can’t take another look"
+    expect(within(panel()).queryByText(/Noir can take another look/)).not.toBeInTheDocument();
     // The refetch says AI is gone: nothing to re-check with any more
     await waitFor(() => expect(within(panel()).queryByRole('button', { name: 'Re-check with AI' })).not.toBeInTheDocument());
     expect(panel()).toBeInTheDocument();

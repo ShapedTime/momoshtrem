@@ -13,12 +13,14 @@ import {
   footState,
   groupDefault,
   groupProposals,
+  groupsWaiting,
   ignoredLabel,
   isDisputed,
   isFullRow,
   movieUndo,
   nextStage,
   openJobLine,
+  pendingInGroup,
   progressSteps,
   readyToastTitle,
   restoredDecision,
@@ -82,6 +84,16 @@ describe('groups and counts', () => {
       false,
     ]);
     expect(defaultGroupOpen('matched', true)).toBe(true);
+    // A file that waits keeps its group open on a phone too
+    expect(defaultGroupOpen('matched', false, true)).toBe(true);
+  });
+
+  it('knows which groups have a file waiting: a disputed one can sit in Matched', () => {
+    const frieren = seeded(101);
+    expect([...groupsWaiting(frieren.proposals)]).toEqual(['needs_review']);
+    const disputed = frieren.proposals.map((p) => (p.file_path.includes(' - 29 ') ? { ...p, decision: 'pending' as const } : p));
+    expect([...groupsWaiting(disputed)].sort()).toEqual(['matched', 'needs_review']);
+    expect(pendingInGroup(disputed.filter((p) => p.group === 'matched'))).toHaveLength(1);
   });
 
   it('pre-selects the first pending file, and the next one after it', () => {
@@ -117,6 +129,14 @@ describe('conflicts', () => {
     expect(conflicts.get(waters.id)?.map((p) => p.id)).toEqual([extended.id]);
     // Ignoring one of them settles it
     expect(conflictMap(decide(doctorWho, ['Extended.Edition', 'ignored'])).size).toBe(0);
+  });
+
+  it('never counts a subtitle as a conflict: an orphan subtitle can go onto an episode a video has', () => {
+    const waters = named(doctorWho, 'S00E02.The.Waters.of.Mars');
+    const subtitle: Proposal = { ...waters, id: 9001, kind: 'subtitle', group: 'extras', file_path: 'Subs/Waters.of.Mars.en.srt', decision: 'accepted' };
+    const proposals = [...decide(doctorWho, ['Extended.Edition', 'ignored']), subtitle];
+    expect(conflictMap(proposals).size).toBe(0);
+    expect(reviewCounts(proposals).conflicts).toBe(0);
   });
 
   it('counts a conflict as review even once both are accepted', () => {

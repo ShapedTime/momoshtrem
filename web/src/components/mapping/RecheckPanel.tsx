@@ -57,7 +57,7 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
   const [scope, setScope] = useState<RecheckScope>(() => defaultScope(counts));
   const [run, setRun] = useState<Run | null>(null);
   const [result, setResult] = useState<{ changed: number } | null>(null);
-  const [notice, setNotice] = useState<{ tone: 'calm' | 'warning'; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'unavailable' | 'failed'; text: string } | null>(null);
 
   const working = isJobWorking(job.status);
   /** Count what changed (`updated` was cleared when it started); a failed run sets ai_error instead. */
@@ -113,8 +113,8 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
     setRun(null);
     setNotice(
       outcome.kind === 'unavailable'
-        ? { tone: 'calm', text: AI_UNAVAILABLE }
-        : { tone: 'warning', text: `Couldn’t start the re-check. ${outcome.message}` }
+        ? { kind: 'unavailable', text: AI_UNAVAILABLE }
+        : { kind: 'failed', text: `Couldn’t start the re-check. ${outcome.message}` }
     );
   };
 
@@ -165,7 +165,8 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
             <CatAvatar size={36} className="map-ai-avatar" />
             <div className="map-ai-copy">
               <strong>Not quite right?</strong>
-              <span className="t-small text-fg-2">Noir can take another look. A hint helps with odd numbering.</span>
+              {/* Not next to "Noir can’t take another look" after a 503 */}
+              {notice?.kind !== 'unavailable' && <span className="t-small text-fg-2">Noir can take another look. A hint helps with odd numbering.</span>}
             </div>
             {!unavailable && (
               <Button variant="secondary" size="sm" className="map-ai-btn" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
@@ -201,8 +202,8 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
             </p>
           )}
           {notice && (
-            <p ref={noticeRef} tabIndex={-1} className={cx('map-ai-note', notice.tone === 'warning' && 'is-warning')}>
-              {notice.tone === 'warning' ? <TriangleAlert size={16} aria-hidden="true" /> : <Info size={16} aria-hidden="true" />}
+            <p ref={noticeRef} tabIndex={-1} className={cx('map-ai-note', notice.kind === 'failed' && 'is-warning')}>
+              {notice.kind === 'failed' ? <TriangleAlert size={16} aria-hidden="true" /> : <Info size={16} aria-hidden="true" />}
               <span>{notice.text}</span>
             </p>
           )}

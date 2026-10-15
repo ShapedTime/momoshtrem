@@ -16,6 +16,8 @@ import {
   firstPending,
   footState,
   groupProposals,
+  groupsWaiting,
+  isDisputed,
   maps,
   movieUndo,
   restoredDecision,
@@ -74,7 +76,10 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   const sheetProposal = sheet ? (proposals.find((p) => p.id === sheet.id) ?? null) : null;
   const pickerFor = desktop ? selected : sheetProposal;
   const taken = useMemo(() => takenBy(proposals, pickerFor?.id ?? null, showTitle), [proposals, pickerFor?.id, showTitle]);
-  const isOpen = (group: Group) => opened[group] ?? defaultGroupOpen(group, desktop);
+  const waiting = useMemo(() => groupsWaiting(proposals), [proposals]);
+  const isOpen = (group: Group) => opened[group] ?? defaultGroupOpen(group, desktop, waiting.has(group));
+  /** A group opened because a file in it waited stays open once you've decided it (it doesn't fold away under you). */
+  const keepOpen = (group: Group) => setOpened((current) => (current[group] === undefined ? { ...current, [group]: isOpen(group) } : current));
   // Movie cuts share the title: their file names tell them apart
   const short = useCallback((p: Proposal) => (movie ? fileName(p.file_path) : shortName(p.file_path, showTitle)), [movie, showTitle]);
   const path = useCallback((p: Proposal) => displayPath(p.file_path, job.torrent.name), [job.torrent.name]);
@@ -140,6 +145,11 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
       } else setSheet((current) => ({ id: p.id, open: true, key: (current?.key ?? 0) + 1 }));
     },
     accept: (p) => {
+      // A disputed file goes back to a compact row: its Accept goes away, so focus moves to what's left
+      if (isDisputed(p)) {
+        keepOpen(p.group);
+        focusAfterRender({ kind: 'row', id: p.id, actions: ['change', 'ignore'] });
+      }
       void change([{ id: p.id, decision: 'accepted' }]);
       flashRow(p.id);
       if (desktop && !movie) {
@@ -150,6 +160,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
     // A movie pick ignored the other files: they all come back, so you choose again
     unaccept: (p) => void change(movie && p.kind === 'movie' ? movieUndo(proposals) : [{ id: p.id, decision: 'pending' }]),
     ignore: (p) => {
+      keepOpen(p.group);
       if (sheet?.id === p.id) setSheet({ ...sheet, open: false });
       focusAfterRender({ kind: 'row', id: p.id, actions: ['restore'] });
       void change([{ id: p.id, decision: 'ignored' }]);
@@ -173,6 +184,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   };
 
   const pick = async (p: Proposal, episode: PickerEpisode) => {
+    keepOpen(p.group);
     const same = p.targets.length === 1 && p.targets[0].episode_id === episode.id;
     if (sheet?.open) setSheet({ ...sheet, open: false });
     const answer = await change([same ? { id: p.id, decision: 'accepted' } : { id: p.id, episode_ids: [episode.id], decision: 'accepted' }]);

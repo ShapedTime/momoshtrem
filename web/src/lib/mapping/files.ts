@@ -26,5 +26,11 @@ export function fileClass(path: string): FileClass {
   return BY_EXTENSION.get(extension) ?? 'other';
 }
 
-/** A video, or a subtitle: the files that can be given an episode (Include on an extra). */
-export const canHaveEpisodes = (path: string): boolean => ['video', 'subtitle'].includes(fileClass(path));
+/**
+ * The files that can be given an episode (Include on an extra, the picker), as the backend's
+ * `takesEpisodes`: a video, or a subtitle file listed as a subtitle.
+ */
+export function canHaveEpisodes(p: { file_path: string; kind: string }): boolean {
+  const kind = fileClass(p.file_path);
+  return kind === 'video' || (kind === 'subtitle' && p.kind === 'subtitle');
+}
