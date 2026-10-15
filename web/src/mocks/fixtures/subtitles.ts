@@ -1,4 +1,4 @@
-import type { Subtitle, SubtitleCandidate, SubtitleItemType, SubtitleMatch, SubtitleSearchResult } from '@/lib/api/contract';
+import type { EpisodeStream, Subtitle, SubtitleCandidate, SubtitleItemType, SubtitleMatch, SubtitleSearchResult } from '@/lib/api/contract';
 import { iso } from './catalog';
 import { MOVIES, SHOWS } from './title-seeds';
 import { episodeId } from './titles';
@@ -79,6 +79,31 @@ export function subtitleSearch(type: SubtitleItemType, id: number, languages: st
     }))
   );
   return { items, release_name: release };
+}
+
+/** The voice-over with the original audio: HDRezka ships it with English and Russian subtitles, the dubs with none (fixtures/hdrezka.ts). */
+const ORIGINAL_AUDIO = 'Оригинал (+субтитры)';
+
+/** An HDRezka stream as its subtitles' release name: "HDRezka · Оригинал (+субтитры) · 1080p", as the backend labels it. */
+export const streamRelease = (stream: EpisodeStream) => `HDRezka · ${stream.translator} · ${stream.quality}`;
+
+/**
+ * The subtitles an HDRezka stream brings (#68): the backend downloads them
+ * when the stream is assigned and stores them as SRT. English and Russian
+ * for the original audio, none for a dub. Ids count up from `firstId`.
+ */
+export function hdrezkaSubtitles(stream: EpisodeStream, firstId: number): Subtitle[] {
+  if (stream.translator !== ORIGINAL_AUDIO) return [];
+  return ['en', 'ru'].map((code, i) => ({
+    id: firstId + i,
+    language_code: code,
+    language_name: languageName(code),
+    format: 'srt',
+    source: 'hdrezka',
+    release_name: streamRelease(stream),
+    match: 'exact_release',
+    created_at: new Date().toISOString(),
+  }));
 }
 
 /** Stored subtitles a page starts with: each kind of source, and some the torrent brought (can't be deleted). */

@@ -57,12 +57,31 @@ type ItemContext struct {
 	Item Item
 	// Search finds the item on OpenSubtitles; Languages is set per request.
 	Search opensubtitles.SearchParams
-	// InfoHash is the active assignment's torrent; "" when nothing is assigned.
-	InfoHash string
+	// File is the item's active file; zero when nothing is assigned.
+	File CurrentFile
 	// Release names the assigned release (see AssignedRelease); "" when
-	// nothing is assigned.
+	// nothing is assigned, or for an HDRezka stream.
 	Release string
 }
+
+// CurrentFile is an item's active file, as far as its subtitles care: the
+// subtitles that came with a file show only while it's the item's.
+type CurrentFile struct {
+	// Kind is the source of the subtitles that come with the file:
+	// SourceTorrent for a file in a torrent, SourceHDRezka for an HDRezka
+	// stream; "" when nothing is assigned.
+	Kind Source
+	// InfoHash is the torrent's, for SourceTorrent.
+	InfoHash string
+}
+
+// TorrentFile is a file in the torrent with the info hash.
+func TorrentFile(infoHash string) CurrentFile {
+	return CurrentFile{Kind: SourceTorrent, InfoHash: infoHash}
+}
+
+// HDRezkaFile is an HDRezka stream.
+func HDRezkaFile() CurrentFile { return CurrentFile{Kind: SourceHDRezka} }
 
 // Stored is a stored subtitle with its match against the item's current
 // release.
@@ -72,17 +91,29 @@ type Stored struct {
 }
 
 // Current keeps the subtitles that go with the item's current file:
-// downloaded ones, and those that came with the assigned torrent. Torrent
-// subtitles from an earlier torrent, or with nothing assigned, are left out.
-func Current(subs []*Subtitle, infoHash string) []*Subtitle {
+// downloaded ones, those that came with the assigned torrent, and those
+// that came with an HDRezka stream while one is the item's file. Torrent
+// subtitles from an earlier torrent, HDRezka subtitles once a torrent file
+// replaced the stream, and either with nothing assigned are left out.
+func Current(subs []*Subtitle, file CurrentFile) []*Subtitle {
 	out := make([]*Subtitle, 0, len(subs))
 	for _, sub := range subs {
-		if sub.Source == SourceTorrent && (infoHash == "" || sub.InfoHash != infoHash) {
-			continue
+		if file.shows(sub) {
+			out = append(out, sub)
 		}
-		out = append(out, sub)
 	}
 	return out
+}
+
+// shows reports whether sub goes with the file.
+func (f CurrentFile) shows(sub *Subtitle) bool {
+	switch sub.Source {
+	case SourceTorrent:
+		return f.Kind == SourceTorrent && f.InfoHash != "" && sub.InfoHash == f.InfoHash
+	case SourceHDRezka:
+		return f.Kind == SourceHDRezka
+	}
+	return true
 }
 
 // List returns the item's current subtitles (see Current) with their match.
@@ -91,7 +122,7 @@ func (s *Service) List(ctx context.Context, item ItemContext) ([]Stored, error) 
 	if err != nil {
 		return nil, err
 	}
-	current := Current(subs, item.InfoHash)
+	current := Current(subs, item.File)
 	out := make([]Stored, len(current))
 	for i, sub := range current {
 		out[i] = s.stored(item, sub)
@@ -264,23 +295,25 @@ func (s *Service) download(ctx context.Context, item Item, fileID int, languageC
 	return sub, nil
 }
 
-// DeleteFromItem deletes one of the item's downloaded subtitles and its file.
-// ErrNotFound when the subtitle isn't among the item's current ones (see
-// Current: another item's, or an earlier torrent's); ErrTorrentSubtitle when
-// it came with the assigned torrent.
+// DeleteFromItem deletes one of the item's stored subtitles (downloaded,
+// or from its HDRezka stream) and its file. ErrNotFound when the subtitle
+// isn't among the item's current ones (see Current: another item's, or an
+// earlier file's); ErrTorrentSubtitle when it came with the assigned
+// torrent. Assigning the HDRezka stream again brings its subtitles back.
 func (s *Service) DeleteFromItem(ctx context.Context, item ItemContext, id int64) error {
 	sub, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if sub == nil || sub.Item() != item.Item || len(Current([]*Subtitle{sub}, item.InfoHash)) == 0 {
+	if sub == nil || sub.Item() != item.Item || !item.File.shows(sub) {
 		return ErrNotFound
 	}
 	return s.remove(ctx, sub)
 }
 
 func (s *Service) remove(ctx context.Context, sub *Subtitle) error {
-	// A torrent subtitle's FilePath is a path inside the torrent, not on disk.
+	// A torrent subtitle's FilePath is a path inside the torrent, not on
+	// disk. Downloaded and HDRezka subtitles are local files.
 	if sub.Source == SourceTorrent {
 		return ErrTorrentSubtitle
 	}
@@ -296,6 +329,7 @@ func (s *Service) remove(ctx context.Context, sub *Subtitle) error {
 		"item_type", sub.ItemType,
 		"item_id", sub.ItemID,
 		"language", sub.LanguageCode,
+		"source", sub.Source,
 	)
 	return nil
 }

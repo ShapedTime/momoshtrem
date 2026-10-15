@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { SubtitlesPanel, type SubtitlesPanelProps } from '@/components/title';
 import type { Subtitle } from '@/lib/api/contract';
-import { seedSubtitles, subtitleItemKey, subtitleSearch } from '@/mocks/fixtures/subtitles';
+import { hdrezkaSubtitles, seedSubtitles, subtitleItemKey, subtitleSearch } from '@/mocks/fixtures/subtitles';
 
 const DUNE_RELEASE = 'Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX';
 const duneSubtitles = (): Subtitle[] => seedSubtitles().get(subtitleItemKey('movie', 1)) ?? [];
@@ -38,6 +38,19 @@ describe('SubtitlesPanel', () => {
     expect(within(rows[0]).queryByRole('button')).not.toBeInTheDocument();
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove Russian subtitles' }));
     expect(props.onRemove).toHaveBeenCalledWith(expect.objectContaining({ language_code: 'ru', source: 'opensubtitles' }));
+    expect(screen.getByText('2 languages')).toBeInTheDocument();
+  });
+
+  it('labels the subtitles that came with an HDRezka stream and lets them go', () => {
+    const stream = { translator: 'Оригинал (+субтитры)', quality: '1080p' };
+    const props = renderPanel({ stored: hdrezkaSubtitles(stream, 10) });
+    const rows = within(screen.getByRole('list', { name: 'Your subtitles' })).getAllByRole('listitem');
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('EnglishFrom HDRezka · SRT'),
+      expect.stringContaining('RussianFrom HDRezka · SRT'),
+    ]);
+    fireEvent.click(within(rows[0]).getByRole('button', { name: 'Remove English subtitles' }));
+    expect(props.onRemove).toHaveBeenCalledWith(expect.objectContaining({ language_code: 'en', source: 'hdrezka' }));
     expect(screen.getByText('2 languages')).toBeInTheDocument();
   });
 

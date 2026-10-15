@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -80,10 +81,10 @@ func newSubtitleFixture(t *testing.T, fetcher *subtitletest.Fetcher) *subtitleFi
 	f.server.treeUpdater = f.tree
 	f.server.subtitleItems = fakeItems{
 		duneItem: {Item: duneItem, Search: opensubtitles.SearchParams{Type: "movie", TMDBID: 693134},
-			InfoHash: subHashA, Release: subFlux},
+			File: subtitle.TorrentFile(subHashA), Release: subFlux},
 		pastLives: {Item: pastLives, Search: opensubtitles.SearchParams{Type: "movie", TMDBID: 666277}},
 		severanceEp: {Item: severanceEp, Search: opensubtitles.SearchParams{Type: "episode", ParentTMDBID: 95396, SeasonNumber: 2, EpisodeNumber: 5},
-			InfoHash: subHashA, Release: "Severance.S02.2160p.ATVP.WEB-DL-FLUX"},
+			File: subtitle.TorrentFile(subHashA), Release: "Severance.S02.2160p.ATVP.WEB-DL-FLUX"},
 	}
 	return f
 }
@@ -349,6 +350,63 @@ func TestItemSubtitles_Delete(t *testing.T) {
 	}
 	if rec := f.do(t, http.MethodDelete, path(f.ru.ID), ""); rec.Code != http.StatusNotFound {
 		t.Errorf("deleted twice: status = %d, want 404", rec.Code)
+	}
+}
+
+// An HDRezka movie lists the subtitles its stream came with, made for it,
+// and they can be deleted (they're local files); an earlier torrent's
+// don't show.
+func TestItemSubtitles_HDRezka(t *testing.T) {
+	f := newSubtitleFixture(t, nil)
+	interstellar := subtitle.Item{Type: subtitle.ItemTypeMovie, ID: 3}
+	f.server.subtitleItems.(fakeItems)[interstellar] = subtitle.ItemContext{Item: interstellar, File: subtitle.HDRezkaFile()}
+	const label = "HDRezka · Оригинал (+субтитры) · 1080p"
+	dir := t.TempDir()
+	stored := map[string]*subtitle.Subtitle{}
+	for _, lang := range []string{"en", "ru"} {
+		file := dir + "/" + lang + ".srt"
+		if err := os.WriteFile(file, []byte("1\n00:00:01,000 --> 00:00:02,000\nHi\n\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stored[lang] = f.repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 3, LanguageCode: lang, LanguageName: subtitle.LanguageName(lang),
+			Format: "srt", Source: subtitle.SourceHDRezka, FilePath: file, ReleaseName: label})
+	}
+	en := stored["en"]
+	f.repo.Add(subtitle.Subtitle{ItemType: "movie", ItemID: 3, LanguageCode: "de", Source: subtitle.SourceTorrent,
+		InfoHash: subHashA, FilePath: "Old/de.srt"})
+
+	rec := f.do(t, http.MethodGet, "/api/movies/3/subtitles", "")
+	var list ItemSubtitleList
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	var got []string
+	for _, s := range list.Items {
+		got = append(got, s.LanguageCode+" "+s.Source+" "+s.Match+" "+*s.ReleaseName)
+	}
+	want := []string{"en hdrezka exact_release " + label, "ru hdrezka exact_release " + label}
+	if rec.Code != http.StatusOK || !reflect.DeepEqual(got, want) {
+		t.Fatalf("status %d, items %v, want %v", rec.Code, got, want)
+	}
+
+	if rec := f.do(t, http.MethodDelete, "/api/movies/3/subtitles/"+itoa(en.ID), ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("HDRezka subtitle: status = %d %s, want 204", rec.Code, rec.Body)
+	}
+	if _, err := os.Stat(en.FilePath); !os.IsNotExist(err) {
+		t.Errorf("en.srt still on disk (err %v)", err)
+	}
+	if f.tree.invalidated != 1 {
+		t.Errorf("tree invalidated %d times, want 1", f.tree.invalidated)
+	}
+
+	// Once a torrent replaces the stream, its subtitles neither list nor delete.
+	f.server.subtitleItems.(fakeItems)[interstellar] = subtitle.ItemContext{Item: interstellar, File: subtitle.TorrentFile(subHashA)}
+	rec = f.do(t, http.MethodGet, "/api/movies/3/subtitles", "")
+	list = ItemSubtitleList{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list.Items) != 1 || list.Items[0].Source != "torrent" {
+		t.Errorf("after a torrent: %s", rec.Body)
+	}
+	if rec := f.do(t, http.MethodDelete, "/api/movies/3/subtitles/"+itoa(stored["ru"].ID), ""); rec.Code != http.StatusNotFound {
+		t.Errorf("an earlier stream's subtitle: status = %d, want 404", rec.Code)
 	}
 }
 

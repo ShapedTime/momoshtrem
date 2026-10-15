@@ -21,34 +21,44 @@ const (
 
 var dune = subtitle.Item{Type: subtitle.ItemTypeMovie, ID: 1}
 
+// duneContext is Dune with the torrent hash assigned; nothing when hash
+// is "".
 func duneContext(release, hash string) subtitle.ItemContext {
-	return subtitle.ItemContext{
-		Item:     dune,
-		Search:   opensubtitles.SearchParams{Type: "movie", TMDBID: 693134},
-		InfoHash: hash,
-		Release:  release,
+	ic := subtitle.ItemContext{
+		Item:    dune,
+		Search:  opensubtitles.SearchParams{Type: "movie", TMDBID: 693134},
+		Release: release,
 	}
+	if hash != "" {
+		ic.File = subtitle.TorrentFile(hash)
+	}
+	return ic
 }
 
+// Each file shows its own subtitles across source switches: torrent A, a
+// stream, torrent B, the stream again, nothing.
 func TestCurrent(t *testing.T) {
 	downloaded := &subtitle.Subtitle{ID: 1, Source: subtitle.SourceOpenSubtitles}
 	fromA := &subtitle.Subtitle{ID: 2, Source: subtitle.SourceTorrent, InfoHash: hashA}
 	fromB := &subtitle.Subtitle{ID: 3, Source: subtitle.SourceTorrent, InfoHash: hashB}
-	all := []*subtitle.Subtitle{downloaded, fromA, fromB}
+	fromStream := &subtitle.Subtitle{ID: 4, Source: subtitle.SourceHDRezka}
+	all := []*subtitle.Subtitle{downloaded, fromA, fromB, fromStream}
 
 	tests := []struct {
 		name string
-		hash string
+		file subtitle.CurrentFile
 		want []int64
 	}{
-		{"assigned torrent A", hashA, []int64{1, 2}},
-		{"reassigned to B", hashB, []int64{1, 3}},
-		{"nothing assigned", "", []int64{1}},
+		{"assigned torrent A", subtitle.TorrentFile(hashA), []int64{1, 2}},
+		{"an HDRezka stream replaces it", subtitle.HDRezkaFile(), []int64{1, 4}},
+		{"torrent B replaces the stream", subtitle.TorrentFile(hashB), []int64{1, 3}},
+		{"a torrent without a hash", subtitle.TorrentFile(""), []int64{1}},
+		{"nothing assigned", subtitle.CurrentFile{}, []int64{1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []int64
-			for _, s := range subtitle.Current(all, tt.hash) {
+			for _, s := range subtitle.Current(all, tt.file) {
 				got = append(got, s.ID)
 			}
 			if !reflect.DeepEqual(got, tt.want) {

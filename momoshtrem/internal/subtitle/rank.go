@@ -83,9 +83,10 @@ func Rank(assigned string, candidates []Candidate) []Candidate {
 }
 
 // MatchStored is the match of a stored subtitle against the assigned
-// release. Subtitles that came with the torrent are made for it.
+// release. Subtitles that came with the torrent or the HDRezka stream are
+// made for it.
 func MatchStored(assigned string, sub *Subtitle) Match {
-	if sub.Source == SourceTorrent {
+	if sub.Source == SourceTorrent || sub.Source == SourceHDRezka {
 		return MatchExactRelease
 	}
 	a, b := ParseRelease(assigned), ParseRelease(sub.ReleaseName)

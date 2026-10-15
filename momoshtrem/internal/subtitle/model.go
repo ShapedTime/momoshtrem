@@ -18,8 +18,13 @@ const (
 type Source string
 
 const (
+	// SourceOpenSubtitles: downloaded from OpenSubtitles to local storage.
 	SourceOpenSubtitles Source = "opensubtitles"
-	SourceTorrent       Source = "torrent"
+	// SourceTorrent: a file in the item's torrent, streamed from it.
+	SourceTorrent Source = "torrent"
+	// SourceHDRezka: came with the item's HDRezka stream, converted to SRT
+	// and stored locally when the stream was assigned.
+	SourceHDRezka Source = "hdrezka"
 )
 
 // Item is a library movie or episode that subtitles belong to.
@@ -38,7 +43,7 @@ type Subtitle struct {
 	Format       string // srt, vtt, ass, ssa, sub
 	FilePath     string // Local storage path OR torrent file path (for Source=torrent)
 	FileSize     int64
-	Source       Source // "opensubtitles" or "torrent"
+	Source       Source
 	InfoHash     string // For torrent subtitles: the torrent info hash
 	ReleaseName  string // The release it was made for; "" when unknown
 	CreatedAt    time.Time
@@ -76,6 +81,14 @@ type SubtitleRepository interface {
 	// UpsertTorrent stores a subtitle that came with the item's torrent and
 	// drops the item's torrent subtitles from any other torrent.
 	UpsertTorrent(ctx context.Context, sub *Subtitle) error
+	// UpsertHDRezka stores the subtitles that came with an item's HDRezka
+	// stream, one per language, each replacing the item's HDRezka subtitle
+	// in its language. It writes only while streamFile is the item's active
+	// file, and holds that file until it commits, so an assign can't change
+	// it meanwhile; place runs just before the commit (it moves the files
+	// into place). ErrStaleStream when the item's file has changed: nothing
+	// is stored and place doesn't run.
+	UpsertHDRezka(ctx context.Context, item Item, streamFile string, subs []*Subtitle, place func() error) error
 	GetByID(ctx context.Context, id int64) (*Subtitle, error)
 	GetByItem(ctx context.Context, itemType ItemType, itemID int64) ([]*Subtitle, error)
 	// GetByItems loads the subtitles of many items in one query.

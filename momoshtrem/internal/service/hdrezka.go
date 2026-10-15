@@ -62,6 +62,14 @@ const (
 	// hdrezkaWriteTimeout bounds the write after an assign, which runs
 	// even when the client has gone: the work is done.
 	hdrezkaWriteTimeout = 10 * time.Second
+	// hdrezkaSubtitleWorkers is how many subtitle tracks an assign
+	// downloads at once.
+	hdrezkaSubtitleWorkers = 4
+	// hdrezkaSubtitleTimeout bounds downloading one subtitle track.
+	hdrezkaSubtitleTimeout = 15 * time.Second
+	// hdrezkaSubtitleBudget bounds recording an assign's subtitles, which
+	// may outlive the assign's answer (see finishAssign).
+	hdrezkaSubtitleBudget = 2 * time.Minute
 	// maxHDRezkaQuery caps a search query.
 	maxHDRezkaQuery = 200
 )
@@ -74,6 +82,8 @@ type HDRezkaSite interface {
 	Title(ctx context.Context, pathOrURL string) (*hdrezka.Title, error)
 	Episodes(ctx context.Context, ref hdrezka.Ref, translatorID int) ([]hdrezka.Season, error)
 	ContentLength(ctx context.Context, link string) (int64, error)
+	// Subtitle downloads a stream's subtitle track from the CDN.
+	Subtitle(ctx context.Context, link string) ([]byte, error)
 	Ping(ctx context.Context) error
 }
 
@@ -121,7 +131,8 @@ var (
 	_ StreamWriter  = (*library.AssignmentRepository)(nil)
 )
 
-// HDRezkaDeps are an HDRezkaService's dependencies, all required.
+// HDRezkaDeps are an HDRezkaService's dependencies, all required but
+// Subtitles.
 type HDRezkaDeps struct {
 	Site        HDRezkaSite
 	Resolver    HDRezkaResolver
@@ -129,13 +140,18 @@ type HDRezkaDeps struct {
 	Movies      MovieGetter
 	Shows       EpisodeLister
 	Assignments StreamWriter
-	// Tree is rebuilt once after each assign.
+	// Tree is rebuilt once after each assign (twice when its subtitles
+	// come in late).
 	Tree TreeInvalidator
+	// Subtitles stores the subtitles that come with the streams; nil
+	// skips them.
+	Subtitles HDRezkaSubtitleStore
 }
 
 // HDRezkaService finds titles on HDRezka and makes their streams library
 // files (PLAN §6 "HDRezka (#63)"). Assigning is synchronous: it resolves
-// and measures each stream, then writes once and rebuilds the tree once.
+// and measures each stream, writes once, records the streams' subtitles
+// and rebuilds the tree once.
 type HDRezkaService struct {
 	site        HDRezkaSite
 	resolver    HDRezkaResolver
@@ -144,21 +160,26 @@ type HDRezkaService struct {
 	shows       EpisodeLister
 	assignments StreamWriter
 	tree        TreeInvalidator
+	subtitles   HDRezkaSubtitleStore
 	log         *slog.Logger
 
 	// The budgets; tests shorten them.
-	assignBudget time.Duration
-	sizeBudget   time.Duration
+	assignBudget    time.Duration
+	sizeBudget      time.Duration
+	subtitleTimeout time.Duration
+	subtitleBudget  time.Duration
 }
 
 // NewHDRezkaService creates an HDRezkaService.
 func NewHDRezkaService(d HDRezkaDeps) *HDRezkaService {
 	return &HDRezkaService{
 		site: d.Site, resolver: d.Resolver, tmdb: d.TMDB,
-		movies: d.Movies, shows: d.Shows, assignments: d.Assignments, tree: d.Tree,
-		log:          slog.With("component", "hdrezka"),
-		assignBudget: hdrezkaAssignBudget,
-		sizeBudget:   hdrezkaSizeBudget,
+		movies: d.Movies, shows: d.Shows, assignments: d.Assignments, tree: d.Tree, subtitles: d.Subtitles,
+		log:             slog.With("component", "hdrezka"),
+		assignBudget:    hdrezkaAssignBudget,
+		sizeBudget:      hdrezkaSizeBudget,
+		subtitleTimeout: hdrezkaSubtitleTimeout,
+		subtitleBudget:  hdrezkaSubtitleBudget,
 	}
 }
 

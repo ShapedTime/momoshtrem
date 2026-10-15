@@ -525,7 +525,7 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 		tree.pathMap[filePath] = videoFile
 
 		subDirs = append(subDirs, subtitleDir{dir: movieDir, dirPath: folderPath, base: folderName,
-			item: subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, infoHash: movie.Assignment.InfoHash})
+			item: subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, file: currentFile(movie.Assignment)})
 	}
 
 	// Add TV shows with assigned episodes
@@ -604,9 +604,9 @@ func addSeasonEntries(tree *DirectoryTree, seasonDir *VirtualDir, seasonPath, sh
 
 		d := subtitleDir{
 			dir: seasonDir, dirPath: seasonPath,
-			base:     strings.TrimSuffix(entry.FileName, getVideoExt(first.Assignment.FilePath)),
-			item:     subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: first.ID},
-			infoHash: first.Assignment.InfoHash,
+			base: strings.TrimSuffix(entry.FileName, getVideoExt(first.Assignment.FilePath)),
+			item: subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: first.ID},
+			file: currentFile(first.Assignment),
 		}
 		inEntry := map[int]bool{}
 		for _, i := range entry.Episodes {

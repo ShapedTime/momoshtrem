@@ -18,7 +18,7 @@ export interface SubtitlesPanelProps {
   stored: Subtitle[] | undefined;
   storedError: boolean;
   onRetryStored: () => void;
-  /** Downloaded subtitles only: torrent ones stay with the file. */
+  /** Downloaded and HDRezka subtitles: torrent ones stay with the file. */
   onRemove: (subtitle: Subtitle) => void;
   removingId: number | null;
   /** The language the search will ask for. */
@@ -31,8 +31,14 @@ export interface SubtitlesPanelProps {
 }
 
 function storedDetail(subtitle: Subtitle): string {
-  if (subtitle.source === 'torrent') return `From the torrent · ${subtitle.format.toUpperCase()}`;
-  return `OpenSubtitles · ${STATUS[matchStatus(subtitle.match)].label}`;
+  switch (subtitle.source) {
+    case 'torrent':
+      return `From the torrent · ${subtitle.format.toUpperCase()}`;
+    case 'hdrezka':
+      return `From HDRezka · ${subtitle.format.toUpperCase()}`;
+    case 'opensubtitles':
+      return `OpenSubtitles · ${STATUS[matchStatus(subtitle.match)].label}`;
+  }
 }
 
 function StoredList({ stored, onRemove, removingId }: Pick<SubtitlesPanelProps, 'onRemove' | 'removingId'> & { stored: Subtitle[] }) {
@@ -50,7 +56,7 @@ function StoredList({ stored, onRemove, removingId }: Pick<SubtitlesPanelProps, 
             <span className="font-medium text-fg-1">{subtitle.language_name}</span>
             <span className="t-small text-fg-3">{storedDetail(subtitle)}</span>
           </div>
-          {subtitle.source === 'opensubtitles' && (
+          {subtitle.source !== 'torrent' && (
             <IconButton
               size="sm"
               aria-label={`Remove ${subtitle.language_name} subtitles`}
@@ -128,8 +134,9 @@ function Results({ search, stored, onGet, gettingFileId }: Pick<SubtitlesPanelPr
 
 /**
  * Subtitles for one movie or episode (B7): what Infuse already has (torrent
- * subtitles can't be removed), and an OpenSubtitles search ranked by how
- * well each file matches the release you have.
+ * subtitles can't be removed; those that came with an HDRezka stream can),
+ * and an OpenSubtitles search ranked by how well each file matches the
+ * release you have.
  */
 export function SubtitlesPanel(props: SubtitlesPanelProps) {
   const { stored, storedError, onRetryStored, language, onLanguageChange, onSearch, search } = props;

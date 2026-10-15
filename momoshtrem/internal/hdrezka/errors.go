@@ -31,6 +31,9 @@ var (
 	// assigned: the upload changed, so the bytes no longer line up with what
 	// the player read before.
 	ErrSizeMismatch = errors.New("the HDRezka file's size changed")
+	// ErrSubtitleTooLarge means a subtitle file is over 2 MB, far more than
+	// any film's subtitles: it isn't one.
+	ErrSubtitleTooLarge = errors.New("the HDRezka subtitle file is over 2 MB")
 )
 
 // ParseError means a page or response no longer has the shape the client

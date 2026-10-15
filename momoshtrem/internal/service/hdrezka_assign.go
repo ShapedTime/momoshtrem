@@ -10,12 +10,13 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 )
 
 // Assigning HDRezka streams (PLAN §6 "HDRezka (#63)"): synchronous, with no
 // job. Everything that needs no network is checked first; then each
-// stream is resolved and measured, and the items that worked are written
-// at once and the tree rebuilt once.
+// stream is resolved and measured, the items that worked are written at
+// once, their subtitles recorded and the tree rebuilt once.
 
 // HDRezkaAssign is POST /movies/{id}/assign-hdrezka.
 type HDRezkaAssign struct {
@@ -80,7 +81,8 @@ func (r HDRezkaAssign) validate() (string, error) {
 
 // AssignMovie makes the movie play from an HDRezka stream: the quality
 // asked for, else the best one below it that plays without Premium. The
-// file's size is measured now; then one write and one tree rebuild.
+// file's size is measured now; then one write, the stream's subtitles and
+// one tree rebuild (see finishAssign).
 func (s *HDRezkaService) AssignMovie(ctx context.Context, movieID int64, req HDRezkaAssign) (*HDRezkaAssigned, error) {
 	path, err := req.validate()
 	if err != nil {
@@ -97,19 +99,22 @@ func (s *HDRezkaService) AssignMovie(ctx context.Context, movieID int64, req HDR
 		return nil, err
 	}
 	key := streamKeyOf(t, tr, 0, 0)
-	q, size, err := s.measure(bctx, key, req.Quality)
+	m, err := s.measure(bctx, key, req.Quality)
 	if err != nil {
 		return nil, siteFailure(err)
 	}
-	ref := streamRef(t, tr, key, q)
+	ref := streamRef(t, tr, key, m.quality)
 	if err := s.write(ctx, library.AssignmentWrite{ItemType: library.ItemTypeMovie, MovieID: movieID,
-		Rows: []library.TorrentAssignment{{ItemID: movieID, Stream: &ref, FileSize: size, Resolution: resolutionLabel(q)}},
+		Rows: []library.TorrentAssignment{{ItemID: movieID, Stream: &ref, FileSize: m.size, Resolution: resolutionLabel(m.quality)}},
 	}); err != nil {
 		return nil, err
 	}
+	s.finishAssign(ctx, bctx, []streamSubtitles{
+		{item: subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movieID}, ref: ref, tracks: m.subtitles},
+	})
 	s.log.Info("HDRezka stream assigned", "movie_id", movieID, "post_id", t.PostID, "translator_id", tr.ID,
-		"quality", q.Label, "asked", req.Quality, "size", size)
-	return &HDRezkaAssigned{Quality: q.Label, SizeBytes: size}, nil
+		"quality", m.quality.Label, "asked", req.Quality, "size", m.size, "subtitles", len(m.subtitles))
+	return &HDRezkaAssigned{Quality: m.quality.Label, SizeBytes: m.size}, nil
 }
 
 // AssignShow makes HDRezka episodes the show's episodes' files. Everything
@@ -117,8 +122,9 @@ func (s *HDRezkaService) AssignMovie(ctx context.Context, movieID int64, req HDR
 // each episode is the show's, then with one request that HDRezka has each
 // season and episode in the translation. Then each item is resolved and
 // measured, four at a time within 25 s; those that worked are written at
-// once and the tree rebuilt once, those that didn't are listed in Failed.
-// When nothing worked, the first failure is the error.
+// once, their subtitles recorded and the tree rebuilt once (see
+// finishAssign), those that didn't are listed in Failed. When nothing
+// worked, the first failure is the error.
 func (s *HDRezkaService) AssignShow(ctx context.Context, showID int64, req HDRezkaShowAssign) (*HDRezkaShowResult, error) {
 	path, err := req.validate()
 	if err != nil {
@@ -183,10 +189,9 @@ func (s *HDRezkaService) AssignShow(ctx context.Context, showID int64, req HDRez
 	}
 
 	type result struct {
-		key     hdrezka.StreamKey
-		quality hdrezka.Quality
-		size    int64
-		err     error
+		key hdrezka.StreamKey
+		measured
+		err error
 	}
 	results := make([]result, len(req.Items))
 	var g errgroup.Group
@@ -194,8 +199,8 @@ func (s *HDRezkaService) AssignShow(ctx context.Context, showID int64, req HDRez
 	for i, it := range req.Items {
 		g.Go(func() error {
 			key := streamKeyOf(t, tr, it.Season, it.Episode)
-			q, size, err := s.measure(bctx, key, req.Quality)
-			results[i] = result{key: key, quality: q, size: size, err: err}
+			m, err := s.measure(bctx, key, req.Quality)
+			results[i] = result{key: key, measured: m, err: err}
 			return nil
 		})
 	}
@@ -203,6 +208,7 @@ func (s *HDRezkaService) AssignShow(ctx context.Context, showID int64, req HDRez
 
 	out := &HDRezkaShowResult{Assigned: []HDRezkaAssigned{}, Failed: []HDRezkaFailed{}}
 	var rows []library.TorrentAssignment
+	var subs []streamSubtitles
 	var first *HDRezkaError
 	for i, r := range results {
 		id := req.Items[i].EpisodeID
@@ -218,6 +224,7 @@ func (s *HDRezkaService) AssignShow(ctx context.Context, showID int64, req HDRez
 		}
 		ref := streamRef(t, tr, r.key, r.quality)
 		rows = append(rows, library.TorrentAssignment{ItemID: id, Stream: &ref, FileSize: r.size, Resolution: resolutionLabel(r.quality)})
+		subs = append(subs, streamSubtitles{item: subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: id}, ref: ref, tracks: r.subtitles})
 		out.Assigned = append(out.Assigned, HDRezkaAssigned{EpisodeID: id, Quality: r.quality.Label, SizeBytes: r.size})
 	}
 	if len(rows) == 0 {
@@ -229,6 +236,7 @@ func (s *HDRezkaService) AssignShow(ctx context.Context, showID int64, req HDRez
 	if err := s.write(ctx, library.AssignmentWrite{ItemType: library.ItemTypeEpisode, ShowID: showID, Rows: rows}); err != nil {
 		return nil, err
 	}
+	s.finishAssign(ctx, bctx, subs)
 	s.log.Info("HDRezka streams assigned", "show_id", showID, "post_id", t.PostID, "translator_id", tr.ID,
 		"assigned", len(out.Assigned), "failed", len(out.Failed))
 	return out, nil
@@ -257,18 +265,26 @@ func (s *HDRezkaService) titleAndTranslator(ctx context.Context, path string, tr
 	return t, tr, nil
 }
 
+// measured is a resolved stream: the quality picked, its file's size and
+// the stream's subtitle tracks.
+type measured struct {
+	quality   hdrezka.Quality
+	size      int64
+	subtitles []hdrezka.Subtitle
+}
+
 // measure resolves the stream, picks the quality (the label asked for,
 // else the best one below it that plays without Premium) and measures its
 // file. A link the CDN refuses is resolved again once.
-func (s *HDRezkaService) measure(ctx context.Context, key hdrezka.StreamKey, label string) (hdrezka.Quality, int64, error) {
+func (s *HDRezkaService) measure(ctx context.Context, key hdrezka.StreamKey, label string) (measured, error) {
 	for refreshed := false; ; refreshed = true {
 		stream, err := s.resolver.Resolve(ctx, key)
 		if err != nil {
-			return hdrezka.Quality{}, 0, err
+			return measured{}, err
 		}
 		q, err := pickQuality(stream, label)
 		if err != nil {
-			return q, 0, err
+			return measured{quality: q}, err
 		}
 		size, err := s.site.ContentLength(ctx, q.MP4)
 		if errors.Is(err, hdrezka.ErrLinkExpired) && !refreshed {
@@ -278,7 +294,7 @@ func (s *HDRezkaService) measure(ctx context.Context, key hdrezka.StreamKey, lab
 		if err == nil && size <= 0 {
 			err = errors.New("the HDRezka CDN didn't say the file's size")
 		}
-		return q, size, err
+		return measured{quality: q, size: size, subtitles: stream.Subtitles}, err
 	}
 }
 
@@ -317,15 +333,14 @@ func pickQuality(stream *hdrezka.Stream, label string) (hdrezka.Quality, error) 
 	return best, hdrezka.ErrNoQuality
 }
 
-// write stores the streams and rebuilds the tree once. It runs even when
-// the client has gone, since the streams are resolved.
+// write stores the streams. It runs even when the client has gone, since
+// the streams are resolved; finishAssign rebuilds the tree.
 func (s *HDRezkaService) write(ctx context.Context, w library.AssignmentWrite) error {
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hdrezkaWriteTimeout)
 	defer cancel()
 	if err := s.assignments.WriteStream(wctx, w); err != nil {
 		return libraryFailure(err)
 	}
-	s.tree.InvalidateTree()
 	return nil
 }
 

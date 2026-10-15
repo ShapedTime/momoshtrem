@@ -14,12 +14,17 @@ import (
 
 // Repo is an in-memory subtitle.SubtitleRepository with the same keys as
 // the Postgres one: one downloaded subtitle per item and language, torrent
-// subtitles per torrent and file.
+// subtitles per torrent and file, one HDRezka subtitle per item and
+// language.
 type Repo struct {
 	mu     sync.Mutex
 	nextID int64
 	rows   []*subtitle.Subtitle
 	Now    func() time.Time
+	// Streams, when set, are the items' active HDRezka files:
+	// UpsertHDRezka fails with ErrStaleStream for another file. Unset, any
+	// file is the item's.
+	Streams map[subtitle.Item]string
 }
 
 var _ subtitle.SubtitleRepository = (*Repo)(nil)
@@ -96,6 +101,40 @@ func (r *Repo) UpsertTorrent(_ context.Context, sub *subtitle.Subtitle) error {
 	return nil
 }
 
+func (r *Repo) UpsertHDRezka(_ context.Context, item subtitle.Item, streamFile string, subs []*subtitle.Subtitle, place func() error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Streams != nil && r.Streams[item] != streamFile {
+		return subtitle.ErrStaleStream
+	}
+	if place != nil {
+		if err := place(); err != nil {
+			return err
+		}
+	}
+	for _, sub := range subs {
+		sub.Source = subtitle.SourceHDRezka
+		sub.InfoHash = ""
+		sub.CreatedAt = r.Now()
+		replaced := false
+		for _, row := range r.rows {
+			if row.Source == subtitle.SourceHDRezka && row.Item() == sub.Item() && row.LanguageCode == sub.LanguageCode {
+				sub.ID = row.ID
+				*row = *sub
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.nextID++
+			sub.ID = r.nextID
+			stored := *sub
+			r.rows = append(r.rows, &stored)
+		}
+	}
+	return nil
+}
+
 func (r *Repo) GetByID(_ context.Context, id int64) (*subtitle.Subtitle, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -140,7 +179,8 @@ func (r *Repo) GetByItems(_ context.Context, items []subtitle.Item) (map[subtitl
 	return out, nil
 }
 
-// torrentLast orders downloaded subtitles before torrent ones.
+// torrentLast orders downloaded subtitles before those that came with the
+// file (torrent or HDRezka).
 func torrentLast(s *subtitle.Subtitle) int {
 	if s.Source == subtitle.SourceOpenSubtitles {
 		return 0
