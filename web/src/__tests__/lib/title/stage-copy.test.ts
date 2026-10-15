@@ -92,9 +92,14 @@ describe('primaryActionFor: a second source (HDRezka, #63)', () => {
     });
   });
 
-  it('leaves it off other stages, and off shows until their flow lands', () => {
+  it('offers it to shows too, and leaves it off other stages', () => {
     expect(primaryActionFor(movie(693134), { hdrezka: true })).toMatchObject({ secondary: null, dock: { icon: null } });
-    expect(primaryActionFor(show(209867), { hdrezka: true })).toMatchObject({ stage: 'needs_torrent', secondary: null, dock: { icon: null } });
+    expect(primaryActionFor(show(209867), { hdrezka: true })).toMatchObject({
+      stage: 'needs_torrent',
+      primary: { label: 'Find episodes 29–38' },
+      secondary: { label: 'Stream from HDRezka', intent: 'hdrezka' },
+      dock: { icon: { intent: 'hdrezka' } },
+    });
   });
 
   it('describes a stream once ready: provider, voice-over, quality and size', () => {

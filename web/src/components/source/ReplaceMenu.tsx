@@ -8,6 +8,8 @@ import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 interface ReplaceMenuProps {
   onFindTorrent: () => void;
   onStreamFromHDRezka: () => void;
+  /** Inside another sheet (the episode sheet): the phone menu stacks on it. */
+  nested?: boolean;
 }
 
 /**
@@ -15,7 +17,7 @@ interface ReplaceMenuProps {
  * Find a torrent or Stream from HDRezka. A popover on desktop, a sheet on
  * phone. Each runs after the menu has closed, so what it opens takes focus.
  */
-export function ReplaceMenu({ onFindTorrent, onStreamFromHDRezka }: ReplaceMenuProps) {
+export function ReplaceMenu({ onFindTorrent, onStreamFromHDRezka, nested = false }: ReplaceMenuProps) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const [sheetOpen, setSheetOpen] = useState(false);
   const trigger = (
@@ -52,7 +54,7 @@ export function ReplaceMenu({ onFindTorrent, onStreamFromHDRezka }: ReplaceMenuP
       <Button size="sm" aria-haspopup="dialog" onClick={() => setSheetOpen(true)}>
         {trigger}
       </Button>
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="Replace with" size="narrow">
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="Replace with" size="narrow" nested={nested}>
         <div className="flex flex-col gap-1">
           <button type="button" className="list-row rounded-md text-left" onClick={() => run(onFindTorrent)}>
             <Search size={20} className="text-fg-3" aria-hidden="true" />

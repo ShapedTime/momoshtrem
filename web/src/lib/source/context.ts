@@ -43,6 +43,12 @@ export function sourceParams(context: SourceContext): Record<string, string> {
   return params;
 }
 
+/** `?sheet=…` params for a show: the whole show, a season (`season`), or one episode (`season` and `episode`). */
+export function showSourceParams(tmdbId: number, scope: { season?: number; episode?: number }): Record<string, string> {
+  const { season = null, episode = null } = scope;
+  return sourceParams({ kind: 'show', tmdbId, season, episode: season === null ? null : episode, key: '' });
+}
+
 /** The legacy search's scope for this context (the Torrents tab until #6). */
 export function legacyScope(context: SourceContext): { season?: number; episode?: number } {
   if (context.kind === 'movie' || context.season === null) return {};

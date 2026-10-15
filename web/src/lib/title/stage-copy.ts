@@ -147,8 +147,7 @@ export function primaryActionFor(title: Title, options: StageOptions = {}): Stag
     }
     case 'needs_torrent': {
       const copy = needsTorrentCopy(title);
-      // Movies for now: a show's HDRezka flow (seasons, episodes) comes with #67's second part
-      const hdrezka = options.hdrezka && title.media_type === 'movie' ? HDREZKA : null;
+      const hdrezka = options.hdrezka ? HDREZKA : null;
       return { ...base, ...copy, secondary: hdrezka, dock: { button: copy.primary, copyPath: false, icon: hdrezka } };
     }
     case 'downloading':
