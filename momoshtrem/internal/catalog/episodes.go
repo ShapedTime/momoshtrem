@@ -12,6 +12,9 @@ type EpisodeFact struct {
 	AirDate     string // YYYY-MM-DD; "" when unknown
 	HasFile     bool
 	Downloading bool // HasFile and its file is being fetched
+	// UnderReview: a file of an open mapping job targets it (PLAN §6
+	// "Review rules"). It's needs_review only without a file of its own.
+	UnderReview bool
 }
 
 // SeasonFacts is one season of a library show and its episodes.
@@ -50,9 +53,11 @@ func SummarizeShow(seasons []SeasonFacts, today string) ShowSummary {
 			EpisodesTotal: len(season.Episodes),
 		}
 		for _, ep := range season.Episodes {
-			switch EpisodeStateOf(ep.HasFile, ep.Downloading, ep.AirDate, today) {
+			switch EpisodeStateOf(ep.HasFile, ep.Downloading, ep.UnderReview, ep.AirDate, today) {
 			case EpisodeReady, EpisodeDownloading, EpisodeWatched:
 				s.Ready++
+			case EpisodeNeedsReview:
+				s.NeedsReview++
 			case EpisodeMissing:
 				s.Missing++
 			case EpisodeUpcoming:
@@ -85,7 +90,8 @@ func SummarizeShow(seasons []SeasonFacts, today string) ShowSummary {
 
 // FirstMissingRun finds the frontier: aired regular episodes after the last
 // one with a file (all of them when none has a file). Specials never count,
-// nor do gaps before the last episode with a file. It returns whether the
+// nor do gaps before the last episode with a file. It's about files: an
+// episode under review still belongs to it. It returns whether the
 // frontier is non-empty and its first run of consecutive aired episodes
 // within one season.
 func FirstMissingRun(seasons []SeasonFacts, today string) (frontier bool, run *MissingRun) {

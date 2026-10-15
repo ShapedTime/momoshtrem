@@ -21,7 +21,7 @@ const (
 const (
 	StatusReady       = "ready"        // availability_stage ready
 	StatusIncomplete  = "incomplete"   // anything else: needs a torrent or downloading
-	StatusNeedsReview = "needs_review" // B2: empty until then
+	StatusNeedsReview = "needs_review" // files under mapping review (needs_review > 0)
 	StatusWatching    = "watching"     // B5: empty until then
 )
 
@@ -36,9 +36,9 @@ type LibraryParams struct {
 }
 
 // Library lists the library, a page at a time, each item with its
-// availability. One query (two when the page is past the end); none for the
-// filters that have no data yet (watching, needs_review). Unknown values
-// return ErrInvalidQuery.
+// availability and mapping review. One query (two when the page is past the
+// end); none for watching, which has no data yet. Unknown values return
+// ErrInvalidQuery.
 func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, error) {
 	if p.Page == 0 {
 		p.Page = 1
@@ -67,9 +67,9 @@ func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, e
 
 	page := &LibraryPage{Items: []LibraryItem{}, Page: p.Page, PageSize: p.PageSize}
 	switch p.Status {
-	case "", StatusReady, StatusIncomplete:
-	case StatusNeedsReview, StatusWatching:
-		return page, nil // no review jobs (B2) or watch history (B5) yet
+	case "", StatusReady, StatusIncomplete, StatusNeedsReview:
+	case StatusWatching:
+		return page, nil // no watch history until B5
 	default:
 		return nil, fmt.Errorf("%w: status must be ready, incomplete, needs_review or watching", ErrInvalidQuery)
 	}
@@ -100,6 +100,7 @@ func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, e
 			AvailabilityStage: Stage(row.Stage),
 			EpisodesTotal:     copyInt(row.EpisodesTotal),
 			EpisodesReady:     copyInt(row.EpisodesReady),
+			NeedsReview:       row.NeedsReview,
 			SizeBytes:         row.SizeBytes,
 			AddedAt:           row.CreatedAt,
 		}

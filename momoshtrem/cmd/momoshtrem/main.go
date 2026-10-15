@@ -384,6 +384,7 @@ func main() {
 		Resolver:    identify.NoopResolver{},
 	})
 	apiOpts.Assignments = jobService
+	apiOpts.Review = jobService
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)

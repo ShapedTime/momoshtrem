@@ -654,12 +654,17 @@ type AssignmentWrite struct {
 	// Rows: ItemID, FilePath, FileSize, Resolution, Source, Confidence and
 	// MatchSource. One per item.
 	Rows []TorrentAssignment
+	// Partial writes Rows' items only: the torrent's other rows on the
+	// title stay as they are (a manual override of one episode). Apply's
+	// writes aren't partial.
+	Partial bool
 }
 
 // WriteAssignments applies w: the torrent's rows the job no longer maps
-// are deactivated, each item's other active rows too, and every row is
-// upserted active (a file the item had before is reactivated). It locks
-// the title first, so writes to one title never interleave. Five queries.
+// are deactivated (unless w is partial), each item's other active rows
+// too, and every row is upserted active (a file the item had before is
+// reactivated). It locks the title first, so writes to one title never
+// interleave. Five queries.
 func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 	return writeAssignments(t.ctx, t.tx, w)
 }
@@ -700,8 +705,8 @@ func lockTitle(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
 	return nil
 }
 
-// writeAssignments is the assignment writer: Apply (and, in slice 4, the
-// manual override) write through it.
+// writeAssignments is the assignment writer: Apply and the manual
+// override (AssignmentRepository.WriteOverride) write through it.
 func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
 	if err := lockTitle(ctx, tx, w); err != nil {
 		return err
@@ -726,8 +731,9 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 	}
 
 	var err error
-	switch w.ItemType {
-	case ItemTypeEpisode:
+	switch {
+	case w.Partial:
+	case w.ItemType == ItemTypeEpisode:
 		_, err = tx.ExecContext(ctx, `
 			UPDATE torrent_assignments t SET is_active = FALSE
 			FROM episodes e JOIN seasons sn ON sn.id = e.season_id
@@ -736,7 +742,7 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 			  AND NOT EXISTS (SELECT 1 FROM unnest($3::bigint[], $4::text[]) AS m(item_id, file_path)
 			                  WHERE m.item_id = t.item_id AND m.file_path = t.file_path)
 		`, w.ShowID, w.InfoHash, items, paths)
-	case ItemTypeMovie:
+	case w.ItemType == ItemTypeMovie:
 		_, err = tx.ExecContext(ctx, `
 			UPDATE torrent_assignments t SET is_active = FALSE
 			WHERE t.item_type = 'movie' AND t.item_id = $1 AND t.info_hash = $2 AND t.is_active

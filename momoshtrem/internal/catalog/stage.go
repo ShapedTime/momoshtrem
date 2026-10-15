@@ -44,15 +44,18 @@ func Aired(airDate, today string) bool {
 	return airDate != "" && airDate <= today
 }
 
-// EpisodeStateOf is an episode's state: ready or downloading with a file,
-// missing when it aired without one, upcoming when it hasn't aired or has no
-// date. watched (B5) and needs_review (B2) come later.
-func EpisodeStateOf(hasFile, downloading bool, airDate, today string) EpisodeState {
+// EpisodeStateOf is an episode's state: ready or downloading with a file;
+// without one, needs_review while a file under review targets it, missing
+// when it aired, upcoming when it hasn't aired or has no date. A file wins
+// over review. watched (B5) comes later.
+func EpisodeStateOf(hasFile, downloading, underReview bool, airDate, today string) EpisodeState {
 	switch {
 	case hasFile && downloading:
 		return EpisodeDownloading
 	case hasFile:
 		return EpisodeReady
+	case underReview:
+		return EpisodeNeedsReview
 	case Aired(airDate, today):
 		return EpisodeMissing
 	}

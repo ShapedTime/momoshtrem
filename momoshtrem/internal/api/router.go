@@ -59,6 +59,10 @@ type Options struct {
 	// Assignments runs the assignment jobs: assigning torrents, review and
 	// apply. Nil makes those routes return 503.
 	Assignments AssignmentJobs
+	// Review serves the mapping review: proposal edits, the episode
+	// picker, manual overrides and torrent files. Nil makes those routes
+	// return 503.
+	Review AssignmentReview
 }
 
 // NewServer creates a new API server
@@ -188,6 +192,7 @@ func (s *Server) setupRoutes() {
 	s.registerTitleRoutes(api)      // Title pages, seasons, show settings and episode groups
 	s.registerLibraryRoutes(api)    // GET /library
 	s.registerAssignmentRoutes(api) // Assign torrents (jobs), review and apply
+	s.registerReviewRoutes(api)     // Proposal edits, episode picker, manual overrides, torrent files
 }
 
 // Handler returns the HTTP handler

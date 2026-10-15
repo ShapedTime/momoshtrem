@@ -137,7 +137,7 @@ func (s *JobService) planApply(t *library.JobTx) (*applyResult, error) {
 
 		var ids []int64
 		for _, p := range t.Proposals {
-			if accepted(p) && (p.Kind == library.KindEpisode || p.Kind == library.KindSubtitle) {
+			if accepted(p) && p.Kind != library.KindMovie {
 				ids = append(ids, p.EpisodeIDs...)
 			}
 		}
@@ -149,7 +149,9 @@ func (s *JobService) planApply(t *library.JobTx) (*applyResult, error) {
 		claimed := map[int64]bool{}
 		first := map[int64]int64{} // proposal → the first episode it was written to
 		for _, p := range t.Proposals {
-			if !accepted(p) || p.Kind != library.KindEpisode {
+			// An extra the user included and gave an episode (PATCH) is
+			// that episode's file like any other.
+			if !accepted(p) || (p.Kind != library.KindEpisode && p.Kind != library.KindExtra) {
 				continue
 			}
 			quality := identify.ParseQuality(p.FilePath)

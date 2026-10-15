@@ -233,17 +233,17 @@ const (
 	LibrarySortSize        = "size"
 )
 
-// Library status filters the database can answer (watching and needs_review
-// need B5 and B2).
+// Library status filters the database can answer (watching needs B5).
 const (
-	LibraryStatusReady      = "ready"
-	LibraryStatusIncomplete = "incomplete"
+	LibraryStatusReady       = "ready"
+	LibraryStatusIncomplete  = "incomplete"
+	LibraryStatusNeedsReview = "needs_review"
 )
 
 // LibraryQuery selects library items.
 type LibraryQuery struct {
 	MediaType string // "", "movie" or "tv"
-	Status    string // "", LibraryStatusReady or LibraryStatusIncomplete
+	Status    string // "" or a LibraryStatus*
 	Sort      string // A LibrarySort*; "" is added
 	Search    string // Title substring, case-insensitive
 	Limit     int    // 0: no limit
@@ -281,6 +281,9 @@ type LibraryItem struct {
 	EpisodesTotal *int
 	EpisodesReady *int
 	SizeBytes     int64
+	// NeedsReview counts the files of the title's open mapping jobs that
+	// need a look (PLAN §6 "Review rules").
+	NeedsReview int
 	// Stage is the availability stage: needs_torrent, downloading or ready.
 	Stage string
 }
@@ -297,19 +300,29 @@ type LibraryItem struct {
 //     count towards the frontier, and are left out entirely while the show's
 //     include_specials is off.
 //
+// needs_review counts the title's files under review (reviewCTEs), like
+// ReviewState.
+//
 // Episode positions are encoded as season·10⁶ + episode so MAX can compare
 // them.
 //
 // Parameters: $1/$2 downloading hashes/paths, $3 restrict to IDs, $4 movie
 // IDs, $5 show IDs, $6 today, $7 media type ("" for both).
-const libraryItemsSQL = `
+var libraryItemsSQL = `
 WITH downloading AS (
 	SELECT h AS info_hash, p AS file_path FROM unnest($1::text[], $2::text[]) AS d(h, p)
+),
+` + reviewCTEs("TRUE") + `,
+review_counts AS (
+	SELECT rj.show_id, rj.movie_id, count(*) AS needs_review
+	FROM review_files rf JOIN review_jobs rj ON rj.id = rf.job_id
+	GROUP BY rj.show_id, rj.movie_id
 ),
 movie_items AS (
 	SELECT 'movie'::text AS media_type, m.id, m.tmdb_id, m.title, m.year, COALESCE(m.poster_path, '') AS poster_path,
 	       m.created_at, NULL::bigint AS episodes_total, NULL::bigint AS episodes_ready,
 	       COALESCE(ta.file_size, 0)::bigint AS size_bytes,
+	       COALESCE((SELECT rc.needs_review FROM review_counts rc WHERE rc.movie_id = m.id), 0)::bigint AS needs_review,
 	       CASE WHEN ta.id IS NULL THEN 'needs_torrent'
 	            WHEN (ta.info_hash, ta.file_path) IN (SELECT info_hash, file_path FROM downloading) THEN 'downloading'
 	            ELSE 'ready' END AS stage
@@ -358,6 +371,7 @@ show_sizes AS (
 show_items AS (
 	SELECT 'tv'::text, s.id, s.tmdb_id, s.title, s.year, COALESCE(s.poster_path, ''), s.created_at,
 	       COALESCE(st.episodes_total, 0), COALESCE(st.episodes_ready, 0), COALESCE(sz.size_bytes, 0),
+	       COALESCE((SELECT rc.needs_review FROM review_counts rc WHERE rc.show_id = s.id), 0)::bigint,
 	       CASE WHEN COALESCE(st.assigned, 0) = 0 OR st.last_aired > COALESCE(st.last_assigned, -1) THEN 'needs_torrent'
 	            WHEN st.downloading THEN 'downloading'
 	            ELSE 'ready' END
@@ -400,6 +414,8 @@ func (r *CatalogRepository) LibraryItems(ctx context.Context, q LibraryQuery) ([
 		statusFilter = ` AND stage = 'ready'`
 	case LibraryStatusIncomplete:
 		statusFilter = ` AND stage <> 'ready'`
+	case LibraryStatusNeedsReview:
+		statusFilter = ` AND needs_review > 0`
 	default:
 		return nil, 0, fmt.Errorf("unknown library status %q", q.Status)
 	}
@@ -419,7 +435,7 @@ func (r *CatalogRepository) LibraryItems(ctx context.Context, q LibraryQuery) ([
 	rows, err := r.db.QueryContext(ctx, `
 		WITH items AS (`+libraryItemsSQL+`)
 		SELECT media_type, id, tmdb_id, title, year, poster_path, created_at,
-		       episodes_total, episodes_ready, size_bytes, stage, COUNT(*) OVER ()
+		       episodes_total, episodes_ready, size_bytes, needs_review, stage, COUNT(*) OVER ()
 		FROM items
 		WHERE `+where+`
 		ORDER BY `+order+`
@@ -436,7 +452,7 @@ func (r *CatalogRepository) LibraryItems(ctx context.Context, q LibraryQuery) ([
 		var item LibraryItem
 		var episodesTotal, episodesReady sql.NullInt64
 		if err := rows.Scan(&item.MediaType, &item.ID, &item.TMDBID, &item.Title, &item.Year, &item.PosterPath,
-			&item.CreatedAt, &episodesTotal, &episodesReady, &item.SizeBytes, &item.Stage, &total); err != nil {
+			&item.CreatedAt, &episodesTotal, &episodesReady, &item.SizeBytes, &item.NeedsReview, &item.Stage, &total); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan library item: %w", err)
 		}
 		if episodesTotal.Valid {

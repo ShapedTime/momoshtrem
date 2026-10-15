@@ -432,8 +432,8 @@ func TestCallCounts_DontGrowWithEpisodes(t *testing.T) {
 		}
 	}
 	small, large := measure(10, showTitle), measure(1000, showTitle)
-	if small != large || small.store != 3 || small.tmdb != 1 {
-		t.Errorf("ShowTitle calls: 10 episodes %+v, 1,000 episodes %+v; want {3 1} for both", small, large)
+	if small != large || small.store != 4 || small.tmdb != 1 {
+		t.Errorf("ShowTitle calls: 10 episodes %+v, 1,000 episodes %+v; want {4 1} for both", small, large)
 	}
 
 	season := func(f *fixture) {
@@ -444,8 +444,8 @@ func TestCallCounts_DontGrowWithEpisodes(t *testing.T) {
 		}
 	}
 	small, large = measure(10, season), measure(1000, season)
-	if small.store != 1 || large.store != 1 || small.tmdb != 0 || large.tmdb != 2 {
-		t.Errorf("Season calls: 10 episodes %+v, 1,000 episodes %+v; want one store call, and two TMDB calls for arcs only past 20 episodes", small, large)
+	if small.store != 2 || large.store != 2 || small.tmdb != 0 || large.tmdb != 2 {
+		t.Errorf("Season calls: 10 episodes %+v, 1,000 episodes %+v; want two store calls (the season, the review), and two TMDB calls for arcs only past 20 episodes", small, large)
 	}
 	if long := measure(25, season); long != large {
 		t.Errorf("Season calls: 25 episodes %+v, 1,000 episodes %+v", long, large)
@@ -489,12 +489,17 @@ func TestLibrary(t *testing.T) {
 		t.Errorf("huge page = %+v (offset %d), %v; want it capped at %d", page, f.store.lastQuery.Offset, err, MaxPage)
 	}
 
-	for _, status := range []string{StatusWatching, StatusNeedsReview} {
-		before := f.store.total()
-		page, err := f.svc.Library(context.Background(), LibraryParams{Status: status})
-		if err != nil || page.Total != 0 || len(page.Items) != 0 || page.Items == nil || f.store.total() != before {
-			t.Errorf("%s = %+v, %v (store calls %d)", status, page, err, f.store.total()-before)
-		}
+	before := f.store.total()
+	page, err = f.svc.Library(context.Background(), LibraryParams{Status: StatusWatching})
+	if err != nil || page.Total != 0 || len(page.Items) != 0 || page.Items == nil || f.store.total() != before {
+		t.Errorf("watching = %+v, %v (store calls %d)", page, err, f.store.total()-before)
+	}
+
+	// needs_review is the database's filter; each item carries its count.
+	f.store.library[0].NeedsReview = 3
+	page, err = f.svc.Library(context.Background(), LibraryParams{Status: StatusNeedsReview})
+	if err != nil || f.store.lastQuery.Status != StatusNeedsReview || page.Items[0].NeedsReview != 3 || page.Items[1].NeedsReview != 0 {
+		t.Errorf("needs_review = %+v (query %+v), %v", page, f.store.lastQuery, err)
 	}
 
 	for _, p := range []LibraryParams{{MediaType: "music"}, {Status: "done"}, {Sort: "rating"}, {Page: -1}, {PageSize: -5}} {

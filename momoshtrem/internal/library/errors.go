@@ -6,6 +6,7 @@ import "errors"
 var (
 	ErrShowNotFound              = errors.New("show not found")
 	ErrMovieNotFound             = errors.New("movie not found")
+	ErrEpisodeNotFound           = errors.New("episode not found")
 	ErrInvalidMagnet             = errors.New("invalid magnet URI")
 	ErrTorrentServiceUnavailable = errors.New("torrent service not available")
 	ErrNoVideoFiles              = errors.New("no video files found in torrent")
