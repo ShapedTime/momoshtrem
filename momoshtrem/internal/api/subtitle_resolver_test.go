@@ -10,9 +10,10 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 )
 
-// An HDRezka stream has no torrent and no release to rank subtitles
-// against (its made-up path would name it "hdrezka"); a torrent's release
-// is its magnet's name.
+// An HDRezka stream's file shows the stream's subtitles and has no
+// release to rank subtitles against (its made-up path would name it
+// "hdrezka"); a torrent's release is its magnet's name, and nothing
+// assigned shows neither kind.
 func TestLibraryItemResolver_Streams(t *testing.T) {
 	url := os.Getenv("MOMOSHTREM_TEST_DATABASE_URL")
 	if url == "" {
@@ -54,11 +55,16 @@ func TestLibraryItemResolver_Streams(t *testing.T) {
 
 	r := &libraryItemResolver{movies: movies, shows: library.NewShowRepository(db), assignments: assignments}
 	got, err := r.ResolveSubtitleItem(ctx, subtitle.Item{Type: subtitle.ItemTypeMovie, ID: fromTorrent.ID})
-	if err != nil || got.InfoHash != hash || got.Release != "Film.2014.1080p.WEB-GRP" {
+	if err != nil || got.File != subtitle.TorrentFile(hash) || got.Release != "Film.2014.1080p.WEB-GRP" {
 		t.Errorf("torrent = %+v, %v", got, err)
 	}
 	got, err = r.ResolveSubtitleItem(ctx, subtitle.Item{Type: subtitle.ItemTypeMovie, ID: fromStream.ID})
-	if err != nil || got == nil || got.InfoHash != "" || got.Release != "" {
+	if err != nil || got == nil || got.File != subtitle.HDRezkaFile() || got.Release != "" {
 		t.Errorf("stream = %+v, %v", got, err)
+	}
+	nothing := movie(2, "Resolver Nothing")
+	got, err = r.ResolveSubtitleItem(ctx, subtitle.Item{Type: subtitle.ItemTypeMovie, ID: nothing.ID})
+	if err != nil || got == nil || got.File != (subtitle.CurrentFile{}) || got.Release != "" {
+		t.Errorf("nothing assigned = %+v, %v", got, err)
 	}
 }

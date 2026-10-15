@@ -798,10 +798,23 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 		return nil
 	}
 
+	// The items' other rows go first: an HDRezka stream whose subtitles are
+	// being stored is held (subtitle.Repository.UpsertHDRezka), so this
+	// waits for them, and the delete below, a new statement, sees them.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE torrent_assignments t SET is_active = FALSE
+		FROM unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
+		WHERE t.item_type = $3 AND t.item_id = m.item_id AND t.is_active
+		  AND NOT (t.kind = $5 AND t.info_hash IS NOT DISTINCT FROM $4::text AND t.file_path = m.file_path)
+	`, items, paths, w.ItemType, hash, w.Kind); err != nil {
+		return fmt.Errorf("failed to deactivate the items' other rows: %w", err)
+	}
+
 	// Torrent and HDRezka subtitles belong to the file they came with: an
 	// item moving to another file (even of the same torrent, or another
 	// translation) drops them. Downloaded subtitles stay. A row is the
-	// item's file when kind, hash (NULL for HDRezka) and path all match.
+	// item's file when kind, hash (NULL for HDRezka) and path all match;
+	// only the new file's row can still be active, when it already was.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM subtitles s
 		USING unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
@@ -812,15 +825,6 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 		                    AND t.file_path = m.file_path)
 	`, items, paths, w.ItemType, hash, w.Kind); err != nil {
 		return fmt.Errorf("failed to drop the old files' subtitles: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE torrent_assignments t SET is_active = FALSE
-		FROM unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
-		WHERE t.item_type = $3 AND t.item_id = m.item_id AND t.is_active
-		  AND NOT (t.kind = $5 AND t.info_hash IS NOT DISTINCT FROM $4::text AND t.file_path = m.file_path)
-	`, items, paths, w.ItemType, hash, w.Kind); err != nil {
-		return fmt.Errorf("failed to deactivate the items' other rows: %w", err)
 	}
 
 	if w.Kind == AssignmentKindHDRezka {

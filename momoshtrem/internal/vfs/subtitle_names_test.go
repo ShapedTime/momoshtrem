@@ -3,8 +3,10 @@ package vfs
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 
+	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 )
 
@@ -91,7 +93,7 @@ func TestAddSubtitleFiles_OnlyTheAssignedTorrents(t *testing.T) {
 	tree, moviesDir, _ := newEmptyTree()
 	dir := NewVirtualDir("Dune (2024)")
 	moviesDir.children[dir.name] = dir
-	d := subtitleDir{dir: dir, dirPath: MoviesPath + "/Dune (2024)", base: "Dune (2024)", item: movie, infoHash: hashA}
+	d := subtitleDir{dir: dir, dirPath: MoviesPath + "/Dune (2024)", base: "Dune (2024)", item: movie, file: subtitle.TorrentFile(hashA)}
 
 	subs := fs.loadSubtitles([]subtitleDir{d})
 	addSubtitleFiles(tree, d, subs[movie])
@@ -111,9 +113,74 @@ func TestAddSubtitleFiles_OnlyTheAssignedTorrents(t *testing.T) {
 		t.Errorf("files = %d, want 2 (the old torrent's ru subtitle is left out)", len(dir.children))
 	}
 
+	t.Run("an HDRezka stream replaced the torrent", func(t *testing.T) {
+		tree, moviesDir, _ := newEmptyTree()
+		dir := NewVirtualDir("Dune (2024)")
+		moviesDir.children[dir.name] = dir
+		d := d
+		d.dir, d.file = dir, currentFile(&library.TorrentAssignment{Kind: library.AssignmentKindHDRezka})
+		addSubtitleFiles(tree, d, subs[movie])
+		if len(dir.children) != 1 || dir.children["Dune (2024).en.srt"] == nil {
+			t.Errorf("files = %v, want the downloaded one only", dir.children)
+		}
+	})
+
 	t.Run("no repository", func(t *testing.T) {
 		if got := (&LibraryFS{}).loadSubtitles([]subtitleDir{d}); got != nil {
 			t.Errorf("loadSubtitles = %v, want nil", got)
 		}
 	})
+}
+
+// An HDRezka movie's subtitles sit next to its .mp4 as local files (an
+// earlier torrent's don't), and the v5 cache restores them.
+func TestAddSubtitleFiles_HDRezkaStream(t *testing.T) {
+	ref := library.StreamRef{Provider: "hdrezka", Path: "/films/fiction/2259-interstellar-2014.html", PostID: 2259,
+		TranslatorID: 238, TranslatorName: "Оригинал (+субтитры)", Quality: "1080p"}
+	stream := &library.TorrentAssignment{Kind: library.AssignmentKindHDRezka, Stream: &ref, FilePath: ref.FilePath(), FileSize: 3322740623}
+	movie := subtitle.Item{Type: subtitle.ItemTypeMovie, ID: 7}
+	fs := NewTestFS([]TestMovie{{Title: "Interstellar", Year: 2014, Assignment: stream}}, nil)
+	fs.subtitleRepo = &fakeSubtitles{subs: map[subtitle.Item][]*subtitle.Subtitle{movie: {
+		{ID: 1, LanguageCode: "en", Format: "srt", Source: subtitle.SourceHDRezka, FilePath: "/subs/hdrezka/movie/7/en.srt", FileSize: 10},
+		{ID: 2, LanguageCode: "ru", Format: "srt", Source: subtitle.SourceHDRezka, FilePath: "/subs/hdrezka/movie/7/ru.srt", FileSize: 20},
+		{ID: 3, LanguageCode: "de", Format: "srt", Source: subtitle.SourceTorrent, InfoHash: "aaaa", FilePath: "Old/de.srt", FileSize: 30},
+	}}}
+
+	folder := MovieDir("Interstellar", 2014)
+	d := subtitleDir{dir: fs.tree.pathMap[folder].(*VirtualDir), dirPath: folder, base: "Interstellar (2014)", item: movie, file: currentFile(stream)}
+	addSubtitleFiles(fs.tree, d, fs.loadSubtitles([]subtitleDir{d})[movie])
+
+	list := func(fs *LibraryFS) []string {
+		t.Helper()
+		entries, err := fs.ReadDir(folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for name := range entries {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return names
+	}
+	want := []string{"Interstellar (2014).en.srt", "Interstellar (2014).mp4", "Interstellar (2014).ru.srt"}
+	if got := list(fs); !reflect.DeepEqual(got, want) {
+		t.Fatalf("folder = %v, want %v", got, want)
+	}
+
+	cacheDir := t.TempDir()
+	(&LibraryFS{cacheDir: cacheDir, tree: fs.tree}).saveTreeToCache()
+	loader := &LibraryFS{cacheDir: cacheDir}
+	if err := loader.loadTreeFromCache(); err != nil {
+		t.Fatalf("loadTreeFromCache: %v", err)
+	}
+	if got := list(loader); !reflect.DeepEqual(got, want) {
+		t.Errorf("folder from the cache = %v, want %v", got, want)
+	}
+	for lang, path := range map[string]string{"en": "/subs/hdrezka/movie/7/en.srt", "ru": "/subs/hdrezka/movie/7/ru.srt"} {
+		f, ok := loader.tree.pathMap[folder+"/Interstellar (2014)."+lang+".srt"].(*SubtitleFile)
+		if !ok || f.localPath != path {
+			t.Errorf("%s from the cache = %#v, want a local file at %s", lang, f, path)
+		}
+	}
 }

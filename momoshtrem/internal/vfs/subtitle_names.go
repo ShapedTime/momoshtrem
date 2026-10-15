@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 )
 
@@ -77,7 +78,8 @@ func subtitleLanguage(sub *subtitle.Subtitle) string {
 	return strings.ToLower(sub.LanguageCode)
 }
 
-// sourceRank puts downloaded subtitles before torrent ones.
+// sourceRank puts downloaded subtitles before those that came with the
+// file (torrent or HDRezka).
 func sourceRank(s subtitle.Source) int {
 	if s == subtitle.SourceOpenSubtitles {
 		return 0
@@ -85,13 +87,23 @@ func sourceRank(s subtitle.Source) int {
 	return 1
 }
 
+// currentFile is what a video's assignment means for its subtitles.
+func currentFile(a *library.TorrentAssignment) subtitle.CurrentFile {
+	if a.IsTorrent() {
+		return subtitle.TorrentFile(a.InfoHash)
+	}
+	return subtitle.HDRezkaFile()
+}
+
 // subtitleDir is a video in the tree whose subtitles go next to it.
 type subtitleDir struct {
-	dir      *VirtualDir
-	dirPath  string
-	base     string // The video's file name without its extension
-	item     subtitle.Item
-	infoHash string // The video's torrent: only its own torrent subtitles show
+	dir     *VirtualDir
+	dirPath string
+	base    string // The video's file name without its extension
+	item    subtitle.Item
+	// file is the video's source: only the subtitles that came with it
+	// (its own torrent's, or its HDRezka stream's) show.
+	file subtitle.CurrentFile
 	// more are the other episodes a grouped entry ("S01E01-E02") plays:
 	// their subtitles are named after it too.
 	more []subtitle.Item
@@ -168,13 +180,14 @@ func (fs *LibraryFS) loadSubtitles(dirs []subtitleDir) map[subtitle.Item][]*subt
 // addSubtitleFiles puts the video's current subtitles next to it. The caller
 // owns tree (a tree being built) or holds fs.mu.
 func addSubtitleFiles(tree *DirectoryTree, d subtitleDir, subs []*subtitle.Subtitle) {
-	for _, ns := range subtitleFileNames(d.base, subtitle.Current(subs, d.infoHash)) {
+	for _, ns := range subtitleFileNames(d.base, subtitle.Current(subs, d.file)) {
 		var entry Entry
 		if ns.Sub.Source == subtitle.SourceTorrent {
 			// Streamed from the torrent on open.
 			entry = NewTorrentSubtitleFile(ns.Name, ns.Sub.FilePath, ns.Sub.FileSize, ns.Sub.InfoHash)
 		} else {
-			// Downloaded from OpenSubtitles to local storage.
+			// In local storage: downloaded from OpenSubtitles, or converted
+			// from an HDRezka stream's.
 			entry = NewSubtitleFile(ns.Name, ns.Sub.FilePath, ns.Sub.FileSize)
 		}
 		d.dir.children[ns.Name] = entry
