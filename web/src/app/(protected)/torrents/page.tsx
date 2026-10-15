@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import { MappingJobsBanner } from '@/components/mapping';
 import { useTorrents } from '@/hooks/useTorrents';
 import {
   TorrentManagementCard,
@@ -139,6 +140,11 @@ export default function TorrentsPage() {
           </button>
         </div>
       </header>
+
+      {/* Open mapping jobs: files to check before they reach Infuse (#5) */}
+      <div className="mb-8 empty:hidden">
+        <MappingJobsBanner />
+      </div>
 
       {/* Stats summary */}
       {torrents.length > 0 && (

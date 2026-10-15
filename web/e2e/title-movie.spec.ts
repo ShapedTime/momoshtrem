@@ -13,6 +13,10 @@ const DUNE_URL = 'https://momoshtrem.local:36911/Movies/Dune-%20Part%20Two%20(20
 
 /** axe and no sideways scrolling at this width and at 320 px. */
 async function expectAccessibleAndContained(page: Page) {
+  // Entry animations (fades, the dock) done first, so axe reads final colours under load too
+  await page.waitForFunction(() =>
+    document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity)
+  );
   await expectNoA11yViolations(page);
   await expectNoHorizontalOverflow(page);
   const viewport = page.viewportSize();

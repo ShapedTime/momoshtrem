@@ -114,6 +114,47 @@ describe('MappingReview', () => {
     expect(calls.some((call) => call.url.endsWith('/apply'))).toBe(false);
   });
 
+  it('offers Include only on extras that can have an episode (videos, subtitles)', async () => {
+    stubBackend(seeded(101));
+    renderPage(101);
+    expect(await screen.findByRole('button', { name: 'Include NCOP2' })).toBeInTheDocument();
+    const font = screen.getByText(/OpenSans-Semibold/).closest('li');
+    if (!font) throw new Error('No font row');
+    expect(within(font).queryByRole('button')).not.toBeInTheDocument();
+    expect(font).toHaveTextContent(/Font\s*· not in Infuse/);
+  });
+
+  it('a matched file a re-check disputed: a full row to accept, then focus moves on as it turns compact', async () => {
+    const detail = seeded(101);
+    const disputed = detail.proposals.map((p) =>
+      p.file_path.includes(' - 29 ') ? { ...p, decision: 'pending' as const, confidence: 'medium' as const, reason: 'AI suggests S01E30: …' } : p
+    );
+    stubBackend({ ...detail, proposals: disputed });
+    renderPage(101);
+    const matched = await screen.findByRole('button', { name: /^Matched/ });
+    expect(matched).toHaveTextContent('1 to decide');
+    const accept = screen.getByRole('button', { name: 'Accept #29' });
+    accept.focus();
+    fireEvent.click(accept);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change episode for #29' })).toHaveFocus());
+    expect(screen.queryByRole('button', { name: 'Accept #29' })).not.toBeInTheDocument();
+  });
+
+  it('on a phone, a group with a file to decide starts open', async () => {
+    const desktop = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ ...desktop(query), matches: false })) as typeof window.matchMedia;
+    try {
+      const detail = seeded(101);
+      const disputed = detail.proposals.map((p) => (p.file_path.includes(' - 29 ') ? { ...p, decision: 'pending' as const } : p));
+      stubBackend({ ...detail, proposals: disputed });
+      renderPage(101);
+      expect(await screen.findByRole('button', { name: /^Matched/ })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: /^Extras/ })).toHaveAttribute('aria-expanded', 'false');
+    } finally {
+      window.matchMedia = desktop;
+    }
+  });
+
   it('a missing job is the not-found view', async () => {
     stubBackend(seeded(101));
     renderPage(999);

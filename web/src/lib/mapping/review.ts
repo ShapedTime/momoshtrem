@@ -57,7 +57,7 @@ export const GROUPS: Record<ProposalGroup, GroupCopy> = {
 
 /** Movie candidates have their own words: there's one movie, and the files compete for it. */
 export const MOVIE_GROUPS: Partial<Record<ProposalGroup, Pick<GroupCopy, 'description'>>> = {
-  needs_review: { description: 'More than one file could be the movie. Accept the right one; the others are ignored.' },
+  needs_review: { description: 'More than one file could be the movie. Use the right one; the others stay out of Infuse.' },
   matched: { description: 'The movie file.' },
 };
 
@@ -68,13 +68,27 @@ export function groupProposals(proposals: Proposal[]): Array<{ group: ProposalGr
   );
 }
 
-/** Everything is open on desktop; below 1024 px the long, settled groups start collapsed. */
-export const defaultGroupOpen = (group: ProposalGroup, desktop: boolean): boolean =>
-  desktop || (group !== 'matched' && group !== 'extras');
+/** Everything is open on desktop; below 1024 px the long, settled groups start collapsed, unless a file in them waits. */
+export const defaultGroupOpen = (group: ProposalGroup, desktop: boolean, waiting = false): boolean =>
+  desktop || waiting || (group !== 'matched' && group !== 'extras');
+
+/** Files in a group that wait for a decision: pending and mapping somewhere ("2 to decide"). */
+export const pendingInGroup = (proposals: Proposal[]): Proposal[] => proposals.filter((p) => p.decision === 'pending' && maps(p));
+
+/** The groups with a file that waits for a decision (a disputed one can sit in Matched or Specials). */
+export function groupsWaiting(proposals: Proposal[]): Set<ProposalGroup> {
+  return new Set(pendingInGroup(proposals).map((p) => p.group));
+}
 
 /** Full rows (decide here) vs compact ones (spot-check). */
 export const isFullRow = (p: Proposal): boolean =>
-  (p.group === 'needs_review' || p.group === 'unmatched') && p.decision !== 'ignored';
+  p.decision !== 'ignored' && (p.group === 'needs_review' || p.group === 'unmatched' || isDisputed(p));
+
+/**
+ * A file outside Needs review that waits for a decision: a re-check's AI disagreed with a high rules
+ * answer, so it went back to pending in its own group (PLAN §6 "Re-check"). It gets a full row, to accept.
+ */
+export const isDisputed = (p: Proposal): boolean => p.group !== 'needs_review' && p.group !== 'unmatched' && p.decision === 'pending' && maps(p);
 
 // ---- Mapping, conflicts and counts --------------------------------------------------------
 
@@ -85,12 +99,13 @@ const isSpecial = (p: Proposal) => p.targets[0]?.season === 0;
 
 /**
  * Two or more non-ignored proposals whose targets share an episode: for each
- * proposal in a conflict, the others it collides with. Movie candidates never conflict.
+ * proposal in a conflict, the others it collides with. Movie candidates and subtitles never conflict.
  */
 export function conflictMap(proposals: Proposal[]): Map<number, Proposal[]> {
   const byEpisode = new Map<number, Proposal[]>();
   for (const p of proposals) {
-    if (p.decision === 'ignored' || p.kind === 'movie') continue;
+    // Subtitles never conflict: one no video claims can go onto an episode a video maps to
+    if (p.decision === 'ignored' || p.kind === 'movie' || p.kind === 'subtitle') continue;
     for (const id of new Set(p.targets.map((t) => t.episode_id))) byEpisode.set(id, [...(byEpisode.get(id) ?? []), p]);
   }
   const out = new Map<number, Proposal[]>();
@@ -283,11 +298,15 @@ const EXTRA_LABEL: Record<ExtraType, string> = {
   other: 'Extra',
 };
 
-/** What an ignored row says it is: the extra's kind, or "Ignored". */
+/** What an ignored row says it is: the extra's kind, "Not used" for a movie file you didn't pick, or "Ignored". */
 export function ignoredLabel(p: Pick<Proposal, 'kind' | 'extra_type'>): string {
   if (p.extra_type) return EXTRA_LABEL[p.extra_type];
+  if (p.kind === 'movie') return 'Not used';
   return p.kind === 'extra' ? EXTRA_LABEL.other : STATUS.ignored.label;
 }
+
+/** A file's name without its folders: labels for movie files (both cuts of a release share the title). */
+export const fileName = (path: string): string => path.split('/').pop() ?? path;
 
 /** A collapsed Extras group's peek: its first three kinds, each once ("Font, Sample", not "Font, Font, Font"). */
 export function extrasPeek(proposals: Proposal[]): string {
@@ -305,6 +324,24 @@ export function extrasPeek(proposals: Proposal[]): string {
 export function restoredDecision(p: Proposal): ProposalDecision {
   if (p.group === 'needs_review' || !maps(p)) return 'pending';
   return 'accepted';
+}
+
+/** Where a group starts (PLAN §6): matched and specials accepted, extras ignored, the rest pending. */
+export const groupDefault = (group: ProposalGroup): ProposalDecision =>
+  group === 'matched' || group === 'specials' ? 'accepted' : group === 'extras' ? 'ignored' : 'pending';
+
+/**
+ * Undo a movie pick: using a file ignored the other candidates, so every
+ * candidate goes back to its group's default (matched accepted, Needs review
+ * pending, extras ignored) and you choose again. Back on its default, a
+ * candidate is no longer `user_decided`, so nothing blocks Apply that didn't before.
+ */
+export function movieUndo(proposals: Proposal[]): ProposalChange[] {
+  return proposals.flatMap((p): ProposalChange[] => {
+    if (p.kind !== 'movie') return [];
+    const decision = groupDefault(p.group);
+    return p.decision === decision ? [] : [{ id: p.id, decision }];
+  });
 }
 
 /** Undo can't put a picked file back to "no episode" (the contract never empties targets): Change and Ignore only. */
@@ -338,12 +375,13 @@ export interface FootState {
   message: string;
 }
 
-/** The message line, highest priority first: conflict, pending, unmatched, all clear. */
-export function footState(counts: ReviewCounts): FootState {
+/** The message line, highest priority first: conflict, pending, unmatched, all clear. A movie job waits for one pick. */
+export function footState(counts: ReviewCounts, { movie = false }: { movie?: boolean } = {}): FootState {
   const label = `Apply ${counts.toApply} ${counts.toApply === 1 ? 'mapping' : 'mappings'}`;
   const blocked = counts.pending > 0 || counts.conflicts > 0;
   const base = { label, toApply: counts.toApply, blocked };
   if (counts.conflicts > 0) return { ...base, tone: 'conflict', message: 'Two files point at the same episode. Keep one.' };
+  if (counts.pending > 0 && movie) return { ...base, tone: 'blocked', message: 'Pick the file to use' };
   if (counts.pending > 0) return { ...base, tone: 'blocked', message: `Decide on ${plural(counts.pending, 'file')} to apply` };
   if (counts.unmatched > 0) {
     const one = counts.unmatched === 1;
@@ -477,6 +515,14 @@ export function nextStage(stage: ViewStage | null, status: JobStatus | undefined
 
 /** "Frieren: Beyond Journey’s End" → "Frieren": the back link and buttons. */
 export const shortTitle = (title: string): string => title.split(/:\s/)[0] || title;
+
+/** An open job in Activity: "Frieren: 2 files to check", "Frieren: ready to apply", or "Frieren: mapping files…" while it works. */
+export function openJobLine(job: Pick<AssignmentJob, 'status' | 'item' | 'counts'>): string {
+  const show = shortTitle(job.item.title);
+  if (isJobWorking(job.status)) return `${show}: mapping files…`;
+  if (job.counts.needs_review > 0) return `${show}: ${plural(job.counts.needs_review, 'file')} to check`;
+  return `${show}: ready to apply`;
+}
 
 /** The title page the job belongs to. */
 export const titleHref = (job: Pick<AssignmentJob, 'item'>): string => `/${job.item.media_type === 'movie' ? 'movie' : 'tv'}/${job.item.tmdb_id}`;

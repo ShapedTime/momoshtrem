@@ -5,7 +5,7 @@ import { closeLegacySearch, useLegacySearchHost } from '@/hooks/useLegacySearch'
 import { useSheet } from '@/lib/sheets/useSheet';
 
 interface LegacySearchHostProps {
-  /** A torrent was added and assigned. */
+  /** A movie's torrent was assigned on the spot (a show's goes to its mapping review). */
   onAdded: () => void;
   /** The search closed (something may have been added). */
   onClose: () => void;

@@ -6,7 +6,6 @@ export { useTorrentSearch, sortTorrents, filterByQuality } from './useJackett';
 
 export { useLibrary, useRemoveFromLibrary } from './useLibrary';
 
-export { useAddTorrent, isShowResponse } from './useAddToLibrary';
 
 export { useTorrents } from './useTorrents';
 

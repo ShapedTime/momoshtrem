@@ -3,8 +3,6 @@ import { APIError, ValidationError } from '@/lib/errors';
 import type {
   LibraryMovie,
   LibraryShow,
-  MovieAssignmentResponse,
-  ShowAssignmentResponse,
   RecentlyAiredResponse,
 } from '@/types/momoshtrem';
 import { parseMomoshtremError } from '@/types/momoshtrem';
@@ -178,23 +176,6 @@ class MomoshtremClient {
     );
   }
 
-  /**
-   * Assign a torrent to a movie (auto-detects best file).
-   */
-  async assignMovieTorrent(
-    id: number,
-    magnetUri: string
-  ): Promise<MovieAssignmentResponse> {
-    this.validateMagnetUri(magnetUri);
-
-    return this.request<MovieAssignmentResponse>(
-      'POST',
-      `/api/movies/${id}/assign-torrent?wait=true`, // legacy synchronous assign (#5): waits for the job and applies it
-      { magnet_uri: magnetUri },
-      'assign torrent to movie'
-    );
-  }
-
   // ============================================================================
   // Shows API
   // ============================================================================
@@ -247,141 +228,6 @@ class MomoshtremClient {
       undefined,
       'delete show'
     );
-  }
-
-  /**
-   * Assign a torrent to a show (auto-matches episodes by filename).
-   * Returns detailed results of which episodes were matched.
-   */
-  async assignShowTorrent(
-    id: number,
-    magnetUri: string
-  ): Promise<ShowAssignmentResponse> {
-    this.validateMagnetUri(magnetUri);
-
-    return this.request<ShowAssignmentResponse>(
-      'POST',
-      `/api/shows/${id}/assign-torrent?wait=true`, // legacy synchronous assign (#5): waits for the job and applies it
-      { magnet_uri: magnetUri },
-      'assign torrent to show'
-    );
-  }
-
-  // ============================================================================
-  // Library Lookup Methods
-  // ============================================================================
-
-  /**
-   * Find a movie in the library by TMDB ID.
-   * Returns null if not found.
-   */
-  async findMovieByTmdbId(tmdbId: number): Promise<LibraryMovie | null> {
-    const movies = await this.getMovies();
-    return movies.find((m) => m.tmdb_id === tmdbId) || null;
-  }
-
-  /**
-   * Find a show in the library by TMDB ID.
-   * Returns null if not found.
-   * Fetches full show data including seasons and episodes.
-   */
-  async findShowByTmdbId(tmdbId: number): Promise<LibraryShow | null> {
-    const shows = await this.getShows();
-    const show = shows.find((s) => s.tmdb_id === tmdbId);
-    if (!show) return null;
-    // Fetch full show data including seasons
-    return this.getShow(show.id);
-  }
-
-  // ============================================================================
-  // Combined Add & Assign Flow
-  // ============================================================================
-
-  /**
-   * Add a movie torrent with combined flow:
-   * 1. Check if movie exists in library
-   * 2. Add to library if not
-   * 3. Assign the torrent
-   *
-   * @returns Object with assignment result and whether item was newly added
-   */
-  async addMovieTorrent(
-    tmdbId: number,
-    magnetUri: string
-  ): Promise<{
-    addedToLibrary: boolean;
-    libraryId: number;
-    assignment: MovieAssignmentResponse;
-  }> {
-    this.validateMagnetUri(magnetUri);
-
-    // Check if already in library
-    let movie = await this.findMovieByTmdbId(tmdbId);
-    const addedToLibrary = !movie;
-
-    // Add to library if needed
-    if (!movie) {
-      movie = await this.addMovie(tmdbId);
-    }
-
-    // Assign torrent
-    const assignment = await this.assignMovieTorrent(movie.id, magnetUri);
-
-    return {
-      addedToLibrary,
-      libraryId: movie.id,
-      assignment,
-    };
-  }
-
-  /**
-   * Add a show torrent with combined flow:
-   * 1. Check if show exists in library
-   * 2. Add to library if not (creates all episodes from TMDB)
-   * 3. Assign the torrent (auto-matches episodes)
-   *
-   * @returns Object with assignment result and whether item was newly added
-   */
-  async addShowTorrent(
-    tmdbId: number,
-    magnetUri: string
-  ): Promise<{
-    addedToLibrary: boolean;
-    libraryId: number;
-    assignment: ShowAssignmentResponse;
-  }> {
-    this.validateMagnetUri(magnetUri);
-
-    // Check if already in library
-    let show = await this.findShowByTmdbId(tmdbId);
-    const addedToLibrary = !show;
-
-    // Add to library if needed
-    if (!show) {
-      show = await this.addShow(tmdbId);
-    }
-
-    // Assign torrent
-    const assignment = await this.assignShowTorrent(show.id, magnetUri);
-
-    return {
-      addedToLibrary,
-      libraryId: show.id,
-      assignment,
-    };
-  }
-
-  // ============================================================================
-  // Validation
-  // ============================================================================
-
-  /**
-   * Validate magnet URI format.
-   */
-  private validateMagnetUri(magnetUri: string): void {
-    if (!magnetUri || !magnetUri.startsWith('magnet:?')) {
-      throw new ValidationError('Invalid magnet URI');
-    }
   }
 
   // ============================================================================

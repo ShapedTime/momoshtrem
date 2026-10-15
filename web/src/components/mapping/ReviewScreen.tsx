@@ -11,11 +11,15 @@ import {
   conflictMap,
   defaultGroupOpen,
   displayPath,
+  fileName,
   firstBlocker,
   firstPending,
   footState,
   groupProposals,
+  groupsWaiting,
+  isDisputed,
   maps,
+  movieUndo,
   restoredDecision,
   reviewCounts,
   shortName,
@@ -28,6 +32,7 @@ import { MappingFoot } from './MappingFoot';
 import { MappingHeader, MappingMoreMenu, MappingSummary } from './MappingHeader';
 import { ProposalGroup } from './ProposalGroup';
 import { type RowActions, ProposalRow, rowId } from './ProposalRow';
+import { RecheckPanel } from './RecheckPanel';
 
 const FLASH_MS = 1200;
 /** How long a focus move waits for its target to render. */
@@ -56,7 +61,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   const counts = useMemo(() => reviewCounts(proposals), [proposals]);
   const conflicts = useMemo(() => conflictMap(proposals), [proposals]);
   const groups = useMemo(() => groupProposals(proposals), [proposals]);
-  const foot = footState(counts);
+  const foot = footState(counts, { movie });
 
   const [selectedId, setSelectedId] = useState<number | null>(() => (isDesktop() && !movie ? (firstPending(proposals)?.id ?? null) : null));
   const [opened, setOpened] = useState<Partial<Record<Group, boolean>>>({});
@@ -71,8 +76,12 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   const sheetProposal = sheet ? (proposals.find((p) => p.id === sheet.id) ?? null) : null;
   const pickerFor = desktop ? selected : sheetProposal;
   const taken = useMemo(() => takenBy(proposals, pickerFor?.id ?? null, showTitle), [proposals, pickerFor?.id, showTitle]);
-  const isOpen = (group: Group) => opened[group] ?? defaultGroupOpen(group, desktop);
-  const short = useCallback((p: Proposal) => shortName(p.file_path, showTitle), [showTitle]);
+  const waiting = useMemo(() => groupsWaiting(proposals), [proposals]);
+  const isOpen = (group: Group) => opened[group] ?? defaultGroupOpen(group, desktop, waiting.has(group));
+  /** A group opened because a file in it waited stays open once you've decided it (it doesn't fold away under you). */
+  const keepOpen = (group: Group) => setOpened((current) => (current[group] === undefined ? { ...current, [group]: isOpen(group) } : current));
+  // Movie cuts share the title: their file names tell them apart
+  const short = useCallback((p: Proposal) => (movie ? fileName(p.file_path) : shortName(p.file_path, showTitle)), [movie, showTitle]);
   const path = useCallback((p: Proposal) => displayPath(p.file_path, job.torrent.name), [job.torrent.name]);
 
   useEffect(() => {
@@ -136,6 +145,11 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
       } else setSheet((current) => ({ id: p.id, open: true, key: (current?.key ?? 0) + 1 }));
     },
     accept: (p) => {
+      // A disputed file goes back to a compact row: its Accept goes away, so focus moves to what's left
+      if (isDisputed(p)) {
+        keepOpen(p.group);
+        focusAfterRender({ kind: 'row', id: p.id, actions: ['change', 'ignore'] });
+      }
       void change([{ id: p.id, decision: 'accepted' }]);
       flashRow(p.id);
       if (desktop && !movie) {
@@ -143,8 +157,10 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
         if (next) setSelectedId(next.id);
       }
     },
-    unaccept: (p) => void change([{ id: p.id, decision: 'pending' }]),
+    // A movie pick ignored the other files: they all come back, so you choose again
+    unaccept: (p) => void change(movie && p.kind === 'movie' ? movieUndo(proposals) : [{ id: p.id, decision: 'pending' }]),
     ignore: (p) => {
+      keepOpen(p.group);
       if (sheet?.id === p.id) setSheet({ ...sheet, open: false });
       focusAfterRender({ kind: 'row', id: p.id, actions: ['restore'] });
       void change([{ id: p.id, decision: 'ignored' }]);
@@ -168,6 +184,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   };
 
   const pick = async (p: Proposal, episode: PickerEpisode) => {
+    keepOpen(p.group);
     const same = p.targets.length === 1 && p.targets[0].episode_id === episode.id;
     if (sheet?.open) setSheet({ ...sheet, open: false });
     const answer = await change([same ? { id: p.id, decision: 'accepted' } : { id: p.id, episode_ids: [episode.id], decision: 'accepted' }]);
@@ -198,7 +215,8 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
       <MappingHeader job={job} summary={<MappingSummary counts={counts} />} more={<MappingMoreMenu onDiscard={() => void actions.discard()} />} />
       <div className={cx('map-layout page', desktop && !movie && 'has-pane')}>
         <div className="map-main">
-          {/* "Re-check with AI" (#5, slice 7) goes here, above the groups, while job.ai_available */}
+          {/* Shown while job.ai_available; it stays to explain a 503 when AI went away */}
+          <RecheckPanel detail={detail} />
           <div className="map-groups">
             {groups.map(({ group, proposals: rows }) => (
               <ProposalGroup

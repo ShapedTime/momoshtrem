@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { Button, Chip, Confidence, FilePath } from '@/components/ui';
 import type { Proposal } from '@/lib/api/contract';
-import { canToggleAccept, ignoredLabel, isFullRow, maps, targetCode, targetName } from '@/lib/mapping/review';
+import { canHaveEpisodes } from '@/lib/mapping/files';
+import { canToggleAccept, ignoredLabel, isDisputed, isFullRow, maps, targetCode, targetName } from '@/lib/mapping/review';
 import { formatBytes, plural } from '@/lib/title/format';
 import { cx } from '@/lib/utils/cx';
 
@@ -154,6 +155,23 @@ function Notes({ p, conflictWith }: { p: Proposal; conflictWith: string | null }
 }
 
 function Actions({ p, short, movie, actions }: { p: Proposal; short: string; movie: boolean; actions: RowActions }) {
+  // A movie job is one choice: use a file (the others step aside), or undo that to choose again.
+  // The one plausible file (matched) keeps the plain row.
+  if (movie && p.kind === 'movie' && p.group !== 'matched') {
+    return p.decision === 'accepted' ? (
+      <Button variant="ready" size="sm" data-action="accept" aria-pressed="true" aria-label={`Using this file: ${short}. Tap to undo`} onClick={() => actions.unaccept(p)}>
+        <Check size={16} aria-hidden="true" />
+        Using this file
+      </Button>
+    ) : (
+      <Button variant="secondary" size="sm" className="mt-accept" data-action="accept" aria-label={`Use this file: ${short}`} onClick={() => actions.accept(p)}>
+        <Check size={16} aria-hidden="true" />
+        Use this file
+      </Button>
+    );
+  }
+  // An extra can't become the movie, and only videos and subtitles can have episodes
+  if (p.decision === 'ignored' && !maps(p) && (movie || !canHaveEpisodes(p))) return null;
   if (p.decision === 'ignored') {
     const include = p.group === 'extras';
     return (
@@ -237,7 +255,7 @@ export function ProposalRow({ proposal: p, path, short, conflictWith, movieTitle
       className={cx(
         'mrow',
         full ? 'mrow--full' : 'mrow--compact',
-        p.group === 'needs_review' && pending && 'is-review',
+        (p.group === 'needs_review' || isDisputed(p)) && pending && 'is-review',
         p.group === 'needs_review' && !pending && !ignored && 'is-resolved',
         p.group === 'unmatched' && pending && !maps(p) && 'is-unmatched',
         ignored && 'is-ignored',
@@ -247,7 +265,8 @@ export function ProposalRow({ proposal: p, path, short, conflictWith, movieTitle
       )}
     >
       <div className="mrow-file">
-        {movie ? (
+        {/* Movies have no episodes, and fonts, info files and images can't have one */}
+        {movie || !canHaveEpisodes(p) ? (
           <span className="mrow-name">
             <FilePath path={path} />
           </span>

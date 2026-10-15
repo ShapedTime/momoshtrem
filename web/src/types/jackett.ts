@@ -65,6 +65,8 @@ export interface TorrentSearchContext {
   season?: number;
   /** Episode number (for episodes) */
   episode?: number;
+  /** Library id when the title is in the library; adding a torrent adds it first otherwise. */
+  libraryId?: number | null;
 }
 
 // ============================================

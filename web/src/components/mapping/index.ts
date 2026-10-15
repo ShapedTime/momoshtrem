@@ -3,3 +3,4 @@ export { MappingReview } from './MappingReview';
 export { ReviewScreen } from './ReviewScreen';
 export { ProposalRow } from './ProposalRow';
 export { EpisodePickerPane, EpisodePickerSheet } from './EpisodePicker';
+export { MappingJobsBanner } from './MappingJobsBanner';

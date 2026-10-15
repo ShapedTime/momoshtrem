@@ -11,9 +11,16 @@ import {
   firstBlocker,
   firstPending,
   footState,
+  groupDefault,
   groupProposals,
+  groupsWaiting,
   ignoredLabel,
+  isDisputed,
+  isFullRow,
+  movieUndo,
   nextStage,
+  openJobLine,
+  pendingInGroup,
   progressSteps,
   readyToastTitle,
   restoredDecision,
@@ -77,6 +84,16 @@ describe('groups and counts', () => {
       false,
     ]);
     expect(defaultGroupOpen('matched', true)).toBe(true);
+    // A file that waits keeps its group open on a phone too
+    expect(defaultGroupOpen('matched', false, true)).toBe(true);
+  });
+
+  it('knows which groups have a file waiting: a disputed one can sit in Matched', () => {
+    const frieren = seeded(101);
+    expect([...groupsWaiting(frieren.proposals)]).toEqual(['needs_review']);
+    const disputed = frieren.proposals.map((p) => (p.file_path.includes(' - 29 ') ? { ...p, decision: 'pending' as const } : p));
+    expect([...groupsWaiting(disputed)].sort()).toEqual(['matched', 'needs_review']);
+    expect(pendingInGroup(disputed.filter((p) => p.group === 'matched'))).toHaveLength(1);
   });
 
   it('pre-selects the first pending file, and the next one after it', () => {
@@ -112,6 +129,14 @@ describe('conflicts', () => {
     expect(conflicts.get(waters.id)?.map((p) => p.id)).toEqual([extended.id]);
     // Ignoring one of them settles it
     expect(conflictMap(decide(doctorWho, ['Extended.Edition', 'ignored'])).size).toBe(0);
+  });
+
+  it('never counts a subtitle as a conflict: an orphan subtitle can go onto an episode a video has', () => {
+    const waters = named(doctorWho, 'S00E02.The.Waters.of.Mars');
+    const subtitle: Proposal = { ...waters, id: 9001, kind: 'subtitle', group: 'extras', file_path: 'Subs/Waters.of.Mars.en.srt', decision: 'accepted' };
+    const proposals = [...decide(doctorWho, ['Extended.Edition', 'ignored']), subtitle];
+    expect(conflictMap(proposals).size).toBe(0);
+    expect(reviewCounts(proposals).conflicts).toBe(0);
   });
 
   it('counts a conflict as review even once both are accepted', () => {
@@ -204,6 +229,7 @@ describe('files', () => {
     expect(ignoredLabel({ kind: 'extra', extra_type: 'opening' })).toBe('Opening (creditless)');
     expect(ignoredLabel({ kind: 'extra', extra_type: 'info' })).toBe('Info file');
     expect(ignoredLabel({ kind: 'episode', extra_type: null })).toBe('Ignored');
+    expect(ignoredLabel({ kind: 'movie', extra_type: null })).toBe('Not used');
   });
 });
 
@@ -218,6 +244,16 @@ describe('decisions', () => {
     expect(restoredDecision(named(frieren, 'NCOP2'))).toBe('pending');
   });
 
+  it('a matched file a re-check disputed waits in a full row, to accept', () => {
+    const matched = named(frieren, ' - 29 ');
+    expect(isFullRow(matched)).toBe(false);
+    const disputed: Proposal = { ...matched, decision: 'pending', confidence: 'medium', reason: 'AI suggests S01E30: …' };
+    expect(isDisputed(disputed)).toBe(true);
+    expect(isFullRow(disputed)).toBe(true);
+    expect(isDisputed(named(frieren, '35v2'))).toBe(false);
+    expect(isDisputed(named(frieren, 'Special Extra'))).toBe(false);
+  });
+
   it('can’t un-accept a picked unmatched file (the contract never empties targets)', () => {
     const extra = named(frieren, 'Special Extra');
     const picked: Proposal = { ...extra, targets: [named(frieren, ' - 29 ').targets[0]], decision: 'accepted', source: 'manual' };
@@ -229,6 +265,40 @@ describe('decisions', () => {
   it('a movie job keeps one file: accepting a candidate ignores the others', () => {
     const cuts: Proposal[] = [1, 2].map((id) => ({ ...named(frieren, '35v2'), id, kind: 'movie', targets: [], suggested_targets: [] }));
     expect(withDecisions(cuts, [{ id: 2, decision: 'accepted' }]).map((p) => p.decision)).toEqual(['ignored', 'accepted']);
+  });
+
+  it('undoing a movie pick brings every candidate back to its default, so you choose again', () => {
+    const cuts: Proposal[] = [1, 2, 3].map((id) => ({ ...named(frieren, '35v2'), id, kind: 'movie', targets: [], suggested_targets: [] }));
+    const picked = withDecisions(cuts, [{ id: 2, decision: 'accepted' }]);
+    expect(movieUndo([...picked, named(frieren, 'NCOP2')])).toEqual([
+      { id: 1, decision: 'pending' },
+      { id: 2, decision: 'pending' },
+      { id: 3, decision: 'pending' },
+    ]);
+    expect(movieUndo(cuts)).toEqual([]);
+  });
+
+  it('a movie Undo puts each candidate back on its own group’s default: matched accepted, extras ignored', () => {
+    const base: Proposal = { ...named(frieren, '35v2'), kind: 'movie', targets: [], suggested_targets: [] };
+    const used: Proposal[] = [
+      { ...base, id: 1, group: 'matched', decision: 'ignored' },
+      { ...base, id: 2, group: 'extras', decision: 'accepted' },
+    ];
+    expect(movieUndo(used)).toEqual([
+      { id: 1, decision: 'accepted' },
+      { id: 2, decision: 'ignored' },
+    ]);
+    expect(['matched', 'specials', 'needs_review', 'unmatched', 'extras'].map((group) => groupDefault(group as Proposal['group']))).toEqual([
+      'accepted',
+      'accepted',
+      'pending',
+      'pending',
+      'ignored',
+    ]);
+  });
+
+  it('a movie job’s foot asks for one pick', () => {
+    expect(footState({ ...reviewCounts([]), pending: 2, toApply: 2 }, { movie: true })).toMatchObject({ blocked: true, message: 'Pick the file to use' });
   });
 });
 
@@ -300,5 +370,12 @@ describe('the job', () => {
 
   it('lists the torrent’s facts in the design’s order', () => {
     expect(torrentFacts(frieren.job, formatBytes)).toEqual(['14.4 GB', '16 files', 'Nyaa', 'SubsPlease']);
+  });
+
+  it('says what an open job waits for on Activity', () => {
+    expect(openJobLine(frieren.job)).toBe('Frieren: 2 files to check');
+    expect(openJobLine({ ...frieren.job, status: 'fetching_metadata' })).toBe('Frieren: mapping files…');
+    expect(openJobLine({ ...frieren.job, status: 'ready', counts: { ...frieren.job.counts, needs_review: 0 } })).toBe('Frieren: ready to apply');
+    expect(openJobLine({ ...frieren.job, counts: { ...frieren.job.counts, needs_review: 1 } })).toBe('Frieren: 1 file to check');
   });
 });
