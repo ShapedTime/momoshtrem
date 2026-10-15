@@ -77,6 +77,23 @@ func TestSeasonEntries(t *testing.T) {
 			},
 		},
 		{
+			name:   "a gap splits a file's episodes into runs",
+			season: 1,
+			eps: []SeasonEpisode{
+				{Number: 9, Name: "Nine", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+				{Number: 7, Name: "Seven", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+				{Number: 8, Name: "Eight", InfoHash: "h", FilePath: "other.mkv", Grouped: true},
+				{Number: 10, Name: "Ten", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+				{Number: 12, Name: "Twelve", InfoHash: "h", FilePath: "odd.mkv", Grouped: true},
+			},
+			want: []SeasonEntry{
+				{FileName: "Show - S01E07 - Seven.mkv", Episodes: []int{1}},
+				{FileName: "Show - S01E08 - Eight.mkv", Episodes: []int{2}},
+				{FileName: "Show - S01E09-E10 - Nine.mkv", Episodes: []int{0, 3}},
+				{FileName: "Show - S01E12 - Twelve.mkv", Episodes: []int{4}},
+			},
+		},
+		{
 			name:   "specials group in Season 00 too",
 			season: 0,
 			eps: []SeasonEpisode{
@@ -192,5 +209,54 @@ func TestAddSeasonEntries(t *testing.T) {
 	addSeasonEntries(tree, legacyDir, dirPath, "Show", season)
 	if _, ok := legacyDir.children["Show - S01E01 - Pilot.mkv"]; !ok || len(legacyDir.children) != 2 {
 		t.Errorf("legacy files = %v", legacyDir.children)
+	}
+}
+
+// A file split at a gap is two entries; the torrent subtitle Apply recorded
+// on its first episode goes next to both. Downloaded subtitles stay with
+// their own episode's entry.
+func TestAddSeasonEntries_GapRunsShareTheFilesSubtitles(t *testing.T) {
+	const hash, file = "hhhh", "Pack/Show.S01E07.mkv"
+	row := func(id int64) *library.TorrentAssignment {
+		return &library.TorrentAssignment{ID: id, InfoHash: hash, FilePath: file, FileSize: 2000, MatchSource: "manual"}
+	}
+	season := library.Season{SeasonNumber: 1, Episodes: []library.Episode{
+		{ID: 17, EpisodeNumber: 7, Name: "Seven", Assignment: row(1)},
+		{ID: 18, EpisodeNumber: 8, Name: "Eight"},
+		{ID: 19, EpisodeNumber: 9, Name: "Nine", Assignment: row(2)},
+	}}
+	ep17 := subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: 17}
+	ep19 := subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: 19}
+	fake := &fakeSubtitles{subs: map[subtitle.Item][]*subtitle.Subtitle{
+		ep17: {{ID: 1, LanguageCode: "en", Format: "srt", Source: subtitle.SourceTorrent, InfoHash: hash, FilePath: "Pack/Show.S01E07.en.srt"}},
+		ep19: {{ID: 2, LanguageCode: "de", Format: "srt", Source: subtitle.SourceOpenSubtitles, FilePath: "/subs/19/de.srt"}},
+	}}
+	fs := &LibraryFS{subtitleRepo: fake}
+
+	tree, _, _ := newEmptyTree()
+	dir := NewVirtualDir("Season 01")
+	dirs := addSeasonEntries(tree, dir, "/TV Shows/Show (2020)/Season 01", "Show", season)
+	subs := fs.loadSubtitles(dirs)
+	for _, d := range dirs {
+		addSubtitleFiles(tree, d, d.subtitles(subs))
+	}
+
+	var names []string
+	for name := range dir.children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	want := []string{
+		"Show - S01E07 - Seven.en.srt",
+		"Show - S01E07 - Seven.mkv",
+		"Show - S01E09 - Nine.de.srt",
+		"Show - S01E09 - Nine.en.srt",
+		"Show - S01E09 - Nine.mkv",
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Errorf("files = %q, want %q", names, want)
+	}
+	if fake.calls != 1 {
+		t.Errorf("subtitle queries = %d, want 1", fake.calls)
 	}
 }

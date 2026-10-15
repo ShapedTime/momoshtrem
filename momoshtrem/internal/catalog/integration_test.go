@@ -274,18 +274,23 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 		t.Errorf("colours = %v %v, want them computed inline", movieTitle.BackdropDominantColor, showTitle.BackdropDominantColor)
 	}
 
-	// Warm: the budgets of PLAN §6.
+	// Warm: the budgets of PLAN §6. The mapping review (#5) adds one
+	// query to the title pages and seasons; /library reads it in its one.
 	budgets := []struct {
 		name string
 		max  int
 		fn   func() error
 	}{
-		{"movie title", 4, func() error { _, err := it.svc.MovieTitle(ctx, movieID); return err }},
+		{"movie title", 5, func() error { _, err := it.svc.MovieTitle(ctx, movieID); return err }},
 		{"show title", 6, func() error { _, err := it.svc.ShowTitle(ctx, showID); return err }},
-		{"long season (arcs)", 3, func() error { _, err := it.svc.Season(ctx, showID, 1); return err }},
-		{"short season", 1, func() error { _, err := it.svc.Season(ctx, showID, 2); return err }},
+		{"long season (arcs)", 4, func() error { _, err := it.svc.Season(ctx, showID, 1); return err }},
+		{"short season", 2, func() error { _, err := it.svc.Season(ctx, showID, 2); return err }},
 		{"library", 1, func() error {
 			_, err := it.svc.Library(ctx, LibraryParams{Query: it.tag})
+			return err
+		}},
+		{"library needing review", 1, func() error {
+			_, err := it.svc.Library(ctx, LibraryParams{Query: it.tag, Status: StatusNeedsReview})
 			return err
 		}},
 		{"library past the end", 2, func() error {

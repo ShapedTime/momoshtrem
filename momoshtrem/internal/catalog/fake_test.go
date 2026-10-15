@@ -22,8 +22,11 @@ type fakeStore struct {
 	library   []library.LibraryItem
 	libTotal  int
 	lastQuery library.LibraryQuery
-	calls     map[string]int
-	err       error
+	// reviews answers ReviewState by "tv:<id>" or "movie:<id>"; none is
+	// an empty review.
+	reviews map[string]*library.ReviewState
+	calls   map[string]int
+	err     error
 }
 
 func newFakeStore() *fakeStore {
@@ -31,8 +34,20 @@ func newFakeStore() *fakeStore {
 		movies:  map[int]*library.Movie{},
 		shows:   map[int]*library.Show{},
 		seasons: map[int64][]library.Season{},
+		reviews: map[string]*library.ReviewState{},
 		calls:   map[string]int{},
 	}
+}
+
+func (f *fakeStore) ReviewState(_ context.Context, mediaType string, id int64) (*library.ReviewState, error) {
+	if err := f.count("review"); err != nil {
+		return nil, err
+	}
+	if r, ok := f.reviews[fmt.Sprintf("%s:%d", mediaType, id)]; ok {
+		c := *r
+		return &c, nil
+	}
+	return &library.ReviewState{}, nil
 }
 
 var _ Store = (*fakeStore)(nil)

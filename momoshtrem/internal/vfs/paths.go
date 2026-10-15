@@ -60,8 +60,10 @@ type SeasonEntry struct {
 }
 
 // SeasonEntries names a season folder's videos. Grouped episodes that
-// share a file (info hash and path) are one entry, "Title - S01E01-E02 -
-// FirstName.ext"; every other episode is its own "Title - S01E05 -
+// share a file (info hash and path) and follow each other are one entry,
+// "Title - S01E01-E02 - FirstName.ext"; a file mapped to episodes with a
+// gap (E07 and E09) gets one entry per run, so a name never claims an
+// episode it doesn't play. Every other episode is its own "Title - S01E05 -
 // Name.ext", exactly as EpisodeFilePath names it. Entries come in episode
 // order.
 func SeasonEntries(showTitle string, season int, eps []SeasonEpisode) []SeasonEntry {
@@ -72,14 +74,17 @@ func SeasonEntries(showTitle string, season int, eps []SeasonEpisode) []SeasonEn
 	sort.SliceStable(order, func(a, b int) bool { return eps[order[a]].Number < eps[order[b]].Number })
 
 	type fileKey struct{ hash, path string }
-	group := map[fileKey]int{} // file → its entry
+	group := map[fileKey]int{} // file → its latest entry
 	var entries []SeasonEntry
 	for _, i := range order {
 		ep := eps[i]
 		key := fileKey{ep.InfoHash, ep.FilePath}
 		if at, ok := group[key]; ok && ep.Grouped {
-			entries[at].Episodes = append(entries[at].Episodes, i)
-			continue
+			run := entries[at].Episodes
+			if eps[run[len(run)-1]].Number+1 == ep.Number {
+				entries[at].Episodes = append(run, i)
+				continue
+			}
 		}
 		if ep.Grouped {
 			group[key] = len(entries)

@@ -11,9 +11,9 @@ import (
 )
 
 // ShowTitle builds GET /titles/tv/{tmdb_id}. Queries: the show, its episodes
-// (one lean query however many there are), the TMDB cache, the similar
-// titles' library state and the colour cache. Episodes themselves load per
-// season (Season).
+// (one lean query however many there are), its mapping review, the TMDB
+// cache, the similar titles' library state and the colour cache. Episodes
+// themselves load per season (Season).
 //
 // TMDB failures for a show in the library fall back to its stored metadata
 // (no cast, creators, networks or similar titles); for one that isn't,
@@ -24,8 +24,12 @@ func (s *Service) ShowTitle(ctx context.Context, tmdbID int) (*ShowTitle, error)
 		return nil, err
 	}
 	var seasons []library.Season
+	var rev *review
 	if show != nil {
 		if seasons, err = s.store.ShowEpisodes(ctx, show.ID); err != nil {
+			return nil, err
+		}
+		if rev, err = s.reviewOf(ctx, string(library.JobTV), show.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -48,7 +52,7 @@ func (s *Service) ShowTitle(ctx context.Context, tmdbID int) (*ShowTitle, error)
 	color := s.colorAsync(ctx, deref(title.BackdropPath))
 
 	if show != nil {
-		s.applyLibraryShow(title, show, seasons)
+		s.applyLibraryShow(title, show, seasons, rev)
 	} else {
 		title.Seasons = tmdbSeasons(details.Seasons)
 		title.DefaultSeason = firstSeason(title.Seasons)
@@ -157,8 +161,8 @@ func showFromLibrary(sh *library.Show) *ShowTitle {
 }
 
 // applyLibraryShow sets what the library knows: the show's settings, its
-// seasons and where it stands.
-func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons []library.Season) {
+// seasons, where it stands and what's under review.
+func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons []library.Season, rev *review) {
 	title.IsAnime = show.IsAnime
 	title.EpisodeOrdering = string(show.EpisodeOrdering)
 	title.EpisodeGroupID = strPtr(show.EpisodeGroupID)
@@ -191,6 +195,7 @@ func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons
 				AirDate:     ep.AirDate,
 				HasFile:     ep.Assignment != nil,
 				Downloading: downloading,
+				UnderReview: rev.underReview(ep.ID),
 			})
 		}
 		if visible {
@@ -208,6 +213,7 @@ func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons
 	state.EpisodesReady = intPtr(sum.EpisodesReady)
 	state.Missing = sum.Missing
 	state.Download = download.progress()
+	rev.setOn(&state)
 	if anyFile {
 		state.WebDAVPath = strPtr(vfs.ShowDir(show.Title, show.Year) + "/")
 		state.WebDAVURL = s.webdavURL(state.WebDAVPath)

@@ -15,10 +15,10 @@ const arcsBudget = 3 * time.Second
 
 // Season builds GET /titles/tv/{tmdb_id}/seasons/{n}: one season's episodes
 // with their state and, for seasons over 20 episodes, jump ranges. Queries:
-// the season (one, with the show), plus two TMDB cache reads for story arcs
-// when a regular season is long. Returns ErrNotInLibrary when the show isn't in
-// the library and ErrSeasonNotFound for an unknown season, or specials while
-// they're switched off.
+// the season (one, with the show), the show's mapping review, plus two TMDB
+// cache reads for story arcs when a regular season is long. Returns
+// ErrNotInLibrary when the show isn't in the library and ErrSeasonNotFound
+// for an unknown season, or specials while they're switched off.
 func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*SeasonDetail, error) {
 	view, err := s.store.SeasonByTMDBID(ctx, tmdbID, seasonNumber)
 	if err != nil {
@@ -29,6 +29,10 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 	}
 	if view.Season == nil || (seasonNumber == 0 && !view.IncludeSpecials) {
 		return nil, ErrSeasonNotFound
+	}
+	rev, err := s.reviewOf(ctx, string(library.JobTV), view.ShowID)
+	if err != nil {
+		return nil, err
 	}
 
 	today := s.today()
@@ -48,7 +52,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 			StillPath:      strPtr(ep.StillPath),
 			Runtime:        positive(ep.Runtime),
 			EpisodeType:    episodeType(ep.EpisodeType),
-			State:          EpisodeStateOf(ep.Assignment != nil, downloading, ep.AirDate, today),
+			State:          EpisodeStateOf(ep.Assignment != nil, downloading, rev.underReview(ep.ID), ep.AirDate, today),
 		}
 		if downloading {
 			summary.Pct = intPtr(pct(done, length))
