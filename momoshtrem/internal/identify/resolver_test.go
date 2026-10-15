@@ -118,6 +118,10 @@ func TestMergeAIExtrasAndReasons(t *testing.T) {
 	if out[2].Kind != KindExtra || out[2].Source != SourceRules {
 		t.Errorf("a font can't become a sample: %+v", out[2])
 	}
+	out = MergeAI(rules, []AIFile{{Path: "y.ttf", Kind: KindEpisode, Season: intp(1), Episodes: []int{3}, Confidence: ConfidenceHigh}}, cat)
+	if out[2].HasTarget() || out[2].Source != SourceRules {
+		t.Errorf("a font can't become an episode: %+v", out[2])
+	}
 	out = MergeAI(rules, []AIFile{{Path: "x.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{2},
 		Confidence: ConfidenceMedium, Reason: "AI: release S2 numbering"}}, cat)
 	if out[0].Reason != "release S2 numbering" {

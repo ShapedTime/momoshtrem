@@ -26,6 +26,16 @@ type ResolveInput struct {
 	Scope []string
 	// Hint is the user's hint: "absolute numbering", "these are the OVAs".
 	Hint string
+
+	// InfoHash, ShowID and MetadataUpdatedAt key the resolver's cache,
+	// with Hint and Scope; without an InfoHash and a ShowID nothing is
+	// cached.
+	InfoHash          string
+	ShowID            int64
+	MetadataUpdatedAt time.Time
+	// JobID is the assignment job the call is for: usage is recorded
+	// against it. Zero when there's no job (the eval).
+	JobID int64
 }
 
 // ResolveOutput is the resolver's answer and what it cost.
@@ -46,13 +56,28 @@ type AIFile struct {
 	Reason         string     `json:"reason"`
 }
 
-// Usage is what a Resolve call cost.
+// Usage is what a Resolve call cost. The prompt is InputTokens (uncached)
+// plus CacheWriteTokens plus CacheReadTokens; OutputTokens include thinking.
 type Usage struct {
-	Model           string
-	InputTokens     int
-	OutputTokens    int
-	CacheReadTokens int
-	CostUSD         float64
+	Model            string
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	CostUSD          float64
+}
+
+// Add sums two usages; the model is the first non-empty one.
+func (u Usage) Add(o Usage) Usage {
+	if u.Model == "" {
+		u.Model = o.Model
+	}
+	u.InputTokens += o.InputTokens
+	u.OutputTokens += o.OutputTokens
+	u.CacheReadTokens += o.CacheReadTokens
+	u.CacheWriteTokens += o.CacheWriteTokens
+	u.CostUSD += o.CostUSD
+	return u
 }
 
 // NoopResolver answers nothing: the rules' proposals stand.
@@ -73,7 +98,8 @@ func (NoopResolver) Resolve(context.Context, ResolveInput) (ResolveOutput, error
 //   - its target isn't an episode in the catalog;
 //   - its target is an episode a high-confidence rules proposal has;
 //   - it's for a subtitle (subtitles follow their video) or says
-//     "unknown" (no answer).
+//     "unknown" (no answer);
+//   - it maps a file that isn't a video (a font, an .nfo) to an episode.
 //
 // Accepted answers keep the resolver's confidence, with the source "ai".
 // Subtitles linked to a changed video follow it.
@@ -126,6 +152,9 @@ func MergeAI(rules []Proposal, ai []AIFile, cat *ShowCatalog) []Proposal {
 			out[i] = p
 			changed[r.Path] = true
 		case KindEpisode, KindSpecial:
+			if ClassOf(r.Path) != ClassVideo {
+				continue
+			}
 			eps := ix.resolveAI(a)
 			if eps == nil {
 				continue
