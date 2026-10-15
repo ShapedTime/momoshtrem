@@ -187,7 +187,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `torrent_assignments`: add `confidence` (`high|medium|low`; NULL for manual and legacy rows) and `match_source` (`rules|ai|manual`; NULL for legacy rows). The VFS groups a multi-episode file into one entry only for rows that have a `match_source` (§6 "Assignment").
 - `assignment_jobs`:
   - The item: `media_type` (`movie|tv`) and `tmdb_id`, plus nullable `show_id` and `movie_id` FKs with `ON DELETE CASCADE`. Both are NULL for a dry run on a title that isn't in the library (#6 Inspect).
-  - The torrent: `info_hash`, `magnet_uri`, `torrent_name`, `indexer`.
+  - The torrent: `info_hash`, `magnet_uri`, `torrent_name`, `indexer`, plus `size_bytes`, `file_count` and `video_count`, written when the file list arrives (`torrent.*` comes from them before proposals exist).
   - `status` (CHECK `queued|fetching_metadata|classifying|resolving|needs_review|ready|applied|failed|cancelled`; flow in §6), `dry_run bool`.
   - `hint jsonb` (`{season, episode, text}`), `suggested_hints jsonb`, `ai_files int`, `error`, `ai_error`.
   - `created_at`, `updated_at`, `applied_at`.
@@ -201,7 +201,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - `decision` (`pending|accepted|ignored`), `user_decided bool`, `updated bool`, `hinted bool`.
   - `superseded_by` (FK to the proposal that replaces it, its v2) and `linked_proposal_id` (a subtitle's video).
 - `ai_usage(id, feature classifier|recs|ask, model, input_tokens, output_tokens, cache_read_tokens, web_searches, cost_usd numeric, ref_id, created_at)`. Shared by every AI feature.
-- `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by `(info_hash, show_id, metadata_version, hint)`.
+- `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by `(info_hash, show_id, metadata_updated_at, hint)`.
 
 **`005_trakt.sql` (B5)**
 - `trakt_auth(id=1, username, access_token_enc, refresh_token_enc, expires_at, created_at, updated_at)`.
@@ -289,9 +289,9 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - Episode: `ready` or `downloading` when assigned; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown; `needs_review` as below. `watched` (B5) fills in later.
   - `default_season`: the frontier's season, else the latest season with a file, else the first regular season.
 - **Review rules** (B2, #5). They read the item's open, non-dry-run mapping jobs that are past classification (`resolving`, `needs_review` or `ready`; §6 "Assignment").
-  - `needs_review` (title and `LibraryItem`) counts those jobs' files that are pending with a target or in a conflict. `/library?status=needs_review` is `needs_review > 0`.
+  - `needs_review` (title and `LibraryItem`) counts those jobs' files that are pending and map (have targets, or are movie candidates) or are in a conflict. `/library?status=needs_review` is `needs_review > 0`.
   - `review_job_id` is the newest of those jobs, or null. It stays set while a `ready` job waits for Apply, even at `needs_review = 0`.
-  - An episode is `needs_review` when such a file targets it and it has no file: a file (`ready`, `downloading`, `watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` there or in `EpisodeRange.missing`.
+  - An episode is `needs_review` when one of those files targets it and it has no file: a file (`ready`, `downloading`, `watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` there or in `EpisodeRange.missing`.
   - The frontier is about files: an aired episode under review is still part of it.
 - `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
@@ -331,7 +331,7 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 - *Working* means `queued…resolving`, *open* means working plus `needs_review` and `ready`, and *closed* means `applied`, `failed` or `cancelled`.
 - `fetching_metadata` loads the torrent's file list. It also refreshes the show's metadata when it's over 24 h old or a file numbers past the last known episode.
 - `resolving` runs the AI resolver on the unsure files. It's skipped when nothing needs asking or AI is unavailable: no key, `classifier_enabled` off, or the show's `classifier_mode` is `rules_only`.
-- After classification, every PATCH and every AI run, the status is recomputed: `needs_review` while a proposal that *maps* is `pending` or a conflict exists, otherwise `ready`. A proposal maps when it has targets, or when it's a movie candidate.
+- After classification, every PATCH (during `resolving`, when the run ends) and every AI run, the status is recomputed: `needs_review` while a proposal that *maps* is `pending` or a conflict exists, otherwise `ready`. A proposal maps when it has targets, or when it's a movie candidate.
 - **Auto-apply** (the `auto_apply_high_confidence` setting, on by default) sends a freshly classified job straight to `applied` when all of these hold:
   - it isn't a dry run;
   - it has no conflict;
@@ -347,15 +347,17 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 | `POST /movies/{id}/assign-torrent` with `{magnet_uri, file_path?, indexer?}` | As for shows. `file_path` picks the file up front: it's accepted, the other candidates are ignored, and the job applies once classified | As for shows |
 | `GET /assignment-jobs/{id}` | `200 AssignmentJobDetail` | `404` |
 | `GET /assignment-jobs?status=` | `{items: [AssignmentJob]}`, newest first, no dry runs. `status` is `open` (the default) or a comma-separated list of statuses | `400 bad_request` (unknown status) |
-| `PATCH /assignment-jobs/{id}/proposals` with `{items: [{id, decision?, episode_ids?}]}` | `200 AssignmentJobDetail`, all or nothing | `404`, `409 job_working`, `409 job_closed`, `422 validation_error` |
-| `POST /assignment-jobs/{id}/reclassify` with `{scope: "unresolved"\|"all", hint?}` | `202 {job_id}`; the job goes to `resolving` | `409 job_working`, `409 job_closed`, `503 unavailable` (no AI) |
+| `PATCH /assignment-jobs/{id}/proposals` with `{items: [{id, decision?, episode_ids?}]}` | `200 AssignmentJobDetail`, all or nothing | `400 bad_request` (malformed body: an item with neither field, an empty `episode_ids`), `404`, `409 job_working`, `409 job_closed`, `422 validation_error` (well-formed but invalid) |
+| `POST /assignment-jobs/{id}/reclassify` with `{scope: "unresolved"\|"all", hint?}` | `202 {job_id}`; the job goes to `resolving` | `400 bad_request` (malformed body), `409 job_working`, `409 job_closed`, `503 unavailable` (no AI) |
 | `POST /assignment-jobs/{id}/apply` | `200 AssignmentJobDetail` (`applied`) | `409` with `dry_run`, `job_closed`, `job_working`, `conflicting_proposals` or `pending_proposals`, checked in that order |
 | `POST /assignment-jobs/{id}/discard` | `200 AssignmentJobDetail` (`cancelled`; again for a cancelled job) | `409 job_closed` once applied or failed |
 | `GET /shows/{id}/episodes` | `{items: [{season_number, name, episodes: [{id, episode_number, absolute_number, name, air_date, has_file}]}]}` | `404` |
 | `PUT /episodes/{id}/assignment`, `PUT /movies/{id}/assignment` with `{info_hash, file_path}` | `204`; a manual override (`match_source: manual`) | `404` |
 | `GET /torrents/{hash}/files` | `{items: [{path, size, mapped_to}]}`; `mapped_to` is `{episodes: [ProposalTarget]}`, `{movie_id}` or null | `404` (unknown torrent) |
 
-`?wait=true` (legacy, both assign routes, until H2) waits until the job stops working. It applies every proposal that maps, at any confidence, except conflicting ones, then answers `201` with the legacy response plus `job_id`.
+`?wait=true` (legacy, both assign routes, until H2) waits until the job stops working, applies it, and answers `201` with the legacy response plus `job_id`. The job ends `applied`.
+- Shows: every proposal with targets is applied, at any confidence, except conflicting ones. Those are left out (the legacy response reports them as unmatched) and their proposals stay `pending`.
+- Movies: only the top-ranked candidate is applied.
 
 ```
 AssignmentJobDetail { job: AssignmentJob, proposals: [Proposal] }   // proposals: [] until classified (queued…classifying)
@@ -364,8 +366,9 @@ AssignmentJob {
   item: {id, media_type, tmdb_id, title, year, poster_path},   // id: library id; null for a dry run on a title not in the library
   torrent: {info_hash, name, size_bytes, file_count, video_count, release_group, indexer},   // sizes and counts null until the file list is in
   progress: {seasons, episodes, files, videos, ai_files},  // the progress steps' details; each null until its step has run
+  // video_count and videos: video files that aren't extras (Frieren's batch: 16 files · 13 videos)
   hint: {season, episode, text} | null,                    // a re-check's hint replaces text
-  ai_available, ai_error,                                  // ai_error: the latest AI run failed; the rules results stand
+  ai_available, ai_error,                                  // ai_error: the latest AI run failed, so its proposals are unchanged; cleared when a re-check starts
   suggested_hints: [string],                               // ≤ 5 chips for "Re-check with AI"
   counts: {files, to_apply, pending, conflicts, needs_review, matched, specials, ignored, unmatched},
   created_at, updated_at, applied_at
@@ -407,22 +410,23 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
 
 **PATCH**
 - **`decision`** sets the decision. `accepted` needs targets, or a movie candidate.
-- **`episode_ids`** replaces the targets; `[]` clears them. The episodes must be this show's, Specials included.
+- **`episode_ids`** replaces the targets. It's never empty (`400 bad_request`): to leave a file out, ignore it. The episodes must be this show's, Specials included.
   - The `suggested_targets` ids restore the suggestion, with its `confidence`, `source` and `reason`.
   - Any other ids make a manual pick: `source: manual`, `confidence: null`, `reason` "You picked this episode".
 - **`user_decided`** turns true when the user changes a proposal. It turns false again once the proposal is back on its suggestion with its group's default decision, so Undo is just another PATCH.
 - **Neither moves the group.** The answer is the whole detail, with the status, counts and conflicts recomputed. PATCH works during `resolving`.
 - **`409 job_working`** before there are proposals (`queued…classifying`).
-- **`422 validation_error`** for:
+- **`400 bad_request`** for a malformed body: no `items`, an item without `id`, with neither field, with an unknown `decision`, or with an empty `episode_ids`.
+- **`422 validation_error`** for a well-formed change that can't apply:
   - an unknown proposal id;
   - an episode outside the show;
   - `episode_ids` on a movie job;
-  - accepting without targets;
-  - an item with neither field.
+  - accepting without targets.
 
 **Re-check (reclassify)**
 - **Scope.** `scope: "unresolved"` re-checks the pending proposals the user hasn't decided; `"all"` re-checks every proposal the user hasn't decided. AI writes use `WHERE NOT user_decided` (plus `decision = 'pending'` for `unresolved`), so the user's decisions always survive.
-- **What changes.** The status goes to `resolving`, then gets recomputed. Each changed proposal gets new `targets` and `suggested_targets`, `confidence`, `reason`, `source: ai` and `updated: true` (plus `hinted`). Its decision and group stay the same.
+- **What changes.** Starting a re-check clears `ai_error` and every `updated`/`hinted`. The status goes to `resolving`, then gets recomputed. Each changed proposal gets new `targets` and `suggested_targets`, `confidence`, `reason`, `source: ai` and `updated: true` (plus `hinted`). Its decision and group stay the same.
+- **When the AI run fails,** the job sets `ai_error` and leaves every proposal as it was.
 
 **Apply**
 - **One transaction,** guarded by `UPDATE … WHERE status = 'ready'`:
@@ -696,7 +700,7 @@ Related endpoints:
   - Every AI mapping must point at an existing episode row.
   - The AI never overrides a `high` rules result.
   - AI-only mappings go to `needs_review` unless they're `high` confidence and the setting allows auto-apply.
-- **Caching and cost.** Cache results by `(info_hash, show_id, metadata_version, hint)`. Record usage in `ai_usage`. If `ANTHROPIC_API_KEY` is missing, degrade quietly to rules-only.
+- **Caching and cost.** Cache results in `ai_cache` by `(info_hash, show_id, metadata_updated_at, hint)`. Record usage in `ai_usage`. If `ANTHROPIC_API_KEY` is missing, degrade quietly to rules-only.
 - **`cmd/classifier-eval`.** Runs at least 20 golden torrent file lists:
   - One Piece batch, Frieren (including the scene "S02" split), Doctor Who with specials, Bluey.
   - Law & Order: SVU, Trailer Park Boys.

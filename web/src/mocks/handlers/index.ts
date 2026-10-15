@@ -4,7 +4,7 @@ import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
 import { recommendationsHandlers } from './recommendations';
 import { searchHandlers } from './search';
-import { settingsHandlers } from './settings';
+import { resetMockSettings, settingsHandlers } from './settings';
 import { resetMockSubtitles, subtitlesHandlers } from './subtitles';
 import { systemHandlers } from './system';
 import { resetMockLibrary, titlesHandlers } from './titles';
@@ -30,9 +30,10 @@ export const handlers = [
   ...legacyHandlers,
 ];
 
-/** Tests: forget what earlier requests changed (the library, mapping jobs and stored subtitles live per page). */
+/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings and stored subtitles live per page). */
 export function resetMockState(): void {
   resetMockLibrary();
+  resetMockSettings();
   resetMockJobs();
   resetMockSubtitles();
   setMockScenario(null);

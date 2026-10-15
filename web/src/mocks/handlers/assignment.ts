@@ -27,7 +27,7 @@ import {
 } from '../fixtures/assignment';
 import { findTitle } from '../fixtures/catalog';
 import { assignMovieRelease, episodeFile, findByLibraryId, libraryKey, showEpisodes } from '../fixtures/titles';
-import { scenario } from '../scenario';
+import { HOLD_STEPS, heldStep, scenario } from '../scenario';
 import { mockAiSettings } from './settings';
 import { mockLibrary } from './titles';
 import { accepted, apiError, isRecord, jsonBody, latency, notFound } from './util';
@@ -134,11 +134,21 @@ function applyJob(job: MockJob): void {
 /** Classification is done: settle the status, then apply on its own when nothing needs a look. */
 function classified(job: MockJob): void {
   job.reached = 4;
+  // Set here too: a poll can miss the short `resolving` step
+  if (job.first_run_files > 0) job.ai_files = job.first_run_files;
   const picked = job.pick && job.proposals.find((p) => p.kind === 'movie' && (p.file_path === job.pick || p.file_path.endsWith(`/${job.pick}`)));
   if (picked) patchProposals(job, [{ id: picked.id, decision: 'accepted' }]);
   job.status = settledStatus(job.proposals);
   if (job.dry_run || job.status !== 'ready') return;
   if (picked || (mockAiSettings().auto_apply_high_confidence && autoApplies(job))) applyJob(job);
+}
+
+/** `job-hold:<step>`: the last step of this walk a held job may reach (-1: the hold doesn't apply). */
+function holdIndex(steps: JobStatus[]): number {
+  const hold = heldStep();
+  if (!hold) return -1;
+  const limit = HOLD_STEPS.indexOf(hold);
+  return steps.reduce((last, status, i) => (HOLD_STEPS.findIndex((known) => known === status) <= limit ? i : last), -1);
 }
 
 /** Move a working job on: per read in Node, by the clock in the browser. */
@@ -147,7 +157,9 @@ function tick(job: MockJob): void {
   const walk = job.walk;
   if (!walk) return;
   walk.polls++;
-  const step = instant() ? walk.polls : Math.floor((Date.now() - walk.started) / STEP_MS);
+  const held = holdIndex(walk.steps);
+  const walked = instant() ? walk.polls : Math.floor((Date.now() - walk.started) / STEP_MS);
+  const step = held >= 0 ? Math.min(walked, held) : walked;
   if (step < walk.steps.length) {
     const status = walk.steps[step];
     if (walk.kind === 'classify') job.reached = Math.max(job.reached, step);
@@ -161,7 +173,9 @@ function tick(job: MockJob): void {
   job.walk = null;
   if (walk.kind === 'classify') classified(job);
   else {
-    finishRecheck(job, walk.scope ?? 'unresolved');
+    // `ai-error`: the run fails and changes nothing
+    if (scenario() === 'ai-error') job.ai_error = 'The AI didn’t answer in time, so nothing changed.';
+    else finishRecheck(job, walk.scope ?? 'unresolved');
     job.status = settledStatus(job.proposals);
   }
   touch(job);
@@ -226,11 +240,14 @@ const isAssignBody = (body: unknown): body is AssignBody =>
 
 const DECISIONS = ['pending', 'accepted', 'ignored'];
 
+/** Well-formed: an id and at least one change; `episode_ids` is never empty (to leave a file out, ignore it). */
 const isChange = (item: unknown): item is ProposalChange =>
   isRecord(item) &&
   typeof item.id === 'number' &&
+  (item.decision !== undefined || item.episode_ids !== undefined) &&
   (item.decision === undefined || DECISIONS.includes(String(item.decision))) &&
-  (item.episode_ids === undefined || (Array.isArray(item.episode_ids) && item.episode_ids.every((id) => typeof id === 'number')));
+  (item.episode_ids === undefined ||
+    (Array.isArray(item.episode_ids) && item.episode_ids.length > 0 && item.episode_ids.every((id) => typeof id === 'number')));
 
 const isPatch = (body: unknown): body is { items: ProposalChange[] } =>
   isRecord(body) && Array.isArray(body.items) && body.items.length > 0 && body.items.every(isChange);
@@ -299,7 +316,7 @@ export const assignmentHandlers = [
     const job = findJob(params.id);
     if (!job) return noJob();
     const body = await jsonBody(request);
-    if (!isPatch(body)) return apiError(422, 'validation_error', 'Send {items: [{id, decision?, episode_ids?}]}.');
+    if (!isPatch(body)) return apiError(400, 'bad_request', 'Send {items: [{id, decision?, episode_ids?}]}, each with a decision or a non-empty episode_ids.');
     if (CLOSED.includes(job.status)) return closed(job);
     if (UNCLASSIFIED.includes(job.status)) return working();
     const error = patchProposals(job, body.items);
@@ -324,6 +341,7 @@ export const assignmentHandlers = [
     delete hint.text;
     if (body.hint) hint.text = body.hint;
     job.hint = Object.keys(hint).length ? hint : null;
+    job.ai_error = null;
     job.proposals = job.proposals.map((p) => ({ ...p, updated: false, hinted: false }));
     job.ai_files = job.proposals.filter((p) => inScope(p, body.scope)).length;
     job.status = 'resolving';

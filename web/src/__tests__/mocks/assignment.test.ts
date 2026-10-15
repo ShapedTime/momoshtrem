@@ -4,7 +4,7 @@ import { resetMockState } from '@/mocks/handlers';
 import { setMockScenario } from '@/mocks/scenario';
 import { episodeId } from '@/mocks/fixtures/titles';
 import { QueryClient } from '@tanstack/react-query';
-import { assignmentApi, assignmentJobQuery, invalidateAfterJob, searchApi, titlesApi } from '@/lib/api/endpoints';
+import { assignmentApi, assignmentJobQuery, invalidateAfterJob, searchApi, settingsApi, titlesApi } from '@/lib/api/endpoints';
 import type { AssignmentJobDetail, JobStatus, Proposal } from '@/lib/api/contract';
 
 /**
@@ -52,8 +52,9 @@ describe('seeded jobs', () => {
       status: 'needs_review',
       dry_run: false,
       item: { id: 1, media_type: 'tv', tmdb_id: FRIEREN, title: 'Frieren: Beyond Journey’s End', year: 2023 },
-      torrent: { name: '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]', file_count: 16, video_count: 15, release_group: 'SubsPlease', indexer: 'Nyaa' },
-      progress: { seasons: 2, episodes: 44, files: 16, videos: 15, ai_files: 3 },
+      // The design's "16 files · 13 videos": openings and endings are extras
+      torrent: { name: '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]', file_count: 16, video_count: 13, release_group: 'SubsPlease', indexer: 'Nyaa' },
+      progress: { seasons: 2, episodes: 44, files: 16, videos: 13, ai_files: 3 },
       ai_available: true,
       ai_error: null,
       suggested_hints: ['these are absolute numbers', '28.5 is a recap', 'v2 replaces v1'],
@@ -107,8 +108,8 @@ describe('seeded jobs', () => {
     expect(await reviewEpisodes(FRIEREN, 1)).toEqual([35]);
     expect(await reviewEpisodes(FRIEREN, 0)).toEqual([3]);
     expect(await reviewEpisodes(ONE_PIECE, 21)).toEqual([1]);
-    // S00E06 has a file, which the two Waters of Mars files would replace: no review state there
-    expect(await reviewEpisodes(DOCTOR_WHO, 0)).toEqual([5]);
+    // Doctor Who's files to review all target specials that have a file (S00E01, S00E06): no review rows
+    expect(await reviewEpisodes(DOCTOR_WHO, 0)).toEqual([]);
     // Frieren still needs 29–38: the episode under review has no file yet
     expect(titles[0].library.missing).toMatchObject({ from: 29, to: 38, count: 10 });
   });
@@ -158,6 +159,14 @@ describe('a new job', () => {
     expect(await statuses(job_id, 3)).toEqual(['fetching_metadata', 'classifying', 'applied']);
     const season = await titlesApi.season(66573, 4);
     expect(new Set(season.episodes.map((e) => e.state))).toEqual(new Set(['ready']));
+  });
+
+  it('discarded before it’s classified, it has no proposals', async () => {
+    const { job_id } = await assignmentApi.assignShow(1, { magnet_uri: 'magnet:?xt=urn:btih:early' });
+    expect((await assignmentApi.job(job_id)).job.status).toBe('fetching_metadata');
+    const discarded = await assignmentApi.discard(job_id);
+    expect(discarded.job).toMatchObject({ status: 'cancelled', counts: { files: 0 } });
+    expect(discarded.proposals).toEqual([]);
   });
 
   it('answers 400 for a magnet without an info hash and 404 for a show not in the library', async () => {
@@ -228,28 +237,39 @@ describe('reviewing', () => {
     expect(detail.job.status).toBe('needs_review');
   });
 
-  it('PATCH is all or nothing and checks every change', async () => {
+  it('PATCH is all or nothing: 400 for a malformed body, 422 for a change that can’t apply', async () => {
     const detail = await assignmentApi.job(101);
     const v2 = named(detail, '35v2');
     const unmatched = named(detail, 'Special Extra');
-    const cases = [
+    // An item with neither field, an empty episode_ids (leave a file out by ignoring it), no items
+    for (const items of [[{ id: v2.id }], [{ id: v2.id, episode_ids: [] }], []]) {
+      await expect(assignmentApi.patchProposals(101, { items })).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+    }
+    // An unknown proposal, another show's episode, accepting without a target
+    const invalid = [
       [{ id: v2.id, decision: 'accepted' as const }, { id: 1, decision: 'accepted' as const }],
       [{ id: v2.id, episode_ids: [episodeId(DOCTOR_WHO, 0, 5)] }],
       [{ id: unmatched.id, decision: 'accepted' as const }],
-      [{ id: v2.id }],
     ];
-    for (const items of cases) {
+    for (const items of invalid) {
       await expect(assignmentApi.patchProposals(101, { items })).rejects.toMatchObject({ status: 422, code: 'validation_error' });
     }
     expect(named(await assignmentApi.job(101), '35v2').decision).toBe('pending');
+    const reclassify = await fetch('/api/assignment-jobs/101/reclassify', { method: 'POST', body: JSON.stringify({ scope: 'some' }) });
+    expect(reclassify.status).toBe(400);
   });
 
   it('conflicts block Apply until one file is ignored, then Doctor Who’s specials are ready', async () => {
     const detail = await assignmentApi.job(103);
-    const planet = named(detail, 'Planet.of.the.Dead');
+    const easter = named(detail, 'Easter.Special');
     const [mars, extended] = detail.proposals.filter((p) => code(p) === 'S00E06');
     await expect(assignmentApi.apply(103)).rejects.toMatchObject({ status: 409, code: 'conflicting_proposals' });
-    await assignmentApi.patchProposals(103, { items: [{ id: planet.id, decision: 'accepted' }, { id: mars.id, decision: 'accepted' }] });
+    await assignmentApi.patchProposals(103, {
+      items: [
+        { id: easter.id, episode_ids: [episodeId(DOCTOR_WHO, 0, 5)], decision: 'accepted' },
+        { id: mars.id, decision: 'accepted' },
+      ],
+    });
     await expect(assignmentApi.apply(103)).rejects.toMatchObject({ status: 409, code: 'conflicting_proposals' });
     const resolved = await assignmentApi.patchProposals(103, { items: [{ id: extended.id, decision: 'ignored' }] });
     expect(resolved.job).toMatchObject({ status: 'ready', counts: { conflicts: 0, pending: 0 } });
@@ -319,6 +339,22 @@ describe('reviewing', () => {
     expect(named(done, '28.5').reason).not.toBe(named(before, '28.5').reason);
   });
 
+  it('a re-check can move a target, and Undo then goes back to the AI’s new suggestion', async () => {
+    const before = named(await assignmentApi.job(103), 'Easter.Special');
+    expect(before).toMatchObject({ targets: [{ season: 0, episode: 1 }], confidence: 'low', replaces: expect.objectContaining({ file_path: expect.stringContaining('S00E01') }) });
+    await assignmentApi.reclassify(103, { scope: 'unresolved' });
+    expect(await statuses(103, 2)).toEqual(['resolving', 'needs_review']);
+    const moved = named(await assignmentApi.job(103), 'Easter.Special');
+    const planet = { episode_id: episodeId(DOCTOR_WHO, 0, 5), season: 0, episode: 5, absolute_number: null, name: 'Planet of the Dead' };
+    expect(moved).toMatchObject({ targets: [planet], suggested_targets: [planet], confidence: 'high', source: 'ai', updated: true, hinted: false, replaces: null });
+    // S00E05 has no file: now it's under review
+    expect(await reviewEpisodes(DOCTOR_WHO, 0)).toEqual([5]);
+
+    await assignmentApi.patchProposals(103, { items: [{ id: moved.id, episode_ids: [episodeId(DOCTOR_WHO, 0, 4)], decision: 'accepted' }] });
+    const undone = await assignmentApi.patchProposals(103, { items: [{ id: moved.id, episode_ids: [planet.episode_id], decision: 'pending' }] });
+    expect(named(undone, 'Easter.Special')).toEqual(moved);
+  });
+
   it('GET /shows/{id}/episodes lists every season, Specials included even while they’re off', async () => {
     await titlesApi.patchShow(1, { include_specials: false });
     const { items } = await assignmentApi.showEpisodes(1);
@@ -373,6 +409,43 @@ describe('scenarios', () => {
     const { job_id } = await assignmentApi.assignShow(1, { magnet_uri: 'magnet:?xt=urn:btih:noai' });
     expect(await statuses(job_id, 3)).toEqual(['fetching_metadata', 'classifying', 'needs_review']);
     expect((await assignmentApi.job(job_id)).job.progress.ai_files).toBeNull();
+  });
+
+  it('ai-error: the re-check ends with ai_error and nothing changed; the next one clears it', async () => {
+    setMockScenario('ai-error');
+    const before = await assignmentApi.job(101);
+    await assignmentApi.reclassify(101, { scope: 'all', hint: '28.5 is a recap' });
+    expect(await statuses(101, 2)).toEqual(['resolving', 'needs_review']);
+    const after = await assignmentApi.job(101);
+    expect(after.job.ai_error).toContain('nothing changed');
+    expect(after.proposals).toEqual(before.proposals);
+    setMockScenario(null);
+    await assignmentApi.reclassify(101, { scope: 'unresolved' });
+    expect((await assignmentApi.job(101)).job).toMatchObject({ status: 'resolving', ai_error: null });
+  });
+
+  it('job-hold keeps a new job at a step until it’s lifted', async () => {
+    setMockScenario('job-hold:classifying');
+    const { job_id } = await assignmentApi.assignShow(1, { magnet_uri: 'magnet:?xt=urn:btih:hold' });
+    expect(await statuses(job_id, 5)).toEqual(['fetching_metadata', 'classifying', 'classifying', 'classifying', 'classifying']);
+    expect((await assignmentApi.job(job_id)).proposals).toEqual([]);
+    // Lifted: it jumps past `resolving` without a read there, and still reports the AI run
+    setMockScenario(null);
+    expect((await assignmentApi.job(job_id)).job).toMatchObject({ status: 'needs_review', progress: { ai_files: 3 } });
+
+    setMockScenario('job-hold:resolving');
+    const second = await assignmentApi.assignShow(1, { magnet_uri: 'magnet:?xt=urn:btih:hold2' });
+    expect(await statuses(second.job_id, 5)).toEqual(['fetching_metadata', 'classifying', 'resolving', 'resolving', 'resolving']);
+    expect((await assignmentApi.job(second.job_id)).proposals).toHaveLength(16);
+    // Re-checks hold in `resolving` too
+    await assignmentApi.reclassify(101, { scope: 'unresolved' });
+    expect(await statuses(101, 3)).toEqual(['resolving', 'resolving', 'resolving']);
+  });
+
+  it('resetMockState puts the AI settings back', async () => {
+    await settingsApi.putAi({ ...(await settingsApi.ai()), auto_apply_high_confidence: false });
+    resetMockState();
+    expect((await settingsApi.ai()).auto_apply_high_confidence).toBe(true);
   });
 
   it('rules_only shows have no AI either', async () => {

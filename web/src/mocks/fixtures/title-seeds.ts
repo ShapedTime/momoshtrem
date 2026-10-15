@@ -289,7 +289,7 @@ export const SHOWS: Record<number, ShowSeed> = {
           name,
           air_date,
           runtime: 60,
-          // Planet of the Dead (S00E05) has no file: job 103 maps it, and two of its files want S00E06
+          // Planet of the Dead (S00E05) has no file: job 103's Easter special lands here after a re-check
           state: i < 3 ? 'watched' : i === 4 ? 'missing' : i < 6 ? 'ready' : 'missing',
         })),
       },

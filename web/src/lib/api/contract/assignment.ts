@@ -114,6 +114,7 @@ export interface AssignmentJobTorrent {
   /** Null until the file list is in. */
   size_bytes: number | null;
   file_count: number | null;
+  /** Video files that aren't extras (Frieren's batch: 16 files, 13 videos). */
   video_count: number | null;
   release_group: string | null;
   /** Where it was found, when the assign request said so. */
@@ -125,7 +126,7 @@ export interface AssignmentJobProgress {
   /** Fetching metadata: the show's seasons (Specials included) and episodes. Null for movies. */
   seasons: number | null;
   episodes: number | null;
-  /** Matching files. */
+  /** Matching files; `videos` counts video files that aren't extras, like `torrent.video_count`. */
   files: number | null;
   videos: number | null;
   /** Asking AI: files sent in the current or latest AI run; null when AI hasn't run. */
@@ -142,14 +143,14 @@ export interface AssignmentJobCounts {
   pending: number;
   /** Non-ignored proposals whose targets share an episode with another: they block Apply. */
   conflicts: number;
-  /** Pending ∪ conflicting: the files the title's `needs_review` counts. */
+  /** Pending and maps, or in a conflict: the files the title's `needs_review` counts. */
   needs_review: number;
   /** Accepted regular episodes (or the accepted movie file). */
   matched: number;
   /** Accepted, Season 0. */
   specials: number;
   ignored: number;
-  /** Not ignored, with no target. Never blocks. */
+  /** Not ignored and doesn't map. Never blocks. */
   unmatched: number;
 }
 
@@ -171,7 +172,7 @@ export interface AssignmentJob {
   hint: AssignHint | null;
   /** AI is configured, enabled and allowed for this show (`classifier_mode` isn't `rules_only`). */
   ai_available: boolean;
-  /** The latest AI run failed; the rules results stand. */
+  /** The latest AI run failed, so it changed nothing. Cleared when a re-check starts. */
   ai_error: string | null;
   /** Up to 5 hint chips for "Re-check with AI", e.g. "these are absolute numbers". */
   suggested_hints: string[];
@@ -213,8 +214,9 @@ export interface AssignMovieTorrentRequest {
 }
 
 /**
- * One proposal's change. `episode_ids` replaces the targets (`[]` clears them);
- * the suggestion's ids restore the suggestion, any others make it a manual pick.
+ * One proposal's change: at least one of `decision` and `episode_ids` (else 400).
+ * `episode_ids` replaces the targets and is never empty (to leave a file out,
+ * ignore it); the suggestion's ids restore the suggestion, any others make a manual pick.
  */
 export interface ProposalChange {
   id: number;
@@ -222,12 +224,12 @@ export interface ProposalChange {
   episode_ids?: number[];
 }
 
-/** PATCH /assignment-jobs/{id}/proposals: all or nothing; answers the detail. */
+/** PATCH /assignment-jobs/{id}/proposals: all or nothing; answers the detail. 400 for a malformed body, 422 for a change that can't apply. */
 export interface ProposalsPatch {
   items: ProposalChange[];
 }
 
-/** POST /assignment-jobs/{id}/reclassify: 202 → JobAccepted; 503 `unavailable` without AI. */
+/** POST /assignment-jobs/{id}/reclassify: 202 → JobAccepted; clears `ai_error`. 400 for a malformed body, 503 `unavailable` without AI. */
 export interface ReclassifyRequest {
   /** `unresolved`: pending proposals the user hasn't decided. `all`: every proposal the user hasn't decided. */
   scope: 'unresolved' | 'all';

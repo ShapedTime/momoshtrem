@@ -27,7 +27,7 @@ import { absoluteNumbers, episodeIdFor, SHOWS, type ShowSeed } from './title-see
  * |---|---|---|
  * | 101 Frieren | the design's 16 files, #29–#38 | 2 files: 35v2 (S01E35, AI medium) and 28.5 (S00E03, AI low) |
  * | 102 One Piece | #892–#897 + Fan Letter, 8 files | 1 file: #892 (S21E01, AI medium) |
- * | 103 Doctor Who | the 2009 specials, 7 files | 3 files: Planet of the Dead (AI medium) and two files that want S00E06 |
+ * | 103 Doctor Who | the 2009 specials, 7 files | 3 files: an Easter special guessed by number (S00E01, AI low; a re-check moves it to S00E05) and two files that want S00E06 |
  *
  * New jobs (assign or Inspect) are built from the same templates: Frieren,
  * One Piece and Doctor Who get theirs, other shows a season pack that maps
@@ -143,9 +143,6 @@ export const NO_REVIEW: MockReview = { job_id: null, files: 0, episode_ids: new 
 
 export const WORKING: readonly JobStatus[] = ['queued', 'fetching_metadata', 'classifying', 'resolving'];
 export const CLOSED: readonly JobStatus[] = ['applied', 'failed', 'cancelled'];
-/** Steps whose proposals the API doesn't show yet. */
-const UNCLASSIFIED: readonly JobStatus[] = ['queued', 'fetching_metadata', 'classifying'];
-
 const GROUP_ORDER: ProposalGroup[] = ['needs_review', 'unmatched', 'specials', 'matched', 'extras'];
 
 export const defaultDecision = (group: ProposalGroup): ProposalDecision =>
@@ -366,15 +363,16 @@ function doctorWho(): Template {
     suggested_hints: ['match specials by title', 'Confidential is a different show'],
     ai_files: 1,
     files: [
+      // A re-check moves this one to another episode (Undo then goes back to the AI's new suggestion)
       {
-        file: file('S00E01.Planet.of.the.Dead'),
+        file: file('S00E01.Easter.Special'),
         size: 1.42 * GB,
         group: 'needs_review',
-        at: [[0, 5]],
-        confidence: 'medium',
+        at: [[0, 1]],
+        confidence: 'low',
         source: 'ai',
-        reason: 'The file says S00E01, but TMDB has "Planet of the Dead" as S00E05; matched by title, not number',
-        recheck: { confidence: 'high', reason: 'TMDB lists "Planet of the Dead" (Apr 11 2009) as S00E05; title and air date agree' },
+        reason: 'No title in the name, so S00E01 by number, but this pack’s numbers don’t match TMDB’s specials',
+        recheck: { confidence: 'high', at: [[0, 5]], reason: 'The 2009 Easter special is "Planet of the Dead" (Apr 11 2009): TMDB’s S00E05' },
       },
       // Two files want S00E06, which already has a file: a conflict, and a `replaces` note on both
       {
@@ -642,7 +640,6 @@ export function patchProposals(job: MockJob, items: ProposalChange[]): string | 
   for (const item of items) {
     const current = next.get(item.id) ?? job.proposals.find((p) => p.id === item.id);
     if (!current) return `This job has no proposal ${item.id}.`;
-    if (item.decision === undefined && item.episode_ids === undefined) return `Proposal ${item.id}: send a decision or episode_ids.`;
     const p: MockProposal = { ...current };
     if (item.episode_ids !== undefined) {
       if (job.media_type === 'movie') return 'Movie files have no episodes: accept the file instead.';
@@ -691,7 +688,8 @@ export interface DetailContext {
   currentFile: (episodeId: number) => EpisodeFile | null;
 }
 
-const isVideo = (path: string) => /\.(mkv|mp4|avi|m4v|ts)$/i.test(path);
+/** Video files that aren't extras (`torrent.video_count`, `progress.videos`). */
+const isVideo = (p: Proposal) => p.kind !== 'extra' && /\.(mkv|mp4|avi|m4v|ts)$/i.test(p.file_path);
 
 const CONFIDENCE_ORDER: Array<MatchConfidence | null> = ['high', 'medium', 'low', null];
 
@@ -757,7 +755,8 @@ function seasonsAndEpisodes(job: MockJob): { seasons: number | null; episodes: n
 
 /** GET /assignment-jobs/{id}, as the backend answers it at this moment. */
 export function jobDetail(job: MockJob, ctx: DetailContext): AssignmentJobDetail {
-  const shown = UNCLASSIFIED.includes(job.status) ? [] : job.proposals;
+  // Proposals exist once classification is done (from `resolving` on), also for a job cancelled before that
+  const shown = job.reached >= 3 ? job.proposals : [];
   const listed = job.reached >= 2 && job.proposals.length > 0;
   const proposals = shown
     .map(apiFields)
@@ -785,14 +784,14 @@ export function jobDetail(job: MockJob, ctx: DetailContext): AssignmentJobDetail
         name: job.name,
         size_bytes: listed ? job.proposals.reduce((sum, p) => sum + p.file_size, 0) : null,
         file_count: listed ? job.proposals.length : null,
-        video_count: listed ? job.proposals.filter((p) => isVideo(p.file_path)).length : null,
+        video_count: listed ? job.proposals.filter(isVideo).length : null,
         release_group: job.release_group,
         indexer: job.indexer,
       },
       progress: {
         ...seasonsAndEpisodes(job),
         files: listed ? job.proposals.length : null,
-        videos: listed ? job.proposals.filter((p) => isVideo(p.file_path)).length : null,
+        videos: listed ? job.proposals.filter(isVideo).length : null,
         ai_files: job.ai_files,
       },
       hint: job.hint,
