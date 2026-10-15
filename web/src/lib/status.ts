@@ -5,6 +5,7 @@ import {
   CircleDashed,
   CircleAlert,
   Clock,
+  EyeOff,
   Layers,
   type LucideIcon,
   Minus,
@@ -12,6 +13,7 @@ import {
   Play,
   Plus,
   Search,
+  Sparkle,
   TriangleAlert,
   Tv,
   WifiOff,
@@ -72,6 +74,11 @@ export const STATUS = {
   match_same_source: { tone: 'neutral', label: 'Same source', icon: Check },
   match_different_timing: { tone: 'warning', label: 'Different cut timing', icon: TriangleAlert },
   match_unknown: { tone: 'neutral', label: 'Match unknown', icon: CircleDashed },
+  // A file in a mapping job (#5): where it goes, or why it stays out of Infuse
+  matched: { tone: 'ready', label: 'Matched', icon: Check },
+  special: { tone: 'upcoming', label: 'Special', icon: Sparkle },
+  unmatched: { tone: 'warning', label: 'Unmatched', icon: CircleAlert },
+  ignored: { tone: 'missing', label: 'Ignored', icon: EyeOff },
 } as const satisfies Record<string, StatusDefinition>;
 
 export type StatusKey = keyof typeof STATUS;

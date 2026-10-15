@@ -148,6 +148,8 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `src/components/shell/` - App shell: top bar, tab bar, account menu, ⌘K palette, URL-driven sheets
 - `src/components/title/` - Movie and show pages: hero, primary panel and action dock, subtitles, episodes (`show/`: season tabs, rows, long-season tools, show settings and episode sheets)
 - `src/lib/title/` - Pure title helpers: stage copy (`primaryActionFor`), formats, facts, episodes (`parseJump`, ranges, next-up)
+- `src/components/mapping/` + `src/app/(protected)/mapping/[id]/` - Mapping review (`/mapping/{job_id}`): progress steps, grouped rows, the episode picker (desktop pane, phone sheet), sticky Apply foot, Applied state
+- `src/lib/mapping/` - Pure mapping-review rules: counts, conflicts, ranges, short file names, foot state (`review.ts`) and picker search and tags (`picker.ts`)
 - `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
 - `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
 - `src/lib/api/` - Server-side clients (momoshtrem, jackett, tmdb)

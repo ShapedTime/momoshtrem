@@ -7,13 +7,13 @@ import type {
   AssignmentJobDetail,
   JobAccepted,
   JobListFilter,
-  JobStatus,
   ManualAssignment,
   ProposalsPatch,
   ReclassifyRequest,
   ShowEpisodesSeason,
   TorrentFileEntry,
 } from '../contract';
+import { JOB_OPEN_STATUSES, JOB_WORKING_STATUSES, isJobOpen, isJobWorking } from '../contract/assignment';
 import { libraryKeys } from './library';
 import { subtitleKeys } from './subtitles';
 import { titleKeys } from './titles';
@@ -30,13 +30,8 @@ export const assignmentKeys = {
   torrentFiles: (infoHash: string) => ['torrents', infoHash, 'files'] as const,
 };
 
-/** The worker is still on it (first run or a re-check): poll. */
-export const JOB_WORKING_STATUSES: readonly JobStatus[] = ['queued', 'fetching_metadata', 'classifying', 'resolving'];
-/** Not finished: working, or waiting for the user to review and apply. */
-export const JOB_OPEN_STATUSES: readonly JobStatus[] = [...JOB_WORKING_STATUSES, 'needs_review', 'ready'];
-
-export const isJobWorking = (status: JobStatus) => JOB_WORKING_STATUSES.includes(status);
-export const isJobOpen = (status: JobStatus) => JOB_OPEN_STATUSES.includes(status);
+// The status groups live with the contract (pure code shares them); re-exported for existing imports
+export { JOB_WORKING_STATUSES, JOB_OPEN_STATUSES, isJobWorking, isJobOpen };
 
 const JOB_POLL_MS = 1500;
 const JOBS_POLL_MS = 3000;
@@ -111,19 +106,17 @@ export function setJobDetail(queryClient: QueryClient, detail: AssignmentJobDeta
  * After apply, discard or a re-check: refetch the job (polling restarts while
  * it works), the jobs list, and everything an applied mapping changes: titles,
  * the library, subtitles, the picker's episodes and torrent files.
+ * `refetchJob: false` only marks the job stale, for a page that is leaving
+ * it (discard), so it doesn't flash the job's new state on the way out.
  */
-export function invalidateAfterJob(queryClient: QueryClient, jobId: number): Promise<unknown> {
-  return Promise.all(
-    [
-      assignmentKeys.job(jobId),
-      assignmentKeys.lists,
-      titleKeys.all,
-      libraryKeys.all,
-      subtitleKeys.all,
-      assignmentKeys.allEpisodes,
-      torrentKeys.all,
-    ].map(
-      (queryKey) => queryClient.invalidateQueries({ queryKey })
-    )
-  );
+export function invalidateAfterJob(queryClient: QueryClient, jobId: number, { refetchJob = true }: { refetchJob?: boolean } = {}): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: assignmentKeys.job(jobId), refetchType: refetchJob ? 'active' : 'none' }),
+    ...[assignmentKeys.lists, titleKeys.all, libraryKeys.all, subtitleKeys.all, assignmentKeys.allEpisodes, torrentKeys.all].map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey })
+    ),
+  ]);
 }
+
+/** Every write to one job (PATCH, apply, discard) runs in order: Apply never overtakes a PATCH still on its way. */
+export const jobMutationScope = (jobId: number) => ({ id: `assignment-job-${jobId}` });

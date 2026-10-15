@@ -24,6 +24,17 @@
   }
   .main--bare { padding-bottom: 0; }
 
+  /* Task pages (the route renders a .task-page, e.g. the mapping review; the prototype's
+     noTabbar): their own back link and sticky foot take the phone bar's and tab bar's
+     place below 1024 px. In CSS, so the server's HTML is already right (no flash or shift). */
+  .task-page { display: contents; }
+  body:has(.task-page) .phone-bar,
+  body:has(.task-page) .tabbar { display: none; }
+  .main:has(.task-page) { padding-bottom: 0; }
+  @media (max-width: 1023px) {
+    body:has(.task-page) .toast-region { bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+  }
+
   .page-sections { display: flex; flex-direction: column; gap: var(--sp-10); }
   @media (min-width: 1024px) { .page-sections { gap: var(--sp-12); } }
 
