@@ -187,11 +187,12 @@ export function settledStatus(proposals: Proposal[]): 'needs_review' | 'ready' {
   return counts.pending > 0 || counts.conflicts > 0 ? 'needs_review' : 'ready';
 }
 
-/** Auto-apply: no conflict, nothing pending or unmatched, everything that maps is high. */
+/** Auto-apply: something to apply, no conflict, nothing pending or unmatched, everything that maps is high. */
 export function autoApplies(job: MockJob): boolean {
   const counts = jobCounts(job.proposals);
   return (
     !job.dry_run &&
+    counts.to_apply > 0 &&
     counts.conflicts === 0 &&
     counts.pending === 0 &&
     counts.unmatched === 0 &&
