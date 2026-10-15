@@ -197,8 +197,8 @@ Nothing else is installed or configured by hand. The rest belongs to:
 | What | Where |
 |---|---|
 | Packages, unattended upgrades, Docker and its log caps, journald cap, the guest agent package, ufw, the data folders, the boot unit | #34, [`HOST.md`](HOST.md) |
-| Backups, the shared lock and the restore runbook | #35 |
-| The deploy agent and heartbeat | #38 |
+| Backups, the heartbeat and the restore runbook | #35 |
+| Deploys, run from the Mac with `ops/deploy/deploy.sh` | #38, [`DEPLOY.md`](DEPLOY.md) |
 | `.env`, copying the data, the cutover | #42 |
 
 ## 6. Later changes to the VM

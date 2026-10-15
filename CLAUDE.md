@@ -38,7 +38,7 @@ v2 is a redesign plus new features (Trakt, AI recommendations, episode mapping, 
 
 ## Ops track
 
-Server setup, CI/CD and backups are a separate track from v2: issues labelled `ops` (`gh issue list --label ops --state open`), epic #32. Read `docs/ops/PLAN.md` before any ops work: decisions (§2), state inventory (§5), rollback model (§6) and the deploy agent contract (§8). The VM is configured by the Ansible playbook in `ops/ansible/` (runbook: `docs/ops/HOST.md`). CI checks PRs and publishes images to GHCR from `.github/workflows/ci.yml` (runbook: `docs/ops/CI.md`). Until the deploy agent (#38) exists, deploys are by hand (runbook: `docs/ops/DEPLOY.md`). The repo is public, so secrets and the public hostname never go in it.
+Server setup, CI/CD and backups are a separate track from v2: issues labelled `ops` (`gh issue list --label ops --state open`), epic #32. Read `docs/ops/PLAN.md` before any ops work: decisions (§2), state inventory (§5), rollback model (§6) and the deploy contract (§8). The VM is configured by the Ansible playbook in `ops/ansible/` (runbook: `docs/ops/HOST.md`). CI checks PRs and publishes images to GHCR from `.github/workflows/ci.yml` (runbook: `docs/ops/CI.md`). Deploys run from the Mac with `ops/deploy/deploy.sh` over SSH, never from GitHub (runbook: `docs/ops/DEPLOY.md`). The repo is public, so secrets and the public hostname never go in it.
 
 ## Commands
 
@@ -61,6 +61,10 @@ cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx p
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 cd momoshtrem && go vet ./... && go test ./...
 docker compose run --rm momoshtrem backfill-metadata [--dry-run]   # fill TMDB metadata for titles added before #4 (never renames WebDAV paths)
+
+# Deploy (from the Mac): the newest green main commit, or a given one, to a VM over SSH
+ops/deploy/deploy.sh -n momoshtrem-v2            # dry run: print the plan, change nothing
+ops/deploy/deploy.sh momoshtrem-v2 [<commit>]    # deploy; a rollback is an older commit
 ```
 
 ## Architecture
