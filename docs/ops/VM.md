@@ -205,7 +205,7 @@ Nothing else is installed or configured by hand. The rest belongs to:
 
 These happen at or after the cutover (#42 §3–4). They're listed here because they change the VM or its neighbours.
 
-- **The IP.** The VM keeps 192.168.0.99. On the router, make it a DHCP reservation for this VM's MAC. Once the old VM is shut down, point the port forwards (36911 and 3000) at .99. The old VM keeps its .81 reservation, so a rollback only moves the forwards back (PLAN §6).
+- **The IP.** The VM keeps 192.168.0.99. On the router, make it a DHCP reservation for this VM's MAC. Once the old VM is shut down, point the port forwards at .99: 36911 for WebDAV and 443 for the web UI. Since #19 nothing forwards 3000. The old VM keeps its .81 reservation, so a rollback only moves the forwards back (PLAN §6).
 - **The SSH alias.** `momoshtrem-v2` doesn't change. Drop `momoshtrem-vm` once the old VM is deleted.
 - **RAM.** Raise it to 8 GiB once the old VM is off: shut the VM down, set 8192 MiB and start it again. It was built with about 6 GiB for the overlap (§2).
 - **The old VM.** Turn its **Start at boot** off once it's stopped. Otherwise a host reboot brings it back, with its own stack, until it's deleted.

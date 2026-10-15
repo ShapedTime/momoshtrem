@@ -1,19 +1,35 @@
 # Caddy in front of momoshtrem. The values come from .env through compose
 # (see .env.example), so this file is the same on every host.
 {
-	# Every site uses Caddy's internal CA, which Infuse trusts. It lives in
-	# the momoshtrem_caddy_data volume: losing it means trusting a new one.
-	local_certs
-
 	# The compose healthcheck polls the admin API: keep those lines out
 	log default {
 		exclude admin.api
 	}
 }
 
+# One Let's Encrypt certificate for the public hostname. Caddy keeps one
+# certificate per hostname, so every site on it imports this. Let's Encrypt
+# checks over 443 (TLS-ALPN); the router doesn't forward 80, so the HTTP
+# challenge is off. The account and certificate live in the
+# momoshtrem_caddy_data volume, and a lost volume only means a new certificate.
+(public_tls) {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+}
+
+# The web UI, at home and through the router's 443 forward
+{$WEBDAV_HOST} {
+	import public_tls
+
+	reverse_proxy web:3000
+}
+
 # WebDAV for Infuse, at home and through the router's forward
 {$WEBDAV_HOST}:36911 {
-	tls internal
+	import public_tls
 
 	# The only WebDAV auth: momoshtrem's own is off. The hash comes from
 	# `caddy hash-password` and is used as-is.

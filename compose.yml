@@ -122,11 +122,13 @@ services:
     image: caddy:2.11.7-alpine
     container_name: caddy
     ports:
+      - "443:443"       # The web UI via HTTPS (the router forwards it)
+      - "443:443/udp"   # HTTP/3
       - "36911:36911"   # WebDAV via HTTPS
       - "5050:5050"     # pgAdmin (the Caddyfile allows LAN_CIDR only)
     # Read by the Caddyfile as {$VAR}
     environment:
-      - WEBDAV_HOST=${WEBDAV_HOST:?set the WebDAV hostname in .env}
+      - WEBDAV_HOST=${WEBDAV_HOST:?set the public hostname in .env}
       - WEBDAV_USER=${WEBDAV_USER:?set the WebDAV user in .env}
       - WEBDAV_PASSWORD_HASH=${WEBDAV_PASSWORD_HASH:?set the WebDAV password hash in .env}
       - LAN_CIDR=${LAN_CIDR:-192.168.0.0/24}
@@ -153,19 +155,21 @@ services:
       context: ./web
       dockerfile: Dockerfile
     container_name: momoshtrem-web
+    # Loopback only: everyone else comes through Caddy on 443, so the
+    # forwarded-for address can be trusted (ops PLAN D8)
     ports:
-      - 3000:3000
+      - 127.0.0.1:3000:3000
     environment:
       - APP_USERNAME=${APP_USERNAME:-}
       - APP_PASSWORD=${APP_PASSWORD}
-      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-0}
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - JACKETT_URL=http://jackett:9117
       - JACKETT_API_KEY=${JACKETT_API_KEY}
       - MOMOSHTREM_URL=http://momoshtrem:4444
       - BACKEND_API_TOKEN=${BACKEND_API_TOKEN:-}
       - SESSION_SECRET=${SESSION_SECRET}
-      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+      - SECURE_COOKIES=${SECURE_COOKIES:-true}
       - AUTH_MAX_ATTEMPTS=${AUTH_MAX_ATTEMPTS:-}
       - AUTH_GLOBAL_MAX_FAILURES=${AUTH_GLOBAL_MAX_FAILURES:-}
       - AUTH_WINDOW_MINUTES=${AUTH_WINDOW_MINUTES:-}
