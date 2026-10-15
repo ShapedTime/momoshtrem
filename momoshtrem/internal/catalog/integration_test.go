@@ -503,4 +503,8 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 	if lib.Torrent != nil || lib.Download != nil || lib.WebDAVPath == nil || !strings.HasSuffix(*lib.WebDAVPath, ").mp4") {
 		t.Errorf("HDRezka movie library = %+v", lib)
 	}
+	if s := lib.Stream; s == nil || s.Provider != "hdrezka" || s.Title != it.tag || s.URL != "https://rezka.ag/series/646-show.html" ||
+		s.Translator != "LostFilm" || s.Quality != "1080p" || s.SizeBytes != streamSize || s.AddedAt.IsZero() {
+		t.Errorf("HDRezka movie stream = %+v", lib.Stream)
+	}
 }

@@ -66,7 +66,9 @@ func (t *Title) DefaultTranslator() (Translator, bool) {
 	return Translator{}, false
 }
 
-// Translator returns the translation with the given id.
+// Translator returns the first translation with the given id. One id can
+// come in several cuts (camrip, ads, director's), listed apart in page
+// order; Translators has them all.
 func (t *Title) Translator(id int) (Translator, bool) {
 	for _, tr := range t.Translators {
 		if tr.ID == id {
@@ -123,6 +125,10 @@ func (c *Client) Title(ctx context.Context, pathOrURL string) (*Title, error) {
 // capturing the kind, the post id and the default translator id.
 var initRe = regexp.MustCompile(`initCDN(Series|Movies)Events\((\d+),\s*(\d+),.+?(\{.*?\})\);`)
 
+// movieCutRe reads the default translation's flags from a movie's init
+// call: camrip, ads and director follow the translator id.
+var movieCutRe = regexp.MustCompile(`initCDNMoviesEvents\(\d+,\s*\d+,\s*([01]),\s*([01]),\s*([01]),`)
+
 // slugYearRe reads the year at the end of a title's slug.
 var slugYearRe = regexp.MustCompile(`-((?:19|20)\d\d)(?:-latest)?\.html$`)
 
@@ -153,7 +159,7 @@ func parseTitle(path string, body []byte) (*Title, error) {
 		Title:         textOf(doc, func(n *html.Node) bool { return n.Data == "h1" && withAttr("itemprop", "name")(n) }),
 		OriginalTitle: textOf(doc, withClass("b-post__origtitle")),
 		Year:          pageYear(doc, path),
-		Translators:   parseTranslators(doc, defaultID),
+		Translators:   parseTranslators(doc, defaultID, movieCut(body)),
 	}
 	if t.Title == "" {
 		return nil, &ParseError{What: "title"}
@@ -165,32 +171,67 @@ func parseTitle(path string, body []byte) (*Title, error) {
 	return t, nil
 }
 
+// movieCut is the flags of a movie's default translation, from its init
+// call; nil for a series or when the call doesn't say.
+func movieCut(body []byte) *Translator {
+	m := movieCutRe.FindSubmatch(body)
+	if m == nil {
+		return nil
+	}
+	return &Translator{Camrip: string(m[1]) == "1", Ads: string(m[2]) == "1", Director: string(m[3]) == "1"}
+}
+
 // parseTranslators reads the translation list. Movies list li elements with
 // the flags; series list links and repeat them hidden as
-// b-translator__items, which the exact class match skips. A page without a
-// list has one translation, the init call's.
-func parseTranslators(doc *html.Node, defaultID int) []Translator {
+// b-translator__items, which the exact class match skips. One id may be
+// listed in several cuts (its camrip, ads and director flags differ): each
+// is its own entry. The default is defaultID in defaultCut's flags (nil:
+// its first entry). A page without a list has one translation, the init
+// call's.
+func parseTranslators(doc *html.Node, defaultID int, defaultCut *Translator) []Translator {
+	type cut struct {
+		id                    int
+		camrip, ads, director bool
+	}
 	var out []Translator
-	seen := map[int]bool{}
+	seen := map[cut]bool{}
 	for _, n := range findAll(doc, withClass("b-translator__item")) {
 		raw, _ := attr(n, "data-translator_id")
 		id, err := strconv.Atoi(raw)
-		if err != nil || seen[id] {
+		if err != nil {
 			continue
 		}
-		seen[id] = true
-		out = append(out, Translator{
+		tr := Translator{
 			ID:       id,
 			Name:     translatorName(n),
-			Default:  id == defaultID,
 			Premium:  hasClass(n, "b-prem_translator"),
 			Camrip:   flag(n, "data-camrip"),
 			Ads:      flag(n, "data-ads"),
 			Director: flag(n, "data-director"),
-		})
+		}
+		if k := (cut{id, tr.Camrip, tr.Ads, tr.Director}); !seen[k] {
+			seen[k] = true
+			out = append(out, tr)
+		}
 	}
 	if len(out) == 0 {
-		out = append(out, Translator{ID: defaultID, Name: infoRow(doc, "В переводе"), Default: true})
+		return []Translator{{ID: defaultID, Name: infoRow(doc, "В переводе"), Default: true}}
+	}
+	def := -1
+	for i, tr := range out {
+		if tr.ID != defaultID {
+			continue
+		}
+		if defaultCut == nil || (tr.Camrip == defaultCut.Camrip && tr.Ads == defaultCut.Ads && tr.Director == defaultCut.Director) {
+			def = i
+			break
+		}
+		if def < 0 {
+			def = i // the first cut, unless the default's own turns up
+		}
+	}
+	if def >= 0 {
+		out[def].Default = true
 	}
 	return out
 }

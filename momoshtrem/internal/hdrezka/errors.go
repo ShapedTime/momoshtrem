@@ -25,6 +25,12 @@ var (
 	// ErrRangeIgnored means the CDN answered a Range request with the whole
 	// file (200), so the file can't be seeked.
 	ErrRangeIgnored = errors.New("the HDRezka CDN ignored a Range request")
+	// ErrNoQuality means the stream no longer offers the quality asked for.
+	ErrNoQuality = errors.New("HDRezka no longer offers this quality")
+	// ErrSizeMismatch means the CDN's file isn't the size stored when it was
+	// assigned: the upload changed, so the bytes no longer line up with what
+	// the player read before.
+	ErrSizeMismatch = errors.New("the HDRezka file's size changed")
 )
 
 // ParseError means a page or response no longer has the shape the client

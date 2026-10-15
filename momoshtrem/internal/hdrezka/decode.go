@@ -133,7 +133,7 @@ func parseQualities(plain string) []Quality {
 		label := stripTags(rawLabel)
 		q := Quality{
 			Label:      label,
-			Resolution: resolution(label),
+			Resolution: Resolution(label),
 			Premium:    strings.Contains(rawLabel, premiumMarker),
 		}
 		for _, link := range strings.Split(links, " or ") {
@@ -218,9 +218,9 @@ func stripTags(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(tagRe.ReplaceAllString(s, ""))), " ")
 }
 
-// resolution reads a label's vertical resolution: "1080p Ultra" is 1080,
+// Resolution reads a label's vertical resolution: "1080p Ultra" is 1080,
 // "2K" 1440 and "4K" 2160. Unknown labels give 0.
-func resolution(label string) int {
+func Resolution(label string) int {
 	upper := strings.ToUpper(label)
 	switch {
 	case strings.HasPrefix(upper, "4K"):

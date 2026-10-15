@@ -59,6 +59,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 		}
 		if ep.Assignment != nil {
 			summary.WebDAVPath = strPtr(paths[ep.ID])
+			summary.Source, summary.Stream = sourceOf(ep.Assignment), episodeStream(ep.Assignment)
 		}
 		episodes = append(episodes, summary)
 	}

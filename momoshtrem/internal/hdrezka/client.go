@@ -140,6 +140,14 @@ func (c *Client) BaseURL() string { return c.baseURL }
 // UserAgent returns the User-Agent the client sends.
 func (c *Client) UserAgent() string { return c.userAgent }
 
+// Ping fetches the home page once, without retries or the rate limit: it
+// checks the mirror answers with content rather than an anti-bot page
+// (ErrChallenge).
+func (c *Client) Ping(ctx context.Context) error {
+	_, _, err := c.do(ctx, siteRequest{path: "/"})
+	return err
+}
+
 // siteRequest is one request to the site, as opposed to its CDN.
 type siteRequest struct {
 	path    string     // under the base URL, with any query

@@ -63,6 +63,9 @@ type Options struct {
 	// picker, manual overrides and torrent files. Nil makes those routes
 	// return 503.
 	Review AssignmentReview
+	// HDRezka searches HDRezka and assigns its streams. Nil (HDRezka off)
+	// makes those routes return 503.
+	HDRezka HDRezka
 }
 
 // NewServer creates a new API server
@@ -193,6 +196,7 @@ func (s *Server) setupRoutes() {
 	s.registerLibraryRoutes(api)    // GET /library
 	s.registerAssignmentRoutes(api) // Assign torrents (jobs), review and apply
 	s.registerReviewRoutes(api)     // Proposal edits, episode picker, manual overrides, torrent files
+	s.registerHDRezkaRoutes(api)    // HDRezka search, titles, streams and assigns
 }
 
 // Handler returns the HTTP handler

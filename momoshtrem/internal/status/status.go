@@ -55,6 +55,7 @@ type Options struct {
 
 	Jackett Prober // nil when JACKETT_URL or JACKETT_API_KEY is unset
 	TMDB    Prober // nil when TMDB_API_KEY is unset
+	HDRezka Prober // nil when HDREZKA_ENABLED is off
 
 	TraktConfigured         bool
 	AIConfigured            bool
@@ -81,6 +82,7 @@ type Report struct {
 	Trakt         TraktStatus         `json:"trakt"`
 	AI            AIStatus            `json:"ai"`
 	OpenSubtitles OpenSubtitlesStatus `json:"opensubtitles"`
+	HDRezka       ProbeStatus         `json:"hdrezka"`
 }
 
 // DBStatus reports Postgres health. SizeBytes is null when unknown.
@@ -220,10 +222,11 @@ func (s *Service) check(ctx context.Context) Report {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
 	go func() { defer wg.Done(); r.DB = s.checkDB(ctx) }()
 	go func() { defer wg.Done(); r.Jackett = s.runProbe(ctx, "jackett", s.opts.Jackett) }()
 	go func() { defer wg.Done(); r.TMDB = s.runProbe(ctx, "tmdb", s.opts.TMDB) }()
+	go func() { defer wg.Done(); r.HDRezka = s.runProbe(ctx, "hdrezka", s.opts.HDRezka) }()
 	go func() { defer wg.Done(); r.AI.MTDCostUSD = s.aiCost(ctx) }()
 	wg.Wait()
 

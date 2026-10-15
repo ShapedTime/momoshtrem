@@ -109,10 +109,61 @@ func TestReadDir_ListsTorrentSubtitles(t *testing.T) {
 	}
 }
 
-// An older cache (v1 has no subtitles, v2 no grouped multi-episode files)
-// is ignored, so the tree is rebuilt from the database.
+// A v5 cache keeps each file's source: an HDRezka stream restored from it
+// still opens as a remote file, not as a torrent with an empty hash.
+func TestCache_RoundTripKeepsStreams(t *testing.T) {
+	movie := &library.StreamRef{Provider: "hdrezka", Path: "/films/fiction/2259-interstellar-2014.html", PostID: 2259,
+		Title: "Интерстеллар", TranslatorID: 238, TranslatorName: "Оригинал (+субтитры)", Quality: "1080p"}
+	episode := &library.StreamRef{Provider: "hdrezka", Path: "/series/thriller/646-vo-vse-tyazhkie-2008-latest.html", PostID: 646,
+		TranslatorID: 238, Ads: true, Season: 1, Episode: 2, Quality: "720p"}
+	want := NewTestFS(
+		[]TestMovie{{Title: "Interstellar", Year: 2014, Assignment: &library.TorrentAssignment{
+			Kind: library.AssignmentKindHDRezka, Stream: movie, FilePath: movie.FilePath(), FileSize: 3322740623}}},
+		[]TestEpisode{{Show: "Breaking Bad", Year: 2008, Season: 1, Episode: 2, Name: "Cat's in the Bag...",
+			Assignment: &library.TorrentAssignment{Kind: library.AssignmentKindHDRezka, Stream: episode,
+				FilePath: episode.FilePath(), FileSize: 1145043718}}},
+	).tree
+
+	dir := t.TempDir()
+	(&LibraryFS{cacheDir: dir, tree: want}).saveTreeToCache()
+	loader := &LibraryFS{cacheDir: dir}
+	if err := loader.loadTreeFromCache(); err != nil {
+		t.Fatalf("loadTreeFromCache: %v", err)
+	}
+
+	files := 0
+	for path, w := range want.pathMap {
+		w, ok := w.(*PlaceholderFile)
+		if !ok {
+			continue
+		}
+		files++
+		g, ok := loader.tree.pathMap[path].(*PlaceholderFile)
+		if !ok {
+			t.Fatalf("%s missing after reload", path)
+		}
+		a := g.assignment
+		if a.Kind != library.AssignmentKindHDRezka || a.IsTorrent() || a.Stream == nil || *a.Stream != *w.assignment.Stream ||
+			a.FilePath != w.assignment.FilePath || a.FileSize != w.assignment.FileSize || g.size != w.size {
+			t.Errorf("%s = %+v (stream %+v), want %+v", path, a, a.Stream, w.assignment)
+		}
+		f, err := loader.Open(path)
+		if err != nil {
+			t.Fatalf("Open(%s): %v", path, err)
+		}
+		if _, ok := f.(*RemoteFile); !ok {
+			t.Errorf("Open(%s) = %T, want a RemoteFile", path, f)
+		}
+	}
+	if files != 2 {
+		t.Errorf("files = %d, want 2", files)
+	}
+}
+
+// An older cache (v1 has no subtitles, v2 no grouped multi-episode files,
+// v4 no sources) is ignored, so the tree is rebuilt from the database.
 func TestCache_IgnoresOlderVersions(t *testing.T) {
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3, 4} {
 		dir := t.TempDir()
 		var buf bytes.Buffer
 		old := treeCache{Version: version, Movies: []cachedMovie{{FolderName: "Old (2000)", FileName: "Old (2000).mkv"}}}

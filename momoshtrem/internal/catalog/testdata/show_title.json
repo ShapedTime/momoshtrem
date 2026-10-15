@@ -71,7 +71,8 @@
       "absolute_to": 38,
       "count": 10
     },
-    "torrent": null
+    "torrent": null,
+    "stream": null
   },
   "watch_state": null,
   "recommendation_reason": null,

@@ -80,6 +80,7 @@ func TestReport_AllConfigured(t *testing.T) {
 		ActiveReaders:           func() int { return readers },
 		Jackett:                 countingProber(nil, &jackettCalls),
 		TMDB:                    countingProber(errors.New("TMDB rejected the API key (HTTP 401)"), &tmdbCalls),
+		HDRezka:                 func(context.Context) error { return errors.New("HDRezka asks for a browser check") },
 		TraktConfigured:         true,
 		AIConfigured:            true,
 		OpenSubtitlesConfigured: true,
@@ -121,6 +122,9 @@ func TestReport_AllConfigured(t *testing.T) {
 	if !r.OpenSubtitles.Configured {
 		t.Errorf("opensubtitles = %+v", r.OpenSubtitles)
 	}
+	if h := r.HDRezka; !h.Configured || h.Reachable || h.LatencyMS != nil || h.Error != "HDRezka asks for a browser check" {
+		t.Errorf("hdrezka = %+v", r.HDRezka)
+	}
 }
 
 // ai.mtd_cost_usd is this month's AI cost, rounded to a hundredth of a
@@ -156,6 +160,9 @@ func TestReport_Unconfigured(t *testing.T) {
 	if r.TMDB.Configured || r.TMDB.Reachable || r.TMDB.LatencyMS != nil {
 		t.Errorf("tmdb = %+v, want unconfigured", r.TMDB)
 	}
+	if r.HDRezka.Configured || r.HDRezka.Reachable || r.HDRezka.LatencyMS != nil {
+		t.Errorf("hdrezka = %+v, want unconfigured", r.HDRezka)
+	}
 	if r.Trakt.Configured || r.AI.Configured || r.OpenSubtitles.Configured {
 		t.Errorf("trakt/ai/opensubtitles should be unconfigured: %+v %+v %+v", r.Trakt, r.AI, r.OpenSubtitles)
 	}
@@ -187,6 +194,9 @@ func TestReport_Unconfigured(t *testing.T) {
 	}
 	if _, ok := section("jackett")["latency_ms"]; ok {
 		t.Error("jackett.latency_ms should be omitted when not probed")
+	}
+	if h := section("hdrezka"); h["configured"] != false || h["reachable"] != false {
+		t.Errorf("hdrezka = %v", h)
 	}
 	if v, ok := section("ai")["mtd_cost_usd"]; !ok || v != nil {
 		t.Errorf("ai.mtd_cost_usd should be present and null, got %v (present %v)", v, ok)

@@ -99,7 +99,31 @@ type TitleLibraryState struct {
 	EpisodesReady     *int              `json:"episodes_ready"`
 	Missing           *MissingRun       `json:"missing"`
 	Torrent           *TitleTorrent     `json:"torrent"`
+	Stream            *TitleStream      `json:"stream"` // movies playing from HDRezka; Torrent is null then
 }
+
+// TitleStream is a movie's HDRezka stream (PLAN §6 "HDRezka (#63)").
+type TitleStream struct {
+	Provider   string    `json:"provider"` // "hdrezka"
+	Title      string    `json:"title"`    // the title on HDRezka
+	URL        string    `json:"url"`      // its page on the configured mirror
+	Translator string    `json:"translator"`
+	Quality    string    `json:"quality"` // e.g. "1080p"
+	SizeBytes  int64     `json:"size_bytes"`
+	AddedAt    time.Time `json:"added_at"`
+}
+
+// EpisodeStream is an episode's HDRezka stream.
+type EpisodeStream struct {
+	Translator string `json:"translator"`
+	Quality    string `json:"quality"`
+}
+
+// Sources of an episode's file (EpisodeSummary.Source).
+const (
+	SourceTorrent = "torrent"
+	SourceHDRezka = "hdrezka"
+)
 
 // CastMember is one credited actor.
 type CastMember struct {
@@ -189,19 +213,21 @@ type ShowTitle struct {
 
 // EpisodeSummary is one episode of GET /titles/tv/{id}/seasons/{n}.
 type EpisodeSummary struct {
-	ID             int64        `json:"id"`
-	SeasonNumber   int          `json:"season_number"`
-	EpisodeNumber  int          `json:"episode_number"`
-	AbsoluteNumber *int         `json:"absolute_number"`
-	Name           string       `json:"name"`
-	Overview       string       `json:"overview"`
-	AirDate        *string      `json:"air_date"`
-	StillPath      *string      `json:"still_path"`
-	Runtime        *int         `json:"runtime"`
-	EpisodeType    *string      `json:"episode_type"`
-	State          EpisodeState `json:"state"`
-	Pct            *int         `json:"pct"`         // while downloading
-	WebDAVPath     *string      `json:"webdav_path"` // while it has a file
+	ID             int64          `json:"id"`
+	SeasonNumber   int            `json:"season_number"`
+	EpisodeNumber  int            `json:"episode_number"`
+	AbsoluteNumber *int           `json:"absolute_number"`
+	Name           string         `json:"name"`
+	Overview       string         `json:"overview"`
+	AirDate        *string        `json:"air_date"`
+	StillPath      *string        `json:"still_path"`
+	Runtime        *int           `json:"runtime"`
+	EpisodeType    *string        `json:"episode_type"`
+	State          EpisodeState   `json:"state"`
+	Pct            *int           `json:"pct"`         // while downloading
+	WebDAVPath     *string        `json:"webdav_path"` // while it has a file
+	Source         *string        `json:"source"`      // the file's: torrent or hdrezka; null without one
+	Stream         *EpisodeStream `json:"stream"`      // an HDRezka file's stream
 }
 
 // EpisodeRange is a jump target in a long season.

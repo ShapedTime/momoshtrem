@@ -1,6 +1,9 @@
 package vfs
 
 import (
+	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path"
@@ -92,6 +95,11 @@ type LibraryFS struct {
 	// Reader tracking for debug endpoint (optional)
 	readerTracker *streaming.ReaderTracker
 
+	// Streams files that aren't in a torrent (HDRezka); nil: their reads
+	// fail
+	remoteSource      RemoteSource
+	remoteReadTimeout time.Duration
+
 	// Cached tree structure
 	tree       *DirectoryTree
 	rebuilding sync.Mutex // Coordinates rebuild operations to prevent concurrent rebuilds
@@ -172,6 +180,27 @@ func (fs *LibraryFS) SetTorrentService(
 	)
 }
 
+// RemoteSource opens the files of assignments that aren't in a torrent
+// (HDRezka streams): a's bytes from off to its end. ctx bounds the opening
+// only; the body must stay readable until it's closed, and closing it must
+// end a Read blocked on it.
+type RemoteSource interface {
+	OpenRemote(ctx context.Context, a *library.TorrentAssignment, off int64) (io.ReadCloser, error)
+}
+
+// ErrRemoteUnavailable is a read of an HDRezka file while HDRezka is off.
+var ErrRemoteUnavailable = errors.New("HDRezka streaming is off")
+
+// SetRemoteSource configures streaming of files that aren't in a torrent.
+// readTimeout bounds opening a body and each idle stretch of a read.
+func (fs *LibraryFS) SetRemoteSource(src RemoteSource, readTimeout time.Duration) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.remoteSource = src
+	fs.remoteReadTimeout = readTimeout
+	slog.Info("VFS remote source configured", "read_timeout_seconds", readTimeout.Seconds())
+}
+
 // SetSubtitleRepository configures subtitle support for the VFS.
 func (fs *LibraryFS) SetSubtitleRepository(repo subtitleLister) {
 	fs.mu.Lock()
@@ -241,6 +270,11 @@ func (fs *LibraryFS) Open(filepath string) (File, error) {
 	case *VirtualDir:
 		return &DirFile{dir: e}, nil
 	case *PlaceholderFile:
+		// A stream (HDRezka) opens without I/O and never fails here: WebDAV
+		// opens every file a PROPFIND lists, and one error fails the listing.
+		if e.assignment != nil && !e.assignment.IsTorrent() {
+			return fs.openRemoteFile(e), nil
+		}
 		// If torrent service is available and file has assignment, return real torrent file
 		if fs.torrentService != nil && e.assignment != nil {
 			return fs.openTorrentFile(e)
@@ -301,6 +335,21 @@ func (fs *LibraryFS) openTorrentFile(pf *PlaceholderFile) (File, error) {
 		fs.metrics,
 		fs.readerTracker,
 	), nil
+}
+
+// openRemoteFile returns a handle that streams pf from the remote source
+// on its first read. Without a source (HDRezka off), its reads fail.
+// Called with fs.mu held.
+func (fs *LibraryFS) openRemoteFile(pf *PlaceholderFile) File {
+	src, a := fs.remoteSource, pf.assignment
+	open := func(ctx context.Context, off int64) (io.ReadCloser, error) {
+		if src == nil {
+			slog.Error("Can't stream an HDRezka file: HDRezka is off (HDREZKA_ENABLED)", "file", pf.name)
+			return nil, ErrRemoteUnavailable
+		}
+		return src.OpenRemote(ctx, a, off)
+	}
+	return NewRemoteFile(pf.name, pf.size, open, fs.remoteReadTimeout)
 }
 
 // openTorrentSubtitleFile creates a TorrentFile for streaming a subtitle from a torrent.

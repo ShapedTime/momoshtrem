@@ -12,11 +12,13 @@ import (
 )
 
 const (
-	// cacheVersion 4 splits such a file at gaps in its episodes (E07 and
-	// E09 are two entries); v3 named a file a job mapped to several
-	// episodes once ("S01E01-E02"); v2 added subtitle files. An older
-	// cache is ignored and the tree rebuilt from the database.
-	cacheVersion = 4
+	// cacheVersion 5 stores each file's source (Kind) and HDRezka stream,
+	// so a stream restored from the cache still streams; v4 split a
+	// grouped file at gaps in its episodes (E07 and E09 are two entries);
+	// v3 named a file a job mapped to several episodes once
+	// ("S01E01-E02"); v2 added subtitle files. An older cache is ignored
+	// and the tree rebuilt from the database.
+	cacheVersion = 5
 	cacheFile    = "vfs_tree.gob"
 )
 
@@ -31,9 +33,11 @@ type cachedMovie struct {
 	FolderName string
 	FileName   string
 	FileSize   int64
+	Kind       library.AssignmentKind
 	InfoHash   string
 	MagnetURI  string
 	FilePath   string
+	Stream     *library.StreamRef // HDRezka streams only
 	Subtitles  []cachedSubtitle
 }
 
@@ -89,9 +93,11 @@ func restoreSubtitles(tree *DirectoryTree, dir *VirtualDir, dirPath string, subs
 type cachedEpisode struct {
 	FileName  string
 	FileSize  int64
+	Kind      library.AssignmentKind
 	InfoHash  string
 	MagnetURI string
 	FilePath  string
+	Stream    *library.StreamRef // HDRezka streams only
 }
 
 // loadTreeFromCache attempts to load the VFS tree from disk cache.
@@ -128,10 +134,14 @@ func (fs *LibraryFS) loadTreeFromCache() error {
 
 		// Restore video file
 		assignment := &library.TorrentAssignment{
+			ItemType:  library.ItemTypeMovie,
+			Kind:      cm.Kind,
 			InfoHash:  cm.InfoHash,
 			MagnetURI: cm.MagnetURI,
 			FilePath:  cm.FilePath,
 			FileSize:  cm.FileSize,
+			Stream:    cm.Stream,
+			IsActive:  true,
 		}
 		videoFile := NewPlaceholderFile(cm.FileName, cm.FileSize, assignment)
 		filePath := folderPath + "/" + cm.FileName
@@ -155,10 +165,14 @@ func (fs *LibraryFS) loadTreeFromCache() error {
 
 			for _, ce := range csn.Episodes {
 				assignment := &library.TorrentAssignment{
+					ItemType:  library.ItemTypeEpisode,
+					Kind:      ce.Kind,
 					InfoHash:  ce.InfoHash,
 					MagnetURI: ce.MagnetURI,
 					FilePath:  ce.FilePath,
 					FileSize:  ce.FileSize,
+					Stream:    ce.Stream,
+					IsActive:  true,
 				}
 				videoFile := NewPlaceholderFile(ce.FileName, ce.FileSize, assignment)
 				filePath := seasonPath + "/" + ce.FileName
@@ -214,9 +228,11 @@ func (fs *LibraryFS) saveTreeToCache() {
 					FolderName: folderName,
 					FileName:   fileName,
 					FileSize:   pf.assignment.FileSize,
+					Kind:       pf.assignment.Kind,
 					InfoHash:   pf.assignment.InfoHash,
 					MagnetURI:  pf.assignment.MagnetURI,
 					FilePath:   pf.assignment.FilePath,
+					Stream:     pf.assignment.Stream,
 					Subtitles:  cacheSubtitles(movieDir),
 				})
 				break // Only one video file per movie folder
@@ -249,9 +265,11 @@ func (fs *LibraryFS) saveTreeToCache() {
 					csn.Episodes = append(csn.Episodes, cachedEpisode{
 						FileName:  fileName,
 						FileSize:  pf.assignment.FileSize,
+						Kind:      pf.assignment.Kind,
 						InfoHash:  pf.assignment.InfoHash,
 						MagnetURI: pf.assignment.MagnetURI,
 						FilePath:  pf.assignment.FilePath,
+						Stream:    pf.assignment.Stream,
 					})
 				}
 				if len(csn.Episodes) > 0 {

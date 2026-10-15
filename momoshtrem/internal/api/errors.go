@@ -22,6 +22,14 @@ const (
 	CodeTMDBUnavailable = "tmdb_unavailable"
 	// CodeClientClosed goes with StatusClientClosedRequest: the client went away first.
 	CodeClientClosed = "client_closed"
+	// CodeHDRezkaUnavailable is a 502: HDRezka or its CDN failed (a CDN
+	// 403 included: the API never answers 401 or 403 for HDRezka).
+	CodeHDRezkaUnavailable = "hdrezka_unavailable"
+	// CodeHDRezkaBlocked is a 503: HDRezka answered with its anti-bot page.
+	CodeHDRezkaBlocked = "hdrezka_blocked"
+	// CodePremiumOnly is a 409: the translation or quality needs an
+	// HDRezka Premium account.
+	CodePremiumOnly = "premium_only"
 )
 
 // StatusClientClosedRequest (nginx's 499) answers a request the client
