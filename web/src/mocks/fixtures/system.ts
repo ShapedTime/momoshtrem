@@ -1,7 +1,8 @@
 import type { SystemStatus } from '@/lib/api/contract';
 export function systemStatus(): SystemStatus {
   return {
-    version: '0.9.2',
+    // CI stamps the backend with the full commit SHA of its image
+    version: '9000f05e8c1b2d3a4f5e6d7c8b9a0f1e2d3c4b5a',
     uptime_seconds: 6 * 86_400,
     checked_at: new Date().toISOString(),
     db: { ok: true, size_bytes: 48_000_000 },

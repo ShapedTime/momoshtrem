@@ -14,6 +14,16 @@ export interface ServiceRow {
   pill: { status: StatusKey; label?: string };
 }
 
+/**
+ * How a version reads in Settings. CI stamps images with the full commit SHA,
+ * shown short like git does; a release number reads "v1.2.3"; anything else
+ * (a local "dev" build) as is.
+ */
+export function versionLabel(version: string): string {
+  if (/^[0-9a-f]{40}$/.test(version)) return version.slice(0, 7);
+  return /^\d/.test(version) ? `v${version}` : version;
+}
+
 function uptime(seconds: number): string {
   const days = Math.floor(seconds / 86_400);
   if (days >= 1) return `up ${days} ${days === 1 ? 'day' : 'days'}`;
@@ -32,7 +42,7 @@ export function serviceRows(status: SystemStatus): ServiceRow[] {
     id: 'backend',
     name: 'momoshtrem backend',
     icon: Server,
-    detail: [`v${status.version}`, uptime(status.uptime_seconds), status.db.size_bytes !== null ? `database ${formatBytes(status.db.size_bytes)}` : null]
+    detail: [versionLabel(status.version), uptime(status.uptime_seconds), status.db.size_bytes !== null ? `database ${formatBytes(status.db.size_bytes)}` : null]
       .filter(Boolean)
       .join(' · '),
     health: status.db.ok ? 'ok' : 'error',

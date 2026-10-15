@@ -1,0 +1,15 @@
+# Patterns are anchored at the build context root (cmd/momoshtrem/ stays in)
+
+# Runtime data: torrent cache, subtitles, legacy SQLite
+/data
+*.db
+
+# Locally built binary
+/momoshtrem
+
+# Local config (may hold API keys)
+config.yaml
+
+# Misc
+.git
+.DS_Store
