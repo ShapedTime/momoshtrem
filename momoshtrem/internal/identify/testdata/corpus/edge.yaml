@@ -1,0 +1,105 @@
+# Edge cases: wrong torrents, per-season anime folders, dates a day off,
+# underscore names, obfuscated files, short anime markers, specials folders.
+# Schema: see anime.yaml.
+
+# A torrent of another show: the rules can't tell it from a renamed release,
+# but they must not be sure of it.
+- id: wrong-show
+  show: the-boys
+  tags: [wrong-torrent]
+  files:
+    - path: Breaking.Bad.S01E01.Pilot.720p.BluRay.x264-GRP.mkv
+      ambiguous: true
+      expect: {acceptable: [null, S01E01], max_conf: medium}
+
+- id: jjk-season-folder
+  show: jujutsu-kaisen
+  torrent: Jujutsu Kaisen Season 2 [BD 1080p]
+  tags: [anime, folder-season]
+  files:
+    - {path: "[Group] Jujutsu Kaisen - 01 [BD 1080p].mkv", expect: {eps: [S02E01]}}
+    - {path: "[Group] Jujutsu Kaisen - 02 [BD 1080p].mkv", expect: {eps: [S02E02]}}
+    - {path: "[Group] Jujutsu Kaisen - 23 [BD 1080p].mkv", expect: {eps: [S02E23]}}
+
+- id: aot-complete-continuing
+  show: attack-on-titan
+  golden: true
+  torrent: Attack on Titan (2013) Complete Series [BD 1080p]
+  tags: [anime, complete, absolute, folder-season]
+  files:
+    - {path: "Season 1/[Group] Shingeki no Kyojin - 01 [BD 1080p].mkv", expect: {eps: [S01E01]}}
+    - {path: "Season 1/[Group] Shingeki no Kyojin - 25 [BD 1080p].mkv", expect: {eps: [S01E25]}}
+    - {path: "Season 2/[Group] Shingeki no Kyojin - 26 [BD 1080p].mkv", expect: {eps: [S02E01]}}
+    - {path: "Season 2/[Group] Shingeki no Kyojin - 37 [BD 1080p].mkv", expect: {eps: [S02E12]}}
+    - {path: "Season 3/[Group] Shingeki no Kyojin - 38 [BD 1080p].mkv", expect: {eps: [S03E01]}}
+
+- id: daily-show-day-off-with-guest
+  show: the-daily-show
+  tags: [date, day-off]
+  files:
+    - {path: The.Daily.Show.2024.03.15.Hasan.Minhaj.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S29E40]}}
+
+- id: daily-show-day-off
+  show: the-daily-show
+  tags: [date, day-off]
+  files:
+    - {path: The.Daily.Show.2024.03.15.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S29E40], max_conf: medium}}
+
+- id: underscore-fansub
+  show: spy-x-family
+  tags: [fansub, underscores]
+  files:
+    - {path: "[Coalgirls]_Spy_x_Family_-_05_(1920x1080_Blu-ray_FLAC)_[ABCD1234].mkv", expect: {eps: [S01E05], min_conf: high}}
+
+- id: obfuscated-file
+  show: the-boys
+  torrent: The.Boys.S04E06.1080p.WEB.H264-SuccessfulCrab
+  tags: [obfuscated, folder-episode]
+  files:
+    - {path: 2f8a9c41e.mkv, size: 3.1GB, expect: {eps: [S04E06], min_conf: high}}
+    - {path: 2f8a9c41e.nfo, expect: {extra: info}}
+
+- id: subs-named-by-episode
+  show: breaking-bad
+  torrent: Breaking.Bad.S01.720p.BluRay.x264-GRP
+  tags: [subtitle, season-pack]
+  files:
+    - {path: Breaking.Bad.S01E01.720p.BluRay.x264-GRP.mkv, expect: {eps: [S01E01], min_conf: high}}
+    - {path: Breaking.Bad.S01E02.720p.BluRay.x264-GRP.mkv, expect: {eps: [S01E02], min_conf: high}}
+    - {path: Subs/Breaking.Bad.S01E01.English.srt, expect: {kind: subtitle, eps: [S01E01]}}
+    - {path: Subs/Breaking.Bad.S01E02.English.srt, expect: {kind: subtitle, eps: [S01E02]}}
+
+- id: episode-word-and-title
+  show: the-office
+  torrent: The Office (US) Season 1
+  tags: [folder-season, title]
+  files:
+    - {path: Episode 1 - Pilot.mkv, expect: {eps: [S01E01], min_conf: high}}
+    - {path: Episode 2 - Diversity Day.mkv, expect: {eps: [S01E02], min_conf: high}}
+
+- id: anime-short-markers
+  show: spy-x-family
+  golden: true
+  torrent: "[Group] Spy x Family (BD 1080p)"
+  tags: [fansub, extras]
+  files:
+    - {path: "[Group] Spy x Family - 01 (BD 1080p).mkv", expect: {eps: [S01E01], min_conf: high}}
+    - {path: "[Group] Spy x Family - 02 (BD 1080p).mkv", expect: {eps: [S01E02], min_conf: high}}
+    - {path: "[Group] Spy x Family - OP (BD 1080p).mkv", size: 100MB, expect: {extra: opening}}
+    - {path: "[Group] Spy x Family - ED1 (BD 1080p).mkv", size: 100MB, expect: {extra: ending}}
+    - {path: "[Group] Spy x Family - PV1 (BD 1080p).mkv", size: 50MB, expect: {extra: trailer}}
+    - {path: "[Group] Spy x Family - Menu (BD 1080p).mkv", size: 20MB, expect: {extra: other}}
+
+- id: sample-in-episode-title
+  show: the-sample
+  tags: [title-word, sample]
+  files:
+    - {path: The.Sample.S01E04.Sample.Size.1080p.WEB.H264-GRP.mkv, expect: {eps: [S01E04], min_conf: high}}
+
+- id: doctor-who-specials-folder
+  show: doctor-who
+  torrent: Doctor Who (2005) Specials
+  tags: [specials, folder-season]
+  files:
+    - {path: Doctor Who - 04 - Time Crash.avi, size: 150MB, expect: {eps: [S00E04], min_conf: high}}
+    - {path: Doctor Who - 06.avi, size: 350MB, expect: {eps: [S00E06]}}
