@@ -21,6 +21,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/artwork"
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/config"
+	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/identify/ai"
 	"github.com/shapedtime/momoshtrem/internal/library"
@@ -51,6 +52,11 @@ const probeCommand = "hdrezka-probe"
 // tmdbCacheGrace is how long expired TMDB cache entries are kept for
 // stale-on-error before startup prunes them.
 const tmdbCacheGrace = 30 * 24 * time.Hour
+
+// hdrezkaReadTimeout bounds opening an HDRezka file on the CDN and each
+// stretch of a read that receives nothing. The CDN answers in well under a
+// second; a stalled body is reopened once at its position.
+const hdrezkaReadTimeout = 30 * time.Second
 
 func main() {
 	startedAt := time.Now()
@@ -354,6 +360,28 @@ func main() {
 	if cfg.TMDB.APIKey != "" {
 		statusOpts.TMDB = tmdbClient.Ping
 	}
+
+	// HDRezka, a second source of files: its routes, the status probe and
+	// streaming its files. Off, its files still list over WebDAV, but
+	// their reads fail.
+	if cfg.HDRezka.Enabled {
+		client := hdrezka.NewClient(hdrezka.WithBaseURL(cfg.HDRezka.URL))
+		resolver := hdrezka.NewResolver(client)
+		streamer := hdrezka.NewStreamer(resolver, hdrezka.WithStreamUserAgent(client.UserAgent()))
+		libraryFS.SetRemoteSource(service.NewHDRezkaSource(streamer), hdrezkaReadTimeout)
+		hdrezkaService := service.NewHDRezkaService(service.HDRezkaDeps{
+			Site:        client,
+			Resolver:    resolver,
+			TMDB:        cachedTMDB,
+			Movies:      movieRepo,
+			Shows:       showRepo,
+			Assignments: assignmentRepo,
+			Tree:        libraryFS,
+		})
+		apiOpts.HDRezka = hdrezkaService
+		statusOpts.HDRezka = hdrezkaService.Ping
+		slog.Info("HDRezka enabled", "mirror", client.BaseURL())
+	}
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
 	apiOpts.TMDB = cachedTMDB
@@ -373,6 +401,7 @@ func main() {
 		Colors:          heroColors,
 		Settings:        syncer,
 		WebDAVPublicURL: webdavPublicURL,
+		HDRezkaURL:      cfg.HDRezka.URL,
 	})
 
 	// Initialize subtitle repository (always, for VFS to show existing subtitles)
