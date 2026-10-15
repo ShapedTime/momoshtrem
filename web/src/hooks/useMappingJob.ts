@@ -6,9 +6,18 @@ import { useRouter } from 'next/navigation';
 import { EyeOff } from 'lucide-react';
 import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useConfirm, useToast } from '@/components/ui';
-import type { AssignmentJob, AssignmentJobDetail, ProposalChange, Title } from '@/lib/api/contract';
+import type { AssignmentJob, AssignmentJobDetail, ProposalChange, ReclassifyRequest, Title } from '@/lib/api/contract';
 import { isApiError } from '@/lib/api/client';
-import { assignmentApi, assignmentKeys, invalidateAfterJob, jobMutationScope, setJobDetail, titleKeys } from '@/lib/api/endpoints';
+import {
+  assignmentApi,
+  assignmentKeys,
+  invalidateAfterJob,
+  jobMutationScope,
+  libraryKeys,
+  putJobDetail,
+  setJobDetail,
+  titleKeys,
+} from '@/lib/api/endpoints';
 import { applyErrorMessage, readyToastTitle, shortTitle, titleHref, withDecisions } from '@/lib/mapping/review';
 import { useSheet } from '@/lib/sheets/useSheet';
 
@@ -78,7 +87,7 @@ export function useMappingActions(job: AssignmentJob) {
     scope,
     mutationFn: () => assignmentApi.apply(jobId),
     onSuccess: (detail) => {
-      queryClient.setQueryData(assignmentKeys.job(jobId), detail);
+      putJobDetail(queryClient, detail);
       void invalidateAfterJob(queryClient, jobId);
       toast({
         tone: 'ready',
@@ -143,4 +152,56 @@ export function useMappingActions(job: AssignmentJob) {
   }, [confirm, discardNow]);
 
   return { change, apply, applying: applyMutation.isPending, discard, discarding: discardMutation.isPending };
+}
+
+/**
+ * How starting a re-check went: running (or already running; `detail` is the
+ * job as refetched right after, which may already be done), no AI (503), or
+ * another failure.
+ */
+export type RecheckStart =
+  | { kind: 'started'; detail: AssignmentJobDetail | undefined }
+  | { kind: 'unavailable' }
+  | { kind: 'failed'; message: string };
+
+/**
+ * "Re-check with AI" (PLAN §6 "Re-check"): POST reclassify (202), then refetch
+ * the job so it polls while `resolving`. It shares the job's mutation scope,
+ * so it starts after any PATCH still on its way. A 409 `job_working` means a
+ * re-check is already running: wait for that one.
+ */
+export function useRecheck(jobId: number) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    scope: jobMutationScope(jobId),
+    mutationFn: (body: ReclassifyRequest) => assignmentApi.reclassify(jobId, body),
+  });
+  const { mutateAsync } = mutation;
+
+  const start = useCallback(
+    async (body: ReclassifyRequest): Promise<RecheckStart> => {
+      let failure: RecheckStart | null = null;
+      try {
+        await mutateAsync(body);
+      } catch (error) {
+        if (isApiError(error) && error.status === 503) failure = { kind: 'unavailable' };
+        else if (!(isApiError(error) && error.status === 409 && error.code === 'job_working'))
+          failure = { kind: 'failed', message: error instanceof Error ? error.message : 'Something went wrong.' };
+      }
+      // Polling restarts while it works; after a 503 the job says whether AI is still there
+      const queryKey = assignmentKeys.job(jobId);
+      await queryClient.invalidateQueries({ queryKey });
+      void queryClient.invalidateQueries({ queryKey: assignmentKeys.lists });
+      return failure ?? { kind: 'started', detail: queryClient.getQueryData<AssignmentJobDetail>(queryKey) };
+    },
+    [mutateAsync, queryClient, jobId]
+  );
+
+  /** The run is over: new targets can make or end a conflict, which the title and library count. */
+  const finished = useCallback(
+    () => Promise.all([assignmentKeys.lists, titleKeys.all, libraryKeys.all].map((queryKey) => queryClient.invalidateQueries({ queryKey }))),
+    [queryClient]
+  );
+
+  return { start, starting: mutation.isPending, finished };
 }

@@ -154,6 +154,22 @@ function Notes({ p, conflictWith }: { p: Proposal; conflictWith: string | null }
 }
 
 function Actions({ p, short, movie, actions }: { p: Proposal; short: string; movie: boolean; actions: RowActions }) {
+  // A movie job is one choice: use a file (the others step aside), or undo that to choose again
+  if (movie && p.kind === 'movie' && p.group === 'needs_review') {
+    return p.decision === 'accepted' ? (
+      <Button variant="ready" size="sm" data-action="accept" aria-pressed="true" aria-label={`Using this file: ${short}. Tap to undo`} onClick={() => actions.unaccept(p)}>
+        <Check size={16} aria-hidden="true" />
+        Using this file
+      </Button>
+    ) : (
+      <Button variant="secondary" size="sm" className="mt-accept" data-action="accept" aria-label={`Use this file: ${short}`} onClick={() => actions.accept(p)}>
+        <Check size={16} aria-hidden="true" />
+        Use this file
+      </Button>
+    );
+  }
+  // An extra can't become the movie
+  if (movie && p.decision === 'ignored' && !maps(p)) return null;
   if (p.decision === 'ignored') {
     const include = p.group === 'extras';
     return (

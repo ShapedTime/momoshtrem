@@ -9,7 +9,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
  * season, "Title S01E29" for an episode, or the show's title.
  */
 export function legacySearchContext(title: Title, scope: { season?: number; episode?: number } = {}): TorrentSearchContext {
-  const base = { title: title.title, tmdbId: title.tmdb_id, year: title.year ?? undefined };
+  const base = { title: title.title, tmdbId: title.tmdb_id, year: title.year ?? undefined, libraryId: title.library.library_id };
   if (title.media_type === 'movie') {
     return { ...base, mediaType: 'movie', query: title.year ? `${title.title} ${title.year}` : title.title };
   }

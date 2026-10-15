@@ -65,77 +65,6 @@ export interface AddShowRequest {
   tmdb_id: number;
 }
 
-export interface AssignTorrentRequest {
-  magnet_uri: string;
-}
-
-/**
- * Combined request for adding torrent (auto-adds to library if needed)
- */
-export interface AddTorrentRequest {
-  magnet_uri: string;
-  media_type: 'movie' | 'tv';
-  tmdb_id: number;
-  title?: string;
-  year?: number;
-}
-
-// =============================================================================
-// API Response Types
-// =============================================================================
-
-export interface MovieAssignmentResponse {
-  success: boolean;
-  assignment: TorrentAssignment;
-}
-
-export interface ShowAssignmentResponse {
-  success: boolean;
-  summary: AssignmentSummary;
-  matched: EpisodeMatch[];
-  unmatched: UnmatchedFile[];
-}
-
-export interface AssignmentSummary {
-  total_files: number;
-  matched: number;
-  unmatched: number;
-  skipped: number;
-}
-
-export interface EpisodeMatch {
-  episode_id: number;
-  season: number;
-  episode: number;
-  file_path: string;
-  file_size: number;
-  resolution?: string;
-  confidence: 'high' | 'medium' | 'low';
-}
-
-export interface UnmatchedFile {
-  file_path: string;
-  reason: string;
-  season?: number;
-  episode?: number;
-}
-
-/**
- * Combined response for add-torrent endpoint
- */
-export interface AddTorrentResponse {
-  success: boolean;
-  added_to_library: boolean;
-  library_id: number;
-  media_type: 'movie' | 'tv';
-  // For movies
-  assignment?: TorrentAssignment;
-  // For shows
-  summary?: AssignmentSummary;
-  matched?: EpisodeMatch[];
-  unmatched?: UnmatchedFile[];
-}
-
 // =============================================================================
 // Library Status Types (for UI)
 // =============================================================================
@@ -196,18 +125,6 @@ export function isLibraryMovie(item: LibraryMovie | LibraryShow): item is Librar
 
 export function isLibraryShow(item: LibraryMovie | LibraryShow): item is LibraryShow {
   return 'seasons' in item;
-}
-
-export function isMovieAssignmentResponse(
-  response: MovieAssignmentResponse | ShowAssignmentResponse
-): response is MovieAssignmentResponse {
-  return 'assignment' in response && !('summary' in response);
-}
-
-export function isShowAssignmentResponse(
-  response: MovieAssignmentResponse | ShowAssignmentResponse
-): response is ShowAssignmentResponse {
-  return 'summary' in response && 'matched' in response;
 }
 
 // =============================================================================

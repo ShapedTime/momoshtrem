@@ -57,7 +57,7 @@ export const GROUPS: Record<ProposalGroup, GroupCopy> = {
 
 /** Movie candidates have their own words: there's one movie, and the files compete for it. */
 export const MOVIE_GROUPS: Partial<Record<ProposalGroup, Pick<GroupCopy, 'description'>>> = {
-  needs_review: { description: 'More than one file could be the movie. Accept the right one; the others are ignored.' },
+  needs_review: { description: 'More than one file could be the movie. Use the right one; the others stay out of Infuse.' },
   matched: { description: 'The movie file.' },
 };
 
@@ -283,11 +283,15 @@ const EXTRA_LABEL: Record<ExtraType, string> = {
   other: 'Extra',
 };
 
-/** What an ignored row says it is: the extra's kind, or "Ignored". */
+/** What an ignored row says it is: the extra's kind, "Not used" for a movie file you didn't pick, or "Ignored". */
 export function ignoredLabel(p: Pick<Proposal, 'kind' | 'extra_type'>): string {
   if (p.extra_type) return EXTRA_LABEL[p.extra_type];
+  if (p.kind === 'movie') return 'Not used';
   return p.kind === 'extra' ? EXTRA_LABEL.other : STATUS.ignored.label;
 }
+
+/** A file's name without its folders: labels for movie files (both cuts of a release share the title). */
+export const fileName = (path: string): string => path.split('/').pop() ?? path;
 
 /** A collapsed Extras group's peek: its first three kinds, each once ("Font, Sample", not "Font, Font, Font"). */
 export function extrasPeek(proposals: Proposal[]): string {
@@ -305,6 +309,19 @@ export function extrasPeek(proposals: Proposal[]): string {
 export function restoredDecision(p: Proposal): ProposalDecision {
   if (p.group === 'needs_review' || !maps(p)) return 'pending';
   return 'accepted';
+}
+
+/**
+ * Undo a movie pick: using a file ignored the other candidates, so every
+ * candidate goes back to its group's default (pending in Needs review) and
+ * you choose again. One you had ignored yourself comes back too.
+ */
+export function movieUndo(proposals: Proposal[]): ProposalChange[] {
+  return proposals.flatMap((p): ProposalChange[] => {
+    if (p.kind !== 'movie') return [];
+    const decision: ProposalDecision = p.group === 'needs_review' ? 'pending' : 'accepted';
+    return p.decision === decision ? [] : [{ id: p.id, decision }];
+  });
 }
 
 /** Undo can't put a picked file back to "no episode" (the contract never empties targets): Change and Ignore only. */
@@ -338,12 +355,13 @@ export interface FootState {
   message: string;
 }
 
-/** The message line, highest priority first: conflict, pending, unmatched, all clear. */
-export function footState(counts: ReviewCounts): FootState {
+/** The message line, highest priority first: conflict, pending, unmatched, all clear. A movie job waits for one pick. */
+export function footState(counts: ReviewCounts, { movie = false }: { movie?: boolean } = {}): FootState {
   const label = `Apply ${counts.toApply} ${counts.toApply === 1 ? 'mapping' : 'mappings'}`;
   const blocked = counts.pending > 0 || counts.conflicts > 0;
   const base = { label, toApply: counts.toApply, blocked };
   if (counts.conflicts > 0) return { ...base, tone: 'conflict', message: 'Two files point at the same episode. Keep one.' };
+  if (counts.pending > 0 && movie) return { ...base, tone: 'blocked', message: 'Pick the file to use' };
   if (counts.pending > 0) return { ...base, tone: 'blocked', message: `Decide on ${plural(counts.pending, 'file')} to apply` };
   if (counts.unmatched > 0) {
     const one = counts.unmatched === 1;
@@ -477,6 +495,14 @@ export function nextStage(stage: ViewStage | null, status: JobStatus | undefined
 
 /** "Frieren: Beyond Journey’s End" → "Frieren": the back link and buttons. */
 export const shortTitle = (title: string): string => title.split(/:\s/)[0] || title;
+
+/** An open job in Activity: "Frieren: 2 files to check", "Frieren: ready to apply", or "Frieren: mapping files…" while it works. */
+export function openJobLine(job: Pick<AssignmentJob, 'status' | 'item' | 'counts'>): string {
+  const show = shortTitle(job.item.title);
+  if (isJobWorking(job.status)) return `${show}: mapping files…`;
+  if (job.counts.needs_review > 0) return `${show}: ${plural(job.counts.needs_review, 'file')} to check`;
+  return `${show}: ready to apply`;
+}
 
 /** The title page the job belongs to. */
 export const titleHref = (job: Pick<AssignmentJob, 'item'>): string => `/${job.item.media_type === 'movie' ? 'movie' : 'tv'}/${job.item.tmdb_id}`;

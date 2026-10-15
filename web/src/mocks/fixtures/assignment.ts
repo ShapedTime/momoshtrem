@@ -31,7 +31,8 @@ import { absoluteNumbers, episodeIdFor, SHOWS, type ShowSeed } from './title-see
  *
  * New jobs (assign or Inspect) are built from the same templates: Frieren,
  * One Piece and Doctor Who get theirs, other shows a season pack that maps
- * cleanly (it applies on its own), movies two cuts to choose from.
+ * cleanly (it applies on its own), movies one file (it applies on its own)
+ * or, for a Blu-ray release, two cuts to choose from.
  */
 
 const GB = 1e9;
@@ -451,15 +452,37 @@ function seasonPack(entry: CatalogEntry, name: string | null): Template {
   };
 }
 
-/** Movies: two feature-length cuts to choose from, and a sample. */
+/**
+ * Movies: a Blu-ray release has two feature-length cuts to choose from (the
+ * job waits for review); any other release has one plausible file, so the
+ * job applies on its own. Both come with a sample. The AI never runs for movies.
+ */
 function movieCuts(entry: CatalogEntry, name: string | null): Template {
   const release = name ?? `${dotted(entry.title)}.${entry.year}.2160p.WEB-DL.DDP5.1.H.265-GROUP`;
+  const sample: FileDraft = {
+    file: `Sample/${release}.sample.mkv`,
+    size: 60 * MB,
+    group: 'extras',
+    kind: 'extra',
+    extra_type: 'sample',
+    reason: 'Sample clip; ignored by default',
+  };
+  if (!/blu-?ray/i.test(release)) {
+    return {
+      name: release,
+      release_group: 'GROUP',
+      indexer: null,
+      suggested_hints: [],
+      ai_files: 0,
+      files: [{ file: `${release}.mkv`, size: 14.2 * GB, group: 'matched', kind: 'movie', reason: 'The only feature-length video; title and year match' }, sample],
+    };
+  }
   return {
     name: release,
     release_group: 'GROUP',
     indexer: null,
-    suggested_hints: ['use the theatrical cut'],
-    ai_files: 2,
+    suggested_hints: [],
+    ai_files: 0,
     files: [
       {
         file: `${release}.mkv`,
@@ -468,7 +491,6 @@ function movieCuts(entry: CatalogEntry, name: string | null): Template {
         kind: 'movie',
         confidence: 'medium',
         reason: 'Title and year match; the runtime fits the theatrical cut',
-        recheck: { confidence: 'high', reason: 'The runtime matches TMDB’s: this is the theatrical cut' },
       },
       {
         file: `${release}.Extended.Cut.mkv`,
@@ -478,7 +500,7 @@ function movieCuts(entry: CatalogEntry, name: string | null): Template {
         confidence: 'low',
         reason: 'Also feature-length: probably the extended cut',
       },
-      { file: `Sample/${release}.sample.mkv`, size: 60 * MB, group: 'extras', kind: 'extra', extra_type: 'sample', reason: 'Sample clip; ignored by default' },
+      sample,
     ],
   };
 }

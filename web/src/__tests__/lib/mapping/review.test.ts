@@ -13,7 +13,9 @@ import {
   footState,
   groupProposals,
   ignoredLabel,
+  movieUndo,
   nextStage,
+  openJobLine,
   progressSteps,
   readyToastTitle,
   restoredDecision,
@@ -204,6 +206,7 @@ describe('files', () => {
     expect(ignoredLabel({ kind: 'extra', extra_type: 'opening' })).toBe('Opening (creditless)');
     expect(ignoredLabel({ kind: 'extra', extra_type: 'info' })).toBe('Info file');
     expect(ignoredLabel({ kind: 'episode', extra_type: null })).toBe('Ignored');
+    expect(ignoredLabel({ kind: 'movie', extra_type: null })).toBe('Not used');
   });
 });
 
@@ -229,6 +232,21 @@ describe('decisions', () => {
   it('a movie job keeps one file: accepting a candidate ignores the others', () => {
     const cuts: Proposal[] = [1, 2].map((id) => ({ ...named(frieren, '35v2'), id, kind: 'movie', targets: [], suggested_targets: [] }));
     expect(withDecisions(cuts, [{ id: 2, decision: 'accepted' }]).map((p) => p.decision)).toEqual(['ignored', 'accepted']);
+  });
+
+  it('undoing a movie pick brings every candidate back to its default, so you choose again', () => {
+    const cuts: Proposal[] = [1, 2, 3].map((id) => ({ ...named(frieren, '35v2'), id, kind: 'movie', targets: [], suggested_targets: [] }));
+    const picked = withDecisions(cuts, [{ id: 2, decision: 'accepted' }]);
+    expect(movieUndo([...picked, named(frieren, 'NCOP2')])).toEqual([
+      { id: 1, decision: 'pending' },
+      { id: 2, decision: 'pending' },
+      { id: 3, decision: 'pending' },
+    ]);
+    expect(movieUndo(cuts)).toEqual([]);
+  });
+
+  it('a movie job’s foot asks for one pick', () => {
+    expect(footState({ ...reviewCounts([]), pending: 2, toApply: 2 }, { movie: true })).toMatchObject({ blocked: true, message: 'Pick the file to use' });
   });
 });
 
@@ -300,5 +318,12 @@ describe('the job', () => {
 
   it('lists the torrent’s facts in the design’s order', () => {
     expect(torrentFacts(frieren.job, formatBytes)).toEqual(['14.4 GB', '16 files', 'Nyaa', 'SubsPlease']);
+  });
+
+  it('says what an open job waits for on Activity', () => {
+    expect(openJobLine(frieren.job)).toBe('Frieren: 2 files to check');
+    expect(openJobLine({ ...frieren.job, status: 'fetching_metadata' })).toBe('Frieren: mapping files…');
+    expect(openJobLine({ ...frieren.job, status: 'ready', counts: { ...frieren.job.counts, needs_review: 0 } })).toBe('Frieren: ready to apply');
+    expect(openJobLine({ ...frieren.job, counts: { ...frieren.job.counts, needs_review: 1 } })).toBe('Frieren: 1 file to check');
   });
 });

@@ -174,24 +174,47 @@ describe('a new job', () => {
     await expect(assignmentApi.assignShow(99, { magnet_uri: 'magnet:?xt=urn:btih:abc' })).rejects.toMatchObject({ status: 404 });
   });
 
-  it('movies: accepting one cut ignores the other, and applying assigns it', async () => {
-    const { job_id } = await assignmentApi.assignMovie(3, { magnet_uri: 'magnet:?xt=urn:btih:oba1&dn=One.Battle.After.Another.2025.2160p.WEB-DL' });
-    expect(await statuses(job_id, 4)).toEqual(['fetching_metadata', 'classifying', 'resolving', 'needs_review']);
+  it('movies: no AI; accepting one cut ignores the other, Undo brings both back, and applying assigns it', async () => {
+    const release = 'One.Battle.After.Another.2025.1080p.BluRay.x264-SPARKS';
+    const { job_id } = await assignmentApi.assignMovie(3, { magnet_uri: `magnet:?xt=urn:btih:oba1&dn=${release}` });
+    // The resolver maps episodes: a movie job never asks the AI
+    expect(await statuses(job_id, 3)).toEqual(['fetching_metadata', 'classifying', 'needs_review']);
     const detail = await assignmentApi.job(job_id);
+    expect(detail.job).toMatchObject({ ai_available: false, suggested_hints: [], progress: { ai_files: null } });
+    await expect(assignmentApi.reclassify(job_id, { scope: 'all' })).rejects.toMatchObject({ status: 503 });
     const cuts = detail.proposals.filter((p) => p.kind === 'movie');
-    expect(cuts.map((p) => [p.targets, p.decision])).toEqual([
-      [[], 'pending'],
-      [[], 'pending'],
+    expect(cuts.map((p) => [p.group, p.targets, p.decision])).toEqual([
+      ['needs_review', [], 'pending'],
+      ['needs_review', [], 'pending'],
     ]);
     await expect(assignmentApi.patchProposals(job_id, { items: [{ id: cuts[0].id, episode_ids: [1] }] })).rejects.toMatchObject({ status: 422 });
-    const picked = await assignmentApi.patchProposals(job_id, { items: [{ id: cuts[0].id, decision: 'accepted' }] });
-    expect(picked.proposals.filter((p) => p.kind === 'movie').map((p) => p.decision)).toEqual(['accepted', 'ignored']);
+    const picked = await assignmentApi.patchProposals(job_id, { items: [{ id: cuts[1].id, decision: 'accepted' }] });
+    expect(picked.proposals.filter((p) => p.kind === 'movie').map((p) => p.decision)).toEqual(['ignored', 'accepted']);
     expect(picked.job.status).toBe('ready');
+    // Undo is one PATCH that puts every candidate back to pending, so you choose again
+    const undone = await assignmentApi.patchProposals(job_id, { items: cuts.map((p) => ({ id: p.id, decision: 'pending' as const })) });
+    expect(undone.proposals.filter((p) => p.kind === 'movie').map((p) => [p.decision, p.user_decided])).toEqual([
+      ['pending', false],
+      ['pending', false],
+    ]);
+    expect(undone.job.status).toBe('needs_review');
+    await assignmentApi.patchProposals(job_id, { items: [{ id: cuts[0].id, decision: 'accepted' }] });
     await assignmentApi.apply(job_id);
     expect((await titlesApi.get('movie', 1054867)).library).toMatchObject({
       availability_stage: 'downloading',
-      torrent: { release_name: 'One.Battle.After.Another.2025.2160p.WEB-DL', file_name: 'One.Battle.After.Another.2025.2160p.WEB-DL.mkv' },
+      torrent: { release_name: release, file_name: `${release}.mkv` },
     });
+  });
+
+  it('movies: one plausible file applies on its own', async () => {
+    const release = 'One.Battle.After.Another.2025.2160p.WEB-DL';
+    const { job_id } = await assignmentApi.assignMovie(3, { magnet_uri: `magnet:?xt=urn:btih:oba2&dn=${release}` });
+    expect(await statuses(job_id, 3)).toEqual(['fetching_metadata', 'classifying', 'applied']);
+    expect((await assignmentApi.job(job_id)).proposals.map((p) => [p.kind, p.group, p.decision])).toEqual([
+      ['movie', 'matched', 'accepted'],
+      ['extra', 'extras', 'ignored'],
+    ]);
+    expect((await titlesApi.get('movie', 1054867)).library).toMatchObject({ availability_stage: 'downloading', torrent: { release_name: release } });
   });
 
   it('Inspect makes a dry run: same shape, never applied, not on the title', async () => {
@@ -417,7 +440,7 @@ describe('scenarios', () => {
     await assignmentApi.reclassify(101, { scope: 'all', hint: '28.5 is a recap' });
     expect(await statuses(101, 2)).toEqual(['resolving', 'needs_review']);
     const after = await assignmentApi.job(101);
-    expect(after.job.ai_error).toContain('nothing changed');
+    expect(after.job.ai_error).toBe('The AI didn’t answer in time.');
     expect(after.proposals).toEqual(before.proposals);
     setMockScenario(null);
     await assignmentApi.reclassify(101, { scope: 'unresolved' });

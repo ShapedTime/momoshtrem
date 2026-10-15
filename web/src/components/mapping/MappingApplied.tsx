@@ -45,7 +45,9 @@ export function MappingApplied({ detail }: { detail: AssignmentJobDetail }) {
         Ready in Infuse.
       </h1>
       <p className="t-body-l done-lede text-fg-2">
-        {plural(summary.files, 'file')} mapped. They stream while the rest downloads, and show up after Infuse’s next library refresh.
+        {job.item.media_type === 'movie'
+          ? 'It streams while it downloads, and shows up after Infuse’s next library refresh.'
+          : `${plural(summary.files, 'file')} mapped. They stream while the rest downloads, and show up after Infuse’s next library refresh.`}
       </p>
       <ul className="panel done-list" aria-label="Mapped to Infuse">
         {movieFile && (

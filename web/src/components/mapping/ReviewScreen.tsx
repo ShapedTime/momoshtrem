@@ -11,11 +11,13 @@ import {
   conflictMap,
   defaultGroupOpen,
   displayPath,
+  fileName,
   firstBlocker,
   firstPending,
   footState,
   groupProposals,
   maps,
+  movieUndo,
   restoredDecision,
   reviewCounts,
   shortName,
@@ -28,6 +30,7 @@ import { MappingFoot } from './MappingFoot';
 import { MappingHeader, MappingMoreMenu, MappingSummary } from './MappingHeader';
 import { ProposalGroup } from './ProposalGroup';
 import { type RowActions, ProposalRow, rowId } from './ProposalRow';
+import { RecheckPanel } from './RecheckPanel';
 
 const FLASH_MS = 1200;
 /** How long a focus move waits for its target to render. */
@@ -56,7 +59,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   const counts = useMemo(() => reviewCounts(proposals), [proposals]);
   const conflicts = useMemo(() => conflictMap(proposals), [proposals]);
   const groups = useMemo(() => groupProposals(proposals), [proposals]);
-  const foot = footState(counts);
+  const foot = footState(counts, { movie });
 
   const [selectedId, setSelectedId] = useState<number | null>(() => (isDesktop() && !movie ? (firstPending(proposals)?.id ?? null) : null));
   const [opened, setOpened] = useState<Partial<Record<Group, boolean>>>({});
@@ -72,7 +75,8 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
   const pickerFor = desktop ? selected : sheetProposal;
   const taken = useMemo(() => takenBy(proposals, pickerFor?.id ?? null, showTitle), [proposals, pickerFor?.id, showTitle]);
   const isOpen = (group: Group) => opened[group] ?? defaultGroupOpen(group, desktop);
-  const short = useCallback((p: Proposal) => shortName(p.file_path, showTitle), [showTitle]);
+  // Movie cuts share the title: their file names tell them apart
+  const short = useCallback((p: Proposal) => (movie ? fileName(p.file_path) : shortName(p.file_path, showTitle)), [movie, showTitle]);
   const path = useCallback((p: Proposal) => displayPath(p.file_path, job.torrent.name), [job.torrent.name]);
 
   useEffect(() => {
@@ -143,7 +147,8 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
         if (next) setSelectedId(next.id);
       }
     },
-    unaccept: (p) => void change([{ id: p.id, decision: 'pending' }]),
+    // A movie pick ignored the other files: they all come back, so you choose again
+    unaccept: (p) => void change(movie && p.kind === 'movie' ? movieUndo(proposals) : [{ id: p.id, decision: 'pending' }]),
     ignore: (p) => {
       if (sheet?.id === p.id) setSheet({ ...sheet, open: false });
       focusAfterRender({ kind: 'row', id: p.id, actions: ['restore'] });
@@ -198,7 +203,7 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
       <MappingHeader job={job} summary={<MappingSummary counts={counts} />} more={<MappingMoreMenu onDiscard={() => void actions.discard()} />} />
       <div className={cx('map-layout page', desktop && !movie && 'has-pane')}>
         <div className="map-main">
-          {/* "Re-check with AI" (#5, slice 7) goes here, above the groups, while job.ai_available */}
+          {job.ai_available && <RecheckPanel detail={detail} />}
           <div className="map-groups">
             {groups.map(({ group, proposals: rows }) => (
               <ProposalGroup

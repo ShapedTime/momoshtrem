@@ -70,7 +70,9 @@ const touch = (job: MockJob) => {
 const libraryRow = (mediaType: MediaType, libraryId: number | null) =>
   libraryId === null ? undefined : findByLibraryId(mockLibrary(), mediaType, libraryId);
 
+/** As the backend: the AI resolver maps episodes, so movie jobs never have it. */
 function aiAvailable(mediaType: MediaType, libraryId: number | null): boolean {
+  if (mediaType === 'movie') return false;
   const mode = libraryRow(mediaType, libraryId)?.row.settings.classifier_mode;
   return scenario() !== 'ai-off' && mockAiSettings().classifier_enabled && mode !== 'rules_only';
 }
@@ -175,7 +177,7 @@ function tick(job: MockJob): void {
   if (walk.kind === 'classify') classified(job);
   else {
     // `ai-error`: the run fails and changes nothing
-    if (scenario() === 'ai-error') job.ai_error = 'The AI didn’t answer in time, so nothing changed.';
+    if (scenario() === 'ai-error') job.ai_error = 'The AI didn’t answer in time.';
     else finishRecheck(job, walk.scope ?? 'unresolved');
     job.status = settledStatus(job.proposals);
   }

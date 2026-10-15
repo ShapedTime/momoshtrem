@@ -49,7 +49,7 @@ export interface MockLibraryEntry {
   filed: Map<number, EpisodeFile>;
   /** What the open mapping jobs say about this title (kept in sync by handlers/assignment.ts). */
   review: MockReview;
-  /** Movies: a torrent assigned this session (the legacy add-torrent route); it starts downloading. */
+  /** Movies: a torrent assigned this session (an applied mapping job); it starts downloading. */
   assigned?: TitleTorrent;
   /** Shows. */
   settings: ShowSettings;
@@ -350,7 +350,7 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
   };
 }
 
-/** A movie gets a file (the legacy add-torrent route, or an applied mapping job): loaded, nothing fetched yet. */
+/** A movie gets a file (an applied mapping job): loaded, nothing fetched yet. */
 export function assignMovieRelease(
   row: MockLibraryEntry,
   release: Pick<TitleTorrent, 'info_hash' | 'release_name' | 'file_name' | 'size_bytes'>
@@ -367,18 +367,6 @@ export function assignMovieRelease(
   row.assigned = torrent;
   row.files = true;
   return torrent;
-}
-
-/** The legacy add-torrent route for a movie: assign a release by its magnet (dn = the release name). */
-export function assignMovieTorrent(row: MockLibraryEntry, magnetUri: string): TitleTorrent {
-  const params = new URLSearchParams(magnetUri.replace(/^magnet:\?/, ''));
-  const releaseName = params.get('dn') ?? 'Unnamed.Release.1080p';
-  return assignMovieRelease(row, {
-    info_hash: (params.get('xt') ?? '').replace('urn:btih:', '').toLowerCase(),
-    release_name: releaseName,
-    file_name: `${releaseName}.mkv`,
-    size_bytes: 4_200_000_000,
-  });
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
