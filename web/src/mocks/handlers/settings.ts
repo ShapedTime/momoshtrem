@@ -4,6 +4,14 @@ import { AI_SETTINGS, AI_USAGE } from '../fixtures/settings';
 
 let ai: AiSettings = { ...AI_SETTINGS };
 
+/** This page's AI settings (mapping jobs read `classifier_enabled` and `auto_apply_high_confidence`). */
+export const mockAiSettings = () => ai;
+
+/** Tests: back to the fixture's AI settings. */
+export function resetMockSettings(): void {
+  ai = { ...AI_SETTINGS };
+}
+
 export const settingsHandlers = [
   http.get('*/api/settings/ai', () => HttpResponse.json(ai)),
   http.put('*/api/settings/ai', async ({ request }) => {

@@ -99,6 +99,7 @@ export const titlesHandlers = [
     const row = episode && library.get(libraryKey('tv', episode.tmdbId));
     if (!row) return notFound('No such episode');
     row.unassigned.add(id);
+    row.filed.delete(id);
     return noContent();
   }),
   http.patch('*/api/shows/:id', async ({ params, request }) => {

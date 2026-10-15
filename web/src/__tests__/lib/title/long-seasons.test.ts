@@ -140,7 +140,7 @@ describe('earlierWatched', () => {
 
   it('leaves short seasons, short runs and fully watched seasons alone', () => {
     expect(earlierWatched(season(95396, 2).episodes)).toBeNull(); // 10 episodes
-    expect(earlierWatched(season(37854, 21).episodes)).toBeNull(); // all 156 watched
+    expect(earlierWatched(season(37854, 21).episodes)).toBeNull(); // E1–E6 have no file, then all watched
     const s1 = season(209867, 1).episodes;
     expect(earlierWatched(s1.map((e, i) => (i === 9 ? { ...e, state: 'ready' as const } : e)))).toBeNull(); // run of 9
   });

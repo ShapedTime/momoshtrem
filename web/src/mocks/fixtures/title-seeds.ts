@@ -11,12 +11,15 @@ import { iso } from './catalog';
  * | Interstellar | downloading |
  * | One Battle After Another | needs a torrent |
  * | Past Lives, The Good Place | not in the library |
- * | Frieren | needs a torrent: S01E29–E38 missing, 2 files to review |
- * | One Piece | ready, absolute numbers, arcs |
- * | Doctor Who | ready (a gap in S3 doesn't count), named specials |
+ * | Frieren | needs a torrent: S01E29–E38 missing; mapping job 101 has 2 files to review |
+ * | One Piece | ready (a gap at the start of Wano doesn't count), absolute numbers, arcs; job 102 has 1 file to review |
+ * | Doctor Who | ready (a gap in S3 doesn't count), named specials; job 103 has 3 files to review (a conflict) |
  * | Severance | ready, one upcoming episode |
  * | Bluey | ready, 52-episode seasons |
  * | The Studio | downloading |
+ *
+ * No episode is seeded `needs_review`: that state comes from the open mapping
+ * jobs (fixtures/assignment.ts), for episodes that have no file.
  */
 
 const DAY = 86_400_000;
@@ -47,8 +50,8 @@ export interface EpisodeSeed {
   name: string;
   air_date: string | null;
   runtime: number;
-  /** As seeded; without a file it becomes missing or upcoming. */
-  state: EpisodeState;
+  /** As seeded; without a file it becomes missing or upcoming (or needs_review, from a mapping job). */
+  state: Exclude<EpisodeState, 'needs_review'>;
   pct?: number;
   episode_type?: EpisodeType;
   overview?: string;
@@ -71,7 +74,6 @@ export interface ShowSeed extends TitleSeed {
   networks: string[];
   end_year: number | null;
   episode_run_time: number;
-  review_job_id?: number;
   seeders?: number;
   /** The release the episodes' files came from (one per show here; subtitles rank against it). */
   release?: string;
@@ -90,7 +92,7 @@ function run(
   names: string[],
   start: string,
   runtime: number,
-  state: (n: number) => EpisodeState,
+  state: (n: number) => EpisodeSeed['state'],
   { from = 1, step = 7 }: { from?: number; step?: number } = {}
 ): EpisodeSeed[] {
   return names.map((name, i) => ({ n: from + i, name, air_date: after(start, i, step), runtime, state: state(from + i) }));
@@ -148,14 +150,18 @@ export const SHOWS: Record<number, ShowSeed> = {
     networks: ['Nippon TV'],
     end_year: null,
     episode_run_time: 24,
-    review_job_id: 101,
     seasons: [
       {
         n: 0,
         name: 'Specials',
+        // TMDB's order (the design's): the recap sits between the mini anime. Job 101 maps "28.5" to S00E03.
         episodes: [
-          { n: 1, name: 'Recap: The Journey So Far', air_date: '2024-03-15', runtime: 24, state: 'ready' },
-          ...run(numbered(5, 1, '“Frieren” Mini Anime'), '2023-10-06', 2, (n) => (n === 5 ? 'missing' : n === 6 ? 'needs_review' : 'ready'), { from: 2 }),
+          { n: 1, name: '“Frieren” Mini Anime 1', air_date: '2023-10-06', runtime: 2, state: 'ready' },
+          { n: 2, name: '“Frieren” Mini Anime 2', air_date: '2023-10-13', runtime: 2, state: 'ready' },
+          { n: 3, name: 'Recap: The Journey So Far', air_date: '2024-03-15', runtime: 24, state: 'missing' },
+          { n: 4, name: '“Frieren” Mini Anime 3', air_date: '2024-03-22', runtime: 2, state: 'ready' },
+          { n: 5, name: '“Frieren” Mini Anime 4', air_date: '2024-03-29', runtime: 2, state: 'missing' },
+          { n: 6, name: '“Frieren” Mini Anime 5', air_date: '2024-04-05', runtime: 2, state: 'missing' },
         ],
       },
       {
@@ -164,7 +170,7 @@ export const SHOWS: Record<number, ShowSeed> = {
         episodes: amend(
           amend(
             [
-              ...run(FRIEREN_S1.slice(0, 28), '2023-09-29', 24, (n) => (n === 26 ? 'needs_review' : n === 28 ? 'ready' : 'watched')),
+              ...run(FRIEREN_S1.slice(0, 28), '2023-09-29', 24, (n) => (n === 26 || n === 28 ? 'ready' : 'watched')),
               // The second cour, after a long break: releases call it season 2.
               ...run(FRIEREN_S1.slice(28), '2026-01-16', 24, () => 'missing', { from: 29 }),
             ],
@@ -204,13 +210,17 @@ export const SHOWS: Record<number, ShowSeed> = {
       {
         n: 0,
         name: 'Specials',
-        episodes: run(
-          ['Episode of Nami', 'Episode of Luffy', 'Episode of Merry', 'Episode of Sabo', '3D2Y', 'Heart of Gold', 'Episode of East Blue',
-            'Episode of Sky Island', ...numbered(34, 9, 'Special')],
-          '2005-12-18',
-          100,
-          (n) => (n <= 8 ? 'ready' : 'missing'),
-          { step: 120 }
+        episodes: amend(
+          run(
+            ['Episode of Nami', 'Episode of Luffy', 'Episode of Merry', 'Episode of Sabo', '3D2Y', 'Heart of Gold', 'Episode of East Blue',
+              'Episode of Sky Island', ...numbered(34, 9, 'Special')],
+            '2005-12-18',
+            100,
+            (n) => (n <= 8 ? 'ready' : 'missing'),
+            { step: 120 }
+          ),
+          41,
+          { name: 'One Piece Fan Letter', air_date: '2024-10-20', runtime: 24 }
         ),
       },
       {
@@ -222,7 +232,12 @@ export const SHOWS: Record<number, ShowSeed> = {
           { label: 'Wano: Act 2', from: 26, to: 66 },
           { label: 'Wano: Act 3', from: 67, to: 156 },
         ],
-        episodes: amend(run(numbered(156, 892), '2019-07-07', 24, () => 'watched'), 156, { episode_type: 'finale' }),
+        // #892–#897 have no file: a gap before the last file (job 102 maps them), so it doesn't count
+        episodes: amend(
+          run(numbered(156, 892), '2019-07-07', 24, (n) => (n <= 6 ? 'missing' : 'watched')),
+          156,
+          { episode_type: 'finale' }
+        ),
       },
       {
         n: 22,
@@ -261,7 +276,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     networks: ['BBC One'],
     end_year: 2022,
     episode_run_time: 45,
-    review_job_id: 103,
     seasons: [
       {
         n: 0,
@@ -275,7 +289,8 @@ export const SHOWS: Record<number, ShowSeed> = {
           name,
           air_date,
           runtime: 60,
-          state: i < 3 ? 'watched' : i === 4 ? 'needs_review' : i < 6 ? 'ready' : 'missing',
+          // Planet of the Dead (S00E05) has no file: job 103's Easter special lands here after a re-check
+          state: i < 3 ? 'watched' : i === 4 ? 'missing' : i < 6 ? 'ready' : 'missing',
         })),
       },
       ...(['2005-03-26', '2006-04-15', '2007-03-31', '2008-04-05'] as const).map((start, i): SeasonSeed => ({
@@ -546,3 +561,20 @@ export const MOVIES: Record<number, MovieSeed> = {
     similar: [['movie', 1054867], ['movie', 157336]],
   },
 };
+
+// ---- Episode ids and absolute numbers (shared by titles.ts and assignment.ts) ----
+
+/** Library id of a seeded episode: key × 100,000 + season × 1,000 + episode. */
+export const episodeIdFor = (key: number, season: number, episode: number) => key * 100_000 + season * 1000 + episode;
+
+/** Absolute numbers by episode id: regular seasons count on (from `absolute_from` where set); specials have none. */
+export function absoluteNumbers(show: ShowSeed): Map<number, number> {
+  const numbers = new Map<number, number>();
+  let absolute = 1;
+  for (const season of show.seasons) {
+    if (season.n === 0) continue;
+    absolute = season.absolute_from ?? absolute;
+    for (const episode of season.episodes) numbers.set(episodeIdFor(show.key, season.n, episode.n), absolute++);
+  }
+  return numbers;
+}
