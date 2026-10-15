@@ -13,6 +13,7 @@ import type {
 import {
   autoApplies,
   CLOSED,
+  conflictIds,
   finishRecheck,
   inScope,
   jobCounts,
@@ -343,7 +344,8 @@ export const assignmentHandlers = [
     job.hint = Object.keys(hint).length ? hint : null;
     job.ai_error = null;
     job.proposals = job.proposals.map((p) => ({ ...p, updated: false, hinted: false }));
-    job.ai_files = job.proposals.filter((p) => inScope(p, body.scope)).length;
+    const conflicts = conflictIds(job.proposals);
+    job.ai_files = job.proposals.filter((p) => inScope(p, body.scope, conflicts)).length;
     job.status = 'resolving';
     job.walk = { kind: 'recheck', steps: ['resolving', 'resolving'], started: Date.now(), polls: 0, scope: body.scope };
     touch(job);

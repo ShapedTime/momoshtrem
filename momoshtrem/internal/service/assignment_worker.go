@@ -44,6 +44,7 @@ const (
 	msgAITimeout     = "The AI didn't answer in time, so nothing changed."
 	msgAIFailed      = "The AI check failed, so nothing changed."
 	msgAIInterrupted = "The AI check was interrupted by a restart, so nothing changed."
+	msgAIBudget      = "This month's AI budget is spent, so nothing changed."
 )
 
 // errJobMoved stops processing a job someone else moved on (discarded, or
@@ -56,6 +57,9 @@ var errJobMoved = errors.New("the job moved on")
 func (s *JobService) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.stop = cancel
+	s.runMu.Lock()
+	s.runCtx = ctx
+	s.runMu.Unlock()
 	s.recoverInterrupted(ctx)
 	for i := 0; i < s.workers; i++ {
 		s.wg.Add(1)
@@ -67,16 +71,26 @@ func (s *JobService) Start() {
 	s.log.Info("Assignment workers started", "workers", s.workers)
 }
 
-// Close stops the workers and waits for them. A job in flight stays where
-// it is and is recovered on the next start. Call it before closing the
-// torrent service.
+// Close stops the workers and the re-checks and waits for them. A job in
+// flight stays where it is and is recovered on the next start. Call it
+// before closing the torrent service.
 func (s *JobService) Close() {
-	if s.stop == nil {
-		return
+	if s.stop != nil {
+		s.stop()
 	}
-	s.stop()
 	s.wg.Wait()
 	s.log.Info("Assignment workers stopped")
+}
+
+// runContext is the workers' context: re-checks run in it, so Close stops
+// them. Before Start it's a background context.
+func (s *JobService) runContext() context.Context {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.runCtx == nil {
+		return context.Background()
+	}
+	return s.runCtx
 }
 
 // notify wakes a worker.
@@ -111,7 +125,7 @@ func (s *JobService) work(ctx context.Context) {
 	}
 }
 
-// janitor removes old dry runs.
+// janitor removes old dry runs and expired AI answers.
 func (s *JobService) janitor(ctx context.Context) {
 	defer s.wg.Done()
 	ticker := time.NewTicker(janitorEvery)
@@ -125,6 +139,11 @@ func (s *JobService) janitor(ctx context.Context) {
 				s.log.Warn("Failed to remove old dry runs", "error", err)
 			} else if n > 0 {
 				s.log.Info("Removed old dry runs", "jobs", n)
+			}
+			if s.aiCache != nil {
+				if _, err := s.aiCache.DeleteExpiredCache(ctx); err != nil {
+					s.log.Warn("Failed to prune the AI cache", "error", err)
+				}
 			}
 		}
 	}
@@ -296,7 +315,7 @@ func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob
 
 	if resolving {
 		cat := ShowCatalog(show, extras)
-		if !s.resolveFirst(ctx, job, cat, info, res.Proposals, scope) {
+		if !s.resolveFirst(ctx, job, show, cat, info, res.Proposals, scope, settings) {
 			return nil
 		}
 	}
@@ -537,18 +556,14 @@ func seasonLikeGroup(t int) bool {
 
 // resolveFirst runs the first AI run on the unsure files and merges its
 // answers into the proposals nobody has touched. Groups are set from the
-// merged answer: the first run is part of classification. It reports
-// whether the run succeeded (and the job is still resolving).
-func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJob, cat *identify.ShowCatalog,
-	info *torrent.TorrentInfo, rules []identify.Proposal, scope []string) bool {
-	hint := ""
-	if job.Hint != nil {
-		hint = job.Hint.Text
-	}
+// merged answer: the first run is part of classification. A high rules
+// answer the AI disagrees with keeps its target but goes to review
+// (identify.FlagDisagreements), so auto-apply waits for the user. It
+// reports whether the run succeeded (and the job is still resolving).
+func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJob, show *library.Show, cat *identify.ShowCatalog,
+	info *torrent.TorrentInfo, rules []identify.Proposal, scope []string, settings library.AISettings) bool {
 	rctx, cancel := context.WithTimeout(ctx, resolveBudget)
-	out, aiErr := s.resolver.Resolve(rctx, identify.ResolveInput{
-		TorrentName: info.Name, Files: info.Files, Show: cat, Rules: rules, Scope: scope, Hint: hint,
-	})
+	out, aiErr := s.resolver.Resolve(rctx, resolveInput(job, show, cat, info.Name, info.Files, rules, scope, settings))
 	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
 	cancel()
 	if ctx.Err() != nil {
@@ -562,12 +577,9 @@ func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJo
 		}
 		if aiErr != nil {
 			s.log.Warn("AI run failed; keeping the rules' proposals", "job_id", job.ID, "error", aiErr)
-			t.Job.AIError = msgAIFailed
-			if timedOut {
-				t.Job.AIError = msgAITimeout
-			}
+			t.Job.AIError = aiErrorMessage(aiErr, timedOut)
 		} else {
-			merged := showDrafts(identify.MergeAI(rules, out.Files, cat))
+			merged := showDrafts(s.mergeAnswers(job.ID, rules, out.Files, cat))
 			if err := t.UpdateProposals(mergeFirstRun(t.Proposals, merged)); err != nil {
 				return err
 			}
@@ -583,11 +595,12 @@ func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJo
 	return ok
 }
 
-// mergeFirstRun returns the proposals the first AI run changes: those
-// still pending and untouched by the user take the merged answer (kind,
-// group, targets, confidence, source and reason, as their suggestion too)
-// with the new group's default decision. Linked subtitles follow their
-// video, so they're left alone.
+// mergeFirstRun returns the proposals the first AI run changes: those the
+// user hasn't touched (on their group's default decision, and not user
+// decided) take the merged answer (kind, group, targets, confidence,
+// source and reason, as their suggestion too) with the new group's default
+// decision. So a matched file the AI disputes moves to needs_review and
+// pending. Linked subtitles follow their video, so they're left alone.
 func mergeFirstRun(current []*library.AssignmentProposal, merged []library.ProposalDraft) []*library.AssignmentProposal {
 	byPath := make(map[string]library.ProposalDraft, len(merged))
 	for _, d := range merged {
@@ -596,7 +609,7 @@ func mergeFirstRun(current []*library.AssignmentProposal, merged []library.Propo
 	var changed []*library.AssignmentProposal
 	for _, p := range current {
 		d, ok := byPath[p.FilePath]
-		if !ok || !p.Listed() || p.Decision != library.DecisionPending || p.UserDecided {
+		if !ok || !p.Listed() || p.UserDecided || p.Decision != p.Group.DefaultDecision() {
 			continue
 		}
 		if d.Kind == p.Kind && d.Group == p.Group && d.Source == p.Source && d.Reason == p.Reason &&

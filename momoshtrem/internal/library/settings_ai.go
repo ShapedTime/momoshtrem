@@ -25,6 +25,9 @@ type AISettings struct {
 	// AutoApplyHighConfidence applies a classified job on its own when
 	// everything in it is high confidence.
 	AutoApplyHighConfidence bool `json:"auto_apply_high_confidence"`
+	// MonthlyBudgetUSD caps what every AI feature may spend in a calendar
+	// month; nil means no cap. Once it's spent, AI calls are skipped.
+	MonthlyBudgetUSD *float64 `json:"monthly_budget_usd"`
 }
 
 // DefaultAISettings are the settings before anyone changes them.

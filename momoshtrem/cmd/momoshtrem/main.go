@@ -22,6 +22,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/identify"
+	"github.com/shapedtime/momoshtrem/internal/identify/ai"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
@@ -133,6 +134,7 @@ func main() {
 	assignmentRepo := library.NewAssignmentRepository(db)
 	syncMetaRepo := library.NewSyncMetadataRepository(db)
 	settingsRepo := library.NewSettingsRepository(db)
+	aiStore := library.NewAIStore(db)
 	metadataRepo := library.NewMetadataRepository(db)
 
 	// Initialize TMDB: the client, and the Postgres-backed cache every
@@ -318,6 +320,7 @@ func main() {
 		ActiveReaders:           readerTracker.Count,
 		TraktConfigured:         cfg.Trakt.ClientID != "" && cfg.Trakt.ClientSecret != "",
 		AIConfigured:            cfg.AI.AnthropicAPIKey != "",
+		AICost:                  aiStore.MonthToDateCost,
 		OpenSubtitlesConfigured: cfg.OpenSubtitles.APIKey != "",
 	}
 	if cfg.Jackett.URL != "" && cfg.Jackett.APIKey != "" {
@@ -367,9 +370,23 @@ func main() {
 	}
 	subtitleService := subtitle.NewService(osFetcher, subtitleRepo, cfg.Subtitles.DownloadPath)
 
+	// The AI resolver (Claude Haiku) looks at the files the rules aren't
+	// sure about; without ANTHROPIC_API_KEY the jobs run on rules only.
+	// Its answers are cached in ai_cache and its cost recorded in ai_usage,
+	// against the monthly budget.
+	var resolver identify.Resolver = identify.NoopResolver{}
+	classifierAI := service.NewClassifierAIStore(aiStore, settingsRepo)
+	if r, err := ai.New(ai.Config{
+		APIKey: cfg.AI.AnthropicAPIKey, Cache: classifierAI, Usage: classifierAI, Budget: classifierAI,
+	}); err != nil {
+		slog.Error("AI resolver unavailable; episode mapping runs on rules only", "error", err)
+	} else if r != nil {
+		resolver = r
+		slog.Info("AI resolver enabled", "default_model", r.Model())
+	}
+
 	// Assignment jobs: assigning a torrent queues a job; workers fetch its
 	// file list, classify the files and apply them (or wait for review).
-	// The AI resolver comes with #5's slice 5; until then rules only.
 	jobService := service.NewJobService(service.JobDeps{
 		Jobs:        library.NewAssignmentJobRepository(db),
 		Shows:       showRepo,
@@ -381,7 +398,8 @@ func main() {
 		Subtitles:   subtitleService,
 		Metadata:    syncer,
 		TMDB:        cachedTMDB,
-		Resolver:    identify.NoopResolver{},
+		Resolver:    resolver,
+		AICache:     aiStore,
 	})
 	apiOpts.Assignments = jobService
 	apiOpts.Review = jobService

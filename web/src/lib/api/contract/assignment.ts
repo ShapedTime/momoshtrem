@@ -237,10 +237,17 @@ export interface ProposalsPatch {
   items: ProposalChange[];
 }
 
-/** POST /assignment-jobs/{id}/reclassify: 202 → JobAccepted; clears `ai_error`. 400 for a malformed body, 503 `unavailable` without AI. */
+/**
+ * POST /assignment-jobs/{id}/reclassify: 202 → JobAccepted; clears `ai_error`. 400 for a malformed body, 409 `job_working` or
+ * `job_closed`, 503 `unavailable` without AI (no key, the classifier off, a rules-only show, or a movie job).
+ */
 export interface ReclassifyRequest {
-  /** `unresolved`: pending proposals the user hasn't decided. `all`: every proposal the user hasn't decided. */
+  /**
+   * Which episode files the user hasn't decided the AI looks at. `unresolved`: the pending ones (unmatched included) and those
+   * in a conflict. `all`: every one. Extras and subtitles keep the rules' reading.
+   */
   scope: 'unresolved' | 'all';
+  /** Replaces the job's text hint; its season and episode stay. */
   hint?: string;
 }
 

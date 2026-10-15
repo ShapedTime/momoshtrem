@@ -22,6 +22,7 @@ type AssignmentJobs interface {
 	List(ctx context.Context, statuses []library.JobStatus) ([]service.JobView, error)
 	Apply(ctx context.Context, id int64) (*service.JobDetail, error)
 	Discard(ctx context.Context, id int64) (*service.JobDetail, error)
+	Reclassify(ctx context.Context, id int64, req service.ReclassifyRequest) error
 }
 
 var _ AssignmentJobs = (*service.JobService)(nil)
@@ -34,6 +35,7 @@ func (s *Server) registerAssignmentRoutes(api *gin.RouterGroup) {
 	api.GET("/assignment-jobs/:id", s.getAssignmentJob)
 	api.POST("/assignment-jobs/:id/apply", s.applyAssignmentJob)
 	api.POST("/assignment-jobs/:id/discard", s.discardAssignmentJob)
+	api.POST("/assignment-jobs/:id/reclassify", s.reclassifyAssignmentJob)
 }
 
 // assignmentsReady answers 503 when no job service is configured.
@@ -163,6 +165,36 @@ func (s *Server) discardAssignmentJob(c *gin.Context) {
 	})
 }
 
+// reclassifyRequest is POST /assignment-jobs/{id}/reclassify.
+type reclassifyRequest struct {
+	Scope string  `json:"scope"`
+	Hint  *string `json:"hint"`
+}
+
+// reclassifyAssignmentJob starts a re-check with the AI: 202 {job_id}, the
+// job in resolving.
+func (s *Server) reclassifyAssignmentJob(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok || !s.assignmentsReady(c) {
+		return
+	}
+	var body reclassifyRequest
+	if err := c.ShouldBindJSON(&body); err != nil ||
+		(body.Scope != string(service.RecheckUnresolved) && body.Scope != string(service.RecheckAll)) {
+		errorResponse(c, http.StatusBadRequest, `Send {scope: "unresolved" | "all", hint?}.`)
+		return
+	}
+	req := service.ReclassifyRequest{Scope: service.RecheckScope(body.Scope)}
+	if body.Hint != nil {
+		req.Hint = *body.Hint
+	}
+	if err := s.opts.Assignments.Reclassify(c.Request.Context(), id, req); err != nil {
+		assignmentErrorResponse(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, jobAccepted{JobID: id})
+}
+
 // jobAction runs do on the job in the path and answers its detail.
 func (s *Server) jobAction(c *gin.Context, do func(context.Context, int64) (*service.JobDetail, error)) {
 	id, ok := parseID(c, "id")
@@ -212,8 +244,10 @@ func assignmentErrorResponse(c *gin.Context, err error) {
 		errorResponse(c, http.StatusNotFound, "Movie not found")
 	case errors.Is(err, library.ErrInvalidMagnet):
 		errorResponse(c, http.StatusBadRequest, "The magnet link has no BitTorrent info hash.")
-	case errors.Is(err, service.ErrInvalidHint), errors.Is(err, service.ErrInvalidStatus):
+	case errors.Is(err, service.ErrInvalidHint), errors.Is(err, service.ErrInvalidStatus), errors.Is(err, service.ErrInvalidRecheck):
 		errorResponse(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrAIUnavailable):
+		errorResponse(c, http.StatusServiceUnavailable, "AI isn't available for this job.")
 	case errors.Is(err, library.ErrNoVideoFiles):
 		errorResponse(c, http.StatusBadRequest, "No video files found in torrent")
 	case errors.Is(err, context.Canceled):

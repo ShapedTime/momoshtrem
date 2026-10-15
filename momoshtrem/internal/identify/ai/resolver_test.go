@@ -37,6 +37,29 @@ func TestNewWithoutKey(t *testing.T) {
 	}
 }
 
+// The input's model (the classifier_model setting) wins over the
+// resolver's; one without a price is refused before any call.
+func TestResolveModelPerCall(t *testing.T) {
+	rec := &recorder{}
+	client := &fakeClient{respond: func(int, anthropic.MessageNewParams) (*anthropic.Message, error) { return answer(t), nil }}
+	r := newTest(t, client, Config{Usage: rec})
+	in := testInput()
+	in.Model = "claude-sonnet-5-5"
+	out, err := r.Resolve(context.Background(), in)
+	if err != nil || client.calls[0].Model != "claude-sonnet-5-5" || out.Usage.Model != "claude-sonnet-5-5" || rec.usages[0].Model != "claude-sonnet-5-5" {
+		t.Fatalf("Resolve = %+v, %v; request model %q", out.Usage, err, client.calls[0].Model)
+	}
+	// Priced on Sonnet's card: $2 in, $10 out, $0.20 cache reads.
+	if want := (1000*2.0 + 200*10.0 + 2000*0.20) / 1e6; math.Abs(out.Usage.CostUSD-want) > 1e-12 {
+		t.Errorf("cost = %v, want %v", out.Usage.CostUSD, want)
+	}
+
+	in.Model = "gpt-4o"
+	if _, err := r.Resolve(context.Background(), in); !errors.Is(err, ErrUnknownModel) || client.count() != 1 {
+		t.Errorf("an unknown model: %v after %d calls", err, client.count())
+	}
+}
+
 func TestResolveNothingUnsure(t *testing.T) {
 	client := &fakeClient{respond: func(int, anthropic.MessageNewParams) (*anthropic.Message, error) {
 		return nil, errors.New("must not be called")

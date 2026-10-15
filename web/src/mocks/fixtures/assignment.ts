@@ -665,15 +665,20 @@ export function patchProposals(job: MockJob, items: ProposalChange[]): string | 
   return null;
 }
 
-/** Proposals a re-check may change: not decided by the user (and pending, for `unresolved`). */
-export const inScope = (p: Proposal, scope: 'unresolved' | 'all') => !p.user_decided && (scope === 'all' || p.decision === 'pending');
+/**
+ * Proposals a re-check asks about: episode files the user hasn't decided; for `unresolved`, only those pending
+ * (unmatched included) or in a conflict. Extras and subtitles keep the rules' reading.
+ */
+export const inScope = (p: Proposal, scope: 'unresolved' | 'all', conflicts: Set<number>) =>
+  !p.user_decided && p.kind === 'episode' && (scope === 'all' || p.decision === 'pending' || conflicts.has(p.id));
 
 /** A re-check's AI writes: the scripted suggestion for every proposal still in scope. */
 export function finishRecheck(job: MockJob, scope: 'unresolved' | 'all'): void {
   const show = SHOWS[job.tmdb_id];
   const hinted = Boolean(job.hint?.text);
+  const conflicts = conflictIds(job.proposals);
   job.proposals = job.proposals.map((p) => {
-    if (!p.recheck || !inScope(p, scope)) return p;
+    if (!p.recheck || !inScope(p, scope, conflicts)) return p;
     const targets = p.recheck.at && show ? p.recheck.at.map((ref) => target(show, ref)) : p.targets;
     const suggestion = { confidence: p.recheck.confidence, source: 'ai' as const, reason: p.recheck.reason };
     return { ...p, ...suggestion, suggestion, targets, suggested_targets: targets, updated: true, hinted };

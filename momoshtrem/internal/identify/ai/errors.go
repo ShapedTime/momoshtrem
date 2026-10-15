@@ -21,6 +21,10 @@ var (
 	ErrTruncated = errors.New("the model's answer was cut off")
 	// ErrBadAnswer: the answer wasn't the JSON the schema asks for.
 	ErrBadAnswer = errors.New("the model's answer couldn't be read")
+	// ErrUnknownModel: the model (classifier_model) isn't in the price
+	// table, so its cost couldn't be counted. Use claude-haiku-5-5,
+	// claude-sonnet-5-5 or claude-opus-5-5.
+	ErrUnknownModel = errors.New("the AI model isn't supported")
 
 	// ErrRateLimited: Anthropic answered 429. Worth retrying later.
 	ErrRateLimited = errors.New("Anthropic is rate limiting requests")

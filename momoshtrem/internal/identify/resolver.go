@@ -37,6 +37,9 @@ type ResolveInput struct {
 	// JobID is the assignment job the call is for: usage is recorded
 	// against it. Zero when there's no job (the eval).
 	JobID int64
+	// Model is the model to ask (the classifier_model setting); empty means
+	// the resolver's default.
+	Model string
 }
 
 // ResolveOutput is the resolver's answer and what it cost.

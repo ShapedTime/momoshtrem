@@ -123,7 +123,7 @@ func newResolver(client messagesAPI, cfg Config) (*Resolver, error) {
 		r.model = DefaultModel
 	}
 	if _, ok := prices[r.model]; !ok {
-		return nil, fmt.Errorf("ai: model %q has no price in the table; use one of claude-haiku-5-5, claude-sonnet-5-5, claude-opus-5-5", r.model)
+		return nil, fmt.Errorf("%w: %q", ErrUnknownModel, r.model)
 	}
 	if r.timeout <= 0 {
 		r.timeout = DefaultTimeout
@@ -140,25 +140,33 @@ func newResolver(client messagesAPI, cfg Config) (*Resolver, error) {
 	return r, nil
 }
 
-// Model is the model the resolver calls.
+// Model is the model the resolver calls when the input names none.
 func (r *Resolver) Model() string { return r.model }
 
-// Resolve asks the model about the files in scope. On an error, the output
-// still carries the usage of the calls that were made.
+// Resolve asks the model about the files in scope: in.Model, else the
+// resolver's. On an error, the output still carries the usage of the calls
+// that were made.
 func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (identify.ResolveOutput, error) {
 	scope := effectiveScope(in)
 	if len(scope) == 0 {
 		return identify.ResolveOutput{}, nil
 	}
+	model := r.model
+	if in.Model != "" {
+		model = in.Model
+	}
+	if _, ok := prices[model]; !ok {
+		return identify.ResolveOutput{}, fmt.Errorf("%w: %q", ErrUnknownModel, model)
+	}
 	if err := r.budget.Check(ctx); err != nil {
 		return identify.ResolveOutput{}, err
 	}
 
-	key, cacheable := cacheKey(r.model, in, scope)
+	key, cacheable := cacheKey(model, in, scope)
 	if cacheable {
 		if files, ok := r.cached(ctx, key); ok {
 			r.log.Debug("Answer from cache", "files", len(files), "job_id", in.JobID)
-			return identify.ResolveOutput{Files: files, Usage: identify.Usage{Model: r.model}}, nil
+			return identify.ResolveOutput{Files: files, Usage: identify.Usage{Model: model}}, nil
 		}
 	}
 
@@ -174,13 +182,13 @@ func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (ident
 	g.SetLimit(maxConcurrentCalls)
 	for i, q := range reqs {
 		g.Go(func() error {
-			files, usage, err := r.call(gctx, q, in.JobID)
+			files, usage, err := r.call(gctx, model, q, in.JobID)
 			results[i] = result{files, usage}
 			return err
 		})
 	}
 	err := g.Wait()
-	out := identify.ResolveOutput{Usage: identify.Usage{Model: r.model}}
+	out := identify.ResolveOutput{Usage: identify.Usage{Model: model}}
 	for _, res := range results {
 		out.Usage = out.Usage.Add(res.usage)
 		out.Files = append(out.Files, res.files...)
@@ -196,15 +204,15 @@ func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (ident
 
 // call makes one API request and reads its answer. Its usage is recorded
 // even when the answer can't be used: the tokens were spent.
-func (r *Resolver) call(ctx context.Context, q request, ref int64) ([]identify.AIFile, identify.Usage, error) {
+func (r *Resolver) call(ctx context.Context, model string, q request, ref int64) ([]identify.AIFile, identify.Usage, error) {
 	start := time.Now()
-	resp, err := r.client.New(ctx, q.params(r.model), option.WithRequestTimeout(r.timeout))
+	resp, err := r.client.New(ctx, q.params(model), option.WithRequestTimeout(r.timeout))
 	if err != nil {
 		err = apiError(ctx, err)
 		r.log.Warn("Classifier request failed", "error", err, "files", len(q.paths), "job_id", ref)
-		return nil, identify.Usage{Model: r.model}, err
+		return nil, identify.Usage{Model: model}, err
 	}
-	usage := usageOf(r.model, resp.Usage)
+	usage := usageOf(model, resp.Usage)
 	// Recorded even when the run was cancelled meanwhile (another request
 	// failed, or shutdown): the tokens were spent.
 	if err := r.usage.Record(context.WithoutCancel(ctx), usage, ref); err != nil {
