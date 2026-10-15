@@ -187,6 +187,18 @@ func (c *Client) EpisodeGroups(ctx context.Context, showID int) ([]EpisodeGroupS
 	return resp.Results, nil
 }
 
+// ShowAlternativeTitles lists a show's names in other countries and
+// scripts. The response doesn't depend on the client's language.
+func (c *Client) ShowAlternativeTitles(ctx context.Context, showID int) ([]AlternativeTitle, error) {
+	var resp struct {
+		Results []AlternativeTitle `json:"results"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d/alternative_titles", showID), nil, &resp, c.attempts); err != nil {
+		return nil, err
+	}
+	return resp.Results, nil
+}
+
 // EpisodeGroup fetches one episode group with its episodes.
 func (c *Client) EpisodeGroup(ctx context.Context, id string) (*EpisodeGroup, error) {
 	if id == "" {

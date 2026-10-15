@@ -129,6 +129,28 @@ func (c *Cached) EpisodeGroups(ctx context.Context, showID int) ([]EpisodeGroupS
 	return list.Results, nil
 }
 
+// alternativeTitleList wraps the titles so cachedGet can work with a pointer.
+type alternativeTitleList struct {
+	Results []AlternativeTitle `json:"results"`
+}
+
+// ShowAlternativeTitles returns a show's alternative titles, cached for
+// DetailsTTL.
+func (c *Cached) ShowAlternativeTitles(ctx context.Context, showID int) ([]AlternativeTitle, error) {
+	list, err := cachedGet(ctx, c, c.key(fmt.Sprintf("tv/%d/alternative_titles", showID)), DetailsTTL,
+		func(ctx context.Context) (*alternativeTitleList, error) {
+			titles, err := c.client.ShowAlternativeTitles(ctx, showID)
+			if err != nil {
+				return nil, err
+			}
+			return &alternativeTitleList{Results: titles}, nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	return list.Results, nil
+}
+
 // EpisodeGroup returns one episode group, cached for EpisodeGroupsTTL.
 func (c *Cached) EpisodeGroup(ctx context.Context, id string) (*EpisodeGroup, error) {
 	return cachedGet(ctx, c, c.key("tv/episode_group/"+id), EpisodeGroupsTTL,
