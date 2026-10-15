@@ -43,7 +43,10 @@ func describe(toks []Token) string {
 		case Episode:
 			s = "e:" + joinInts(t.Eps)
 		case Date:
-			s = "d:" + t.Date
+			s = "d:" + strings.Join(t.Dates, "|")
+			if t.Date == "" {
+				s = "d:?"
+			}
 		case Res:
 			s = "res:" + strconv.Itoa(t.N)
 		case Codec:
@@ -139,6 +142,21 @@ func TestTokenize(t *testing.T) {
 		{"filename-like episode title", "Mr.Robot.S01E01.eps1.0_hellofriend.mov.1080p.BluRay.x264-GRP",
 			"w:mr w:robot se:1/1 w:eps1 n:0 w:hellofriend w:mov res:1080 src:bluray codec:x264 g:GRP"},
 		{"sxxeyy version", "Show.S01E05v2.720p", "w:show se:1/5v2 res:720"},
+		{"nxnn joined by &", "Friends - 2x12 & 2x13 - The One", "w:friends - nx:2/12,13 - w:the w:one"},
+		{"sxxeyy joined by &", "Friends - S02E12 & S02E13 - The One", "w:friends - se:2/12,13 - w:the w:one"},
+		{"sxxeyy side by side", "Friends.S02E12.S02E13.The.One", "w:friends se:2/12,13 w:the w:one"},
+		{"nxnn joined by +", "The Office - 6x04 + 6x05 - Niagara", "w:the w:office - nx:6/4,5 - w:niagara"},
+		{"nxnn joined by a comma", "Friends - 2x12, 2x13 - The One", "w:friends - nx:2/12,13 - w:the w:one"},
+		{"nxnn joined by and", "Friends - 2x12 and 2x13", "w:friends - nx:2/12,13"},
+		{"plus inside a tag", "Friends S02E12+E13 The One", "w:friends se:2/12,13 w:the w:one"},
+		{"plus with the season", "Friends.S02E12+S02E13", "w:friends se:2/12,13"},
+		{"different seasons stay apart", "Show.S01E10.S02E01", "w:show se:1/10 se:2/1"},
+		{"an earlier episode stays apart", "Show.S01E05.E03", "w:show se:1/5 e:3"},
+		{"day first date", "The.Daily.Show.13.03.2024", "w:the w:daily w:show d:2024-03-13"},
+		{"either-way date", "The.Daily.Show.03.04.2024", "w:the w:daily w:show d:2024-04-03|2024-03-04"},
+		{"dashed day first date", "Show 13-03-2024", "w:show d:2024-03-13"},
+		{"two-digit year date", "The.Daily.Show.24.03.13", "w:the w:daily w:show d:?"},
+		{"version in brackets", "[Group] Frieren - 14 (v2) [1080p]", "g:Group w:frieren - n:14 v:2 res:1080"},
 		{"4k", "Show.S01E01.4K.HDR", "w:show se:1/1 res:2160 codec:hdr"},
 		{"ncop", "[Judas] Sousou no Frieren - NCOP01", "g:Judas w:sousou w:no w:frieren - w:ncop01"},
 		{"oad number", "[Group] Shingeki no Kyojin - OAD 01 - Ilse's Notebook [BD 1080p]",

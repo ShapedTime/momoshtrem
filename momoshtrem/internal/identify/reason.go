@@ -61,6 +61,8 @@ func (st *packState) noMatchReason(fi *fileInfo) string {
 		return "Specials are off for this show"
 	case fi.suffixWhy != "":
 		return fi.suffixWhy
+	case fi.overflowWhy != "":
+		return fi.overflowWhy
 	case fi.half:
 		return fmt.Sprintf("Episode %s falls between episodes: a recap or special?", fi.specialText)
 	case fi.special && fi.specialText != "":
@@ -73,7 +75,10 @@ func (st *packState) noMatchReason(fi *fileInfo) string {
 		case candExplicit:
 			return fmt.Sprintf("%q isn't in TMDB", c.text)
 		case candDate:
-			return fmt.Sprintf("Nothing aired on %s in TMDB", c.date)
+			if len(c.dates) == 0 {
+				return fmt.Sprintf("%q could be several dates", c.text)
+			}
+			return fmt.Sprintf("Nothing aired on %s in TMDB", strings.Join(c.dates, " or "))
 		case candNumber:
 			return fmt.Sprintf("No episode %s in TMDB", numText(c))
 		}

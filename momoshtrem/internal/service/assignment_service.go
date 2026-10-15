@@ -219,7 +219,7 @@ func (s *ShowAssignmentService) AssignTorrent(
 		}
 
 		if others := conflicts[i]; len(others) > 0 {
-			unmatched(p, fmt.Sprintf("Conflicts with %s: both map to %s", path.Base(res.Proposals[others[0]].Path), targetLabel(p.Targets)))
+			unmatched(p, fmt.Sprintf("Conflicts with %s: both map to %s", clipName(path.Base(res.Proposals[others[0]].Path)), targetLabel(p.Targets)))
 			continue
 		}
 
@@ -297,6 +297,16 @@ func episodeRefs(show *library.Show) map[int64]episodeRef {
 		}
 	}
 	return refs
+}
+
+// clipName shortens a file name to 40 characters for a reason, which must
+// stay within identify.MaxReasonRunes.
+func clipName(name string) string {
+	const n = 40
+	if r := []rune(name); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return name
 }
 
 // targetLabel writes targets as "S01E05" or "S01E05-E06".

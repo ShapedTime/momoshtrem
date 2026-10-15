@@ -52,15 +52,14 @@ type dirSeasonKey struct {
 type packState struct {
 	PackContext
 	ix         *catalogIndex
-	hintSeason int               // -1 without a hint
-	hintEp     int               // 0 without a hint
-	dirSegs    map[string]string // folder → the segment that gave its season
-	maxNum     map[string]int    // folder → the highest bare number in it
-	videosIn   map[string]int    // folder → its main videos
+	hintSeason int                    // -1 without a hint
+	hintEp     int                    // 0 without a hint
+	dirSegs    map[string]string      // folder → the segment that gave its season
+	folderNums map[dirSeasonKey][]int // folder and season → the bare numbers read in it
+	videosIn   map[string]int         // folder → its main videos
 	remapMax   map[dirSeasonKey]int
 	plans      map[dirSeasonKey]*remapPlan
-	videos     int  // main videos: not extras
-	titleSeen  bool // the torrent's or a folder's name shares a word with the show's title
+	videos     int // main videos: not extras
 }
 
 // buildContext reads the torrent-level context: folder seasons, ranges in
@@ -72,7 +71,7 @@ func buildContext(in Input, files []*fileInfo, ix *catalogIndex) *packState {
 		ix:          ix,
 		hintSeason:  -1,
 		dirSegs:     map[string]string{},
-		maxNum:      map[string]int{},
+		folderNums:  map[dirSeasonKey][]int{},
 		videosIn:    map[string]int{},
 		remapMax:    map[dirSeasonKey]int{},
 		plans:       map[dirSeasonKey]*remapPlan{},
@@ -116,10 +115,9 @@ func buildContext(in Input, files []*fileInfo, ix *catalogIndex) *packState {
 		for _, c := range fi.cands {
 			switch c.kind {
 			case candNumber:
-				for _, e := range c.eps {
-					st.maxNum[fi.dir] = max(st.maxNum[fi.dir], e)
-				}
-				if s := st.seasonFor(fi); s >= 1 && !ix.seasonExists(s) {
+				s := st.seasonFor(fi)
+				st.folderNums[dirSeasonKey{fi.dir, s}] = append(st.folderNums[dirSeasonKey{fi.dir, s}], c.eps...)
+				if s >= 1 && !ix.seasonExists(s) {
 					key := dirSeasonKey{fi.dir, s}
 					for _, e := range c.eps {
 						st.remapMax[key] = max(st.remapMax[key], e)
@@ -191,7 +189,7 @@ func rangeOfNames(names []string) [2]int {
 // releaseGroup is the torrent name's group, else the one most videos have.
 func releaseGroup(torrentName string, files []*fileInfo) string {
 	for _, t := range token.Tokenize(torrentName) {
-		if t.Kind == token.Group {
+		if t.Kind == token.Group && !isSiteGroup(t.Text) {
 			return t.Text
 		}
 	}
@@ -201,7 +199,7 @@ func releaseGroup(torrentName string, files []*fileInfo) string {
 			continue
 		}
 		for _, t := range fi.toks {
-			if t.Kind == token.Group {
+			if t.Kind == token.Group && !isSiteGroup(t.Text) {
 				counts[t.Text]++
 				break
 			}
@@ -216,10 +214,28 @@ func releaseGroup(torrentName string, files []*fileInfo) string {
 	return best
 }
 
-// fits reports whether the bare numbers in fi's folder all fall within the
-// folder's season.
-func (st *packState) fits(fi *fileInfo, season int) bool {
-	return season >= 1 && st.ix.seasonExists(season) && st.maxNum[fi.dir] <= st.ix.seasonMax[season]
+// folderMode decides once per folder how its bare numbers read in season
+// s (one TMDB has): seasonal ("Season 2/01..12" is S02E01..E12), unless more
+// of them fall in the season's absolute range than in the season itself
+// ("Season 2/26..37" for a show whose S02 starts at #26). A number past the
+// season's end then has no episode; it never flips the folder's others.
+func (st *packState) folderMode(dir string, s int) DirMode {
+	ix := st.ix
+	count := ix.seasonMax[s]
+	start, hasAbs := ix.absStart[s]
+	seasonal, absolute := 0, 0
+	for _, n := range st.folderNums[dirSeasonKey{dir, s}] {
+		if n <= count {
+			seasonal++
+		}
+		if hasAbs && n >= start && n < start+count {
+			absolute++
+		}
+	}
+	if absolute > seasonal {
+		return DirAbsolute
+	}
+	return DirSeasonal
 }
 
 // plan returns the remap for release season s in folder dir, deciding it
@@ -289,10 +305,8 @@ func (st *packState) dirMode(fi *fileInfo) DirMode {
 		return DirSpecials
 	case s >= 1 && !st.ix.seasonExists(s):
 		return DirRemap
-	case st.fits(fi, s):
-		return DirSeasonal
 	case s >= 1:
-		return DirAbsolute
+		return st.folderMode(fi.dir, s)
 	case len(st.ix.regular) == 1:
 		return DirSeasonal
 	case st.ix.absPreferred() || st.NameRange != [2]int{}:

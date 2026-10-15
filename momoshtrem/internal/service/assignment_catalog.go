@@ -6,9 +6,9 @@ import (
 )
 
 // ShowCatalog builds the classifier's view of a library show loaded with
-// ShowRepository.GetWithSeasonsAndEpisodesContext: its names, numbering and
-// every episode (ID, season, number, absolute number, name, air date and
-// type).
+// ShowRepository.GetWithSeasonsAndEpisodesContext: its names, its origin
+// countries (for "The.Office.US"-style tags), its numbering and every
+// episode (ID, season, number, absolute number, name, air date and type).
 //
 // Season 0 is left out when the show's specials are off, as the title page
 // hides it: specials then come out unmatched ("Specials are off for this
@@ -21,6 +21,7 @@ func ShowCatalog(show *library.Show) *identify.ShowCatalog {
 		Year:          show.Year,
 		IsAnime:       show.IsAnime,
 		Ordering:      identify.Ordering(show.EpisodeOrdering),
+		Countries:     show.OriginCountry,
 	}
 	if cat.OriginalTitle == cat.Title {
 		cat.OriginalTitle = ""

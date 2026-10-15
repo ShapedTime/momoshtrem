@@ -14,8 +14,10 @@ const (
 )
 
 // dedupe settles files that point at the same episodes, in order:
-//  1. a newer version supersedes an older one ("14v2" over "14");
-//  2. a tiny copy of a video is its sample;
+//  1. a tiny copy of a video is its sample;
+//  2. copies of one episode that differ only by version or quality keep the
+//     best (version, then REPACK/PROPER, then resolution, then size); the
+//     others are superseded extras;
 //  3. what's left of two files on one episode is a conflict: neither may be
 //     high, since at least one of them is wrong.
 func dedupe(files []*fileInfo) {
@@ -35,8 +37,8 @@ func dedupe(files []*fileInfo) {
 		if len(g) < 2 {
 			continue
 		}
-		supersede(g)
 		samplesBySize(g)
+		keepBestCopies(g)
 	}
 
 	props := make([]Proposal, len(files))
@@ -46,26 +48,71 @@ func dedupe(files []*fileInfo) {
 	for i, others := range Conflicts(props) {
 		fi := files[i]
 		fi.prop.Confidence = capConfidence(fi.prop.Confidence, ConfidenceMedium)
-		fi.prop.Reason += "; " + baseName(files[others[0]].path) + " maps here too"
+		fi.prop.Reason = clipRunes(fi.prop.Reason, MaxReasonRunes-56) + "; " + clipRunes(baseName(files[others[0]].path), 40) + " maps here too"
 	}
 }
 
-// supersede turns every file of g but the newest version into an extra.
-func supersede(g []*fileInfo) {
-	newest := g[0]
-	for _, fi := range g[1:] {
-		if version(fi) > version(newest) {
-			newest = fi
-		}
-	}
+// keepBestCopies supersedes all but the best of each set of copies in g:
+// files whose names are equal without tags, versions and REPACK.
+func keepBestCopies(g []*fileInfo) {
+	byKey := map[string][]*fileInfo{}
+	var keys []string
 	for _, fi := range g {
-		if fi == newest || version(fi) >= version(newest) {
+		if fi.targetSet == "" {
 			continue
 		}
-		fi.prop = Proposal{Kind: KindExtra, ExtraType: ExtraSuperseded, SupersededBy: newest.path,
-			Reason: "Replaced by the newer " + versionLabel(newest) + ": " + baseName(newest.path)}
-		fi.extra, fi.targetSet = ExtraSuperseded, ""
+		if _, ok := byKey[fi.contentKey]; !ok {
+			keys = append(keys, fi.contentKey)
+		}
+		byKey[fi.contentKey] = append(byKey[fi.contentKey], fi)
 	}
+	for _, key := range keys {
+		copies := byKey[key]
+		if len(copies) < 2 {
+			continue
+		}
+		best := copies[0]
+		for _, fi := range copies[1:] {
+			if betterCopy(fi, best) {
+				best = fi
+			}
+		}
+		for _, fi := range copies {
+			if fi == best {
+				continue
+			}
+			fi.prop = Proposal{Kind: KindExtra, ExtraType: ExtraSuperseded, SupersededBy: best.path,
+				Reason: "Replaced by " + copyLabel(best, fi) + ": " + clipRunes(baseName(best.path), 60)}
+			fi.extra, fi.targetSet = ExtraSuperseded, ""
+		}
+	}
+}
+
+// betterCopy reports whether a is a better copy than b: a higher version,
+// then a REPACK or PROPER, then a higher resolution, then a larger file.
+func betterCopy(a, b *fileInfo) bool {
+	switch {
+	case version(a) != version(b):
+		return version(a) > version(b)
+	case a.repack != b.repack:
+		return a.repack > b.repack
+	case a.lines != b.lines:
+		return a.lines > b.lines
+	}
+	return a.size > b.size
+}
+
+// copyLabel says how best beats other: "v2", "the REPACK", "the 1080p copy".
+func copyLabel(best, other *fileInfo) string {
+	switch {
+	case version(best) != version(other):
+		return "v" + strconv.Itoa(version(best))
+	case best.repack != other.repack:
+		return "the " + best.repackWord
+	case best.lines != other.lines:
+		return "the " + resolutionLabel(best.lines) + " copy"
+	}
+	return "a larger copy"
 }
 
 // samplesBySize turns tiny copies in g into samples.
@@ -86,8 +133,6 @@ func samplesBySize(g []*fileInfo) {
 }
 
 func version(fi *fileInfo) int { return max(fi.version, 1) }
-
-func versionLabel(fi *fileInfo) string { return "v" + strconv.Itoa(version(fi)) }
 
 func isMainVideo(fi *fileInfo) bool { return fi.class == ClassVideo && fi.extra == "" }
 

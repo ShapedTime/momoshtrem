@@ -86,9 +86,30 @@ func TestDedupe(t *testing.T) {
 			{KindEpisode, "", "S01E01", ConfidenceHigh},
 			{KindSample, ExtraSample, "null", ConfidenceNone},
 		}},
-		{"two qualities conflict", "the-boys", []file{
-			{"1080p/The.Boys.S01E02.1080p.WEB.mkv", 3 << 30},
+		{"the better quality is kept", "the-boys", []file{
 			{"720p/The.Boys.S01E02.720p.WEB.mkv", 1 << 30},
+			{"1080p/The.Boys.S01E02.1080p.WEB.mkv", 3 << 30},
+		}, []want{
+			{KindExtra, ExtraSuperseded, "null", ConfidenceNone},
+			{KindEpisode, "", "S01E02", ConfidenceHigh},
+		}},
+		{"a REPACK beats a larger file", "the-boys", []file{
+			{"The.Boys.S03E01.Payback.1080p.WEB.mkv", 4 << 30},
+			{"The.Boys.S03E01.Payback.REPACK.1080p.WEB.mkv", 3 << 30},
+		}, []want{
+			{KindExtra, ExtraSuperseded, "null", ConfidenceNone},
+			{KindEpisode, "", "S03E01", ConfidenceHigh},
+		}},
+		{"a bracketed version", "frieren", []file{
+			{"[Group] Sousou no Frieren - 14 (v2) [1080p].mkv", 1 << 30},
+			{"[Group] Sousou no Frieren - 14 [1080p].mkv", 1 << 30},
+		}, []want{
+			{KindEpisode, "", "S01E14", ConfidenceHigh},
+			{KindExtra, ExtraSuperseded, "null", ConfidenceNone},
+		}},
+		{"different files on one episode conflict", "the-boys", []file{
+			{"The.Boys.S01E02.Cherry.1080p.WEB.mkv", 3 << 30},
+			{"The.Boys.S01E02.Get.Some.1080p.WEB.mkv", 3 << 30},
 		}, []want{
 			{KindEpisode, "", "S01E02", ConfidenceMedium},
 			{KindEpisode, "", "S01E02", ConfidenceMedium},

@@ -59,14 +59,15 @@ type Token struct {
 	Pos     int  // Byte offset of the token in the input
 	Bracket bool // Inside [], (), {} or 【】
 
-	Season     int    // SxxEyy, NxNN, Season: the season (the first of a range)
-	LastSeason int    // Season: the last season of a range; equals Season otherwise
-	Eps        []int  // SxxEyy, NxNN, Episode: the episodes, ranges expanded
-	N          int    // Num, Year: the value; Res: the line count (1080); Version: the version
-	Lo, Hi     int    // Range: first and last number
-	Date       string // Date: YYYY-MM-DD
-	Ver        int    // A version suffix ("05v2", "S01E05v2"); 0 when none
-	Half       bool   // Num: written "28.5" (a recap or special between episodes)
+	Season     int      // SxxEyy, NxNN, Season: the season (the first of a range)
+	LastSeason int      // Season: the last season of a range; equals Season otherwise
+	Eps        []int    // SxxEyy, NxNN, Episode: the episodes, ranges expanded
+	N          int      // Num, Year: the value; Res: the line count (1080); Version: the version
+	Lo, Hi     int      // Range: first and last number
+	Date       string   // Date: YYYY-MM-DD; "" for a date that can't be read ("24.03.13")
+	Dates      []string // Date: every reading ("03.04.2024" is 3 April or 4 March), Date first
+	Ver        int      // A version suffix ("05v2", "S01E05v2"); 0 when none
+	Half       bool     // Num: written "28.5" (a recap or special between episodes)
 
 	sep    byte // the separator before the token: 0 at the start, ' ', '.', '_', '-' or '['
 	hyphen bool // the token followed a '-' inside a word ("x264-GRP")
@@ -379,13 +380,13 @@ func classify(t Token) (Token, bool) {
 	}
 	if m := reDateISO.FindStringSubmatch(l); m != nil {
 		if d, ok := makeDate(m[1], m[2], m[3]); ok {
-			t.Kind, t.Date = Date, d
+			t.Kind, t.Date, t.Dates = Date, d, []string{d}
 			return t, true
 		}
 	}
 	if m := reDateCompact.FindStringSubmatch(l); m != nil && !t.Bracket {
 		if d, ok := makeDate(m[1], m[2], m[3]); ok {
-			t.Kind, t.Date = Date, d
+			t.Kind, t.Date, t.Dates = Date, d, []string{d}
 			return t, true
 		}
 	}
@@ -427,7 +428,8 @@ func classify(t Token) (Token, bool) {
 }
 
 // parseSE reads "s01e05", "s01e05e06", "s01e05-e07", "s01e05-07",
-// "s01e05-s01e06" and "s01e05v2".
+// "s01e05-s01e06", "s01e12+e13", "s01e12+s01e13" and "s01e05v2". A "-"
+// joins a range, a "+" a list.
 func parseSE(t *Token) bool {
 	l := t.Norm
 	season, rest, ok := leadingNumber(l, "s", 2)
@@ -450,8 +452,12 @@ func parseSE(t *Token) bool {
 			if !ok {
 				return false
 			}
-			eps, rest = appendEp(eps, n, false), r
-		case strings.HasPrefix(rest, "-"):
+			if eps = appendEp(eps, n, false); eps == nil {
+				return false
+			}
+			rest = r
+		case strings.HasPrefix(rest, "-") || strings.HasPrefix(rest, "+"):
+			isRange := rest[0] == '-'
 			r := rest[1:]
 			if s2, r2, ok := leadingNumber(r, "s", 2); ok && strings.HasPrefix(r2, "e") {
 				if s2 != season {
@@ -464,7 +470,7 @@ func parseSE(t *Token) bool {
 			if !ok {
 				return false
 			}
-			next := appendEp(eps, n, true)
+			next := appendEp(eps, n, isRange)
 			if next == nil {
 				return false
 			}
@@ -477,8 +483,9 @@ func parseSE(t *Token) bool {
 	return true
 }
 
-// parseNxNN reads "1x05", "1x05-1x06", "1x05-06" and "1x05x06". A first
-// part longer than two digits is a resolution, not a season.
+// parseNxNN reads "1x05", "1x05-1x06", "1x05-06", "1x05x06" and
+// "1x05+1x06". A first part longer than two digits is a resolution, not a
+// season.
 func parseNxNN(t *Token) bool {
 	l := t.Norm
 	i := 0
@@ -502,8 +509,12 @@ func parseNxNN(t *Token) bool {
 			if !ok {
 				return false
 			}
-			eps, rest = appendEp(eps, n, false), r
-		case strings.HasPrefix(rest, "-"):
+			if eps = appendEp(eps, n, false); eps == nil {
+				return false
+			}
+			rest = r
+		case strings.HasPrefix(rest, "-") || strings.HasPrefix(rest, "+"):
+			isRange := rest[0] == '-'
 			r := rest[1:]
 			if j := strings.IndexByte(r, 'x'); j > 0 && j <= 2 {
 				if atoi(r[:j]) != season {
@@ -515,7 +526,7 @@ func parseNxNN(t *Token) bool {
 			if !ok {
 				return false
 			}
-			next := appendEp(eps, n, true)
+			next := appendEp(eps, n, isRange)
 			if next == nil {
 				return false
 			}
@@ -545,13 +556,17 @@ func leadingNumber(s, prefix string, max int) (n int, rest string, ok bool) {
 }
 
 // appendEp adds n to eps; as a range end it adds every episode up to n. It
-// returns nil for a range that runs backwards or spans more than 50.
+// returns nil for an episode that doesn't come after the last one, or a
+// range that spans more than 50.
 func appendEp(eps []int, n int, isRange bool) []int {
 	last := eps[len(eps)-1]
+	if n <= last {
+		return nil
+	}
 	if !isRange {
 		return append(eps, n)
 	}
-	if n <= last || n-last > 50 {
+	if n-last > 50 {
 		return nil
 	}
 	for e := last + 1; e <= n; e++ {
@@ -618,12 +633,35 @@ func joinNext(in []Token, i int, out []Token) (Token, int) {
 	switch {
 	// 2024.03.15, 2024 03 15
 	case t.Kind == Year && has2 && n1.Kind == Num && n2.Kind == Num &&
-		len(n1.Text) == 2 && len(n2.Text) == 2 && n1.sep == n2.sep && n1.sep != '-':
+		len(n1.Text) == 2 && len(n2.Text) == 2 && n1.sep == n2.sep:
 		if d, ok := makeDate(t.Text, n1.Text, n2.Text); ok {
 			t = joined(t, t.Text+string(n1.sep)+n1.Text+string(n2.sep)+n2.Text, Date)
-			t.Date = d
+			t.Date, t.Dates = d, []string{d}
 			return t, 2
 		}
+
+	// 13.03.2024 (day first) or 03.13.2024 (month first): both readings
+	// when both are dates.
+	case t.Kind == Num && len(t.Text) == 2 && has2 && n1.Kind == Num && len(n1.Text) == 2 &&
+		n2.Kind == Year && n1.sep == n2.sep:
+		var dates []string
+		if d, ok := makeDate(n2.Text, n1.Text, t.Text); ok {
+			dates = append(dates, d)
+		}
+		if d, ok := makeDate(n2.Text, t.Text, n1.Text); ok && (len(dates) == 0 || dates[0] != d) {
+			dates = append(dates, d)
+		}
+		if len(dates) > 0 {
+			t = joined(t, t.Text+string(n1.sep)+n1.Text+string(n2.sep)+n2.Text, Date)
+			t.Date, t.Dates = dates[0], dates
+			return t, 2
+		}
+
+	// 24.03.13: a date with a two-digit year can't be read reliably. It
+	// stays a date, without a reading, so it isn't taken for an episode.
+	case t.Kind == Num && len(t.Text) == 2 && has2 && n1.Kind == Num && len(n1.Text) == 2 &&
+		n2.Kind == Num && len(n2.Text) == 2 && n1.sep == n2.sep && n1.sep != ' ' && twoDigitDate(t.Text, n1.Text, n2.Text):
+		return joined(t, t.Text+string(n1.sep)+n1.Text+string(n2.sep)+n2.Text, Date), 2
 
 	// "28.5" after a space or a dash: an in-between episode.
 	case t.Kind == Num && !t.Bracket && has1 && n1.Kind == Num && n1.Text == "5" && n1.sep == '.' &&
@@ -695,29 +733,50 @@ func joinNext(in []Token, i int, out []Token) (Token, int) {
 	return t, 0
 }
 
-// emit appends t, folding an episode token into the season or SxxEyy token
-// before it: "S01 E05", "Season 1 Episode 5", "S01E01.E02", "S01E01 & E02".
+// emit appends t, folding an episode marker into the one before it:
+//   - an episode after a season: "S01 E05", "Season 1 Episode 5";
+//   - later episodes of the same season, side by side or joined by "&",
+//     "and", "+" or ",": "S01E01.E02", "S01E01 & E02", "S02E12.S02E13",
+//     "2x12 & 2x13", "6x04 + 6x05", "2x12, 2x13".
 func emit(out []Token, t Token) []Token {
-	if t.Kind != Episode || len(out) == 0 {
+	if len(out) == 0 || (t.Kind != Episode && t.Kind != SxxEyy && t.Kind != NxNN) {
 		return append(out, t)
 	}
-	prev := &out[len(out)-1]
+	at := len(out) - 1
+	joiner := ""
+	if out[at].Kind == Word && (out[at].Norm == "and" || out[at].Norm == "+") && at > 0 {
+		joiner = out[at].Text
+		at--
+	}
+	prev := &out[at]
+	isSE := func(k Kind) bool { return k == SxxEyy || k == NxNN }
 	switch {
-	case prev.Kind == Season && prev.Season == prev.LastSeason:
+	case t.Kind == Episode && joiner == "" && prev.Kind == Season && prev.Season == prev.LastSeason:
 		prev.Kind = SxxEyy
 		prev.Eps, prev.Ver = t.Eps, t.Ver
-	case prev.Kind == SxxEyy:
-		prev.Eps = append(prev.Eps, t.Eps...)
-	case len(out) > 1 && prev.Kind == Word && (prev.Norm == "and" || prev.Norm == "+") && out[len(out)-2].Kind == SxxEyy:
-		out = out[:len(out)-1]
-		prev = &out[len(out)-1]
+	case isSE(prev.Kind) && (t.Kind == Episode || isSE(t.Kind) && t.Season == prev.Season) &&
+		len(t.Eps) > 0 && t.Eps[0] > prev.Eps[len(prev.Eps)-1]:
 		prev.Eps = append(prev.Eps, t.Eps...)
 	default:
 		return append(out, t)
 	}
+	if joiner != "" {
+		prev.Text += " " + joiner
+	}
 	prev.Text += " " + t.Text
 	prev.Norm = strings.ToLower(prev.Text)
-	return out
+	return out[:at+1]
+}
+
+// twoDigitDate reports whether three two-digit numbers read as a date in
+// any order a release uses: yy.mm.dd, dd.mm.yy or mm.dd.yy.
+func twoDigitDate(a, b, c string) bool {
+	for _, ymd := range [][3]string{{a, b, c}, {c, b, a}, {c, a, b}} {
+		if _, ok := makeDate("20"+ymd[0], ymd[1], ymd[2]); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isTagKind(k Kind) bool { return k == Codec || k == Source || k == Res }

@@ -162,12 +162,14 @@ func (st *packState) explicitOptions(fi *fileInfo, c candidate) []option {
 // a season TMDB doesn't have. The pack decides which reading weighs most.
 func (st *packState) numberOptions(fi *fileInfo, c candidate) []option {
 	ix := st.ix
-	if fi.region.match == regionPrefixExtra {
-		fi.suffixWhy = fmt.Sprintf("Name says %q; the season is unclear", strings.Join(fi.region.words, " "))
+	if fi.region.refusesNumbers() {
+		fi.suffixWhy = clipRunes(fmt.Sprintf("Name says %q; the season is unclear", strings.Join(fi.region.words, " ")), MaxReasonRunes)
 		return nil
 	}
 	s := st.seasonFor(fi)
-	fits := st.fits(fi, s)
+	if s >= 1 && ix.seasonExists(s) {
+		return st.seasonFolderOptions(fi, c, s)
+	}
 	absPref := ix.absPreferred() || st.NameRange != [2]int{}
 	n := numText(c)
 	var opts []option
@@ -177,15 +179,6 @@ func (st *packState) numberOptions(fi *fileInfo, c candidate) []option {
 		if eps := ix.lookupAll(0, c.eps); eps != nil {
 			opts = append(opts, option{eps: eps, weight: wBare, method: MethodSpecialNumber,
 				reason: fmt.Sprintf("Specials folder + episode %s", n)})
-		}
-	case s >= 1 && ix.seasonExists(s):
-		w := wFolderSeason
-		if !fits {
-			w = mediumMin
-		}
-		if eps := ix.lookupAll(s, c.eps); eps != nil {
-			opts = append(opts, option{eps: eps, weight: w, method: MethodFolderSeason,
-				reason: fmt.Sprintf("%s + episode %s", st.seasonSource(fi), n)})
 		}
 	case s >= 1:
 		if p := st.plan(fi.dir, s); p != nil {
@@ -211,17 +204,12 @@ func (st *packState) numberOptions(fi *fileInfo, c candidate) []option {
 	if eps := ix.lookupAbs(c.eps); eps != nil && s != 0 {
 		w := wBare - 0.1
 		switch {
-		case s >= 1 && fits:
-			w = wGuess
-		case s >= 1 && !ix.seasonExists(s) && len(opts) > 0:
+		case s >= 1 && len(opts) > 0:
 			w = wGuess // the remap explains the numbers
 		case absPref:
 			w = wAbsolute
 		case s < 0 && len(ix.regular) == 1:
 			w = wBare
-		}
-		if s >= 1 && !fits && allInSeason(eps, s) {
-			w += bonusAgree // "Season 2/13.mkv" where S02 starts at #13
 		}
 		opts = append(opts, option{eps: eps, weight: w, method: MethodAbsolute,
 			reason: fmt.Sprintf("Absolute #%s → %s", n, seLabel(eps))})
@@ -232,6 +220,62 @@ func (st *packState) numberOptions(fi *fileInfo, c candidate) []option {
 		}
 	}
 	return opts
+}
+
+// seasonFolderOptions reads a bare number in a folder (or hint) of season s,
+// one TMDB has, the way folderMode decides for the whole folder:
+//   - seasonal: S/n, with the absolute reading agreeing when it's the same
+//     episode (season 1); a number past the season's end has no episode;
+//   - absolute: the absolute number, surer when it falls in season s.
+func (st *packState) seasonFolderOptions(fi *fileInfo, c candidate, s int) []option {
+	ix := st.ix
+	n := numText(c)
+	seasonal := ix.lookupAll(s, c.eps)
+	abs := ix.lookupAbs(c.eps)
+	var opts []option
+	if st.folderMode(fi.dir, s) == DirAbsolute {
+		if abs != nil {
+			w := wBare
+			if ix.absPreferred() || st.NameRange != [2]int{} {
+				w = wAbsolute
+			}
+			if allInSeason(abs, s) {
+				w += bonusAgree // "Season 2/26.mkv" where S02 starts at #26
+			} else {
+				w = min(w, mediumMin)
+			}
+			opts = append(opts, option{eps: abs, weight: w, method: MethodAbsolute,
+				reason: fmt.Sprintf("Absolute #%s → %s", n, seLabel(abs))})
+		}
+		if seasonal != nil {
+			opts = append(opts, option{eps: seasonal, weight: wGuess, method: MethodFolderSeason,
+				reason: fmt.Sprintf("%s + episode %s", st.seasonSource(fi), n)})
+		}
+		return opts
+	}
+	if seasonal == nil {
+		fi.overflowWhy = fmt.Sprintf("Episode %s is past S%02d's last episode (E%02d)", n, s, ix.seasonMax[s])
+		return nil
+	}
+	opts = append(opts, option{eps: seasonal, weight: wFolderSeason, method: MethodFolderSeason,
+		reason: fmt.Sprintf("%s + episode %s", st.seasonSource(fi), n)})
+	if abs != nil && sameEpisodes(abs, seasonal) {
+		opts = append(opts, option{eps: abs, weight: agreeMin, method: MethodAbsolute,
+			reason: fmt.Sprintf("Absolute #%s → %s", n, seLabel(abs))})
+	}
+	return opts
+}
+
+func sameEpisodes(a, b []*Episode) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID {
+			return false
+		}
+	}
+	return true
 }
 
 // airingSeasonDays is how recently a season must have started for a bare
@@ -263,25 +307,44 @@ func (st *packState) airingSeasonOption(abs []*Episode, c candidate, n string) (
 		reason: fmt.Sprintf("Episode %s of S%02d, airing now", n, latest)}, true
 }
 
+// dateOptions reads an air date. A date written either way ("03.12.2024")
+// has two readings; when only one of them aired, the catalog has decided.
+// An unreadable date ("24.03.13") gives nothing.
 func (st *packState) dateOptions(c candidate) []option {
 	ix := st.ix
-	switch eps := ix.byDate[c.date]; {
-	case len(eps) == 1:
-		return []option{{eps: eps, weight: wExplicit, method: MethodDate,
-			reason: fmt.Sprintf("Aired %s (%q in the name)", c.date, c.text)}}
-	case len(eps) > 1:
-		opts := make([]option, 0, len(eps))
-		for _, ep := range eps {
-			opts = append(opts, option{eps: []*Episode{ep}, weight: wNearDate, method: MethodDate,
-				reason: fmt.Sprintf("Aired %s, like %d other episodes", c.date, len(eps)-1)})
+	if len(c.dates) == 0 {
+		return nil
+	}
+	var hits []string
+	for _, d := range c.dates {
+		if len(ix.byDate[d]) > 0 {
+			hits = append(hits, d)
+		}
+	}
+	var opts []option
+	switch {
+	case len(hits) == 1 && len(ix.byDate[hits[0]]) == 1:
+		w, why := wExplicit, fmt.Sprintf("%q in the name", c.text)
+		if len(c.dates) > 1 {
+			w, why = wSeasonNumber, fmt.Sprintf("%q read as the date that aired", c.text)
+		}
+		return []option{{eps: ix.byDate[hits[0]], weight: w, method: MethodDate,
+			reason: fmt.Sprintf("Aired %s (%s)", hits[0], why)}}
+	case len(hits) > 0:
+		for _, d := range hits {
+			for _, ep := range ix.byDate[d] {
+				opts = append(opts, option{eps: []*Episode{ep}, weight: wNearDate, method: MethodDate,
+					reason: fmt.Sprintf("Aired %s; %q fits more than one episode", d, c.text)})
+			}
 		}
 		return opts
 	}
-	var opts []option
-	for _, d := range adjacentDates(c.date) {
-		for _, ep := range ix.byDate[d] {
-			opts = append(opts, option{eps: []*Episode{ep}, weight: wNearDate, method: MethodDate,
-				reason: fmt.Sprintf("Aired %s, a day off the name's %s", d, c.date)})
+	for _, date := range c.dates {
+		for _, d := range adjacentDates(date) {
+			for _, ep := range ix.byDate[d] {
+				opts = append(opts, option{eps: []*Episode{ep}, weight: wNearDate, method: MethodDate,
+					reason: fmt.Sprintf("Aired %s, a day off the name's %s", d, date)})
+			}
 		}
 	}
 	return opts

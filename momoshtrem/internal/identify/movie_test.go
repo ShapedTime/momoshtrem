@@ -42,6 +42,19 @@ func TestRankMovieFiles(t *testing.T) {
 			[]string{"Heat.1995.1080p.mkv"}, ConfidenceHigh},
 		{"no video", MovieInfo{Title: "Heat"},
 			[]TorrentFile{{"Heat.1995.nfo", 1 << 10}}, nil, ""},
+		// From the PR #52 review: these gave "No video files found".
+		{"a site prefix and a title word that marks extras", MovieInfo{Title: "The Interview", Year: 2014, RuntimeMin: 112},
+			[]TorrentFile{{"www.UIndex.org    -    The.Interview.2014.1080p.BluRay.x264-GRP.mkv", 8 * gb}},
+			[]string{"www.UIndex.org    -    The.Interview.2014.1080p.BluRay.x264-GRP.mkv"}, ConfidenceHigh},
+		{"the title is a featurette phrase", MovieInfo{Title: "Behind the Candelabra", Year: 2013, RuntimeMin: 118},
+			[]TorrentFile{{"HBO.Behind.the.Candelabra.2013.720p.mkv", 4 * gb}},
+			[]string{"HBO.Behind.the.Candelabra.2013.720p.mkv"}, ConfidenceHigh},
+		{"the largest plausible video is never dropped by name", MovieInfo{Title: "Heat", Year: 1995, RuntimeMin: 170},
+			[]TorrentFile{{"Heat.1995.Bonus.Edition.1080p.mkv", 10 * gb}, {"Heat.1995.Trailer.mkv", 100 << 20}},
+			[]string{"Heat.1995.Bonus.Edition.1080p.mkv"}, ConfidenceHigh},
+		{"never every video", MovieInfo{Title: "Heat", Year: 1995, RuntimeMin: 170},
+			[]TorrentFile{{"Heat.1995.Teaser.mkv", 50 << 20}},
+			[]string{"Heat.1995.Teaser.mkv"}, ConfidenceMedium},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

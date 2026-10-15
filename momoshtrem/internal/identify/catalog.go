@@ -31,6 +31,9 @@ type ShowCatalog struct {
 	// AltOrderings are other ways to split the episodes into seasons (TMDB
 	// episode groups), for releases whose seasons TMDB doesn't have.
 	AltOrderings []AltOrdering
+	// Countries are the show's origin countries (ISO 3166-1, "US"): the
+	// country tag a release may add ("The.Office.US").
+	Countries []string
 }
 
 // Episode is one episode of a ShowCatalog.
@@ -73,7 +76,9 @@ type catalogIndex struct {
 	regular     []int       // regular season numbers, ascending
 	hasSpecials bool
 	named       []namedEpisode
-	titles      [][]string // known show titles as words, longest first
+	titles      [][]string      // known show titles as words, longest first
+	titleWords  map[string]bool // every word of the known titles
+	countryTags map[string]bool // country tags allowed after a title
 }
 
 type namedEpisode struct {
@@ -167,6 +172,21 @@ func newIndex(cat *ShowCatalog, now time.Time) *catalogIndex {
 		}
 	}
 	sort.SliceStable(ix.titles, func(i, j int) bool { return len(ix.titles[i]) > len(ix.titles[j]) })
+	ix.titleWords = map[string]bool{}
+	ix.countryTags = map[string]bool{}
+	for _, title := range ix.titles {
+		for _, w := range title {
+			ix.titleWords[w] = true
+			if countryWords[w] {
+				ix.countryTags[w] = true // "The Office (US)"
+			}
+		}
+	}
+	for _, c := range cat.Countries {
+		for _, tag := range countryCodes[strings.ToUpper(c)] {
+			ix.countryTags[tag] = true
+		}
+	}
 	return ix
 }
 
@@ -293,10 +313,6 @@ var stopwords = map[string]bool{
 	"the": true, "a": true, "an": true, "of": true, "and": true, "no": true, "to": true, "in": true,
 	"on": true, "with": true, "x": true, "de": true, "la": true, "le": true, "wa": true,
 }
-
-// ignorableTitleWords may follow a show's title in a file name without
-// naming another show: country tags.
-var ignorableTitleWords = map[string]bool{"us": true, "uk": true, "au": true, "nz": true, "ca": true}
 
 func significant(w string) bool {
 	return !stopwords[w] && (len(w) >= 3 || containsDigit(w))

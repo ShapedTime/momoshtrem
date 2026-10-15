@@ -86,11 +86,17 @@ func loadCorpus(t testing.TB) []corpusCase {
 
 // input builds the classifier's input for a case. Files of a multi-file
 // case sit in a folder named after the torrent, as in a real torrent.
-func (c corpusCase) input(t testing.TB) Input {
+func (c corpusCase) input(t testing.TB) Input { return c.inputWith(t, false) }
+
+// inputWith builds the input, without the show's aliases when noAliases.
+func (c corpusCase) inputWith(t testing.TB, noAliases bool) Input {
 	t.Helper()
 	cat := show(t, c.Show)
 	if c.DropSpecials {
 		cat = withoutSpecials(cat)
+	}
+	if noAliases {
+		cat = withoutAliases(cat)
 	}
 	in := Input{TorrentName: c.Torrent, Show: cat, Now: corpusNow}
 	if c.Now != "" {
@@ -200,14 +206,14 @@ type corpusReport struct {
 	misses, confMisses, longReasons  []string
 }
 
-func runCorpus(t *testing.T) corpusReport {
+func runCorpus(t *testing.T, noAliases bool) corpusReport {
 	r := corpusReport{byConf: map[Confidence]int{}}
 	for _, c := range loadCorpus(t) {
 		r.cases++
 		if c.Golden {
 			r.golden++
 		}
-		res := Classify(c.input(t))
+		res := Classify(c.inputWith(t, noAliases))
 		if len(res.Proposals) != len(c.Files) {
 			t.Fatalf("%s: %d proposals for %d files", c.ID, len(res.Proposals), len(c.Files))
 		}
@@ -319,7 +325,7 @@ func (r corpusReport) print(t *testing.T) {
 // TestCorpus runs every corpus case and enforces the gates. Run it with -v
 // for the report: go test ./internal/identify/ -run Corpus -v
 func TestCorpus(t *testing.T) {
-	r := runCorpus(t)
+	r := runCorpus(t, false)
 	r.print(t)
 
 	if r.files < 150 {
@@ -342,5 +348,19 @@ func TestCorpus(t *testing.T) {
 	}
 	if len(r.longReasons) > 0 {
 		t.Errorf("%d reasons over %d runes", len(r.longReasons), MaxReasonRunes)
+	}
+}
+
+// TestCorpusWithoutAliases runs the corpus without the shows' aliases, as
+// the library has them until TMDB alternative titles are loaded. Fewer files
+// are sure, but none may be wrong and high, over its max_conf, or outside
+// its acceptable answers.
+func TestCorpusWithoutAliases(t *testing.T) {
+	r := runCorpus(t, true)
+	t.Logf("Without aliases: exact %d/%d = %.1f%%, wrong high %d, over max_conf %d, ambiguous outside acceptable %d; high %d, medium %d, low %d, none %d",
+		r.exact, r.unambiguous, 100*r.accuracy(), len(r.wrongHigh), len(r.maxConf), len(r.ambiguousBad),
+		r.byConf[ConfidenceHigh], r.byConf[ConfidenceMedium], r.byConf[ConfidenceLow], r.byConf[ConfidenceNone])
+	for _, s := range append(append(r.wrongHigh, r.maxConf...), r.ambiguousBad...) {
+		t.Errorf("  - %s", s)
 	}
 }

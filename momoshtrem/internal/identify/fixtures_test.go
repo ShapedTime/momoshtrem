@@ -22,6 +22,7 @@ type showFixture struct {
 	Title         string          `yaml:"title"`
 	OriginalTitle string          `yaml:"original_title"`
 	Aliases       []string        `yaml:"aliases"`
+	Countries     []string        `yaml:"countries"`
 	Year          int             `yaml:"year"`
 	IsAnime       bool            `yaml:"is_anime"`
 	Ordering      string          `yaml:"ordering"`
@@ -119,7 +120,7 @@ func loadShow(path string) (*ShowCatalog, error) {
 	}
 	cat := &ShowCatalog{
 		Title: f.Title, OriginalTitle: f.OriginalTitle, Aliases: f.Aliases, Year: f.Year,
-		IsAnime: f.IsAnime, Ordering: Ordering(f.Ordering),
+		IsAnime: f.IsAnime, Ordering: Ordering(f.Ordering), Countries: f.Countries,
 	}
 	if cat.Ordering == "" {
 		cat.Ordering = OrderingAired
@@ -234,6 +235,14 @@ func advance(t time.Time, every int, days map[time.Weekday]bool) time.Time {
 			return t
 		}
 	}
+}
+
+// withoutAliases copies a catalog without its aliases, as the library has
+// it until TMDB alternative titles are loaded.
+func withoutAliases(cat *ShowCatalog) *ShowCatalog {
+	c := *cat
+	c.Aliases = nil
+	return &c
 }
 
 // withoutSpecials copies a catalog without season 0, as when a show's

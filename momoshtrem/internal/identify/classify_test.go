@@ -45,9 +45,15 @@ func TestPlanFailure_OnePiece1071(t *testing.T) {
 	}
 }
 
-// PLAN §3: "[SubsPlease] Frieren - 05 (1080p)" wasn't identified.
+// PLAN §3: "[SubsPlease] Frieren - 05 (1080p)" wasn't identified. It is
+// now; "Frieren" alone is only the start of the show's title ("Frieren:
+// Beyond Journey's End"), so it's not sure enough to apply on its own. The
+// title or an alias is.
 func TestPlanFailure_SubsPleaseFrieren05(t *testing.T) {
 	p := classifyOne(t, "frieren", "[SubsPlease] Frieren - 05 (1080p).mkv")
+	assertTarget(t, p, KindEpisode, "S01E05", ConfidenceMedium)
+
+	p = classifyOne(t, "frieren", "[SubsPlease] Sousou no Frieren - 05 (1080p).mkv")
 	assertTarget(t, p, KindEpisode, "S01E05", ConfidenceHigh)
 }
 
@@ -56,7 +62,7 @@ func TestPlanFailure_Resolution1920x1080(t *testing.T) {
 	p := classifyOne(t, "the-boys", "The.Boys.S02E05.1920x1080.WEB.x264-GRP.mkv")
 	assertTarget(t, p, KindEpisode, "S02E05", ConfidenceHigh)
 
-	p = classifyOne(t, "frieren", "[Group] Frieren - 07 [1920x1080].mkv")
+	p = classifyOne(t, "frieren", "[Group] Sousou no Frieren - 07 [1920x1080].mkv")
 	assertTarget(t, p, KindEpisode, "S01E07", ConfidenceHigh)
 
 	p = classifyOne(t, "frieren", "Frieren.1920x1080.mkv")
@@ -97,6 +103,92 @@ func TestSpecialWordInEpisodeTitle(t *testing.T) {
 
 	p = classifyOne(t, "attack-on-titan", "[Group] Shingeki no Kyojin - OVA - 03 [BD].mkv")
 	assertTarget(t, p, KindSpecial, "S00E03", ConfidenceMedium)
+}
+
+// High needs the name's title to be the show's: another show's torrent,
+// a spin-off, a strict prefix of a longer title or a year more than one off
+// can't be sure. The right show's usual names stay high.
+func TestWrongShowGuard(t *testing.T) {
+	tests := []struct {
+		show, path string
+		want       Confidence
+	}{
+		{"law-and-order-svu", "Law.and.Order.S20E05.1080p.WEB.mkv", ConfidenceMedium},
+		{"9-1-1", "9-1-1.Lone.Star.S04E05.1080p.WEB.mkv", ConfidenceMedium},
+		{"the-boys", "The.Boys.Presents.Diabolical.S01E05.1080p.WEB.mkv", ConfidenceMedium},
+		{"the-boys", "Gen.V.S01E05.1080p.WEB.mkv", ConfidenceMedium},
+		{"the-boys", "Lost.S01E05.1080p.BluRay.mkv", ConfidenceMedium},
+		{"doctor-who", "Doctor.Who.2023.S01E01.Space.Babies.1080p.mkv", ConfidenceMedium},
+		{"doctor-who", "Doctor.Who.1963.S01E01.An.Unearthly.Child.mkv", ConfidenceMedium},
+		{"the-office", "The.Office.UK.S01E01.Downsize.mkv", ConfidenceMedium},
+		{"doctor-who", "Doctor.Who.2005.S01E01.Rose.mkv", ConfidenceHigh},
+		{"doctor-who", "Doctor.Who.2006.S02E01.mkv", ConfidenceHigh}, // one year off
+		{"the-office", "The.Office.US.S01E01.Pilot.mkv", ConfidenceHigh},
+		{"the-office", "The.Office.S01E01.Pilot.mkv", ConfidenceHigh},
+		{"law-and-order-svu", "Law.and.Order.SVU.S20E05.1080p.WEB.mkv", ConfidenceHigh},
+		{"1923", "1923.S01E01.1080p.mkv", ConfidenceHigh},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if p := classifyOne(t, tt.show, tt.path); p.Confidence != tt.want {
+				t.Errorf("got %s %s [%s] %q, want [%s]", p.Kind, targetLabel(p.Targets), p.Confidence, p.Reason, tt.want)
+			}
+		})
+	}
+
+	// The country tag must be the show's even without the alias that has it.
+	cat := *show(t, "the-office")
+	cat.Aliases = nil
+	for path, want := range map[string]Confidence{
+		"The.Office.US.S01E01.Pilot.mkv": ConfidenceHigh,
+		"The.Office.UK.S01E01.mkv":       ConfidenceMedium,
+	} {
+		res := Classify(Input{TorrentName: path, Files: []TorrentFile{{Path: path, Size: 1 << 30}}, Show: &cat, Now: corpusNow})
+		if got := res.Proposals[0].Confidence; got != want {
+			t.Errorf("%s without aliases: [%s], want [%s]", path, got, want)
+		}
+	}
+}
+
+// A season folder whose numbering restarts reads its numbers in that
+// season; one past the season's end gets no episode and doesn't flip the
+// others to absolute numbers.
+func TestSeasonFolderOverflow(t *testing.T) {
+	files := []TorrentFile{
+		{Path: "[Group] Shingeki no Kyojin Season 2 [BD 1080p]/[Group] Shingeki no Kyojin - 01 [BD 1080p].mkv", Size: 1 << 30},
+		{Path: "[Group] Shingeki no Kyojin Season 2 [BD 1080p]/[Group] Shingeki no Kyojin - 12 [BD 1080p].mkv", Size: 1 << 30},
+		{Path: "[Group] Shingeki no Kyojin Season 2 [BD 1080p]/[Group] Shingeki no Kyojin - 13 [BD 1080p].mkv", Size: 1 << 30},
+	}
+	res := Classify(Input{TorrentName: "[Group] Shingeki no Kyojin Season 2 [BD 1080p]", Files: files, Show: show(t, "attack-on-titan"), Now: corpusNow})
+	want := []string{"S02E01", "S02E12", "null"}
+	for i, p := range res.Proposals {
+		if got := targetLabel(p.Targets); got != want[i] {
+			t.Errorf("%s → %s [%s] %q, want %s", files[i].Path, got, p.Confidence, p.Reason, want[i])
+		}
+	}
+	if r := res.Proposals[2].Reason; !strings.Contains(r, "past S02") {
+		t.Errorf("overflow reason = %q", r)
+	}
+}
+
+// A later season named in brackets before the number ("(The Final
+// Season) - 17") means the number restarts: the rules ask, with or without
+// the show's aliases.
+func TestBracketedSeasonTitle(t *testing.T) {
+	for _, path := range []string{
+		"[SubsPlease] Shingeki no Kyojin (The Final Season) - 17 (1080p) [B3C4D5E6].mkv",
+		"[SubsPlease] Shingeki no Kyojin - The Final Season - 01 (1080p).mkv",
+	} {
+		for _, cat := range []*ShowCatalog{show(t, "attack-on-titan"), withoutAliases(show(t, "attack-on-titan"))} {
+			res := Classify(Input{TorrentName: path, Files: []TorrentFile{{Path: path, Size: 1 << 30}}, Show: cat, Now: corpusNow})
+			if p := res.Proposals[0]; p.HasTarget() {
+				t.Errorf("%s (aliases %v) → %s [%s]", path, cat.Aliases, targetLabel(p.Targets), p.Confidence)
+			}
+		}
+	}
+	// Release words in brackets don't count: "(Uncensored)", "[Dual Audio]".
+	p := classifyOne(t, "frieren", "[Group] Sousou no Frieren (Uncensored) - 05 [Dual Audio][1080p].mkv")
+	assertTarget(t, p, KindEpisode, "S01E05", ConfidenceHigh)
 }
 
 func TestSpecialsOff(t *testing.T) {

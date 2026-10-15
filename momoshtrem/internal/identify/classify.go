@@ -56,7 +56,6 @@ func Classify(in Input) Result {
 		files[i] = analyze(f, ix)
 	}
 	st := buildContext(in, files, ix)
-	st.titleSeen = ix.titleIn(append([]string{in.TorrentName}, allDirs(files)...))
 
 	for _, fi := range files {
 		switch {
@@ -106,9 +105,11 @@ func (st *packState) matchVideo(fi *fileInfo) {
 	if d.note != "" {
 		reason += "; " + d.note
 	}
-	if fi.region.match == regionNone && countSignificant(fi.region.words) >= 2 && !st.titleSeen {
-		conf = capConfidence(conf, ConfidenceMedium)
-		reason += "; the name doesn't look like this show"
+	if conf == ConfidenceHigh {
+		if note := st.titleNote(fi); note != "" {
+			conf = ConfidenceMedium
+			reason += "; " + note
+		}
 	}
 	for _, ep := range d.best.eps {
 		if !st.ix.aired(ep) {
@@ -170,6 +171,9 @@ func (st *packState) linkSubtitles(files []*fileInfo) {
 		}
 		p := Proposal{Kind: KindSubtitle, Targets: targetsOf(d.best.eps), Method: d.best.method,
 			Confidence: confidenceOf(d.score, d.margin), Reason: d.best.reason}
+		if p.Confidence == ConfidenceHigh && st.titleNote(fi) != "" {
+			p.Confidence = ConfidenceMedium
+		}
 		key := d.best.key()
 		for _, v := range videos {
 			if v.targetSet == key {
@@ -256,50 +260,6 @@ func targetsOf(eps []*Episode) []Target {
 		out[i] = Target{EpisodeID: ep.ID, Season: ep.Season, Episode: ep.Number}
 	}
 	return out
-}
-
-func allDirs(files []*fileInfo) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, fi := range files {
-		for _, d := range fi.dirs {
-			if !seen[d] {
-				seen[d] = true
-				out = append(out, d)
-			}
-		}
-	}
-	return out
-}
-
-// titleIn reports whether any of names shares a significant word with one
-// of the show's titles.
-func (ix *catalogIndex) titleIn(names []string) bool {
-	for _, n := range names {
-		for _, w := range normWords(n) {
-			if !significant(w) {
-				continue
-			}
-			for _, title := range ix.titles {
-				for _, tw := range title {
-					if tw == w {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-func countSignificant(words []string) int {
-	n := 0
-	for _, w := range words {
-		if significant(w) {
-			n++
-		}
-	}
-	return n
 }
 
 // shiftDate moves a YYYY-MM-DD date by days.

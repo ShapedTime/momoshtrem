@@ -137,15 +137,15 @@ func TestAssignTorrent_ReassignmentRebuildsTree(t *testing.T) {
 }
 
 // The legacy path assigns everything the classifier places: a multi-episode
-// file gets a row per episode, a special goes to season 0, extras are
-// skipped, subtitles are created, and two files on one episode are both
-// left out.
+// file gets a row per episode, a special goes to season 0, the better of two
+// copies is kept, extras are skipped, subtitles are created, and two
+// different files on one episode are both left out.
 func TestAssignTorrent_LegacySemantics(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	showID, ids := seedShow(t, db, "Legacy Show", [][3]any{
 		{0, 1, "Christmas Special"},
-		{1, 1, "Pilot"}, {1, 2, "Second"}, {1, 3, "Third"}, {1, 4, "Fourth"},
+		{1, 1, "Pilot"}, {1, 2, "Second"}, {1, 3, "Third"}, {1, 4, "Fourth"}, {1, 5, "Fifth"},
 	})
 
 	hash := strings.Repeat("c", 40)
@@ -154,8 +154,10 @@ func TestAssignTorrent_LegacySemantics(t *testing.T) {
 		{Path: root + "Legacy.Show.S01E01E02.1080p.WEB-GRP.mkv", Size: 2 << 30},
 		{Path: root + "1080p/Legacy.Show.S01E03.1080p.WEB-GRP.mkv", Size: 1 << 30},
 		{Path: root + "720p/Legacy.Show.S01E03.720p.WEB-GRP.mkv", Size: 1 << 29},
+		{Path: root + "Legacy.Show.S01E04.Fourth.1080p.WEB-GRP.mkv", Size: 1 << 30},
+		{Path: root + "Legacy.Show.S01E04.Extended.Cut.1080p.WEB-GRP.mkv", Size: 1 << 30},
 		{Path: root + "Legacy.Show.S00E01.Christmas.Special.1080p.WEB-GRP.mkv", Size: 1 << 30},
-		{Path: root + "Legacy.Show.S01E04.1080p.WEB-GRP.en.srt", Size: 40 << 10},
+		{Path: root + "Legacy.Show.S01E05.1080p.WEB-GRP.en.srt", Size: 40 << 10},
 		{Path: root + "Sample/legacy.show.s01e01.1080p-sample.mkv", Size: 30 << 20},
 		{Path: root + "Legacy.Show.S01.1080p.WEB-GRP.nfo", Size: 2 << 10},
 	}}}
@@ -169,7 +171,7 @@ func TestAssignTorrent_LegacySemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := AssignmentSummary{TotalFiles: 6, Matched: 3, Unmatched: 2, Skipped: 1, SubtitlesFound: 1}
+	want := AssignmentSummary{TotalFiles: 8, Matched: 4, Unmatched: 2, Skipped: 2, SubtitlesFound: 1}
 	if res.Summary != want {
 		t.Errorf("summary = %+v, want %+v", res.Summary, want)
 	}
@@ -183,7 +185,10 @@ func TestAssignTorrent_LegacySemantics(t *testing.T) {
 	if a, _ := assignments.GetActiveForItem(library.ItemTypeEpisode, ids["S00E01"]); a == nil {
 		t.Error("the special wasn't assigned")
 	}
-	if a, _ := assignments.GetActiveForItem(library.ItemTypeEpisode, ids["S01E03"]); a != nil {
+	if a, _ := assignments.GetActiveForItem(library.ItemTypeEpisode, ids["S01E03"]); a == nil || a.FilePath != root+"1080p/Legacy.Show.S01E03.1080p.WEB-GRP.mkv" {
+		t.Errorf("S01E03 assignment = %+v, want the 1080p copy", a)
+	}
+	if a, _ := assignments.GetActiveForItem(library.ItemTypeEpisode, ids["S01E04"]); a != nil {
 		t.Errorf("a conflicting file was assigned: %+v", a)
 	}
 	for _, u := range res.Unmatched {
@@ -201,7 +206,7 @@ func TestAssignTorrent_LegacySemantics(t *testing.T) {
 	if !special {
 		t.Error("the special wasn't added to the tree in season 0")
 	}
-	if len(subs.subs) != 1 || subs.subs[0].ItemID != ids["S01E04"] || subs.subs[0].LanguageCode != "en" {
+	if len(subs.subs) != 1 || subs.subs[0].ItemID != ids["S01E05"] || subs.subs[0].LanguageCode != "en" {
 		t.Errorf("subtitles = %+v", subs.subs)
 	}
 	if tree.invalidated != 1 {

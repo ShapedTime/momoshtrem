@@ -1,6 +1,8 @@
 package identify
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shapedtime/momoshtrem/internal/identify/token"
@@ -16,7 +18,7 @@ type fileInfo struct {
 	dir   string // folder path; "" at the torrent's root
 	name  string // file name without its extension
 	toks  []token.Token
-	body  []token.Token // toks without the leading [Group]
+	body  []token.Token // toks without the leading [Group], site prefix and dashes
 
 	titleLen int // tokens of body that spell a known show title
 
@@ -30,13 +32,20 @@ type fileInfo struct {
 	special     bool        // S00, E00, OVA, "28.5", a Specials folder
 	specialText string      // as written: "S04E00", "OVA 2", "28.5"
 	half        bool
-	version     int
 	fileSeason  int // a season the file name gives without an episode ("Show.S02.NCOP"); -1 none
 
+	// Copies of one episode: the best is kept (dedupe).
+	version    int    // "v2", "05v2", "[v2]": 2; 0 when none
+	repack     int    // REPACK, PROPER, RERIP words
+	repackWord string // the first of them, as written
+	lines      int    // resolution: 1080, 720; 0 when unknown
+	contentKey string // the name without tags, versions and REPACK: equal for copies
+
 	// Matching
-	prop      Proposal
-	targetSet string // the target episode IDs, for dedupe
-	suffixWhy string // why bare-number readings were refused
+	prop        Proposal
+	targetSet   string // the target episode IDs, for dedupe
+	suffixWhy   string // why bare-number readings were refused
+	overflowWhy string // why a bare number in a season folder has no episode
 }
 
 type candKind uint8
@@ -53,26 +62,10 @@ type candidate struct {
 	kind   candKind
 	season int
 	eps    []int
-	date   string
-	text   string // as written, for reasons
+	dates  []string // candDate: the readings; none for an unreadable date
+	text   string   // as written, for reasons
 	method Method
 	word   string // candSpecial: "ova", "oad", "sp", "special"
-}
-
-type regionMatch uint8
-
-const (
-	regionEmpty       regionMatch = iota // no title before the episode
-	regionExact                          // the show's title (or the start of it)
-	regionPrefixExtra                    // the show's title and more words: "Dr. Stone - New World"
-	regionPartial                        // shares a word with the show's title
-	regionNone                           // shares nothing
-)
-
-type titleRegion struct {
-	match regionMatch
-	words []string
-	extra []string // regionPrefixExtra: the words after the show's title
 }
 
 // analyze reads one file: its class, its tokens and its candidates.
@@ -87,16 +80,47 @@ func analyze(f TorrentFile, ix *catalogIndex) *fileInfo {
 		return fi
 	}
 	fi.toks = token.Tokenize(name)
-	fi.body = fi.toks
-	for len(fi.body) > 0 && fi.body[0].Kind == token.Group {
-		fi.body = fi.body[1:]
-	}
+	fi.body = stripLead(fi.toks)
 	fi.titleLen = ix.titlePrefix(fi.body)
 	fi.extract(ix)
 	if fi.class == ClassVideo {
 		fi.findExtra(ix)
+		fi.readCopy()
 	}
 	return fi
+}
+
+// copyWords mark a re-release of the same episode.
+var copyWords = map[string]bool{"repack": true, "proper": true, "rerip": true}
+
+// readCopy reads what tells copies of one episode apart: the version, a
+// REPACK or PROPER, the resolution; and the content key that is equal for
+// copies ("Show - 14 [1080p]" and "Show - 14 (v2) [720p]").
+func (fi *fileInfo) readCopy() {
+	var key []string
+	for _, t := range fi.toks {
+		switch {
+		case t.Kind == token.Version:
+			fi.version = max(fi.version, t.N)
+		case t.Kind == token.Res:
+			fi.lines = max(fi.lines, t.N)
+		case t.Kind == token.Word && copyWords[t.Norm]:
+			if fi.repack == 0 {
+				fi.repackWord = strings.ToUpper(t.Text)
+			}
+			fi.repack++
+		case t.Kind == token.Num:
+			fi.version = max(fi.version, t.Ver)
+			key = append(key, strconv.Itoa(t.N))
+		case t.Kind == token.SxxEyy || t.Kind == token.NxNN || t.Kind == token.Episode:
+			fi.version = max(fi.version, t.Ver)
+			key = append(key, fmt.Sprintf("%d/%v", t.Season, t.Eps))
+		case t.IsTag() || t.Kind == token.Dash:
+		default:
+			key = append(key, normWords(t.Text)...)
+		}
+	}
+	fi.contentKey = strings.Join(key, " ")
 }
 
 func isEpisodeMarker(t token.Token) bool {
@@ -127,7 +151,6 @@ func (fi *fileInfo) extract(ix *catalogIndex) {
 				method = MethodNxNN
 			}
 			fi.hasMarker = true
-			fi.version = t.Ver
 			eps := nonZero(t.Eps)
 			if len(eps) < len(t.Eps) || t.Season == 0 {
 				fi.special, fi.specialText = true, t.Text
@@ -142,13 +165,12 @@ func (fi *fileInfo) extract(ix *catalogIndex) {
 			return
 		case token.Episode:
 			fi.hasMarker = true
-			fi.version = t.Ver
 			fi.cands = append(fi.cands, candidate{kind: candNumber, eps: t.Eps, text: t.Text})
 			fi.finish(ix, m, m+1)
 			return
 		case token.Date:
 			fi.hasMarker = true
-			fi.cands = append(fi.cands, candidate{kind: candDate, date: t.Date, text: t.Text})
+			fi.cands = append(fi.cands, candidate{kind: candDate, dates: t.Dates, text: t.Text})
 			fi.finish(ix, m, m+1)
 			return
 		case token.Season:
@@ -165,7 +187,6 @@ func (fi *fileInfo) extract(ix *catalogIndex) {
 					return
 				case n.Kind == token.Num && n.N > 0:
 					fi.hasMarker = true
-					fi.version = n.Ver
 					fi.cands = append(fi.cands, candidate{kind: candExplicit, season: t.Season, eps: []int{n.N},
 						text: t.Text + " - " + n.Text, method: MethodSeasonNumber})
 					fi.finish(ix, m, j+1)
@@ -192,7 +213,7 @@ func (fi *fileInfo) extract(ix *catalogIndex) {
 // finish records the show title before the marker at m and the episode
 // title after it.
 func (fi *fileInfo) finish(ix *catalogIndex, m, after int) {
-	fi.region = ix.regionOf(regionWords(fi.body[:m]))
+	fi.region = ix.regionOf(ix.regionWords(fi.body[:m]))
 	fi.titleText = titleWordsFrom(fi.body, after)
 }
 
@@ -241,7 +262,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 		if k > 0 && k < i {
 			end = k // "Extras.Christmas.Special": the title is "Extras"
 		}
-		fi.region = ix.regionOf(regionWords(body[:end]))
+		fi.region = ix.regionOf(ix.regionWords(body[:end]))
 		if len(c.eps) > 0 {
 			fi.titleText = titleWordsFrom(body, after)
 		} else {
@@ -254,7 +275,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 	for i := from; i < specialEnd; i++ {
 		if t := body[i]; t.Kind == token.Num && t.Half && !t.Bracket {
 			fi.special, fi.half, fi.specialText = true, true, t.Text
-			fi.region = ix.regionOf(regionWords(body[:i]))
+			fi.region = ix.regionOf(ix.regionWords(body[:i]))
 			return
 		}
 	}
@@ -271,7 +292,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 			}
 		}
 		end = max(end, from)
-		fi.region = ix.regionOf(regionWords(body[:end]))
+		fi.region = ix.regionOf(ix.regionWords(body[:end]))
 		fi.titleText = titleWordsFrom(body, end)
 		return
 	}
@@ -286,12 +307,11 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 	if eps == nil {
 		return
 	}
-	fi.version = n.Ver
 	fi.cands = append(fi.cands, candidate{kind: candNumber, eps: eps, text: n.Text})
 	if n.Kind == token.Num && len(n.Text) >= 3 && len(n.Text) <= 4 && n.N%100 > 0 && n.N >= 100 && !ix.absPreferred() {
 		fi.cands = append(fi.cands, candidate{kind: candConcat, season: n.N / 100, eps: []int{n.N % 100}, text: n.Text})
 	}
-	fi.region = ix.regionOf(regionWords(body[:j]))
+	fi.region = ix.regionOf(ix.regionWords(body[:j]))
 	fi.titleText = titleWordsFrom(body, j+1)
 }
 
@@ -355,7 +375,7 @@ func (fi *fileInfo) findExtra(ix *catalogIndex) {
 			}
 		}
 		if tail >= 0 {
-			t, why = textExtra(wordsOf(fi.body[tail:]), true)
+			t, why = textExtra(ix.maskTitles(wordsOf(fi.body[tail:])), true)
 		}
 		if t == "" && len(fi.toks) > 0 {
 			if last := fi.toks[len(fi.toks)-1]; last.Kind == token.Word && (last.Norm == "sample" || reNCWord.MatchString(last.Norm)) {
@@ -363,18 +383,19 @@ func (fi *fileInfo) findExtra(ix *catalogIndex) {
 			}
 		}
 	} else {
-		start := fi.titleLen
+		// The show's title is never a marker, wherever it sits:
+		// "www.Site.org - Trailer.Park.Boys.Christmas.Special".
 		var words []string
-		for _, tok := range fi.body[start:] {
+		for _, tok := range fi.body {
 			if tok.IsTag() || tok.Kind == token.Dash {
 				continue
 			}
 			words = append(words, normWords(tok.Text)...)
 		}
-		t, why = textExtra(words, false)
+		t, why = textExtra(ix.maskTitles(words), false)
 		if t == "" {
 			// "Show - OP1", "Show - ED": a short marker right after a dash.
-			for i := start; i+1 < len(fi.body); i++ {
+			for i := 0; i+1 < len(fi.body); i++ {
 				if fi.body[i].Kind == token.Dash && fi.body[i+1].Kind == token.Word {
 					if st := shortExtra(fi.body[i+1].Norm); st != "" {
 						t, why = st, fi.body[i+1].Text
@@ -409,146 +430,14 @@ func (ix *catalogIndex) dirExtra(seg string) (ExtraType, string) {
 // quality tags: "Trailer.Park.Boys.S01-S12.COMPLETE.1080p" → "s01 s12
 // complete".
 func (ix *catalogIndex) dirKey(seg string) string {
-	toks := token.Tokenize(seg)
-	for len(toks) > 0 && toks[0].Kind == token.Group {
-		toks = toks[1:]
-	}
-	toks = toks[ix.titlePrefix(toks):]
 	var words []string
-	for _, t := range toks {
+	for _, t := range stripLead(token.Tokenize(seg)) {
 		if t.IsTag() || t.Kind == token.Dash || t.Kind == token.Year {
 			continue
 		}
 		words = append(words, normWords(t.Text)...)
 	}
-	return strings.Join(words, " ")
-}
-
-// titlePrefix returns how many of toks spell a known title of the show:
-// all of one ("Law.and.Order.SVU"), or the start of one up to a dash or an
-// episode marker ("Frieren - 05").
-func (ix *catalogIndex) titlePrefix(toks []token.Token) int {
-	best := 0
-	for _, title := range ix.titles {
-		w, i := 0, 0
-		for i < len(toks) && w < len(title) {
-			t := toks[i]
-			if t.Kind == token.Dash && w > 0 {
-				i++
-				continue
-			}
-			if t.Bracket || t.Kind == token.Dash {
-				break
-			}
-			tw := normWords(t.Text)
-			if len(tw) == 0 {
-				i++
-				continue
-			}
-			if w+len(tw) > len(title) || !equalWords(tw, title[w:w+len(tw)]) {
-				break
-			}
-			w += len(tw)
-			i++
-		}
-		if w == len(title) && i > best {
-			best = i
-		}
-	}
-	if best > 0 {
-		return best
-	}
-
-	// The start of a title: "Frieren - 05" for "Frieren: Beyond Journey's
-	// End". It must end where the title region does.
-	for _, title := range ix.titles {
-		w, i := 0, 0
-		for i < len(toks) && w < len(title) {
-			tw := normWords(toks[i].Text)
-			if toks[i].Bracket || toks[i].Kind == token.Dash || len(tw) == 0 ||
-				w+len(tw) > len(title) || !equalWords(tw, title[w:w+len(tw)]) {
-				break
-			}
-			w += len(tw)
-			i++
-		}
-		if i == 0 || !hasSignificant(title[:w]) {
-			continue
-		}
-		if i == len(toks) || toks[i].Kind == token.Dash || toks[i].Bracket || isEpisodeMarker(toks[i]) || toks[i].IsTag() {
-			if i > best {
-				best = i
-			}
-		}
-	}
-	return best
-}
-
-// regionOf compares the words before a file's episode number with the
-// show's titles.
-func (ix *catalogIndex) regionOf(words []string) titleRegion {
-	r := titleRegion{words: words}
-	if len(words) == 0 {
-		r.match = regionEmpty
-		return r
-	}
-	best := regionNone
-	for _, title := range ix.titles {
-		switch {
-		case equalWords(words, title):
-			r.match, r.extra = regionExact, nil
-			return r
-		case len(words) < len(title) && equalWords(words, title[:len(words)]) && hasSignificant(words):
-			r.match, r.extra = regionExact, nil
-			return r
-		case len(words) > len(title) && equalWords(words[:len(title)], title):
-			var extra []string
-			for _, w := range words[len(title):] {
-				if !ignorableTitleWords[w] {
-					extra = append(extra, w)
-				}
-			}
-			if len(extra) == 0 {
-				r.match, r.extra = regionExact, nil
-				return r
-			}
-			if best != regionPrefixExtra || len(extra) < len(r.extra) {
-				best, r.extra = regionPrefixExtra, extra
-			}
-		}
-	}
-	if best == regionPrefixExtra {
-		r.match = best
-		return r
-	}
-	for _, w := range words {
-		if !significant(w) {
-			continue
-		}
-		for _, title := range ix.titles {
-			for _, tw := range title {
-				if tw == w {
-					r.match = regionPartial
-					return r
-				}
-			}
-		}
-	}
-	r.match = regionNone
-	return r
-}
-
-// regionWords are the words of the show-title part of a name: no group,
-// tags, bracketed parts or years.
-func regionWords(toks []token.Token) []string {
-	var out []string
-	for _, t := range toks {
-		if t.Bracket || t.IsTag() || t.Kind == token.Dash || t.Kind == token.Year || t.IsMarker() {
-			continue
-		}
-		out = append(out, normWords(t.Text)...)
-	}
-	return out
+	return strings.Join(ix.maskTitles(words), " ")
 }
 
 // titleWordsFrom returns the episode name a file gives from body[i] on:
