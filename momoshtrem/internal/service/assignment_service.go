@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
@@ -20,14 +21,6 @@ type TorrentAdder interface {
 // Compile-time verification
 var _ TorrentAdder = (torrent.Service)(nil)
 
-// EpisodeIdentifier defines the identification operations.
-type EpisodeIdentifier interface {
-	Identify(files []identify.TorrentFile, torrentName string) *identify.IdentificationResult
-}
-
-// Compile-time verification
-var _ EpisodeIdentifier = (*identify.Identifier)(nil)
-
 // SubtitleCreator defines subtitle operations needed for torrent subtitles.
 type SubtitleCreator interface {
 	CreateTorrentSubtitle(ctx context.Context, sub *subtitle.Subtitle) error
@@ -41,7 +34,6 @@ type ShowAssignmentService struct {
 	showRepo        *library.ShowRepository
 	assignmentRepo  *library.AssignmentRepository
 	torrentAdder    TorrentAdder
-	identifier      EpisodeIdentifier
 	treeUpdater     vfs.TreeUpdater // Optional
 	subtitleCreator SubtitleCreator // Optional
 	log             *slog.Logger
@@ -69,14 +61,12 @@ func NewShowAssignmentService(
 	showRepo *library.ShowRepository,
 	assignmentRepo *library.AssignmentRepository,
 	torrentAdder TorrentAdder,
-	identifier EpisodeIdentifier,
 	opts ...AssignmentServiceOption,
 ) *ShowAssignmentService {
 	s := &ShowAssignmentService{
 		showRepo:       showRepo,
 		assignmentRepo: assignmentRepo,
 		torrentAdder:   torrentAdder,
-		identifier:     identifier,
 		log:            slog.With("component", "show-assignment-service"),
 	}
 	for _, opt := range opts {
@@ -93,10 +83,10 @@ func (s *ShowAssignmentService) SetSubtitleCreator(sc SubtitleCreator) {
 
 // AssignmentSummary contains counts of the assignment operation.
 type AssignmentSummary struct {
-	TotalFiles     int `json:"total_files"`
-	Matched        int `json:"matched"`
+	TotalFiles     int `json:"total_files"` // videos and subtitles
+	Matched        int `json:"matched"`     // assignment rows: one per episode
 	Unmatched      int `json:"unmatched"`
-	Skipped        int `json:"skipped"`
+	Skipped        int `json:"skipped"` // extras: samples, openings, trailers, older versions...
 	SubtitlesFound int `json:"subtitles_found"`
 }
 
@@ -111,7 +101,8 @@ type MatchedAssignment struct {
 	Confidence string `json:"confidence"`
 }
 
-// UnmatchedAssignment represents a file that couldn't be matched.
+// UnmatchedAssignment represents a file that couldn't be matched. Reason is
+// the classifier's (or a conflict's) explanation; Season and Episode are -1.
 type UnmatchedAssignment struct {
 	FilePath string `json:"file_path"`
 	Reason   string `json:"reason"`
@@ -126,106 +117,161 @@ type ShowAssignmentResult struct {
 	Summary   AssignmentSummary
 }
 
-// AssignTorrent assigns a torrent to a show, auto-detecting episodes.
+// episodeRef is a library episode and its season number.
+type episodeRef struct {
+	episode *library.Episode
+	season  int
+}
+
+// torrentSubtitle is a subtitle file for one episode.
+type torrentSubtitle struct {
+	ref  episodeRef
+	path string
+	size int64
+}
+
+// AssignTorrent assigns a torrent to a show synchronously (the legacy
+// path): it classifies the torrent's files and assigns every file the
+// classifier gives a target, whatever the confidence. Files in conflict
+// (two files on one episode) are both left out and reported unmatched.
+// Specials go to season 0; a multi-episode file gets one row per episode.
 func (s *ShowAssignmentService) AssignTorrent(
 	ctx context.Context,
 	showID int64,
 	magnetURI string,
 ) (*ShowAssignmentResult, error) {
-	// 1. Validate magnet URI and extract info hash
 	infoHash := torrent.ExtractInfoHash(magnetURI)
 	if infoHash == "" {
 		return nil, library.ErrInvalidMagnet
 	}
 
-	// 2. Load show with all seasons/episodes
-	show, err := s.showRepo.GetWithSeasonsAndEpisodes(showID)
+	show, err := s.showRepo.GetWithSeasonsAndEpisodesContext(ctx, showID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load show: %w", err)
 	}
 	if show == nil {
 		return nil, library.ErrShowNotFound
 	}
-
-	// 3. Check torrent service availability
 	if s.torrentAdder == nil {
 		return nil, library.ErrTorrentServiceUnavailable
 	}
-
-	// 4. Add torrent and get file list
 	torrentInfo, err := s.torrentAdder.AddTorrent(magnetURI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add torrent: %w", err)
 	}
 
-	// 5. Identify episodes in the torrent
-	identResult := s.identifier.Identify(torrentInfo.Files, torrentInfo.Name)
-
-	// 6. Match identified files to library episodes
-	matchResult := identify.MatchToShow(show, identResult)
-
-	// 7. Create assignments for matched episodes
-	result := &ShowAssignmentResult{
-		Matched:   make([]MatchedAssignment, 0, len(matchResult.Matched)),
-		Unmatched: make([]UnmatchedAssignment, 0, len(matchResult.Unmatched)),
+	res := identify.Classify(identify.Input{
+		TorrentName: torrentInfo.Name,
+		Files:       torrentInfo.Files,
+		Show:        ShowCatalog(show),
+	})
+	refs := episodeRefs(show)
+	conflicts := identify.Conflicts(res.Proposals)
+	byPath := make(map[string]int, len(res.Proposals))
+	for i, p := range res.Proposals {
+		byPath[p.Path] = i
 	}
 
-	episodesForTree := make([]vfs.EpisodeWithContext, 0, len(matchResult.Matched))
+	result := &ShowAssignmentResult{
+		Matched:   make([]MatchedAssignment, 0),
+		Unmatched: make([]UnmatchedAssignment, 0),
+	}
+	unmatched := func(p identify.Proposal, reason string) {
+		result.Unmatched = append(result.Unmatched, UnmatchedAssignment{FilePath: p.Path, Reason: reason, Season: -1, Episode: -1})
+		s.log.Warn("Unmatched file in torrent",
+			"show_id", showID, "show_title", show.Title, "info_hash", infoHash,
+			"file_path", p.Path, "reason", reason)
+	}
+
+	var episodesForTree []vfs.EpisodeWithContext
+	var subs []torrentSubtitle
 	// An episode moving to another torrent leaves the old torrent's
 	// subtitles in the tree (and its cache) until a rebuild.
 	torrentChanged := false
 
-	for _, m := range matchResult.Matched {
-		if prev := m.Episode.Assignment; prev != nil && prev.InfoHash != infoHash {
-			torrentChanged = true
+	for i, p := range res.Proposals {
+		class := identify.ClassOf(p.Path)
+		if class != identify.ClassVideo && class != identify.ClassSubtitle {
+			continue // fonts, images, info files: not counted, as before
 		}
-		assignment := &library.TorrentAssignment{
-			ItemType:   library.ItemTypeEpisode,
-			ItemID:     m.Episode.ID,
-			InfoHash:   infoHash,
-			MagnetURI:  magnetURI,
-			FilePath:   m.FilePath,
-			FileSize:   m.FileSize,
-			Resolution: m.Quality.Resolution,
-			Source:     m.Quality.Source,
-		}
+		result.Summary.TotalFiles++
 
-		if err := s.assignmentRepo.Create(assignment); err != nil {
-			s.log.Error("Failed to create assignment",
-				"episode_id", m.Episode.ID,
-				"error", err,
-			)
+		switch {
+		case p.Kind == identify.KindExtra || p.Kind == identify.KindSample:
+			result.Summary.Skipped++
+			continue
+		case !p.HasTarget():
+			unmatched(p, p.Reason)
 			continue
 		}
 
-		result.Matched = append(result.Matched, MatchedAssignment{
-			EpisodeID:  m.Episode.ID,
-			Season:     m.Season.SeasonNumber,
-			Episode:    m.Episode.EpisodeNumber,
-			FilePath:   m.FilePath,
-			FileSize:   m.FileSize,
-			Resolution: m.Quality.Resolution,
-			Confidence: string(m.Confidence),
-		})
+		if p.Kind == identify.KindSubtitle {
+			if v, ok := byPath[p.LinkedVideo]; ok && len(conflicts[v]) > 0 {
+				unmatched(p, "Its video conflicts with another file")
+				continue
+			}
+			for _, t := range p.Targets {
+				if ref, ok := refs[t.EpisodeID]; ok {
+					subs = append(subs, torrentSubtitle{ref: ref, path: p.Path, size: p.Size})
+				}
+			}
+			continue
+		}
 
-		episodesForTree = append(episodesForTree, vfs.EpisodeWithContext{
-			ShowTitle:    show.Title,
-			ShowYear:     show.Year,
-			SeasonNumber: m.Season.SeasonNumber,
-			Episode:      m.Episode,
-			Assignment:   assignment,
-		})
+		if others := conflicts[i]; len(others) > 0 {
+			unmatched(p, fmt.Sprintf("Conflicts with %s: both map to %s", path.Base(res.Proposals[others[0]].Path), targetLabel(p.Targets)))
+			continue
+		}
+
+		quality := identify.ParseQuality(p.Path)
+		for _, t := range p.Targets {
+			ref, ok := refs[t.EpisodeID]
+			if !ok {
+				continue // the catalog came from this show, so this doesn't happen
+			}
+			if prev := ref.episode.Assignment; prev != nil && prev.InfoHash != infoHash {
+				torrentChanged = true
+			}
+			assignment := &library.TorrentAssignment{
+				ItemType:   library.ItemTypeEpisode,
+				ItemID:     ref.episode.ID,
+				InfoHash:   infoHash,
+				MagnetURI:  magnetURI,
+				FilePath:   p.Path,
+				FileSize:   p.Size,
+				Resolution: quality.Resolution,
+				Source:     quality.Source,
+			}
+			if err := s.assignmentRepo.Create(assignment); err != nil {
+				s.log.Error("Failed to create assignment", "episode_id", ref.episode.ID, "error", err)
+				continue
+			}
+			result.Matched = append(result.Matched, MatchedAssignment{
+				EpisodeID:  ref.episode.ID,
+				Season:     ref.season,
+				Episode:    ref.episode.EpisodeNumber,
+				FilePath:   p.Path,
+				FileSize:   p.Size,
+				Resolution: quality.Resolution,
+				Confidence: string(p.Confidence),
+			})
+			episodesForTree = append(episodesForTree, vfs.EpisodeWithContext{
+				ShowTitle:    show.Title,
+				ShowYear:     show.Year,
+				SeasonNumber: ref.season,
+				Episode:      ref.episode,
+				Assignment:   assignment,
+			})
+		}
 	}
 
-	// 8. Update VFS tree
 	if s.treeUpdater != nil && len(episodesForTree) > 0 {
 		s.treeUpdater.AddEpisodesToTree(episodesForTree)
 	}
 
-	// 9. Process matched subtitles
 	subtitlesCreated := 0
-	if s.subtitleCreator != nil && len(matchResult.MatchedSubtitles) > 0 {
-		subtitlesCreated = s.createSubtitles(ctx, matchResult.MatchedSubtitles, infoHash, magnetURI)
+	if s.subtitleCreator != nil && len(subs) > 0 {
+		subtitlesCreated = s.createSubtitles(ctx, subs, infoHash, magnetURI)
 	}
 
 	// Targeted updates don't touch subtitle files: rebuild when there are
@@ -234,70 +280,66 @@ func (s *ShowAssignmentService) AssignTorrent(
 		s.treeUpdater.InvalidateTree()
 	}
 
-	// 10. Build unmatched response
-	for _, u := range matchResult.Unmatched {
-		result.Unmatched = append(result.Unmatched, UnmatchedAssignment{
-			FilePath: u.FilePath,
-			Reason:   string(u.Reason),
-			Season:   u.Season,
-			Episode:  u.Episode,
-		})
-
-		s.log.Warn("Unmatched file in torrent",
-			"show_id", showID,
-			"show_title", show.Title,
-			"info_hash", infoHash,
-			"file_path", u.FilePath,
-			"reason", u.Reason,
-			"parsed_season", u.Season,
-			"parsed_episode", u.Episode,
-		)
-	}
-
-	// 11. Calculate summary
-	skipped := identResult.TotalFiles - len(identResult.IdentifiedFiles) - len(identResult.UnidentifiedFiles)
-	if skipped < 0 {
-		skipped = 0
-	}
-
-	result.Summary = AssignmentSummary{
-		TotalFiles:     identResult.TotalFiles,
-		Matched:        len(result.Matched),
-		Unmatched:      len(result.Unmatched),
-		Skipped:        skipped,
-		SubtitlesFound: subtitlesCreated,
-	}
-
+	result.Summary.Matched = len(result.Matched)
+	result.Summary.Unmatched = len(result.Unmatched)
+	result.Summary.SubtitlesFound = subtitlesCreated
 	return result, nil
+}
+
+// episodeRefs indexes a show's episodes by ID.
+func episodeRefs(show *library.Show) map[int64]episodeRef {
+	refs := make(map[int64]episodeRef)
+	for i := range show.Seasons {
+		season := &show.Seasons[i]
+		for j := range season.Episodes {
+			ep := &season.Episodes[j]
+			refs[ep.ID] = episodeRef{episode: ep, season: season.SeasonNumber}
+		}
+	}
+	return refs
+}
+
+// targetLabel writes targets as "S01E05" or "S01E05-E06".
+func targetLabel(targets []identify.Target) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	first, last := targets[0], targets[len(targets)-1]
+	label := fmt.Sprintf("S%02dE%02d", first.Season, first.Episode)
+	if len(targets) > 1 {
+		label += fmt.Sprintf("-E%02d", last.Episode)
+	}
+	return label
 }
 
 // createSubtitles creates subtitle records for matched subtitles. Each
 // replaces the episode's subtitles from any earlier torrent.
 func (s *ShowAssignmentService) createSubtitles(
 	ctx context.Context,
-	matched []identify.MatchedSubtitle,
+	subs []torrentSubtitle,
 	infoHash, magnetURI string,
 ) int {
 	created := 0
 
-	for _, ms := range matched {
+	for _, ts := range subs {
+		langCode, langName, _ := subtitle.DetectLanguage(ts.path)
 		sub := &subtitle.Subtitle{
 			ItemType:     subtitle.ItemTypeEpisode,
-			ItemID:       ms.Episode.ID,
-			LanguageCode: ms.LanguageCode,
-			LanguageName: ms.LanguageName,
-			Format:       ms.Format,
-			FilePath:     ms.FilePath,
-			FileSize:     ms.FileSize,
+			ItemID:       ts.ref.episode.ID,
+			LanguageCode: langCode,
+			LanguageName: langName,
+			Format:       subtitle.ParseFormat(ts.path),
+			FilePath:     ts.path,
+			FileSize:     ts.size,
 			Source:       subtitle.SourceTorrent,
 			InfoHash:     infoHash,
-			ReleaseName:  subtitle.AssignedRelease(magnetURI, ms.FilePath),
+			ReleaseName:  subtitle.AssignedRelease(magnetURI, ts.path),
 		}
 
 		if err := s.subtitleCreator.CreateTorrentSubtitle(ctx, sub); err != nil {
 			s.log.Error("Failed to create torrent subtitle",
-				"episode_id", ms.Episode.ID,
-				"file_path", ms.FilePath,
+				"episode_id", ts.ref.episode.ID,
+				"file_path", ts.path,
 				"error", err,
 			)
 			continue
@@ -305,11 +347,11 @@ func (s *ShowAssignmentService) createSubtitles(
 
 		created++
 		s.log.Info("Torrent subtitle assigned",
-			"episode_id", ms.Episode.ID,
-			"season", ms.Season.SeasonNumber,
-			"episode", ms.Episode.EpisodeNumber,
-			"language", ms.LanguageCode,
-			"file_path", ms.FilePath,
+			"episode_id", ts.ref.episode.ID,
+			"season", ts.ref.season,
+			"episode", ts.ref.episode.EpisodeNumber,
+			"language", langCode,
+			"file_path", ts.path,
 		)
 	}
 

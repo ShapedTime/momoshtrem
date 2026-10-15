@@ -21,11 +21,11 @@ type CreateMovieRequest struct {
 }
 
 type MovieResponse struct {
-	ID            int64  `json:"id"`
-	TMDBID        int    `json:"tmdb_id"`
-	Title         string `json:"title"`
-	Year          int    `json:"year"`
-	HasAssignment bool   `json:"has_assignment"`
+	ID            int64               `json:"id"`
+	TMDBID        int                 `json:"tmdb_id"`
+	Title         string              `json:"title"`
+	Year          int                 `json:"year"`
+	HasAssignment bool                `json:"has_assignment"`
 	Assignment    *AssignmentResponse `json:"assignment,omitempty"`
 }
 
@@ -88,11 +88,11 @@ type RefreshShowResponse struct {
 
 // Show assignment response
 type ShowAssignmentResponse struct {
-	Success   bool                        `json:"success"`
-	Summary   service.AssignmentSummary   `json:"summary"`
-	Matched   []service.MatchedAssignment `json:"matched"`
+	Success   bool                          `json:"success"`
+	Summary   service.AssignmentSummary     `json:"summary"`
+	Matched   []service.MatchedAssignment   `json:"matched"`
 	Unmatched []service.UnmatchedAssignment `json:"unmatched,omitempty"`
-	Error     string                      `json:"error,omitempty"`
+	Error     string                        `json:"error,omitempty"`
 }
 
 // parseID parses and validates an ID parameter
@@ -299,31 +299,35 @@ func (s *Server) assignMovieTorrent(c *gin.Context) {
 		return
 	}
 
-	// Find the best movie file (largest video file)
-	result := identify.FindMovieFile(torrentInfo.Files)
-	if !result.Found {
+	// Rank the videos as the film; the legacy path takes the best one.
+	candidates := identify.RankMovieFiles(torrentInfo.Files, identify.MovieInfo{
+		Title: movie.Title, Year: movie.Year, RuntimeMin: movie.Runtime,
+	})
+	if len(candidates) == 0 {
 		errorResponse(c, http.StatusBadRequest, "No video files found in torrent")
 		return
 	}
-
-	// Log other files if any
-	if len(result.OtherFiles) > 0 {
-		slog.Info("Movie torrent has multiple video files, using largest",
+	best := candidates[0]
+	if len(candidates) > 1 {
+		slog.Info("Movie torrent has several candidate videos, using the best",
 			"movie_id", id,
-			"selected", result.FilePath,
-			"others", result.OtherFiles,
+			"selected", best.Path,
+			"confidence", best.Confidence,
+			"reason", best.Reason,
+			"candidates", len(candidates),
 		)
 	}
+	quality := identify.ParseQuality(best.Path)
 
 	assignment := &library.TorrentAssignment{
 		ItemType:   library.ItemTypeMovie,
 		ItemID:     id,
 		InfoHash:   infoHash,
 		MagnetURI:  req.MagnetURI,
-		FilePath:   result.FilePath,
-		FileSize:   result.FileSize,
-		Resolution: result.Quality.Resolution,
-		Source:     result.Quality.Source,
+		FilePath:   best.Path,
+		FileSize:   best.Size,
+		Resolution: quality.Resolution,
+		Source:     quality.Source,
 	}
 
 	if err := s.assignmentRepo.Create(assignment); err != nil {

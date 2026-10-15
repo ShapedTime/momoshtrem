@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/shapedtime/momoshtrem/internal/airdate"
-	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/service"
@@ -23,8 +22,7 @@ type Server struct {
 	movieRepo       *library.MovieRepository
 	showRepo        *library.ShowRepository
 	assignmentRepo  *library.AssignmentRepository
-	torrentService  torrent.Service // Optional: nil until Stage 2 implementation
-	identifier      *identify.Identifier
+	torrentService  torrent.Service      // Optional: nil until Stage 2 implementation
 	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
 	subtitleService *subtitle.Service    // Optional: subtitle search/download service
 	subtitleItems   subtitleItemResolver // Loads movies and episodes for the subtitle routes
@@ -75,15 +73,12 @@ func NewServer(
 ) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
-	identifier := identify.NewIdentifier(nil)
-
 	s := &Server{
 		router:         gin.New(),
 		movieRepo:      movieRepo,
 		showRepo:       showRepo,
 		assignmentRepo: assignmentRepo,
 		torrentService: torrentService,
-		identifier:     identifier,
 		treeUpdater:    treeUpdater,
 		opts:           opts,
 	}
@@ -98,7 +93,6 @@ func NewServer(
 		showRepo,
 		assignmentRepo,
 		torrentService,
-		identifier,
 		assignmentOpts...,
 	)
 
