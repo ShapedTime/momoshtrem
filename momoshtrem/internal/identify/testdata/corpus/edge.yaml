@@ -103,3 +103,14 @@
   files:
     - {path: Doctor Who - 04 - Time Crash.avi, size: 150MB, expect: {eps: [S00E04], min_conf: high}}
     - {path: Doctor Who - 06.avi, size: 350MB, expect: {eps: [S00E06]}}
+
+# While a later season airs, a group that numbers each season from 01 makes
+# "- 05" as likely S03E05 as absolute #5: never high.
+- id: airing-season-bare-number
+  show: spy-x-family
+  now: 2025-11-01
+  tags: [anime, airing]
+  files:
+    - path: "[Erai-raws] Spy x Family - 05 [1080p][Multiple Subtitle].mkv"
+      ambiguous: true
+      expect: {acceptable: [S03E05, S01E05, null], max_conf: medium}
