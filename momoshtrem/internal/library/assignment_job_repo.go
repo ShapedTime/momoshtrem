@@ -647,10 +647,13 @@ func (t *JobTx) EpisodeRefs(showID int64, ids []int64) (map[int64]*EpisodeRef, e
 	return episodeRefs(t.ctx, t.tx, showID, ids)
 }
 
-// AssignmentWrite is what Apply writes for one torrent: the title's rows,
-// one per item (episode or movie).
+// AssignmentWrite is what Apply writes for one torrent, or WriteStream for
+// HDRezka streams: the title's rows, one per item (episode or movie).
 type AssignmentWrite struct {
-	ItemType  ItemType
+	ItemType ItemType
+	// Kind is the rows' source; "" is a torrent.
+	Kind AssignmentKind
+	// The torrent; unused for HDRezka streams.
 	InfoHash  string
 	MagnetURI string
 	// The title the write is authoritative for: the torrent's active rows
@@ -658,22 +661,25 @@ type AssignmentWrite struct {
 	// list are deactivated.
 	ShowID  int64
 	MovieID int64
-	// Rows: ItemID, FilePath, FileSize, Resolution, Source, Confidence and
-	// MatchSource. One per item.
+	// Rows, one per item. A torrent's: ItemID, FilePath, FileSize,
+	// Resolution, Source, Confidence and MatchSource. An HDRezka stream's:
+	// ItemID, Stream, FileSize and Resolution; its FilePath is
+	// Stream.FilePath().
 	Rows []TorrentAssignment
 	// Partial writes Rows' items only: the torrent's other rows on the
 	// title stay as they are (a manual override of one episode). Apply's
-	// writes aren't partial.
+	// writes aren't partial; HDRezka writes always are.
 	Partial bool
 }
 
 // WriteAssignments applies w: the torrent's rows the job no longer maps
 // are deactivated (unless w is partial), each item's other active rows
-// too, and every row is upserted active (a file the item had before is
-// reactivated). An item whose file changes loses its torrent subtitles:
-// they came with the old file, and the caller records the new file's
-// after the commit. It locks the title first, so writes to one title
-// never interleave. Six queries (five for a partial write).
+// too (whatever their kind), and every row is upserted active (a file the
+// item had before is reactivated). An item whose file changes loses its
+// torrent and HDRezka subtitles: they came with the old file, and the
+// caller records the new file's after the commit. It locks the title
+// first, so writes to one title never interleave. Six queries (five for a
+// partial write).
 func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 	return writeAssignments(t.ctx, t.tx, w)
 }
@@ -714,9 +720,22 @@ func lockTitle(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
 	return nil
 }
 
-// writeAssignments is the assignment writer: Apply and the manual
-// override (AssignmentRepository.WriteOverride) write through it.
+// writeAssignments is the assignment writer: Apply, the manual override
+// (AssignmentRepository.WriteOverride) and HDRezka streams
+// (AssignmentRepository.WriteStream) write through it.
 func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
+	// hash is the rows' info hash: NULL for HDRezka streams, so the
+	// comparisons below use IS NOT DISTINCT FROM.
+	var hash sql.NullString
+	switch w.Kind {
+	case "", AssignmentKindTorrent:
+		w.Kind = AssignmentKindTorrent
+		hash = sql.NullString{String: w.InfoHash, Valid: true}
+	case AssignmentKindHDRezka:
+		w.Partial = true
+	default:
+		return fmt.Errorf("unknown assignment kind %q", w.Kind)
+	}
 	if err := lockTitle(ctx, tx, w); err != nil {
 		return err
 	}
@@ -728,6 +747,7 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 	sources := make([]string, n)
 	confidences := make([]string, n)
 	matchSources := make([]string, n)
+	streams := make([]string, n)
 	seen := make(map[int64]bool, n)
 	for i, row := range w.Rows {
 		if seen[row.ItemID] {
@@ -737,6 +757,16 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 		items[i], paths[i], sizes[i] = row.ItemID, row.FilePath, row.FileSize
 		resolutions[i], sources[i] = row.Resolution, row.Source
 		confidences[i], matchSources[i] = row.Confidence, row.MatchSource
+		if w.Kind == AssignmentKindHDRezka {
+			if row.Stream == nil {
+				return fmt.Errorf("item %d has no stream", row.ItemID)
+			}
+			raw, err := json.Marshal(row.Stream)
+			if err != nil {
+				return fmt.Errorf("failed to encode the stream of item %d: %w", row.ItemID, err)
+			}
+			paths[i], streams[i] = row.Stream.FilePath(), string(raw)
+		}
 	}
 
 	var err error
@@ -768,17 +798,19 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 		return nil
 	}
 
-	// Torrent subtitles belong to the file they came with: an item moving
-	// to another file (even of the same torrent) drops them. Downloaded
-	// subtitles stay.
+	// Torrent and HDRezka subtitles belong to the file they came with: an
+	// item moving to another file (even of the same torrent, or another
+	// translation) drops them. Downloaded subtitles stay. A row is the
+	// item's file when kind, hash (NULL for HDRezka) and path all match.
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM subtitles s
 		USING unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
-		WHERE s.item_type = $3 AND s.item_id = m.item_id AND s.source = 'torrent'
+		WHERE s.item_type = $3 AND s.item_id = m.item_id AND s.source IN ('torrent', 'hdrezka')
 		  AND NOT EXISTS (SELECT 1 FROM torrent_assignments t
 		                  WHERE t.item_type = $3 AND t.item_id = m.item_id AND t.is_active
-		                    AND t.info_hash = $4 AND t.file_path = m.file_path)
-	`, items, paths, w.ItemType, w.InfoHash); err != nil {
+		                    AND t.kind = $5 AND t.info_hash IS NOT DISTINCT FROM $4::text
+		                    AND t.file_path = m.file_path)
+	`, items, paths, w.ItemType, hash, w.Kind); err != nil {
 		return fmt.Errorf("failed to drop the old files' subtitles: %w", err)
 	}
 
@@ -786,21 +818,36 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 		UPDATE torrent_assignments t SET is_active = FALSE
 		FROM unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
 		WHERE t.item_type = $3 AND t.item_id = m.item_id AND t.is_active
-		  AND NOT (t.info_hash = $4 AND t.file_path = m.file_path)
-	`, items, paths, w.ItemType, w.InfoHash); err != nil {
+		  AND NOT (t.kind = $5 AND t.info_hash IS NOT DISTINCT FROM $4::text AND t.file_path = m.file_path)
+	`, items, paths, w.ItemType, hash, w.Kind); err != nil {
 		return fmt.Errorf("failed to deactivate the items' other rows: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size,
-		                                 resolution, source, confidence, match_source, is_active)
-		SELECT $1, m.item_id, $2, $3, m.file_path, m.file_size, NULLIF(m.resolution, ''), NULLIF(m.source, ''),
-		       NULLIF(m.confidence, ''), NULLIF(m.match_source, ''), TRUE
-		FROM unnest($4::bigint[], $5::text[], $6::bigint[], $7::text[], $8::text[], $9::text[], $10::text[])
-		     AS m(item_id, file_path, file_size, resolution, source, confidence, match_source)
-		`+assignmentUpsert,
-		w.ItemType, w.InfoHash, w.MagnetURI, items, paths, sizes, resolutions, sources, confidences, matchSources,
-	); err != nil {
+	if w.Kind == AssignmentKindHDRezka {
+		// The arbiter is torrent_assignments_hdrezka_key: the stream's
+		// made-up path keys the row.
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO torrent_assignments (item_type, item_id, kind, stream_ref, file_path, file_size, resolution, is_active)
+			SELECT $1, m.item_id, 'hdrezka', m.stream_ref::jsonb, m.file_path, m.file_size, NULLIF(m.resolution, ''), TRUE
+			FROM unnest($2::bigint[], $3::text[], $4::bigint[], $5::text[], $6::text[])
+			     AS m(item_id, file_path, file_size, resolution, stream_ref)
+			ON CONFLICT (item_type, item_id, file_path) WHERE kind = 'hdrezka' DO UPDATE SET
+				is_active = TRUE, stream_ref = EXCLUDED.stream_ref, file_size = EXCLUDED.file_size,
+				resolution = EXCLUDED.resolution, created_at = NOW()
+		`, w.ItemType, items, paths, sizes, resolutions, streams)
+	} else {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size,
+			                                 resolution, source, confidence, match_source, is_active)
+			SELECT $1, m.item_id, $2, $3, m.file_path, m.file_size, NULLIF(m.resolution, ''), NULLIF(m.source, ''),
+			       NULLIF(m.confidence, ''), NULLIF(m.match_source, ''), TRUE
+			FROM unnest($4::bigint[], $5::text[], $6::bigint[], $7::text[], $8::text[], $9::text[], $10::text[])
+			     AS m(item_id, file_path, file_size, resolution, source, confidence, match_source)
+			`+assignmentUpsert,
+			w.ItemType, w.InfoHash, w.MagnetURI, items, paths, sizes, resolutions, sources, confidences, matchSources,
+		)
+	}
+	if err != nil {
 		return fmt.Errorf("failed to write assignments: %w", err)
 	}
 	return nil

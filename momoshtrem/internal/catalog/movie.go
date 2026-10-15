@@ -129,6 +129,9 @@ func (s *Service) movieLibrary(movie *library.Movie, tv *torrentView) TitleLibra
 	if downloading {
 		state.Download = &DownloadProgress{Pct: pct(done, length), Seeders: seeders}
 	}
+	if !a.IsTorrent() {
+		return state // an HDRezka stream: torrent stays null
+	}
 
 	torrentState := TorrentNotLoaded
 	var torrentSeeders *int

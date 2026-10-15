@@ -25,8 +25,8 @@ func NewCatalogRepository(db *DB) *CatalogRepository {
 // itemType is a SQL literal; itemID the outer column.
 func activeAssignmentLateral(itemType, itemID string) string {
 	return `LEFT JOIN LATERAL (
-			SELECT t.id, t.info_hash, t.magnet_uri, t.file_path, t.file_size, t.resolution, t.source,
-			       t.confidence, t.match_source, t.created_at
+			SELECT t.id, t.kind, t.info_hash, t.magnet_uri, t.file_path, t.file_size, t.resolution, t.source,
+			       t.confidence, t.match_source, t.stream_ref, t.created_at
 			FROM torrent_assignments t
 			WHERE t.item_type = '` + itemType + `' AND t.item_id = ` + itemID + ` AND t.is_active
 			ORDER BY t.created_at DESC, t.id DESC
@@ -34,29 +34,33 @@ func activeAssignmentLateral(itemType, itemID string) string {
 		) ta ON TRUE`
 }
 
-// assignmentDest scans the ta.* columns of activeAssignmentLateral. Call
-// finish after Scan: it returns the assignment, or nil when there is none.
+// assignmentDest scans assignmentColumns: the ta.* columns of
+// activeAssignmentLateral, or of an active torrent_assignments row joined
+// as ta. Call finish after Scan: it returns the assignment, or nil when
+// there is none. Every column is nullable: an HDRezka row has no hash or
+// magnet, and the lateral none at all without a row.
 func assignmentDest(itemType ItemType) (dest []any, finish func(itemID int64) *TorrentAssignment) {
 	var id, size sql.NullInt64
-	var hash, magnet, path, resolution, source, confidence, matchSource sql.NullString
+	var kind, hash, magnet, path, resolution, source, confidence, matchSource sql.NullString
+	var stream nullStreamRef
 	var created sql.NullTime
-	dest = []any{&id, &hash, &magnet, &path, &size, &resolution, &source, &confidence, &matchSource, &created}
+	dest = []any{&id, &kind, &hash, &magnet, &path, &size, &resolution, &source, &confidence, &matchSource, &stream, &created}
 	return dest, func(itemID int64) *TorrentAssignment {
 		if !id.Valid {
 			return nil
 		}
 		return &TorrentAssignment{
-			ID: id.Int64, ItemType: itemType, ItemID: itemID,
+			ID: id.Int64, ItemType: itemType, ItemID: itemID, Kind: AssignmentKind(kind.String),
 			InfoHash: hash.String, MagnetURI: magnet.String, FilePath: path.String, FileSize: size.Int64,
 			Resolution: resolution.String, Source: source.String,
-			Confidence: confidence.String, MatchSource: matchSource.String,
+			Confidence: confidence.String, MatchSource: matchSource.String, Stream: stream.Ref,
 			IsActive: true, CreatedAt: created.Time,
 		}
 	}
 }
 
-const assignmentColumns = `ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size, ta.resolution, ta.source,
-	ta.confidence, ta.match_source, ta.created_at`
+const assignmentColumns = `ta.id, ta.kind, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size, ta.resolution, ta.source,
+	ta.confidence, ta.match_source, ta.stream_ref, ta.created_at`
 
 // MovieByTMDBID returns the movie with that TMDB ID and its active
 // assignment (Movie.Assignment, nil when none), or nil when the movie isn't
@@ -300,6 +304,11 @@ type LibraryItem struct {
 //     count towards the frontier, and are left out entirely while the show's
 //     include_specials is off.
 //
+// An item has a file when it has an active assignment (its row id): an
+// HDRezka row has no info hash. Only torrent files are ever downloading.
+// A show's size counts each file once: episodes a multi-episode file plays
+// share its (kind, hash, path).
+//
 // needs_review counts the title's files under review (reviewCTEs), like
 // ReviewState.
 //
@@ -324,11 +333,12 @@ movie_items AS (
 	       COALESCE(ta.file_size, 0)::bigint AS size_bytes,
 	       COALESCE((SELECT rc.needs_review FROM review_counts rc WHERE rc.movie_id = m.id), 0)::bigint AS needs_review,
 	       CASE WHEN ta.id IS NULL THEN 'needs_torrent'
-	            WHEN (ta.info_hash, ta.file_path) IN (SELECT info_hash, file_path FROM downloading) THEN 'downloading'
+	            WHEN ta.kind = 'torrent' AND (ta.info_hash, ta.file_path) IN (SELECT info_hash, file_path FROM downloading)
+	                 THEN 'downloading'
 	            ELSE 'ready' END AS stage
 	FROM movies m
 	` + `LEFT JOIN LATERAL (
-		SELECT t.id, t.info_hash, t.file_path, t.file_size
+		SELECT t.id, t.kind, t.info_hash, t.file_path, t.file_size
 		FROM torrent_assignments t
 		WHERE t.item_type = 'movie' AND t.item_id = m.id AND t.is_active
 		ORDER BY t.created_at DESC, t.id DESC
@@ -338,13 +348,13 @@ movie_items AS (
 ),
 show_episodes AS (
 	SELECT sn.show_id, sn.season_number, e.episode_number, e.air_date,
-	       ta.info_hash, ta.file_path, ta.file_size,
+	       ta.id AS ta_id, ta.kind, ta.info_hash, ta.file_path, ta.file_size,
 	       sn.season_number::bigint * 1000000 + e.episode_number AS position
 	FROM shows s
 	JOIN seasons sn ON sn.show_id = s.id AND (sn.season_number > 0 OR s.include_specials)
 	JOIN episodes e ON e.season_id = sn.id
 	LEFT JOIN LATERAL (
-		SELECT t.info_hash, t.file_path, t.file_size
+		SELECT t.id, t.kind, t.info_hash, t.file_path, t.file_size
 		FROM torrent_assignments t
 		WHERE t.item_type = 'episode' AND t.item_id = e.id AND t.is_active
 		ORDER BY t.created_at DESC, t.id DESC
@@ -354,18 +364,19 @@ show_episodes AS (
 ),
 show_stats AS (
 	SELECT show_id,
-	       COUNT(*) FILTER (WHERE season_number > 0 AND (info_hash IS NOT NULL OR air_date <= $6)) AS episodes_total,
-	       COUNT(*) FILTER (WHERE season_number > 0 AND info_hash IS NOT NULL) AS episodes_ready,
-	       COUNT(info_hash) AS assigned,
-	       MAX(position) FILTER (WHERE season_number > 0 AND info_hash IS NOT NULL) AS last_assigned,
+	       COUNT(*) FILTER (WHERE season_number > 0 AND (ta_id IS NOT NULL OR air_date <= $6)) AS episodes_total,
+	       COUNT(*) FILTER (WHERE season_number > 0 AND ta_id IS NOT NULL) AS episodes_ready,
+	       COUNT(ta_id) AS assigned,
+	       MAX(position) FILTER (WHERE season_number > 0 AND ta_id IS NOT NULL) AS last_assigned,
 	       MAX(position) FILTER (WHERE season_number > 0 AND air_date <= $6) AS last_aired,
-	       COALESCE(BOOL_OR((info_hash, file_path) IN (SELECT info_hash, file_path FROM downloading)), FALSE) AS downloading
+	       COALESCE(BOOL_OR(kind = 'torrent' AND (info_hash, file_path) IN (SELECT info_hash, file_path FROM downloading)),
+	                FALSE) AS downloading
 	FROM show_episodes
 	GROUP BY show_id
 ),
 show_sizes AS (
 	SELECT show_id, SUM(file_size)::bigint AS size_bytes
-	FROM (SELECT DISTINCT show_id, info_hash, file_path, file_size FROM show_episodes WHERE info_hash IS NOT NULL) f
+	FROM (SELECT DISTINCT show_id, kind, info_hash, file_path, file_size FROM show_episodes WHERE ta_id IS NOT NULL) f
 	GROUP BY show_id
 ),
 show_items AS (

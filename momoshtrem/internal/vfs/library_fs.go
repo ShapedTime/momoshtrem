@@ -530,7 +530,7 @@ func addSeasonEntries(tree *DirectoryTree, seasonDir *VirtualDir, seasonPath, sh
 		eps = append(eps, SeasonEpisode{
 			Number: ep.EpisodeNumber, Name: ep.Name,
 			InfoHash: ep.Assignment.InfoHash, FilePath: ep.Assignment.FilePath,
-			Grouped: ep.Assignment.MatchSource != "",
+			Grouped: ep.Assignment.Groupable(),
 		})
 	}
 

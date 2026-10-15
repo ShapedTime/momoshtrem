@@ -399,6 +399,11 @@ func TestReplacesOf(t *testing.T) {
 	if got := replacesOf(job, p, &library.EpisodeRef{ID: 101}); got != nil {
 		t.Errorf("no file: %+v", got)
 	}
+	stream := &library.EpisodeRef{ID: 101, Active: &library.TorrentAssignment{Kind: library.AssignmentKindHDRezka,
+		FilePath: "hdrezka/646/t56/s01e01/1080p.mp4", Stream: &library.StreamRef{TranslatorName: "LostFilm", Quality: "1080p"}}}
+	if got := replacesOf(job, p, stream); got == nil || *got != (ProposalReplaces{ReleaseName: "HDRezka · LostFilm · 1080p"}) {
+		t.Errorf("an HDRezka stream: %+v", got)
+	}
 }
 
 // The first AI run only touches pending proposals the user hasn't, and

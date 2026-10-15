@@ -162,12 +162,11 @@ func (r *MovieRepository) ListWithActiveAssignment(ctx context.Context) ([]*Movi
 	return movies, rows.Err()
 }
 
-// ListWithAssignments returns all movies that have active torrent assignments
+// ListWithAssignments returns all movies that have active assignments (the
+// VFS tree), torrent files and HDRezka streams alike.
 func (r *MovieRepository) ListWithAssignments() ([]*Movie, error) {
 	rows, err := r.db.Query(`
-		SELECT ` + movieColumns + `,
-		       ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size,
-		       ta.resolution, ta.source, ta.created_at
+		SELECT ` + movieColumns + `, ` + assignmentColumns + `
 		FROM movies m
 		INNER JOIN torrent_assignments ta ON ta.item_type = 'movie' AND ta.item_id = m.id AND ta.is_active = TRUE
 		ORDER BY m.title
@@ -179,23 +178,12 @@ func (r *MovieRepository) ListWithAssignments() ([]*Movie, error) {
 
 	var movies []*Movie
 	for rows.Next() {
-		assignment := &TorrentAssignment{ItemType: ItemTypeMovie, IsActive: true}
-		var resolution, source sql.NullString
-
-		movie, err := scanMovie(rows,
-			&assignment.ID, &assignment.InfoHash, &assignment.MagnetURI,
-			&assignment.FilePath, &assignment.FileSize,
-			&resolution, &source, &assignment.CreatedAt,
-		)
+		dest, finish := assignmentDest(ItemTypeMovie)
+		movie, err := scanMovie(rows, dest...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan movie: %w", err)
 		}
-
-		assignment.ItemID = movie.ID
-		assignment.Resolution = resolution.String
-		assignment.Source = source.String
-		movie.Assignment = assignment
-
+		movie.Assignment = finish(movie.ID)
 		movies = append(movies, movie)
 	}
 

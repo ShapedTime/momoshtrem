@@ -222,12 +222,21 @@ func targetsOf(ids []int64, refs map[int64]*library.EpisodeRef) []ProposalTarget
 }
 
 // replacesOf is the file the episode has now when it isn't this one: Apply
-// replaces it. It's computed when read, so it never goes stale.
+// replaces it. It's computed when read, so it never goes stale. An HDRezka
+// stream is named by its label ("HDRezka · LostFilm · 1080p") and has no
+// file path.
 func replacesOf(j *library.AssignmentJob, p *library.AssignmentProposal, ref *library.EpisodeRef) *ProposalReplaces {
 	if ref == nil || ref.Active == nil {
 		return nil
 	}
 	a := ref.Active
+	if !a.IsTorrent() {
+		r := &ProposalReplaces{}
+		if a.Stream != nil {
+			r.ReleaseName = a.Stream.Label()
+		}
+		return r
+	}
 	if a.InfoHash == j.InfoHash && a.FilePath == p.FilePath {
 		return nil
 	}

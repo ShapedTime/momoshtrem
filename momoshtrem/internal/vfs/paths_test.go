@@ -1,6 +1,12 @@
 package vfs
 
-import "testing"
+import (
+	"reflect"
+	"sort"
+	"testing"
+
+	"github.com/shapedtime/momoshtrem/internal/library"
+)
 
 // Golden paths: WebDAV paths must never change for existing titles (Infuse
 // keys its library and watch history on them), so these are literal.
@@ -62,6 +68,37 @@ func TestPaths_MatchTreeComposition(t *testing.T) {
 	want := seasonPath + "/" + makeEpisodeFileName(title, 1, 2, "Pilot", getVideoExt(source))
 	if got := EpisodeFilePath(title, year, 1, 2, "Pilot", source); got != want {
 		t.Errorf("EpisodeFilePath = %q, want %q", got, want)
+	}
+}
+
+// HDRezka streams are MP4s with made-up paths: a movie keeps its name with
+// .mp4, and episodes are never grouped, even two that play one stream.
+func TestPaths_HDRezkaStreams(t *testing.T) {
+	movie := library.StreamRef{Provider: "hdrezka", PostID: 2259, TranslatorID: 56, Quality: "1080p"}
+	if got, want := MovieFilePath("Interstellar", 2014, movie.FilePath()), "/Movies/Interstellar (2014)/Interstellar (2014).mp4"; got != want {
+		t.Errorf("movie file = %q, want %q", got, want)
+	}
+
+	ep := library.StreamRef{Provider: "hdrezka", PostID: 646, TranslatorID: 1, Season: 1, Episode: 1, Quality: "720p"}
+	row := func(id int64) *library.TorrentAssignment {
+		// The CHECK forbids a match source on a stream; the tree holds anyway.
+		return &library.TorrentAssignment{ID: id, Kind: library.AssignmentKindHDRezka, FilePath: ep.FilePath(), FileSize: 9,
+			Stream: &ep, MatchSource: library.SourceManual}
+	}
+	season := library.Season{SeasonNumber: 1, Episodes: []library.Episode{
+		{ID: 11, EpisodeNumber: 1, Name: "Pilot", Assignment: row(1)},
+		{ID: 12, EpisodeNumber: 2, Name: "Second", Assignment: row(2)},
+	}}
+	tree, _, _ := newEmptyTree()
+	dir := NewVirtualDir("Season 01")
+	addSeasonEntries(tree, dir, "/TV Shows/Show (2020)/Season 01", "Show", season)
+	var names []string
+	for name := range dir.children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if want := []string{"Show - S01E01 - Pilot.mp4", "Show - S01E02 - Second.mp4"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("files = %q, want %q", names, want)
 	}
 }
 

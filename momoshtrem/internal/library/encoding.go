@@ -49,3 +49,30 @@ func decodeStrings(raw []byte) ([]string, error) {
 	}
 	return values, nil
 }
+
+// nullStreamRef scans a nullable stream_ref (JSONB) column: Ref is nil for
+// NULL. A malformed document fails the Scan.
+type nullStreamRef struct {
+	Ref *StreamRef
+}
+
+func (n *nullStreamRef) Scan(src any) error {
+	n.Ref = nil
+	var raw []byte
+	switch v := src.(type) {
+	case nil:
+		return nil
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return fmt.Errorf("stream_ref: unexpected %T", src)
+	}
+	ref := &StreamRef{}
+	if err := json.Unmarshal(raw, ref); err != nil {
+		return fmt.Errorf("failed to decode stream_ref: %w", err)
+	}
+	n.Ref = ref
+	return nil
+}

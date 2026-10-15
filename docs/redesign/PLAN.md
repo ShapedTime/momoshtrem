@@ -229,6 +229,13 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - `(item_type, item_id, info_hash, file_path) WHERE source = 'torrent'`.
 - CHECK that torrent subtitles have an `info_hash`.
 
+**`008_stream_sources.sql` (#63)**
+- `torrent_assignments`: add `kind` (`torrent|hdrezka`, default `torrent`) and `stream_ref jsonb`; `info_hash` and `magnet_uri` become nullable. One active source per item: `writeAssignments` stays the only writer and deactivates an item's other rows whatever their kind.
+- `stream_ref` is an HDRezka row's stream (`library.StreamRef`): `{provider, path, post_id, title, translator_id, translator_name, camrip, ads, director, season, episode, quality}`. `path` is the title page without the host (mirrors change); `season` and `episode` are HDRezka's, absent for a movie.
+- A CHECK per kind: a torrent row has a hash and a magnet and no `stream_ref`; an HDRezka row has a `stream_ref`, no hash or magnet, and NULL `match_source` and `confidence` (the VFS never groups it).
+- An HDRezka row's `file_path` is made up from its stream, `hdrezka/<post_id>/t<translator_id>[-c][-a][-d]/<movie|s01e05>/<quality>.mp4`, never parsed back. It gives the VFS the `.mp4` extension and keys the row: a partial unique index `(item_type, item_id, file_path) WHERE kind = 'hdrezka'` is the upsert's arbiter, so the same stream again reactivates its row and another translator or quality is a new one. `resolution` is the quality's; `source` is NULL.
+- Rollback: an older binary scans the hash and magnet into strings, so one active HDRezka row fails its VFS queries and folders vanish from WebDAV. Roll back from the pg_dump (ops PLAN §6), or as an escape hatch `UPDATE torrent_assignments SET is_active = false WHERE kind = 'hdrezka'`.
+
 ## 6. API contract (backend, under `/api`)
 
 **Conventions**
@@ -268,7 +275,8 @@ Migration numbers are reserved per task so parallel branches don't collide.
                                              // null for movies and while not in the library
     missing: {season_number, from, to, absolute_from, absolute_to, count} | null,   // shows: the first frontier run (below)
     torrent: {info_hash, release_name, file_name, size_bytes, resolution, source, added_at,
-              state: active|idle|not_loaded, seeders} | null   // movies; seeders null unless loaded
+              state: active|idle|not_loaded, seeders} | null,  // movies; seeders null unless loaded
+    stream: {…} | null                       // movies playing from HDRezka; see "HDRezka (#63)"
   }
   SimilarTitle { media_type, tmdb_id, title, year, poster_path,
                  library: {library_id, availability_stage, episodes_total, episodes_ready} | null }
@@ -280,7 +288,8 @@ Migration numbers are reserved per task so parallel branches don't collide.
   EpisodeSummary { id, season_number, episode_number, absolute_number, name, overview, air_date, still_path,
                    runtime, episode_type: standard|mid_season|finale|null,
                    state: watched|ready|downloading|missing|upcoming|needs_review, pct,
-                   webdav_path }             // only while the episode has a file
+                   webdav_path,              // only while the episode has a file
+                   source, stream }          // the file's source; see "HDRezka (#63)"
   EpisodeRange { label, kind: arc|block, from, to, absolute_from, absolute_to, missing }   // from/to in-season
   ```
   Ranges exist only for seasons over 20 episodes. They never overlap: every episode is in exactly one range, so it counts towards one `missing`. A regular season uses the story arcs of its TMDB story-arc group (type 5) when they share no episode and cover at least 80% of the season. Each arc becomes one range per run of consecutive episodes it lists, never its min–max span: an arc interrupted by other episodes gets `"Specials"`, then `"Specials (2)"`, and so on. Otherwise the season is split where air dates are more than 45 days apart, then cut into blocks of up to 10. Episodes no arc covers (arc groups lag behind airing shows) get blocks too. Specials (season 0) always get blocks and skip the air-date split, since they air years apart. Block labels are in-season numbers, e.g. `"21–28"`, or `"31"` for a single episode. Without TMDB the season still loads, with blocks.
@@ -289,6 +298,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - Show: `none` not in the library; `needs_torrent` nothing assigned, or the frontier is non-empty; `downloading` any assigned episode is downloading; `ready` otherwise.
   - The **frontier** (until B5 knows what was watched): aired regular episodes after the last assigned one. Specials never count, nor do gaps before the last assigned episode. `missing` is its first run, within one season.
   - Episode: `ready` or `downloading` when assigned; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown; `needs_review` as below. `watched` (B5) fills in later.
+  - An HDRezka file (#63) counts as assigned like a torrent's, and is never `downloading`: it streams from the CDN, so it's always `ready`. The stage keeps the name `needs_torrent`.
   - `default_season`: the frontier's season, else the latest season with a file, else the first regular season.
 - **Review rules** (B2, #5). They read the item's open, non-dry-run mapping jobs that are past classification (`resolving`, `needs_review` or `ready`; §6 "Assignment").
   - `needs_review` (title and `LibraryItem`) counts those jobs' files that are pending and map (have targets, or are movie candidates) or are in a conflict. `/library?status=needs_review` is `needs_review > 0`.
@@ -459,6 +469,32 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
 
 **A torrent's file list** (overrides and `GET /torrents/{hash}/files`) comes from the newest job that stored it as proposals, else from the loaded torrent, else the torrent is added again with a magnet an assignment or a job has, waiting at most 25 s, under the web proxy's 30 s (`504` past that). The add carries on; a torrent added only to list its files, or whose add lands after the request gave up, is dropped again when nothing uses it. The hash may be hex in either case, or base32. `mapped_to` comes from the active assignments: `{movie_id}` for a movie's file, else its episodes in order.
 
+### HDRezka (#63)
+A movie or an episode can play from an **HDRezka** stream instead of a torrent file: original audio with subtitles, without an account, so 1080p is the top quality. It's opt-in (`HDREZKA_ENABLED`, off by default; `HDREZKA_URL`, default `https://rezka.ag`). An item has one active source, and picking one replaces the other in either direction (`008_stream_sources.sql`, §5). Episodes of one show may mix sources.
+```
+GET  /hdrezka/search?media_type=movie|tv&tmdb_id=[&q=]
+     → {items: [{url, path, title, original_title, year, kind, category, rating, match: exact|likely|weak}], query}
+GET  /hdrezka/titles?url=[&translator_id=][&show_id=|&movie_id=]
+     → {url, path, post_id, kind, title, original_title, year,
+        translators: [{id, name, default, premium, camrip, ads, director}], translator_id,
+        seasons: [{number, episodes: [{number,
+                   library: {episode_id, season, episode, name, air_date, has_file, source, stream} | null}]}]}
+GET  /hdrezka/streams?url=&translator_id=[&season=&episode=]
+     → {qualities: [{label, resolution, premium, available, size_bytes | null}], subtitles: [{language_code, language_name}]}
+POST /movies/{id}/assign-hdrezka {url, translator_id, quality} → 204
+POST /shows/{id}/assign-hdrezka  {url, translator_id, quality, items: [{episode_id, season, episode}]}   // 1–30 items
+     → 200 {assigned: [{episode_id, quality, size_bytes}], failed: [{episode_id, code, message}]}
+```
+- **`url`** accepts a URL on any mirror, or a bare path. The server keeps only the validated path and fetches only `{HDREZKA_URL}{path}`, so there's no SSRF.
+- **Errors:** `404 not_found`, `409 premium_only`, `422 validation_error`, `502 hdrezka_unavailable`, `503 hdrezka_blocked` (the anti-bot page) or `503 unavailable` (disabled), `504 timeout`. Never `401` or `403`: the web proxy reads those as `backend_auth`.
+- **Assigning** is synchronous, with no job: at most 30 episodes a request (the web sends chunks) within a 25 s budget, under the web proxy's 30 s. The size is measured then. It's one write through Apply's writer (`AssignmentRepository.WriteStream`, partial: the title's other items keep their files) and one `InvalidateTree`. The same stream again reactivates its row; another translator or quality replaces it.
+- **Titles:** `TitleLibraryState.stream {provider, title, url, translator, quality, size_bytes, added_at} | null`, and `torrent` is null while it's set. `EpisodeSummary.source torrent|hdrezka|null` and `EpisodeSummary.stream {translator, quality} | null`. Under "Availability rules" an HDRezka file is never `downloading`.
+- **`/hdrezka/titles` `library`** is the library episode an HDRezka episode maps to, with its file's `source` and `stream` (the newest active row); null when it maps to none.
+- **Mapping review:** a proposal whose episode plays from HDRezka gets `replaces: {release_name: "HDRezka · LostFilm · 1080p", file_path: ""}`.
+- **VFS:** the file is named like any movie or episode, with `.mp4`, and never grouped with other episodes. momoshtrem resolves the signed link (they expire after about 20 h; cached at most 4 h) and proxies the bytes, resolving again once on `403`, `404` or `410`.
+- **Subtitles:** until #68 an HDRezka item has no release name, so subtitle search matches are `unknown`. #68 downloads the stream's VTTs when the source is assigned (their links expire), converts them to SRT, and serves them as local files with a new subtitle source, `hdrezka`; they go when the item's file changes, like torrent subtitles.
+- **`GET /status`** adds `hdrezka: {configured, reachable, latency_ms?, error?}`.
+
 ### Search (B4)
 
 `GET /search/torrents` parameters:
@@ -557,7 +593,8 @@ Related endpoints:
     tmdb: { configured, reachable, latency_ms?, error? },
     trakt: { configured, connected },             // connected is always false until B5
     ai: { configured, mtd_cost_usd },             // mtd_cost_usd: every AI feature's spend this month (ai_usage); null when it can't be read
-    opensubtitles: { configured }
+    opensubtitles: { configured },
+    hdrezka: { configured, reachable, latency_ms?, error? }   // #63
   }
   ```
   - Probes run concurrently with a 3 s timeout each. Results are cached for 30 s, and concurrent callers share one check. `?refresh=1` bypasses the cache at most once every 5 s.
