@@ -3,7 +3,8 @@ import type { Timestamp } from './common';
 /** Subtitles (B7; #4), item-scoped under /movies/{id} and /episodes/{id}. */
 
 export type SubtitleItemType = 'movie' | 'episode';
-export type SubtitleSource = 'opensubtitles' | 'torrent';
+/** opensubtitles: downloaded; torrent: in the assigned torrent; hdrezka: came with the HDRezka stream (#68), stored as SRT. */
+export type SubtitleSource = 'opensubtitles' | 'torrent' | 'hdrezka';
 /** exact_release: score ≥ 90; same_source: ≥ 60; different_timing: lower; unknown: a release name is missing. */
 export type SubtitleMatch = 'exact_release' | 'same_source' | 'different_timing' | 'unknown';
 
@@ -14,10 +15,11 @@ export interface Subtitle {
   language_name: string;
   /** e.g. "srt", "ass". */
   format: string;
-  /** Torrent subtitles can't be deleted (409). */
+  /** Torrent subtitles can't be deleted (409); downloaded and HDRezka ones can. */
   source: SubtitleSource;
+  /** HDRezka's are the stream's label, e.g. "HDRezka · Оригинал (+субтитры) · 1080p". */
   release_name: string | null;
-  /** Against the current release; torrent subtitles are always exact_release. */
+  /** Against the current release; torrent and HDRezka subtitles are always exact_release. */
   match: SubtitleMatch;
   created_at: Timestamp;
 }

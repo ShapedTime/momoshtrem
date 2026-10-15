@@ -73,7 +73,10 @@ export function useItemSubtitles(type: SubtitleItemType, id: number | null, rele
     onRemove: async (subtitle) => {
       const confirmed = await confirm({
         title: `Remove the ${subtitle.language_name} subtitles?`,
-        description: 'Infuse stops offering them. You can get them again from OpenSubtitles any time.',
+        description:
+          subtitle.source === 'hdrezka'
+            ? 'Infuse stops offering them. Picking this HDRezka voice-over again brings them back.'
+            : 'Infuse stops offering them. You can get them again from OpenSubtitles any time.',
         confirmLabel: 'Remove subtitles',
       });
       if (confirmed) remove.mutate(subtitle);
