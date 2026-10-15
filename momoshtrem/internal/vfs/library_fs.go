@@ -475,8 +475,8 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 		movieDir.children[fileName] = videoFile
 		tree.pathMap[filePath] = videoFile
 
-		subDirs = append(subDirs, subtitleDir{movieDir, folderPath, folderName,
-			subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, movie.Assignment.InfoHash, nil})
+		subDirs = append(subDirs, subtitleDir{dir: movieDir, dirPath: folderPath, base: folderName,
+			item: subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, infoHash: movie.Assignment.InfoHash})
 	}
 
 	// Add TV shows with assigned episodes
@@ -534,6 +534,17 @@ func addSeasonEntries(tree *DirectoryTree, seasonDir *VirtualDir, seasonPath, sh
 		})
 	}
 
+	// A grouped file split at a gap is several entries: each gets the
+	// file's torrent subtitles, wherever Apply recorded them.
+	type fileKey struct{ hash, path string }
+	byFile := map[fileKey][]int{}
+	for i, ep := range eps {
+		if ep.Grouped {
+			key := fileKey{ep.InfoHash, ep.FilePath}
+			byFile[key] = append(byFile[key], i)
+		}
+	}
+
 	var dirs []subtitleDir
 	for _, entry := range SeasonEntries(showTitle, season.SeasonNumber, eps) {
 		first := assigned[entry.Episodes[0]]
@@ -548,8 +559,19 @@ func addSeasonEntries(tree *DirectoryTree, seasonDir *VirtualDir, seasonPath, sh
 			item:     subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: first.ID},
 			infoHash: first.Assignment.InfoHash,
 		}
+		inEntry := map[int]bool{}
+		for _, i := range entry.Episodes {
+			inEntry[i] = true
+		}
 		for _, i := range entry.Episodes[1:] {
 			d.more = append(d.more, subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: assigned[i].ID})
+		}
+		if lead := eps[entry.Episodes[0]]; lead.Grouped {
+			for _, i := range byFile[fileKey{lead.InfoHash, lead.FilePath}] {
+				if !inEntry[i] {
+					d.sameFile = append(d.sameFile, subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: assigned[i].ID})
+				}
+			}
 		}
 		dirs = append(dirs, d)
 	}

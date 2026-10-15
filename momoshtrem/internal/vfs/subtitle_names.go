@@ -95,6 +95,17 @@ type subtitleDir struct {
 	// more are the other episodes a grouped entry ("S01E01-E02") plays:
 	// their subtitles are named after it too.
 	more []subtitle.Item
+	// sameFile are episodes the same file plays in another entry of the
+	// folder (a gap: "S01E07" and "S01E09"). Only their torrent subtitles
+	// join this entry: those belong to the file, and Apply records them
+	// on its first episode only.
+	sameFile []subtitle.Item
+}
+
+// items are every item whose subtitles the entry may show.
+func (d subtitleDir) items() []subtitle.Item {
+	out := append([]subtitle.Item{d.item}, d.more...)
+	return append(out, d.sameFile...)
 }
 
 // subtitles collects the subtitles of the video's items from subs. A
@@ -102,23 +113,33 @@ type subtitleDir struct {
 // episodes have it: assigns before jobs recorded one on every episode a
 // file mapped to.
 func (d subtitleDir) subtitles(subs map[subtitle.Item][]*subtitle.Subtitle) []*subtitle.Subtitle {
-	if len(d.more) == 0 {
+	if len(d.more) == 0 && len(d.sameFile) == 0 {
 		return subs[d.item]
 	}
 	type torrentFile struct{ hash, path string }
 	seen := map[torrentFile]bool{}
 	var out []*subtitle.Subtitle
-	for _, item := range append([]subtitle.Item{d.item}, d.more...) {
+	add := func(item subtitle.Item, torrentOnly bool) {
 		for _, sub := range subs[item] {
-			if sub.Source == subtitle.SourceTorrent {
-				key := torrentFile{sub.InfoHash, sub.FilePath}
-				if seen[key] {
-					continue
+			if sub.Source != subtitle.SourceTorrent {
+				if !torrentOnly {
+					out = append(out, sub)
 				}
-				seen[key] = true
+				continue
 			}
+			key := torrentFile{sub.InfoHash, sub.FilePath}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			out = append(out, sub)
 		}
+	}
+	for _, item := range append([]subtitle.Item{d.item}, d.more...) {
+		add(item, false)
+	}
+	for _, item := range d.sameFile {
+		add(item, true)
 	}
 	return out
 }
@@ -134,8 +155,7 @@ func (fs *LibraryFS) loadSubtitles(dirs []subtitleDir) map[subtitle.Item][]*subt
 	}
 	items := make([]subtitle.Item, 0, len(dirs))
 	for _, d := range dirs {
-		items = append(items, d.item)
-		items = append(items, d.more...)
+		items = append(items, d.items()...)
 	}
 	subs, err := repo.GetByItems(context.Background(), items)
 	if err != nil {

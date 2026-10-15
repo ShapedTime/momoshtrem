@@ -91,7 +91,7 @@ func TestAddSubtitleFiles_OnlyTheAssignedTorrents(t *testing.T) {
 	tree, moviesDir, _ := newEmptyTree()
 	dir := NewVirtualDir("Dune (2024)")
 	moviesDir.children[dir.name] = dir
-	d := subtitleDir{dir, MoviesPath + "/Dune (2024)", "Dune (2024)", movie, hashA, nil}
+	d := subtitleDir{dir: dir, dirPath: MoviesPath + "/Dune (2024)", base: "Dune (2024)", item: movie, infoHash: hashA}
 
 	subs := fs.loadSubtitles([]subtitleDir{d})
 	addSubtitleFiles(tree, d, subs[movie])

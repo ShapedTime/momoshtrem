@@ -223,6 +223,7 @@ func TestReview_GroupingSplitsAtGaps(t *testing.T) {
 	e := newJobEnv(t, info(hash, root,
 		file("Gap.Show.S01E01E02.1080p.WEB-GRP.mkv", 2*gb),
 		file("Gap.Show.S01E07.1080p.WEB-GRP.mkv", gb),
+		file("Gap.Show.S01E07.1080p.WEB-GRP.en.srt", 1<<10),
 		file("Gap.Show.S01E08.1080p.WEB-GRP.mkv", gb)))
 	var episodes [][3]any
 	for n, name := range []string{"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"} {
@@ -230,6 +231,7 @@ func TestReview_GroupingSplitsAtGaps(t *testing.T) {
 	}
 	showID, eps := e.show("Gap Show", episodes)
 	fs := vfs.NewLibraryFS(library.NewMovieRepository(e.db), library.NewShowRepository(e.db), library.NewAssignmentRepository(e.db), 0)
+	fs.SetSubtitleRepository(e.realSubtitles())
 	e.svc.tree = fs
 	e.setAI(`{"auto_apply_high_confidence": false}`)
 	id := e.assignShow(showID, hash, nil)
@@ -250,10 +252,13 @@ func TestReview_GroupingSplitsAtGaps(t *testing.T) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	// The file's subtitle (recorded on E07) sits next to both of its entries.
 	want := []string{
 		"Gap Show - S01E01-E02 - One.mkv",
+		"Gap Show - S01E07 - Seven.en.srt",
 		"Gap Show - S01E07 - Seven.mkv",
 		"Gap Show - S01E08 - Eight.mkv",
+		"Gap Show - S01E09 - Nine.en.srt",
 		"Gap Show - S01E09 - Nine.mkv",
 	}
 	if strings.Join(names, "|") != strings.Join(want, "|") {
@@ -270,7 +275,7 @@ func TestReview_GroupingSplitsAtGaps(t *testing.T) {
 			paths[ep.EpisodeNumber] = *ep.WebDAVPath
 		}
 	}
-	for n, name := range map[int]string{1: want[0], 2: want[0], 7: want[1], 8: want[2], 9: want[3]} {
+	for n, name := range map[int]string{1: want[0], 2: want[0], 7: want[2], 8: want[3], 9: want[5]} {
 		if paths[n] != dir+"/"+name {
 			t.Errorf("E%02d webdav_path = %q, want %q", n, paths[n], dir+"/"+name)
 		}
