@@ -15,9 +15,8 @@ Thanks for your interest in contributing! Whether it's a bug report, feature sug
 The fastest way to get everything running:
 
 ```bash
-cp .env.example .env        # Fill in required variables
-cp Caddyfile.example Caddyfile
-docker compose up -d
+cp .env.example .env        # Fill in required variables (the Caddyfile reads the WebDAV ones)
+docker compose up -d --build
 ```
 
 ### Frontend Development

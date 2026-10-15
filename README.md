@@ -89,23 +89,23 @@ The frontend talks to TMDB for metadata, Jackett for torrent search, and momosht
    | `TMDB_API_KEY` | [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) |
    | `SESSION_SECRET` | `openssl rand -base64 32` |
    | `POSTGRES_PASSWORD` | Choose a strong database password |
+   | `JACKETT_DATA`, `MOMOSHTREM_PGDATA`, `MOMOSHTREM_CONFIG`, `MOMOSHTREM_DATA` | Data folders; the `./data/...` defaults in `.env.example` work locally |
 
 3. **Configure Caddy (reverse proxy)**
-   ```bash
-   cp Caddyfile.example Caddyfile
-   ```
-   Edit `Caddyfile` — set your domain/hostname and generate a password hash:
-   ```bash
-   docker run --rm caddy:2-alpine caddy hash-password --plaintext "YourPassword"
-   ```
 
-4. **Start all services**
+   The tracked [`Caddyfile`](Caddyfile) reads its values from `.env`. Set `WEBDAV_HOST` (your domain or hostname), `WEBDAV_USER`, and `WEBDAV_PASSWORD_HASH` from:
    ```bash
-   docker compose up -d
+   docker run --rm caddy:2.11.7-alpine caddy hash-password --plaintext "YourPassword"
+   ```
+   Put the hash in single quotes in `.env` (`WEBDAV_PASSWORD_HASH='$2a$14$...'`), or compose reads its `$` signs as variables.
+
+4. **Start all services** (this builds the momoshtrem and web images)
+   ```bash
+   docker compose up -d --build
    ```
 
 5. **Configure Jackett**
-   - Open Jackett at `http://localhost:9117`
+   - Open Jackett at `http://localhost:9117` (it listens on the server's loopback only; from another machine, use `ssh -L 9117:localhost:9117 <server>`)
    - Add your preferred torrent indexers
    - Copy the API key from the top of the Jackett UI
    - Add it to `.env` as `JACKETT_API_KEY` and restart:
@@ -115,7 +115,7 @@ The frontend talks to TMDB for metadata, Jackett for torrent search, and momosht
 
 6. **Open the web UI** at `http://localhost:3000`
 
-7. **Connect your player** (Infuse, VLC, nPlayer, etc.) to WebDAV at `https://your-domain:36911` with the credentials from your Caddyfile.
+7. **Connect your player** (Infuse, VLC, nPlayer, etc.) to WebDAV at `https://your-domain:36911` with `WEBDAV_USER` and its password.
 
 ## Configuration
 
@@ -140,7 +140,7 @@ See [`momoshtrem/config.yaml.example`](momoshtrem/config.yaml.example) for torre
 
 ### Reverse Proxy
 
-See [`Caddyfile.example`](Caddyfile.example) for the Caddy reverse proxy setup including HTTPS, basic auth, and LAN-only access for metrics/pgAdmin.
+The [`Caddyfile`](Caddyfile) sets up HTTPS and basic auth for WebDAV, and LAN-only access to pgAdmin (`LAN_CIDR`). Its values come from `.env`.
 
 ## Project Structure
 
@@ -161,7 +161,7 @@ apple-tv-tor-stream/
 ├── grafana/                 # Grafana dashboard provisioning
 ├── docs/                    # Documentation and code quality guides
 ├── compose.yml              # Docker Compose stack
-├── Caddyfile.example        # Reverse proxy configuration
+├── Caddyfile                # Reverse proxy configuration (values from .env)
 └── .env.example             # Environment variable template
 ```
 
@@ -183,9 +183,9 @@ The virtual filesystem is built from your library database. When you add a movie
 | **web** (momoshtrem-web) | 3000 | Next.js web UI for browsing, searching, and managing your library |
 | **momoshtrem** | 4444 (internal) | Go backend — REST API, torrent client, library management |
 | **momoshtrem WebDAV** | 36911 | Virtual filesystem endpoint for media players |
-| **Jackett** | 9117 | Torrent indexer aggregator — search across multiple trackers |
+| **Jackett** | 9117 (loopback) | Torrent indexer aggregator — search across multiple trackers |
 | **PostgreSQL** | 5432 (internal) | Library and metadata storage |
-| **Caddy** | 36911, 9090, 5050 | Reverse proxy — HTTPS, basic auth, LAN-only routes |
+| **Caddy** | 36911, 5050 | Reverse proxy — HTTPS and basic auth for WebDAV, LAN-only pgAdmin |
 
 ## Contributing
 

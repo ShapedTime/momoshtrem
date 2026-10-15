@@ -49,6 +49,8 @@ type Options struct {
 	CORSAllowedOrigins []string
 	// Status serves GET /api/status. Nil makes the endpoint return 503.
 	Status StatusReporter
+	// DB is pinged by GET /healthz. Nil makes the endpoint return 503.
+	DB Pinger
 	// Settings is the app_settings store, for the settings routes (B4, R2).
 	Settings *library.SettingsRepository
 	// Metadata adds and refreshes movies and shows from TMDB. Nil makes
@@ -138,6 +140,10 @@ func (s *Server) setupMiddleware() {
 	// Logging middleware
 	s.router.Use(func(c *gin.Context) {
 		c.Next()
+		// Docker polls the liveness check; only its failures are worth a line.
+		if c.Request.URL.Path == healthzPath && c.Writer.Status() == http.StatusOK {
+			return
+		}
 		slog.Info("API request",
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
@@ -163,6 +169,9 @@ func (s *Server) setupMiddleware() {
 }
 
 func (s *Server) setupRoutes() {
+	// Liveness, outside /api so the token check doesn't apply
+	s.router.GET(healthzPath, s.getHealthz)
+
 	api := s.router.Group("/api")
 
 	// Movies

@@ -14,7 +14,7 @@
 
 The commands are the ones in `CLAUDE.md` "Commands". A new push to a PR cancels that PR's older run. `main` runs are never cancelled, so every commit gets its images.
 
-**A green `main` commit** is one whose `publish` jobs succeeded. Its images exist, and its checks passed on that exact commit. The Deploy button (#38) offers only these.
+**A green `main` commit** is one whose `publish` jobs succeeded. Its images exist, and its checks passed on that exact commit. The Deploy button (#38) offers only these. Until it exists, [`DEPLOY.md`](DEPLOY.md) deploys them by hand.
 
 ## 2. Images
 
@@ -44,8 +44,7 @@ The commands are the ones in `CLAUDE.md` "Commands". A new push to a PR cancels 
 `.github/dependabot.yml` opens one grouped PR a week for each ecosystem:
 - **GitHub Actions.** It moves the SHA pins and their version comments.
 - **The Dockerfile base images** in `momoshtrem/` and `web/`. A Node bump in `web/Dockerfile` also moves the `web` job's Node.
-
-Compose images join once #37 pins them, through the `docker-compose` ecosystem.
+- **The third-party images in `compose.yml`**: Jackett, Postgres, pgAdmin and Caddy, pinned to exact tags (#37). Our own two images are ignored: deploys move their tag.
 
 ## 5. One-time setup
 

@@ -1,11 +1,11 @@
 # momoshtrem ops: reproducible server, CI/CD and backups
 
-> Status: agreed plan · 2026-10-14 · Epic #32
+> Status: agreed plan · 2026-10-14, updated 2026-10-15 · Epic #32
 > A separate track from v2 (`docs/redesign/PLAN.md`). Issues are labelled `ops`.
 
 ## 0. How to use this plan
 
-- The work is tracked in the GitHub issues #33–#39 under epic #32, using the normal workflow in `CLAUDE.md`: claim, branch `<issue#>-<slug>`, and a PR with `Closes #n`.
+- The work is tracked in the GitHub issues #33–#38 and #42 under epic #32, using the normal workflow in `CLAUDE.md`: claim, branch `<issue#>-<slug>`, and a PR with `Closes #n`.
 - This plan fixes **decisions and boundaries**, not implementations. Each issue's agent designs its own approach within them and writes the runbook for its part in `docs/ops/`.
 - If an implementation has to break a decision here, update this file in the same PR and explain why on the issue.
 - **Keep it small.** The whole setup is one VM, Docker Compose, a few systemd timers and one Ansible playbook. If a step seems to need a new service or platform, stop and ask.
@@ -35,11 +35,11 @@
 | D2 | Alerts go through **Healthchecks.io** | The backup, deploy and heartbeat jobs ping it, and it notifies the user when a ping fails or doesn't arrive. Nothing extra runs on the VM. |
 | D3 | **Manual promote; the VM pulls** | CI checks PRs and publishes images for every `main` commit. A GitHub **Deploy** button records the desired version, and a timer on the VM notices it and deploys. No inbound ports. No self-hosted runner, because PRs from forks could run code on it. |
 | D4 | **Ansible** configures the VM, run from the Mac | The VM itself is created by hand in Proxmox from a documented spec. The Proxmox host is out of scope. |
-| D5 | **Converge the current VM in place** | No fresh VM. The user takes Proxmox snapshots by hand before risky steps (the first real Ansible run, the cutover). |
+| D5 | **Build a fresh VM and cut over** | Reversed on 2026-10-15 (#42): the as-is inventory found too much to fix in place. The new VM is created by hand from [`VM.md`](VM.md), configured by Ansible and deployed from scratch, and the data is copied across. It keeps its own IP, 192.168.0.99: at cutover the router forwards (36911 and 3000) move to it, and the old VM keeps the .81 reservation. The old VM stays, stopped, as the way back until the new one is proven. The user takes Proxmox snapshots by hand before risky steps. |
 | D6 | **Secrets live only on the VM** and in the encrypted backup | `.env` is managed by hand on the VM. Secrets never go in the repo or in GitHub, and there is no Ansible Vault. The break-glass values the VM can't hold live in the user's password manager (§7). |
 | D7 | **Images live on GHCR, tagged by the full commit SHA** | The images are public, since the code is public anyway. Tags are immutable, and the VM never builds. |
-| D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | Reach them over an SSH tunnel when needed. |
-| D9 | **Go-live happens at cutover** | The first deploy through the pipeline is current `main` (v2). It is protected by a pre-deploy dump, the B2 backup and a Proxmox snapshot. |
+| D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | compose publishes them on the VM's loopback only (`127.0.0.1:9117` and `127.0.0.1:9090`), so an SSH tunnel reaches them: `ssh -L 9117:localhost:9117 momoshtrem-v2`. |
+| D9 | **Go-live happens at cutover** | The first deploy is current `main` (v2). The old VM went down before #35 and #38 existed (§9), so it's deployed by hand and protected by the #33 copy and a Proxmox snapshot. Later deploys go through the pipeline, behind a pre-deploy dump and the B2 backup. |
 
 ## 3. Current state: findings that drive this plan
 
@@ -109,12 +109,12 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 | Jackett `/config` | `/mnt/data/3/jackett` | **Critical** | The indexer setup. Its API key must match `JACKETT_API_KEY`, so restore the two together. |
 | momoshtrem `config.yaml` | `.../momoshtrem/config` | Back up | Tuning: cache size, ports, metrics. |
 | Downloaded subtitles | `.../data/data/subtitles` | Back up | DB rows point at these files, and downloading them again uses up OpenSubtitles quota. |
-| `caddy_data` volume | Docker named volume | Back up | Caddy's internal CA. If it's lost, Infuse has to trust a new certificate. |
+| `caddy_data` volume | `momoshtrem_caddy_data`, a Docker named volume | Back up | Caddy's internal CA. If it's lost, Infuse has to trust a new certificate. The pinned project name fixes the volume's name (#37). |
 | Deploy state | new in #38 | Back up | The current, previous and last-failed commit. |
-| Caddyfile | checkout root | Moves into the repo (#37) | Back it up until then. |
+| Caddyfile | the repo (#37) | Tracked | Its host values and the WebDAV hash come from `.env`. |
 | Torrent cache | `.../data/data/torrents` (90 GB) | Excluded | Rebuilds itself. Never move it; delete it if the space is needed. |
 | `vfs_tree.gob` | `.../data/data/cache` | Excluded | Rebuilt from the DB. |
-| Legacy SQLite file | `.../data/data/momoshtrem.db` | Excluded | Archive it once (#33), then delete it (#39). |
+| Legacy SQLite file | `.../data/data/momoshtrem.db` | Excluded | Archived once (#33). It isn't copied to the new VM (#42). |
 
 **Defaults** (the implementing agent may change them, with a reason):
 - Backups run nightly at a quiet hour.
@@ -130,10 +130,10 @@ From least to most effort:
 |---|---|---|
 | **App** | A deploy misbehaves | Press Deploy with the previous commit. Images are immutable, and the VM keeps the previous ones. |
 | **Data** | The rollback crosses a migration, or the data went bad | Also restore the dump that deploy took beforehand. Migrations only go forward, and an old binary on a newer schema only warns. |
-| **Machine** | An OS or Ansible change broke the host | Revert to the Proxmox snapshot taken before the change (D5). |
-| **Disaster** | The VM or its disk is gone | Create a VM from the spec, run Ansible, restore from B2 (including `.env`), then deploy the last good commit. |
+| **Machine** | An OS or Ansible change broke the host | Revert to the Proxmox snapshot taken before the change (D5). Without one, rebuild as in the next row. |
+| **Disaster** | The VM or its disk is gone | Create a VM from [`VM.md`](VM.md), run Ansible ([`HOST.md`](HOST.md)), restore from B2 (including `.env`), then deploy the last good commit in the order of [`DEPLOY.md`](DEPLOY.md) §2. #42 does this once with the old VM's data. |
 
-At cutover (#39), the pre-cutover Proxmox snapshot is the only way back to the old version, because `e063821` has no images on GHCR.
+At cutover (#42), the old VM is the only way back to the old version, because `e063821` has no images on GHCR. It stays stopped, not deleted, until the new VM has three green nightly backups. Rolling back means shutting the new VM down, pointing the router forwards back at .81 and starting the old VM; anything written on the new VM in between is lost.
 
 ## 7. Secrets and break-glass
 
@@ -173,16 +173,16 @@ This is the contract for #38. How it's built is up to the implementing agent.
 | Issue | Task | Depends on |
 |---|---|---|
 | #33 | **0 · Safety net and as-is inventory**: take a Proxmox snapshot, copy everything in §5 to the Mac, and document today's setup | (none); blocks #34 |
-| #34 | **A · Ansible baseline**: packages, Docker log limits, journald cap, extend the root disk, prune, guest agent, host firewall, folders, VM spec | #33 |
+| #34 | **A · Ansible baseline** for the new VM: packages, Docker log limits, journald cap, guest agent, host firewall, folders, boot unit | #33, the VM (#42) |
 | #35 | **B · Backups to B2**: nightly encrypted backups, retention, alerts, the shared lock, and the restore runbook and drill | #34 |
 | #36 | **C · CI**: PR checks, images on GHCR by SHA, `.dockerignore`, Dependabot | (none) |
 | #37 | **D · Production compose**: GHCR images, pinned versions, required paths, pinned project name, fewer published ports, tracked Caddyfile, liveness endpoint and healthchecks | #36 |
 | #38 | **E · Deploy button and pull agent** (§8), plus the deploy and rollback runbook | #34, #35, #37 |
-| #39 | **F · Cutover**: converge the live VM, go live on `main`, clean up leftovers, practise a rollback, finish the runbook | #34, #35, #38 |
+| #42 | **F · New VM and cutover**: build the VM from the spec, deploy `main` on it, copy the data, cut over, practise a rollback, retire the old VM, finish the runbook. Supersedes #39 | #34, #35, #37, #38 |
 
 ```
 0 (#33) ──► A (#34) ──► B (#35) ──┐
-                                  ├──► E (#38) ──► F (#39)
+                                  ├──► E (#38) ──► F (#42)
 C (#36) ──► D (#37) ──────────────┘
 ```
 
@@ -191,7 +191,9 @@ The waves:
 2. **#34 and #37** come next.
 3. **#35** follows.
 4. **#38** after that.
-5. **#39** is last.
+5. **#42** is last. #39 (converge the old VM) is superseded by it.
+
+The old VM was shut down early, on 2026-10-15. So #42 deploys by hand ([`DEPLOY.md`](DEPLOY.md)) with #37 folded in, before #35 and #38 exist. Until #35 lands, Proxmox snapshots and the #33 copy on the Mac are the safety net.
 
 ## 10. Verification
 
@@ -209,14 +211,14 @@ Epic #32 is done when all of these hold:
 ## 11. Risks and deferred items
 
 **Risks**
-- **Converging a live VM.** Ansible changes to the Docker daemon config, the firewall or the disk can restart containers or lock out SSH.
-  - Mitigation: do #33 first, take a Proxmox snapshot before each first real run, and run in check mode before every real run.
+- **Missing state in the move to a new VM.** Anything the copy misses is gone once the old VM is deleted.
+  - Mitigation: the as-is inventory (#33) lists the state, the restore is rehearsed on the Mac with the real dump first, and the old VM is kept until the new one has three green nightly backups.
 - **The v2 jump at cutover.** Several migrations and a backfill all happen in one deploy.
-  - Mitigation: the pre-deploy dump, a snapshot, and the H3 smoke test. The snapshot is the way back (§6).
-- **Losing the Caddy CA.** Renaming the compose project renames the `caddy_data` volume, and then Infuse stops trusting the certificate.
-  - Mitigation: pin the project name (#37) and back up `caddy_data` (#35).
-- **Disk pressure.** The root disk is nearly full today.
-  - Mitigation: #34 fixes it, and image retention (§8) keeps it fixed.
+  - Mitigation: a rehearsal of the restore and migrations on the Mac first, a snapshot, and the H3 smoke test. The old VM is the way back (§6).
+- **Losing the Caddy CA.** A new `caddy_data` volume means a new CA, and then Infuse stops trusting the certificate.
+  - Mitigation: #37 pins the project name, so the volume is always `momoshtrem_caddy_data`. The cutover copies the old volume into it, and #35 backs it up.
+- **Disk pressure.** The old VM's root disk filled up, and the new data disk is 70 GiB until cutover.
+  - Mitigation: the new root LV fills its disk and the VM never builds (VM.md §1). Image retention (§8) keeps it that way. The torrent cache cap is 52 GiB until the data disk grows to 120 GiB.
 - **One person, one VM.** Accepted. The runbook is the mitigation.
 
 **Deferred.** Each of these gets its own issue when it's needed.
@@ -224,6 +226,6 @@ Epic #32 is done when all of these hold:
 - **GHCR image cleanup.** Public images cost nothing to store.
 - **Tooling for secret rotation.**
 - **GitHub deployment statuses and automatic rollback.**
-- **A full rebuild drill on a fresh VM.**
+- **Security review of the new VM**, including SSH root login (#43).
 - **The doubled `/data/data` path.** It comes from relative defaults combined with `WORKDIR /data`. It's harmless and documented.
 - **Remote streaming speed.** It needs measuring first: home upload, the torrent swarm, the proxy.

@@ -3,9 +3,6 @@
 .env.*
 !.env.example
 
-# Caddy (contains deployment-specific config)
-Caddyfile
-
 # Playwright MCP
 .playwright-mcp/
 

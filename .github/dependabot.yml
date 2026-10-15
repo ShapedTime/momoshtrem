@@ -26,3 +26,18 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+
+  # Third-party images in compose.yml
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    # Ours are tagged by commit, and deploys move them (docs/ops/CI.md)
+    ignore:
+      - dependency-name: "ghcr.io/shapedtime/*"
+    # Skip releases younger than a week: a hijacked release is usually caught by then
+    cooldown:
+      default-days: 7
+    groups:
+      docker-compose:
+        patterns: ["*"]
