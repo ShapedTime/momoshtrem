@@ -92,6 +92,21 @@ type subtitleDir struct {
 	base     string // The video's file name without its extension
 	item     subtitle.Item
 	infoHash string // The video's torrent: only its own torrent subtitles show
+	// more are the other episodes a grouped entry ("S01E01-E02") plays:
+	// their subtitles are named after it too.
+	more []subtitle.Item
+}
+
+// subtitles collects the subtitles of the video's items from subs.
+func (d subtitleDir) subtitles(subs map[subtitle.Item][]*subtitle.Subtitle) []*subtitle.Subtitle {
+	if len(d.more) == 0 {
+		return subs[d.item]
+	}
+	out := append([]*subtitle.Subtitle(nil), subs[d.item]...)
+	for _, item := range d.more {
+		out = append(out, subs[item]...)
+	}
+	return out
 }
 
 // loadSubtitles fetches the subtitles of every video in dirs in one query.
@@ -103,9 +118,10 @@ func (fs *LibraryFS) loadSubtitles(dirs []subtitleDir) map[subtitle.Item][]*subt
 	if repo == nil || len(dirs) == 0 {
 		return nil
 	}
-	items := make([]subtitle.Item, len(dirs))
-	for i, d := range dirs {
-		items[i] = d.item
+	items := make([]subtitle.Item, 0, len(dirs))
+	for _, d := range dirs {
+		items = append(items, d.item)
+		items = append(items, d.more...)
 	}
 	subs, err := repo.GetByItems(context.Background(), items)
 	if err != nil {

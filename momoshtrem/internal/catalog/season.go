@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
@@ -32,6 +33,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 
 	today := s.today()
 	tv := s.torrentView()
+	paths := episodePaths(view.ShowTitle, view.ShowYear, seasonNumber, view.Season.Episodes)
 	episodes := make([]EpisodeSummary, 0, len(view.Season.Episodes))
 	for _, ep := range view.Season.Episodes {
 		downloading, done, length, _ := tv.fileProgress(ep.Assignment)
@@ -52,8 +54,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 			summary.Pct = intPtr(pct(done, length))
 		}
 		if ep.Assignment != nil {
-			summary.WebDAVPath = strPtr(vfs.EpisodeFilePath(view.ShowTitle, view.ShowYear, seasonNumber,
-				ep.EpisodeNumber, ep.Name, ep.Assignment.FilePath))
+			summary.WebDAVPath = strPtr(paths[ep.ID])
 		}
 		episodes = append(episodes, summary)
 	}
@@ -97,6 +98,30 @@ func (s *Service) storyArcs(ctx context.Context, tmdbID, seasonNumber int) []Arc
 		return nil
 	}
 	return ArcsForSeason(group, seasonNumber)
+}
+
+// episodePaths is each assigned episode's WebDAV path, by episode id, as
+// the tree names it: a file a job mapped to several episodes is one
+// "S01E01-E02" entry they share (vfs.SeasonEntries).
+func episodePaths(showTitle string, showYear, season int, episodes []library.Episode) map[int64]string {
+	var ids []int64
+	var eps []vfs.SeasonEpisode
+	for _, ep := range episodes {
+		if ep.Assignment == nil {
+			continue
+		}
+		ids = append(ids, ep.ID)
+		eps = append(eps, vfs.SeasonEpisode{
+			Number: ep.EpisodeNumber, Name: ep.Name,
+			InfoHash: ep.Assignment.InfoHash, FilePath: ep.Assignment.FilePath,
+			Grouped: ep.Assignment.MatchSource != "",
+		})
+	}
+	out := make(map[int64]string, len(ids))
+	for i, p := range vfs.SeasonEpisodePaths(showTitle, showYear, season, eps) {
+		out[ids[i]] = p
+	}
+	return out
 }
 
 // episodeType keeps TMDB's known episode types; anything else is null.

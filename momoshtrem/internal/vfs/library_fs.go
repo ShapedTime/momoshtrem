@@ -43,6 +43,17 @@ func makeEpisodeFileName(showTitle string, seasonNum, epNum int, epName, ext str
 		" - " + library.SanitizeFilename(epName) + ext
 }
 
+// makeMultiEpisodeFileName names a file that plays several episodes, after
+// the first: "Show - S01E01-E02 - First Name.ext".
+func makeMultiEpisodeFileName(showTitle string, seasonNum, firstEp, lastEp int, firstName, ext string) string {
+	if firstName == "" {
+		firstName = "Episode " + common.Itoa(firstEp)
+	}
+	return library.SanitizeFilename(showTitle) + " - S" +
+		common.PadZero(seasonNum, 2) + "E" + common.PadZero(firstEp, 2) + "-E" + common.PadZero(lastEp, 2) +
+		" - " + library.SanitizeFilename(firstName) + ext
+}
+
 // makeEpisodePrefix creates the prefix for matching episodes: "Show - S01E05"
 func makeEpisodePrefix(showTitle string, seasonNum, epNum int) string {
 	return library.SanitizeFilename(showTitle) + " - S" +
@@ -465,7 +476,7 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 		tree.pathMap[filePath] = videoFile
 
 		subDirs = append(subDirs, subtitleDir{movieDir, folderPath, folderName,
-			subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, movie.Assignment.InfoHash})
+			subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, movie.Assignment.InfoHash, nil})
 	}
 
 	// Add TV shows with assigned episodes
@@ -491,32 +502,58 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 			showDir.children[seasonFolderName] = seasonDir
 			tree.pathMap[seasonPath] = seasonDir
 
-			for _, episode := range season.Episodes {
-				if episode.Assignment == nil {
-					continue
-				}
-
-				// Episode file: Show - S01E05 - Name.ext
-				ext := getVideoExt(episode.Assignment.FilePath)
-				filePath := EpisodeFilePath(show.Title, show.Year, season.SeasonNumber, episode.EpisodeNumber, episode.Name, episode.Assignment.FilePath)
-				fileName := path.Base(filePath)
-
-				videoFile := NewPlaceholderFile(fileName, episode.Assignment.FileSize, episode.Assignment)
-				seasonDir.children[fileName] = videoFile
-				tree.pathMap[filePath] = videoFile
-
-				subDirs = append(subDirs, subtitleDir{seasonDir, seasonPath, strings.TrimSuffix(fileName, ext),
-					subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: episode.ID}, episode.Assignment.InfoHash})
-			}
+			subDirs = append(subDirs, addSeasonEntries(tree, seasonDir, seasonPath, show.Title, season)...)
 		}
 	}
 
 	subs := fs.loadSubtitles(subDirs)
 	for _, d := range subDirs {
-		addSubtitleFiles(tree, d, subs[d.item])
+		addSubtitleFiles(tree, d, d.subtitles(subs))
 	}
 
 	return tree
+}
+
+// addSeasonEntries puts a season's assigned episodes in its folder, named
+// by SeasonEntries: "Show - S01E05 - Name.ext", or one "Show - S01E01-E02 -
+// Name.ext" for episodes a job mapped to the same file. It returns where
+// each video's subtitles go: a grouped entry gets every one of its
+// episodes' subtitles, named after it.
+func addSeasonEntries(tree *DirectoryTree, seasonDir *VirtualDir, seasonPath, showTitle string, season library.Season) []subtitleDir {
+	var assigned []library.Episode
+	var eps []SeasonEpisode
+	for _, ep := range season.Episodes {
+		if ep.Assignment == nil {
+			continue
+		}
+		assigned = append(assigned, ep)
+		eps = append(eps, SeasonEpisode{
+			Number: ep.EpisodeNumber, Name: ep.Name,
+			InfoHash: ep.Assignment.InfoHash, FilePath: ep.Assignment.FilePath,
+			Grouped: ep.Assignment.MatchSource != "",
+		})
+	}
+
+	var dirs []subtitleDir
+	for _, entry := range SeasonEntries(showTitle, season.SeasonNumber, eps) {
+		first := assigned[entry.Episodes[0]]
+		filePath := seasonPath + "/" + entry.FileName
+		videoFile := NewPlaceholderFile(entry.FileName, first.Assignment.FileSize, first.Assignment)
+		seasonDir.children[entry.FileName] = videoFile
+		tree.pathMap[filePath] = videoFile
+
+		d := subtitleDir{
+			dir: seasonDir, dirPath: seasonPath,
+			base:     strings.TrimSuffix(entry.FileName, getVideoExt(first.Assignment.FilePath)),
+			item:     subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: first.ID},
+			infoHash: first.Assignment.InfoHash,
+		}
+		for _, i := range entry.Episodes[1:] {
+			d.more = append(d.more, subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: assigned[i].ID})
+		}
+		dirs = append(dirs, d)
+	}
+	return dirs
 }
 
 // InvalidateFileHandles is a no-op retained for the TreeUpdater interface.
@@ -618,7 +655,7 @@ func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.To
 	videoFile := NewPlaceholderFile(fileName, assignment.FileSize, assignment)
 	movieDir.children[fileName] = videoFile
 	fs.tree.pathMap[filePath] = videoFile
-	addSubtitleFiles(fs.tree, subtitleDir{movieDir, folderPath, folderName, subItem, assignment.InfoHash}, subs[subItem])
+	addSubtitleFiles(fs.tree, subtitleDir{movieDir, folderPath, folderName, subItem, assignment.InfoHash, nil}, subs[subItem])
 
 	fs.mu.Unlock()
 
