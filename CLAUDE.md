@@ -61,6 +61,7 @@ cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx p
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 cd momoshtrem && go vet ./... && go test ./...
 docker compose run --rm momoshtrem backfill-metadata [--dry-run]   # fill TMDB metadata for titles added before #4 (never renames WebDAV paths)
+docker compose run --rm --no-deps momoshtrem hdrezka-probe [-translator 238] [-season 1 -episode 1] <query>   # check HDRezka resolves to a seekable MP4 from this host (no database; exit 1 on failure)
 # Episode-mapping eval on the corpus's golden torrents: accuracy, cost and latency per mode.
 # The AI modes (auto, ai_always) call Claude and cost cents; -modes rules and -dry-run (request sizes only) are free
 cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-modes rules,auto,ai_always] [-cases id,…] [-dry-run] [-v]
@@ -155,6 +156,7 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/library/assignment_job*.go`, `ai_store.go`, `settings_ai.go` - Jobs and proposals (claimed with `FOR UPDATE SKIP LOCKED`), `ai_usage` and `ai_cache`, AI settings in `app_settings`
 - `cmd/classifier-eval/` - The classifier on the golden corpus, rules and AI modes (Commands above)
 - `internal/subtitle/` - Subtitles: OpenSubtitles search ranked by release match, downloads, torrent subtitles
+- `internal/hdrezka/` - HDRezka client: search, title pages and translations, CDN streams (MP4 qualities, subtitles), sizes, ranking against TMDB (`cmd/momoshtrem/probe.go`: `hdrezka-probe`)
 - `internal/vfs/library_fs.go` - Virtual filesystem
 - `internal/torrent/service.go` - Torrent service interface
 - `internal/streaming/prioritizer.go` - Piece prioritization
@@ -181,6 +183,8 @@ JACKETT_API_KEY=...           # From Jackett dashboard
 APP_USERNAME=...              # Sign-in username (defaults to admin)
 APP_PASSWORD=...              # Sign-in password
 OPENSUBTITLES_API_KEY=...     # Optional: subtitles
+HDREZKA_ENABLED=...           # Optional: HDRezka as a second source (default false)
+HDREZKA_URL=...               # Optional: HDRezka mirror (default https://rezka.ag)
 DATABASE_URL=...              # Postgres (momoshtrem)
 ```
 

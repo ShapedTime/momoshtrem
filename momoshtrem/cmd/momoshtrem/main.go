@@ -44,6 +44,10 @@ var version = "dev"
 // existing library.
 const backfillCommand = "backfill-metadata"
 
+// probeCommand is the subcommand that checks HDRezka end to end from this
+// host: search, title, streams and Range requests on the CDN.
+const probeCommand = "hdrezka-probe"
+
 // tmdbCacheGrace is how long expired TMDB cache entries are kept for
 // stale-on-error before startup prunes them.
 const tmdbCacheGrace = 30 * 24 * time.Hour
@@ -58,19 +62,28 @@ func main() {
 		fmt.Fprintf(out, "Usage: %s [-config path] [command]\n\n", os.Args[0])
 		fmt.Fprintf(out, "Without a command, runs the server. Commands:\n")
 		fmt.Fprintf(out, "  %s  write TMDB metadata onto movies and shows added before it existed\n", backfillCommand)
-		fmt.Fprintf(out, "                     (%s -h for its flags)\n\nFlags:\n", backfillCommand)
+		fmt.Fprintf(out, "                     (%s -h for its flags)\n", backfillCommand)
+		fmt.Fprintf(out, "  %s      check that HDRezka resolves a title to a seekable MP4 from this host\n", probeCommand)
+		fmt.Fprintf(out, "                     (no database needed; %s -h for its flags)\n\nFlags:\n", probeCommand)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
 	command := flag.Arg(0)
 	var backfill backfillFlags
+	var probe probeFlags
 	switch command {
 	case "":
 	case backfillCommand:
 		var code int
 		var ok bool
 		if backfill, code, ok = parseBackfillFlags(flag.Args()[1:]); !ok {
+			os.Exit(code)
+		}
+	case probeCommand:
+		var code int
+		var ok bool
+		if probe, code, ok = parseProbeFlags(flag.Args()[1:]); !ok {
 			os.Exit(code)
 		}
 	default:
@@ -87,11 +100,23 @@ func main() {
 
 	slog.Info("Starting momoshtrem", "version", version, "config", *configPath, "command", command)
 
-	// Load configuration (defaults → config file if present → env)
-	cfg, err := config.Load(*configPath)
+	// Load configuration (defaults → config file if present → env). The
+	// probe needs no database, so it runs without DATABASE_URL too.
+	load := config.Load
+	if command == probeCommand {
+		load = config.LoadWithoutDatabase
+	}
+	cfg, err := load(*configPath)
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
+	}
+
+	// The probe branches off before the database: `docker compose run
+	// --no-deps` works without Postgres. It ignores HDREZKA_ENABLED, since
+	// it's what tells you whether to turn HDRezka on.
+	if command == probeCommand {
+		os.Exit(runProbe(cfg, probe))
 	}
 
 	// Initialize database (and run migrations)

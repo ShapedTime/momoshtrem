@@ -28,7 +28,7 @@ Settings are layered, and each layer overrides the one before:
 2. **`config.yaml`**, if it exists (path from `-config`, `/config/config.yaml` in Docker). It's optional. See `momoshtrem/config.yaml.example`.
 3. **Environment variables**, which always apply, with or without a config file. Values are trimmed, and an empty variable counts as unset.
 
-The service refuses to start without a database URL, with a port outside 1–65535, an invalid boolean, or a CORS origin that isn't `http(s)://host[:port]`.
+The service refuses to start without a database URL, with a port outside 1–65535, an invalid boolean, or a CORS origin or `HDREZKA_URL` that isn't `http(s)://host[:port]`.
 
 | Env var | Config key | Notes |
 |---|---|---|
@@ -41,6 +41,8 @@ The service refuses to start without a database URL, with a port outside 1–655
 | `TMDB_LANGUAGE` | `tmdb.language` | Language of names and overviews, e.g. `de-DE`. Default `en-US`. |
 | `TMDB_RPS` | `tmdb.rps` | TMDB requests per second, a whole number of at least 1. Default `20` (TMDB allows about 50). |
 | `JACKETT_URL`, `JACKETT_API_KEY` | `jackett.*` | Torrent search (moving from web to the backend in B4). |
+| `HDREZKA_ENABLED` | `hdrezka.enabled` | HDRezka as a second source of files ([epic #63](https://github.com/ShapedTime/momoshtrem/issues/63)). Default `false`. Run [`hdrezka-probe`](#checking-hdrezka) before turning it on. |
+| `HDREZKA_URL` | `hdrezka.url` | The HDRezka mirror, `http(s)://host[:port]` with no path. Default `https://rezka.ag`. |
 | `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | `opensubtitles.*` | Subtitle download. |
 | `ANTHROPIC_API_KEY` | `ai.anthropic_api_key` | AI classifier and recommendations; disabled when unset. |
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. |
@@ -101,6 +103,30 @@ DATABASE_URL=postgres://... TMDB_API_KEY=... ./momoshtrem backfill-metadata
 
 It is resumable. An item is marked done (`metadata_updated_at`) only after it fully synced. A rerun, or a run after Ctrl-C, picks up the rest. Failures are logged and counted, and the exit code is `1` when any item failed, so run it again.
 
+## Checking HDRezka
+
+`internal/hdrezka` is a small client for HDRezka: search, title pages (translations, seasons, episodes) and the CDN links of a movie or an episode. Its protocol follows [n0madic/go-hdrezka](https://github.com/n0madic/go-hdrezka) (MIT). It sends a User-Agent that doesn't start with `Mozilla`, because the site's Anubis proxy challenges browser user agents only. It makes at most 4 site requests a second.
+
+`hdrezka-probe` checks, from the host it runs on, that a title resolves to a seekable MP4. It searches, ranks the hits, reads the title page and its translations, fetches the streams of one translation and measures each quality. Then it makes two Range requests on the chosen quality: bytes `0-1023` must come back `206` with the measured total and `ftyp` at byte 4, and 1 KB from the middle must come back `206` at that offset. It also reports whether `moov` comes before `mdat` (faststart). It exits `1` when anything fails. It needs no database and ignores `HDREZKA_ENABLED`: it's what tells you whether to turn HDRezka on.
+
+```bash
+# Docker: no Postgres needed
+docker compose run --rm --no-deps momoshtrem hdrezka-probe interstellar
+docker compose run --rm --no-deps momoshtrem hdrezka-probe -season 1 -episode 1 "breaking bad"
+
+# Locally
+cd momoshtrem && go run ./cmd/momoshtrem hdrezka-probe -translator 238 interstellar
+```
+
+| Flag | Default | |
+|---|---|---|
+| `-translator id` | the page default | The translation to check. When the default is premium, the first one that isn't. `238` is usually the original audio with subtitles. |
+| `-quality label` | the best that isn't premium | E.g. `1080p`. Premium labels (`1080p Ultra`, `2K`, `4K`) are a short teaser without an account. |
+| `-season N`, `-episode N` | `1` | For a series. |
+| `-show-urls` | off | Print the CDN links in full. They're signed for this IP and expire, so the default prints only the host and file name. |
+
+The links are signed and may be bound to the IP that asked for them, so run the probe on the host that will stream. A challenge page (`ErrChallenge`) or a `403` there means HDRezka won't work from it.
+
 ## Episode mapping
 
 Assigning a torrent (`POST /api/shows/{id}/assign-torrent`, or `/movies/{id}/…`) starts a mapping job and answers `202 {job_id}`; nothing blocks on the torrent. A worker (`internal/service/assignment_worker.go`) takes it from there:
@@ -117,7 +143,7 @@ Apply writes the assignments in one transaction and rebuilds the WebDAV tree. A 
 
 ## Tests
 
-`go vet ./... && go test ./...` needs no services: TMDB tests use an `httptest` server and fixtures in `internal/tmdb/testdata/`, and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service` and `internal/subtitle`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service` and `internal/subtitle`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine

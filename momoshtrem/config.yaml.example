@@ -17,6 +17,8 @@
 #   TMDB_RPS                  tmdb.rps (default 20)
 #   JACKETT_URL               jackett.url
 #   JACKETT_API_KEY           jackett.api_key
+#   HDREZKA_ENABLED           hdrezka.enabled (true/false, default false)
+#   HDREZKA_URL               hdrezka.url (default https://rezka.ag)
 #   OPENSUBTITLES_API_KEY     opensubtitles.api_key
 #   OPENSUBTITLES_USERNAME    opensubtitles.username
 #   OPENSUBTITLES_PASSWORD    opensubtitles.password
@@ -86,6 +88,12 @@ tmdb:
 jackett:
   url: http://jackett:9117
   api_key: ""
+
+# HDRezka, a second source of files (optional, off by default). Check it
+# works from this host first: momoshtrem hdrezka-probe <title>
+# hdrezka:
+#   enabled: false
+#   url: https://rezka.ag   # the mirror; no path
 
 # Subtitle download (optional)
 # opensubtitles:

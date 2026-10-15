@@ -26,6 +26,7 @@ type Config struct {
 	AirDateSync   AirDateSyncConfig   `yaml:"airdate_sync"`
 	Metrics       MetricsConfig       `yaml:"metrics"`
 	Jackett       JackettConfig       `yaml:"jackett"`
+	HDRezka       HDRezkaConfig       `yaml:"hdrezka"`
 	AI            AIConfig            `yaml:"ai"`
 	Trakt         TraktConfig         `yaml:"trakt"`
 	Security      SecurityConfig      `yaml:"security"`
@@ -126,6 +127,14 @@ type JackettConfig struct {
 	APIKey string `yaml:"api_key"` // From the Jackett dashboard
 }
 
+// HDRezkaConfig configures HDRezka as a second source of files. It's off
+// by default; `hdrezka-probe` checks the site works from this host before
+// it's turned on.
+type HDRezkaConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"` // the mirror, e.g. https://rezka.ag (no path)
+}
+
 // AIConfig configures Anthropic-backed features. They are disabled when the
 // key is empty.
 type AIConfig struct {
@@ -196,6 +205,10 @@ func DefaultConfig() *Config {
 			Enabled: false,
 			Port:    9090,
 		},
+		HDRezka: HDRezkaConfig{
+			Enabled: false,
+			URL:     "https://rezka.ag",
+		},
 	}
 }
 
@@ -204,6 +217,16 @@ func DefaultConfig() *Config {
 // applied whether or not the file exists, so a container can be configured
 // with env vars alone. The result is validated before it is returned.
 func Load(path string) (*Config, error) {
+	return load(path, true)
+}
+
+// LoadWithoutDatabase is Load for commands that never open the database
+// (hdrezka-probe): DATABASE_URL may be empty, everything else is checked.
+func LoadWithoutDatabase(path string) (*Config, error) {
+	return load(path, false)
+}
+
+func load(path string, needDatabase bool) (*Config, error) {
 	cfg := DefaultConfig()
 
 	if path != "" {
@@ -224,8 +247,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Server.CORSAllowedOrigins = normalizeOrigins(cfg.Server.CORSAllowedOrigins)
+	cfg.HDRezka.URL = strings.TrimRight(strings.TrimSpace(cfg.HDRezka.URL), "/")
 
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.validate(needDatabase); err != nil {
 		return nil, err
 	}
 
@@ -267,6 +291,10 @@ func applyEnv(cfg *Config) error {
 	}
 	envString("JACKETT_URL", &cfg.Jackett.URL)
 	envString("JACKETT_API_KEY", &cfg.Jackett.APIKey)
+	if err := envBool("HDREZKA_ENABLED", &cfg.HDRezka.Enabled); err != nil {
+		return err
+	}
+	envString("HDREZKA_URL", &cfg.HDRezka.URL)
 	envString("ANTHROPIC_API_KEY", &cfg.AI.AnthropicAPIKey)
 	envString("TRAKT_CLIENT_ID", &cfg.Trakt.ClientID)
 	envString("TRAKT_CLIENT_SECRET", &cfg.Trakt.ClientSecret)
@@ -360,7 +388,11 @@ func normalizeOrigins(origins []string) []string {
 
 // Validate reports configuration that would prevent the service from starting.
 func (c *Config) Validate() error {
-	if strings.TrimSpace(c.Database.URL) == "" {
+	return c.validate(true)
+}
+
+func (c *Config) validate(needDatabase bool) error {
+	if needDatabase && strings.TrimSpace(c.Database.URL) == "" {
 		return errors.New("DATABASE_URL is required (set the DATABASE_URL environment variable or database.url in the config file)")
 	}
 
@@ -387,6 +419,9 @@ func (c *Config) Validate() error {
 		if err := validateOrigin(o); err != nil {
 			return fmt.Errorf("invalid CORS_ALLOWED_ORIGINS entry %q: %w", o, err)
 		}
+	}
+	if err := validateOrigin(c.HDRezka.URL); err != nil {
+		return fmt.Errorf("invalid HDREZKA_URL %q: %w", c.HDRezka.URL, err)
 	}
 	return nil
 }
