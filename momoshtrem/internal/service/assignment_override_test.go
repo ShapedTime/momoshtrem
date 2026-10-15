@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -266,6 +268,68 @@ func TestTorrentFiles_AddsAndReleases(t *testing.T) {
 	}
 	if addsOf(e.torrents) != 1 || !reflect.DeepEqual(e.torrents.removals(), []string{hash}) {
 		t.Errorf("adds %d, removals %v", addsOf(e.torrents), e.torrents.removals())
+	}
+}
+
+// gatedTorrents holds every add until the gate opens.
+type gatedTorrents struct {
+	*fakeTorrents
+	gate chan struct{}
+}
+
+func (g *gatedTorrents) AddTorrent(magnetURI string) (*torrent.TorrentInfo, error) {
+	<-g.gate
+	return g.fakeTorrents.AddTorrent(magnetURI)
+}
+
+// An add the request stopped waiting for is dropped once it lands, when
+// nothing uses the torrent.
+func TestTorrentFiles_ReleasesALateAdd(t *testing.T) {
+	hash := strings.Repeat("c1", 20)
+	e := newJobEnv(t, info(hash, "Slow", file("Slow.S01E01.mkv", gb)))
+	_, eps := e.show("Slow", [][3]any{{1, 1, "One"}})
+	e.legacyRow(library.ItemTypeEpisode, eps["S01E01"], hash, "Slow/Slow.S01E01.mkv", false)
+	gated := &gatedTorrents{fakeTorrents: e.torrents, gate: make(chan struct{})}
+	e.svc.torrents = gated
+
+	ctx, cancel := context.WithTimeout(e.ctx, 50*time.Millisecond)
+	defer cancel()
+	if _, err := e.svc.TorrentFiles(ctx, hash); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the request's deadline", err)
+	}
+	if got := e.torrents.removals(); len(got) != 0 {
+		t.Fatalf("removed before the add landed: %v", got)
+	}
+	close(gated.gate)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(e.torrents.removals()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := e.torrents.removals(); !reflect.DeepEqual(got, []string{hash}) {
+		t.Errorf("removals = %v, want the late add dropped", got)
+	}
+}
+
+// An override that fails to write drops the torrent it added.
+func TestOverride_ReleasesWhenTheWriteFails(t *testing.T) {
+	hash := strings.Repeat("d2", 20)
+	e := newJobEnv(t, info(hash, "Doomed", file("Doomed.S01E01.mkv", gb)))
+	_, eps := e.show("Doomed", [][3]any{{1, 1, "One"}})
+	e.legacyRow(library.ItemTypeEpisode, eps["S01E01"], hash, "Doomed/old.mkv", false)
+	if _, err := e.db.Exec(`
+		CREATE FUNCTION refuse_doomed() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'no'; END $$;
+		CREATE TRIGGER refuse_doomed BEFORE INSERT ON torrent_assignments
+		FOR EACH ROW WHEN (NEW.file_path = 'Doomed/Doomed.S01E01.mkv') EXECUTE FUNCTION refuse_doomed();
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.svc.OverrideEpisode(e.ctx, eps["S01E01"], hash, "Doomed/Doomed.S01E01.mkv"); err == nil {
+		t.Fatal("the write succeeded")
+	}
+	if addsOf(e.torrents) != 1 || !reflect.DeepEqual(e.torrents.removals(), []string{hash}) {
+		t.Errorf("adds %d, removals %v: want the added torrent dropped", addsOf(e.torrents), e.torrents.removals())
 	}
 }
 

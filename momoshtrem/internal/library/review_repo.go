@@ -188,11 +188,15 @@ type TorrentFile struct {
 }
 
 // StoredTorrent is a torrent as a job stored it: its file list (every
-// file, as proposals) and how to fetch it again.
+// file, as proposals), the subtitles the classifier linked to each video,
+// and how to fetch it again.
 type StoredTorrent struct {
 	Name      string
 	MagnetURI string
 	Files     []TorrentFile
+	// Subtitles are the subtitle files that belong to a video, by the
+	// video's path.
+	Subtitles map[string][]TorrentFile
 }
 
 // StoredTorrent returns the file list of the newest job for the torrent
@@ -205,8 +209,9 @@ func (r *AssignmentJobRepository) StoredTorrent(ctx context.Context, infoHash st
 			WHERE j.info_hash = $1 AND EXISTS (SELECT 1 FROM assignment_proposals p WHERE p.job_id = j.id)
 			ORDER BY j.id DESC LIMIT 1
 		)
-		SELECT job.torrent_name, job.magnet_uri, p.file_path, p.file_size
+		SELECT job.torrent_name, job.magnet_uri, p.file_path, p.file_size, COALESCE(v.file_path, '')
 		FROM job JOIN assignment_proposals p ON p.job_id = job.id
+		LEFT JOIN assignment_proposals v ON v.id = p.linked_proposal_id
 		ORDER BY p.id
 	`, infoHash)
 	if err != nil {
@@ -215,17 +220,23 @@ func (r *AssignmentJobRepository) StoredTorrent(ctx context.Context, infoHash st
 	defer rows.Close()
 	var out *StoredTorrent
 	for rows.Next() {
-		var name, magnet string
+		var name, magnet, video string
 		var f TorrentFile
-		if err := rows.Scan(&name, &magnet, &f.Path, &f.Size); err != nil {
+		if err := rows.Scan(&name, &magnet, &f.Path, &f.Size, &video); err != nil {
 			return nil, fmt.Errorf("failed to scan a torrent file: %w", err)
 		}
 		if out == nil {
-			out = &StoredTorrent{Name: name, MagnetURI: magnet}
+			out = &StoredTorrent{Name: name, MagnetURI: magnet, Subtitles: map[string][]TorrentFile{}}
 		}
 		out.Files = append(out.Files, f)
+		if video != "" {
+			out.Subtitles[video] = append(out.Subtitles[video], f)
+		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read the torrent's files: %w", err)
+	}
+	return out, nil
 }
 
 // TorrentMagnet returns a magnet for the torrent: an assignment's (active
@@ -299,14 +310,17 @@ func (r *AssignmentJobRepository) ActiveMappings(ctx context.Context, infoHash s
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read the torrent's assignments: %w", err)
+	}
+	return out, nil
 }
 
 // WriteOverride writes a manual override in its own transaction, through
 // the same writer as Apply (the title's lock, the upsert, the item's other
-// rows deactivated). The write is partial: the torrent's other rows on the
-// title stay. It returns ErrShowNotFound or ErrMovieNotFound when the
-// title is gone.
+// rows deactivated, its torrent subtitles dropped when its file changes).
+// The write is partial: the torrent's other rows on the title stay. It
+// returns ErrShowNotFound or ErrMovieNotFound when the title is gone.
 func (r *AssignmentRepository) WriteOverride(ctx context.Context, w AssignmentWrite) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

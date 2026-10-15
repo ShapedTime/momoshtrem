@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"path"
 
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
@@ -49,8 +50,8 @@ type ProposalChange struct {
 //
 // It answers job_closed or job_working (409) when the job can't change,
 // and a ValidationError for an unknown proposal, an episode that isn't the
-// show's, episode ids on a movie job, or accepting a file that maps to
-// nothing.
+// show's, episode ids on a movie job, accepting a file that maps to
+// nothing, or episodes for a file that isn't a video (or a subtitle).
 func (s *JobService) PatchProposals(ctx context.Context, jobID int64, changes []ProposalChange) (*JobDetail, error) {
 	err := s.jobs.Locked(ctx, jobID, func(t *library.JobTx) error {
 		job := t.Job
@@ -148,6 +149,9 @@ func (s *JobService) planChanges(t *library.JobTx, changes []ProposalChange) ([]
 		}
 		if p.Decision == library.DecisionAccepted && !p.Maps() {
 			return nil, invalid("Proposal %d: pick an episode before accepting it.", c.ID)
+		}
+		if len(p.EpisodeIDs) > 0 && (c.EpisodeIDs != nil || p.Decision == library.DecisionAccepted) && !takesEpisodes(p) {
+			return nil, invalid("%q isn't a video, so it can't play an episode.", path.Base(p.FilePath))
 		}
 	}
 

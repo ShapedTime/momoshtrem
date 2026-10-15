@@ -266,6 +266,77 @@ func TestPatch_MovieCandidates(t *testing.T) {
 	}
 }
 
+// Fonts, info files and the like can't play an episode: PATCH refuses
+// them, and Apply leaves one that got in some other way out.
+func TestPatch_NonVideoFilesTakeNoEpisodes(t *testing.T) {
+	hash := strings.Repeat("7a", 20)
+	root := "Nfo.Show.S01"
+	e := newJobEnv(t, info(hash, root,
+		file("Nfo.Show.S01E01.mkv", gb),
+		file("Nfo.Show.S01.nfo", 1<<10),
+		file("Fonts/Arial.ttf", 1<<20)))
+	showID, eps := e.show("Nfo Show", [][3]any{{1, 1, "One"}, {1, 2, "Two"}, {1, 3, "Three"}})
+	e.setAI(`{"auto_apply_high_confidence": false}`)
+	id := e.assignShow(showID, hash, nil)
+	d := e.detail(id)
+	nfo, font := proposalByPath(d, "S01.nfo"), proposalByPath(d, "Arial.ttf")
+	if nfo == nil || font == nil || nfo.Group != "extras" || font.Group != "extras" {
+		t.Fatalf("extras = %+v %+v", nfo, font)
+	}
+	for name, c := range map[string]ProposalChange{
+		"an episode for the nfo":      change(nfo.ID, "", eps["S01E02"]),
+		"the font, accepted onto E03": change(font.ID, library.DecisionAccepted, eps["S01E03"]),
+	} {
+		if _, err := e.svc.PatchProposals(e.ctx, id, []ProposalChange{c}); !strings.Contains(validationMessage(err), "isn't a video") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	// One that got its episode some other way stays out of Infuse.
+	err := e.jobs.Locked(e.ctx, id, func(tx *library.JobTx) error {
+		for _, p := range tx.Proposals {
+			if p.ID == nfo.ID {
+				next := *p
+				next.EpisodeIDs, next.Decision = []int64{eps["S01E02"]}, library.DecisionAccepted
+				return tx.UpdateProposals([]*library.AssignmentProposal{&next})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Apply(e.ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if e.active(library.ItemTypeEpisode, eps["S01E01"]) == nil {
+		t.Error("E01 wasn't applied")
+	}
+	if a := e.active(library.ItemTypeEpisode, eps["S01E02"]); a != nil {
+		t.Errorf("E02 = %+v, want no file", a)
+	}
+}
+
+func TestTakesEpisodes(t *testing.T) {
+	for _, tt := range []struct {
+		path string
+		kind library.ProposalKind
+		want bool
+	}{
+		{"Pack/E01.mkv", library.KindEpisode, true},
+		{"Pack/NCOP.mkv", library.KindExtra, true},
+		{"Pack/E01.en.srt", library.KindSubtitle, true},
+		{"Pack/E01.en.srt", library.KindExtra, false},
+		{"Pack/Show.nfo", library.KindExtra, false},
+		{"Pack/Fonts/Arial.ttf", library.KindExtra, false},
+		{"Pack/poster.jpg", library.KindExtra, false},
+	} {
+		if got := takesEpisodes(&library.AssignmentProposal{FilePath: tt.path, Kind: tt.kind}); got != tt.want {
+			t.Errorf("%s (%s) = %v, want %v", tt.path, tt.kind, got, tt.want)
+		}
+	}
+}
+
 // An extra the user includes and gives an episode is applied as that
 // episode's file.
 func TestPatch_IncludedExtraApplies(t *testing.T) {

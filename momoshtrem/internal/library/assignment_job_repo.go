@@ -12,6 +12,12 @@ import (
 // AssignmentJobRepository stores assignment jobs and their proposals. Every
 // read and write takes a fixed number of queries, however many files a
 // torrent has.
+//
+// A job's updated_at never goes backwards: every UPDATE writes
+// GREATEST(clock_timestamp(), updated_at). NOW() is the transaction's
+// start, and two transactions can take a job's lock in the other order
+// from their BEGINs; the web client drops a poll older than the one it
+// has, so an older stamp on a newer write would hide every later change.
 type AssignmentJobRepository struct {
 	db *DB
 }
@@ -291,7 +297,7 @@ func episodeRefs(ctx context.Context, q queryer, showID int64, ids []int64) (map
 func (r *AssignmentJobRepository) Claim(ctx context.Context) (*AssignmentJob, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx, `
-		UPDATE assignment_jobs SET status = 'fetching_metadata', updated_at = NOW()
+		UPDATE assignment_jobs SET status = 'fetching_metadata', updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE id = (
 			SELECT id FROM assignment_jobs WHERE status = 'queued'
 			ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1
@@ -311,7 +317,7 @@ func (r *AssignmentJobRepository) Claim(ctx context.Context) (*AssignmentJob, er
 // classifying back in the queue, and returns how many.
 func (r *AssignmentJobRepository) Requeue(ctx context.Context) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE assignment_jobs SET status = 'queued', updated_at = NOW()
+		UPDATE assignment_jobs SET status = 'queued', updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE status IN ('fetching_metadata', 'classifying')
 	`)
 	if err != nil {
@@ -353,7 +359,7 @@ func (r *AssignmentJobRepository) SetFileList(ctx context.Context, id int64, f F
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE assignment_jobs
 		SET torrent_name = $2, size_bytes = $3, file_count = $4, video_count = $5,
-		    status = 'classifying', updated_at = NOW()
+		    status = 'classifying', updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE id = $1 AND status = 'fetching_metadata'
 	`, id, f.Name, f.SizeBytes, f.FileCount, f.VideoCount)
 	if err != nil {
@@ -366,7 +372,7 @@ func (r *AssignmentJobRepository) SetFileList(ctx context.Context, id int64, f F
 // user. It reports false when the job isn't working any more.
 func (r *AssignmentJobRepository) Fail(ctx context.Context, id int64, code, message string) (bool, error) {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE assignment_jobs SET status = 'failed', error_code = $2, error = $3, updated_at = NOW()
+		UPDATE assignment_jobs SET status = 'failed', error_code = $2, error = $3, updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE id = $1 AND status = ANY($4)
 	`, id, code, message, workingStatuses())
 	if err != nil {
@@ -379,7 +385,7 @@ func (r *AssignmentJobRepository) Fail(ctx context.Context, id int64, code, mess
 // isn't open.
 func (r *AssignmentJobRepository) Cancel(ctx context.Context, id int64) (bool, error) {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE assignment_jobs SET status = 'cancelled', updated_at = NOW()
+		UPDATE assignment_jobs SET status = 'cancelled', updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE id = $1 AND status = ANY($2)
 	`, id, openStatuses())
 	if err != nil {
@@ -473,7 +479,7 @@ func (t *JobTx) SaveJob() error {
 		UPDATE assignment_jobs
 		SET status = $2, hint = $3::jsonb, release_group = NULLIF($4, ''), video_count = $5,
 		    suggested_hints = $6::jsonb, ai_files = $7, error = NULLIF($8, ''), ai_error = NULLIF($9, ''),
-		    applied_at = $10, updated_at = NOW()
+		    applied_at = $10, updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE id = $1
 		RETURNING updated_at
 	`, t.Job.ID, t.Job.Status, hint, t.Job.ReleaseGroup, t.Job.VideoCount,
@@ -488,19 +494,20 @@ func (t *JobTx) SaveJob() error {
 // WHERE status IN from). It reports false when the job isn't in one of
 // from.
 func (t *JobTx) MarkApplied(from []JobStatus) (bool, error) {
-	var applied time.Time
+	var applied, updated time.Time
 	err := t.tx.QueryRowContext(t.ctx, `
-		UPDATE assignment_jobs SET status = 'applied', applied_at = NOW(), updated_at = NOW()
+		UPDATE assignment_jobs SET status = 'applied', applied_at = clock_timestamp(),
+		       updated_at = GREATEST(clock_timestamp(), updated_at)
 		WHERE id = $1 AND status = ANY($2)
-		RETURNING applied_at
-	`, t.Job.ID, statusStrings(from)).Scan(&applied)
+		RETURNING applied_at, updated_at
+	`, t.Job.ID, statusStrings(from)).Scan(&applied, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("failed to mark the job applied: %w", err)
 	}
-	t.Job.Status, t.Job.AppliedAt, t.Job.UpdatedAt = JobApplied, &applied, applied
+	t.Job.Status, t.Job.AppliedAt, t.Job.UpdatedAt = JobApplied, &applied, updated
 	return true, nil
 }
 
@@ -663,8 +670,10 @@ type AssignmentWrite struct {
 // WriteAssignments applies w: the torrent's rows the job no longer maps
 // are deactivated (unless w is partial), each item's other active rows
 // too, and every row is upserted active (a file the item had before is
-// reactivated). It locks the title first, so writes to one title never
-// interleave. Five queries.
+// reactivated). An item whose file changes loses its torrent subtitles:
+// they came with the old file, and the caller records the new file's
+// after the commit. It locks the title first, so writes to one title
+// never interleave. Six queries (five for a partial write).
 func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 	return writeAssignments(t.ctx, t.tx, w)
 }
@@ -757,6 +766,20 @@ func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error 
 	}
 	if n == 0 {
 		return nil
+	}
+
+	// Torrent subtitles belong to the file they came with: an item moving
+	// to another file (even of the same torrent) drops them. Downloaded
+	// subtitles stay.
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM subtitles s
+		USING unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
+		WHERE s.item_type = $3 AND s.item_id = m.item_id AND s.source = 'torrent'
+		  AND NOT EXISTS (SELECT 1 FROM torrent_assignments t
+		                  WHERE t.item_type = $3 AND t.item_id = m.item_id AND t.is_active
+		                    AND t.info_hash = $4 AND t.file_path = m.file_path)
+	`, items, paths, w.ItemType, w.InfoHash); err != nil {
+		return fmt.Errorf("failed to drop the old files' subtitles: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `

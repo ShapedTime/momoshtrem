@@ -9,6 +9,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -18,9 +19,10 @@ import (
 // loaded torrent, else by adding the torrent again.
 
 // fileListBudget bounds adding a torrent to read its file list during a
-// request. The add goes on in the background when it runs out, so asking
-// again later finds the torrent loaded.
-const fileListBudget = 30 * time.Second
+// request; under the web proxy's 30 s, so the user gets this 504 and not
+// the proxy's. The add goes on in the background when it runs out, and
+// the torrent is dropped again if nothing uses it by then.
+const fileListBudget = 25 * time.Second
 
 // Errors the torrent file endpoints map to status codes.
 var (
@@ -48,7 +50,10 @@ type torrentFiles struct {
 	name   string
 	magnet string // "" when only the loaded torrent knows it
 	files  []library.TorrentFile
-	added  bool // this request added the torrent to read its files
+	// subtitles are the subtitle files a job linked to each video, by the
+	// video's path; nil when no job stored the file list.
+	subtitles map[string][]library.TorrentFile
+	added     bool // this request added the torrent to read its files
 }
 
 // fileList returns the torrent's files: the newest job's that stored them,
@@ -62,7 +67,7 @@ func (s *JobService) fileList(ctx context.Context, hash string) (*torrentFiles, 
 		return nil, err
 	}
 	if stored != nil {
-		return &torrentFiles{name: stored.Name, magnet: stored.MagnetURI, files: stored.Files}, nil
+		return &torrentFiles{name: stored.Name, magnet: stored.MagnetURI, files: stored.Files, subtitles: stored.Subtitles}, nil
 	}
 	if loader, ok := s.torrents.(torrentLoader); ok {
 		if info, err := loader.GetTorrent(hash); err == nil && info != nil && len(info.Files) > 0 {
@@ -79,7 +84,7 @@ func (s *JobService) fileList(ctx context.Context, hash string) (*torrentFiles, 
 
 	addCtx, cancel := context.WithTimeout(ctx, fileListBudget)
 	defer cancel()
-	info, err := s.addTorrent(addCtx, magnet, hash)
+	info, err := s.addForFileList(addCtx, magnet, hash)
 	switch {
 	case err == nil:
 		return &torrentFiles{name: info.Name, magnet: magnet, files: libraryFiles(info.Files), added: true}, nil
@@ -91,6 +96,42 @@ func (s *JobService) fileList(ctx context.Context, hash string) (*torrentFiles, 
 		return nil, err
 	}
 	return nil, fmt.Errorf("failed to add the torrent: %w", err)
+}
+
+// addForFileList adds the torrent under its lock (like the worker's
+// addTorrent) and waits for its file list until ctx ends. An add that
+// finishes after that is dropped again when nothing uses the torrent:
+// nobody is left to use the file list it was added for.
+func (s *JobService) addForFileList(ctx context.Context, magnetURI, hash string) (*torrent.TorrentInfo, error) {
+	if s.torrents == nil {
+		return nil, library.ErrTorrentServiceUnavailable
+	}
+	type result struct {
+		info *torrent.TorrentInfo
+		err  error
+	}
+	client := s.torrents
+	done := make(chan result, 1)
+	go func() {
+		unlock := s.hashLocks.Lock(hash)
+		defer unlock()
+		info, err := client.AddTorrent(magnetURI)
+		done <- result{info, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err == nil && r.info == nil {
+			return nil, torrent.ErrTorrentNotFound
+		}
+		return r.info, r.err
+	case <-ctx.Done():
+		go func() {
+			if r := <-done; r.err == nil {
+				s.releaseTorrent(context.Background(), hash, 0)
+			}
+		}()
+		return nil, ctx.Err()
+	}
 }
 
 func libraryFiles(files []identify.TorrentFile) []library.TorrentFile {
@@ -189,8 +230,11 @@ func (s *JobService) OverrideMovie(ctx context.Context, movieID int64, infoHash,
 }
 
 // override checks the file is in the torrent, writes w's one row for
-// itemID and rebuilds the tree.
-func (s *JobService) override(ctx context.Context, w library.AssignmentWrite, itemID int64, infoHash, filePath string) error {
+// itemID (which drops the item's torrent subtitles when its file changes),
+// records the subtitles a job linked to the new file and rebuilds the
+// tree. A torrent added only for this is dropped again when the override
+// fails and nothing else uses it.
+func (s *JobService) override(ctx context.Context, w library.AssignmentWrite, itemID int64, infoHash, filePath string) (err error) {
 	hash := normalizeInfoHash(infoHash)
 	if hash == "" {
 		return ErrUnknownTorrent
@@ -202,6 +246,13 @@ func (s *JobService) override(ctx context.Context, w library.AssignmentWrite, it
 	if err != nil {
 		return err
 	}
+	if src.added {
+		defer func() {
+			if err != nil {
+				s.releaseTorrent(context.WithoutCancel(ctx), hash, 0)
+			}
+		}()
+	}
 	var file *library.TorrentFile
 	for i := range src.files {
 		if src.files[i].Path == filePath {
@@ -210,9 +261,6 @@ func (s *JobService) override(ctx context.Context, w library.AssignmentWrite, it
 		}
 	}
 	if file == nil {
-		if src.added {
-			s.releaseTorrent(context.WithoutCancel(ctx), hash, 0)
-		}
 		return ErrFileNotInTorrent
 	}
 
@@ -238,6 +286,20 @@ func (s *JobService) override(ctx context.Context, w library.AssignmentWrite, it
 		return err
 	}
 	s.log.Info("Manual assignment", "item_type", w.ItemType, "item_id", itemID, "info_hash", hash, "file_path", file.Path)
+
+	// Committed: the rest outlives a cancelled request, like afterApply.
+	ctx = context.WithoutCancel(ctx)
+	if s.subtitles != nil {
+		itemType := subtitle.ItemTypeEpisode
+		if w.ItemType == library.ItemTypeMovie {
+			itemType = subtitle.ItemTypeMovie
+		}
+		for _, f := range src.subtitles[file.Path] {
+			if err := s.subtitles.CreateTorrentSubtitle(ctx, newTorrentSubtitle(hash, magnet, f, itemType, itemID)); err != nil {
+				s.log.Error("Failed to record a torrent subtitle", "item_id", itemID, "file_path", f.Path, "error", err)
+			}
+		}
+	}
 	if s.tree != nil {
 		s.tree.InvalidateTree()
 	}

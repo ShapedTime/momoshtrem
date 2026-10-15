@@ -150,8 +150,14 @@ func (s *JobService) planApply(t *library.JobTx) (*applyResult, error) {
 		first := map[int64]int64{} // proposal → the first episode it was written to
 		for _, p := range t.Proposals {
 			// An extra the user included and gave an episode (PATCH) is
-			// that episode's file like any other.
+			// that episode's file like any other, if it's a video: PATCH
+			// refuses episodes for fonts, images and the like, and this
+			// keeps one that got through out of Infuse.
 			if !accepted(p) || (p.Kind != library.KindEpisode && p.Kind != library.KindExtra) {
+				continue
+			}
+			if !takesEpisodes(p) {
+				s.log.Warn("Not a video; left out", "job_id", job.ID, "file_path", p.FilePath)
 				continue
 			}
 			quality := identify.ParseQuality(p.FilePath)
@@ -220,20 +226,38 @@ func (s *JobService) planApply(t *library.JobTx) (*applyResult, error) {
 	return res, nil
 }
 
+// takesEpisodes reports whether a proposal's file can be an episode's:
+// a video, or a subtitle (recorded as the episode's subtitle). Fonts,
+// images, info files and the like can't.
+func takesEpisodes(p *library.AssignmentProposal) bool {
+	switch identify.ClassOf(p.FilePath) {
+	case identify.ClassVideo:
+		return true
+	case identify.ClassSubtitle:
+		return p.Kind == library.KindSubtitle
+	}
+	return false
+}
+
 // torrentSubtitle is a subtitle file of the job's torrent, for an item.
 func torrentSubtitle(job *library.AssignmentJob, p *library.AssignmentProposal, itemType subtitle.ItemType, itemID int64) *subtitle.Subtitle {
-	code, name, _ := subtitle.DetectLanguage(p.FilePath)
+	return newTorrentSubtitle(job.InfoHash, job.MagnetURI, library.TorrentFile{Path: p.FilePath, Size: p.FileSize}, itemType, itemID)
+}
+
+// newTorrentSubtitle is a subtitle file of a torrent, for an item.
+func newTorrentSubtitle(infoHash, magnetURI string, f library.TorrentFile, itemType subtitle.ItemType, itemID int64) *subtitle.Subtitle {
+	code, name, _ := subtitle.DetectLanguage(f.Path)
 	return &subtitle.Subtitle{
 		ItemType:     itemType,
 		ItemID:       itemID,
 		LanguageCode: code,
 		LanguageName: name,
-		Format:       subtitle.ParseFormat(p.FilePath),
-		FilePath:     p.FilePath,
-		FileSize:     p.FileSize,
+		Format:       subtitle.ParseFormat(f.Path),
+		FilePath:     f.Path,
+		FileSize:     f.Size,
 		Source:       subtitle.SourceTorrent,
-		InfoHash:     job.InfoHash,
-		ReleaseName:  subtitle.AssignedRelease(job.MagnetURI, p.FilePath),
+		InfoHash:     infoHash,
+		ReleaseName:  subtitle.AssignedRelease(magnetURI, f.Path),
 	}
 }
 

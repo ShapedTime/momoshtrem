@@ -6,7 +6,94 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+// A job's updated_at never goes backwards, even when a transaction that
+// began earlier writes after one that began later: NOW() would stamp it
+// with its start, before the other's write.
+func TestJobUpdatedAtNeverGoesBackwards(t *testing.T) {
+	db := openSchemaDB(t)
+	ctx := context.Background()
+	repo := NewAssignmentJobRepository(db)
+	show, _ := jobShow(t, db, 1)
+	job := seedJob(t, db, newShowJob(show, strings.Repeat("8", 40)), JobNeedsReview, nil)
+	stamp := func() time.Time {
+		t.Helper()
+		var at time.Time
+		if err := db.QueryRow(`SELECT updated_at FROM assignment_jobs WHERE id = $1`, job.ID).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+
+	for _, write := range []struct {
+		name string
+		fn   func(*JobTx) error
+	}{
+		{"SaveJob", func(jt *JobTx) error { return jt.SaveJob() }},
+		{"MarkApplied", func(jt *JobTx) error {
+			ok, err := jt.MarkApplied([]JobStatus{JobNeedsReview, JobReady})
+			if err == nil && !ok {
+				err = errors.New("not applied")
+			}
+			return err
+		}},
+	} {
+		// The early transaction starts, then a later one writes and commits.
+		early, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var began time.Time
+		if err := early.QueryRowContext(ctx, `SELECT NOW()`).Scan(&began); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+		err = repo.Locked(ctx, job.ID, func(jt *JobTx) error {
+			jt.Job.Status = JobNeedsReview
+			return jt.SaveJob()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		later := stamp()
+		if !began.Before(later) {
+			t.Fatalf("%s: the early transaction began at %v, not before the later write at %v", write.name, began, later)
+		}
+
+		// Now the early one takes the lock and writes.
+		current, err := getJob(ctx, early, job.ID, "FOR UPDATE OF j")
+		if err != nil {
+			t.Fatal(err)
+		}
+		jt := &JobTx{ctx: ctx, tx: early, Job: current}
+		if err := write.fn(jt); err != nil {
+			t.Fatalf("%s: %v", write.name, err)
+		}
+		if err := early.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if got := stamp(); !got.After(later) || !jt.Job.UpdatedAt.Equal(got) {
+			t.Errorf("%s: updated_at = %v (job says %v), want after %v", write.name, got, jt.Job.UpdatedAt, later)
+		}
+	}
+
+	// The single-statement writes keep it moving forward too.
+	before := stamp()
+	if ok, err := repo.Cancel(ctx, job.ID); err != nil || ok {
+		t.Fatalf("cancel an applied job = %v, %v", ok, err)
+	}
+	if _, err := db.Exec(`UPDATE assignment_jobs SET status = 'needs_review' WHERE id = $1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.Cancel(ctx, job.ID); err != nil || !ok {
+		t.Fatalf("cancel = %v, %v", ok, err)
+	}
+	if got := stamp(); !got.After(before) {
+		t.Errorf("cancel: updated_at = %v, want after %v", got, before)
+	}
+}
 
 // seedJob creates a job with drafts as its proposals and the status.
 func seedJob(t *testing.T, db *DB, job *AssignmentJob, status JobStatus, drafts []ProposalDraft) *AssignmentJob {
