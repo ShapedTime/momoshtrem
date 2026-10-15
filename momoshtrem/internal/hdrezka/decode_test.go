@@ -160,8 +160,8 @@ func TestResolution(t *testing.T) {
 		"HD": 0, "1080": 0, "": 0, "p": 0,
 	}
 	for label, want := range tests {
-		if got := resolution(label); got != want {
-			t.Errorf("resolution(%q) = %d, want %d", label, got, want)
+		if got := Resolution(label); got != want {
+			t.Errorf("Resolution(%q) = %d, want %d", label, got, want)
 		}
 	}
 }

@@ -174,7 +174,7 @@ func TestParseTranslators_FlagsAndUkrainianDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := parseTranslators(doc, 57)
+	got := parseTranslators(doc, 57, nil)
 	want := []Translator{
 		{ID: 56, Name: "Дубляж", Camrip: true, Ads: true},
 		{ID: 57, Name: "Режиссёрская", Default: true, Director: true},
@@ -182,6 +182,37 @@ func TestParseTranslators_FlagsAndUkrainianDuplicate(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseTranslators =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// One translator id in two cuts is two entries; the init call's flags say
+// which is the default.
+func TestParseTranslators_Cuts(t *testing.T) {
+	page := `<html><body><ul id="translators-list">
+<li title="Дубляж" class="b-translator__item" data-translator_id="56" data-camrip="0" data-ads="0" data-director="0">Дубляж</li>
+<li title="Дубляж" class="b-translator__item" data-translator_id="56" data-camrip="0" data-ads="0" data-director="1">Дубляж</li>
+<li title="Дубляж" class="b-translator__item" data-translator_id="56" data-camrip="0" data-ads="0" data-director="1">Дубляж</li>
+</ul><script>sof.tv.initCDNMoviesEvents(9, 56, 0, 0, 1, 'rezka.ag', false, false, {"id":"cdnplayer"});</script></body></html>`
+	doc, err := parseHTML([]byte(page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := parseTranslators(doc, 56, movieCut([]byte(page)))
+	want := []Translator{
+		{ID: 56, Name: "Дубляж"},
+		{ID: 56, Name: "Дубляж", Default: true, Director: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseTranslators =\n%+v\nwant\n%+v", got, want)
+	}
+
+	// Without the flags, the id's first cut is the default.
+	got = parseTranslators(doc, 56, nil)
+	if !got[0].Default || got[1].Default {
+		t.Errorf("default without flags = %+v", got)
+	}
+	if movieCut([]byte(`initCDNSeriesEvents(646, 565, 1, 1, false, 'rezka.ag', false, true, {});`)) != nil {
+		t.Error("a series' init call read as a movie's cut")
 	}
 }
 
