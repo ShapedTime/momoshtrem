@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -235,17 +236,17 @@ func TestHDRezkaStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []HDRezkaQuality{
-		{Label: "360p", Resolution: intRef(360), Available: true, SizeBytes: positiveInt64(100_000)},
-		{Label: "720p", Resolution: intRef(720), Available: true, SizeBytes: positiveInt64(200_000)},
-		{Label: "1080p", Resolution: intRef(1080), Available: true, SizeBytes: positiveInt64(300_000)},
-		{Label: "1080p Ultra", Resolution: intRef(1080), Premium: true},
-		{Label: "4K", Resolution: intRef(2160), Premium: true},
+		{Label: "360p", Resolution: 360, Available: true, SizeBytes: positiveInt64(100_000)},
+		{Label: "720p", Resolution: 720, Available: true, SizeBytes: positiveInt64(200_000)},
+		{Label: "1080p", Resolution: 1080, Available: true, SizeBytes: positiveInt64(300_000)},
+		{Label: "1080p Ultra", Resolution: 1080, Premium: true},
+		{Label: "4K", Resolution: 2160, Premium: true},
 	}
 	if !reflect.DeepEqual(got.Qualities, want) {
 		t.Errorf("qualities = %+v", got.Qualities)
 	}
-	if len(got.Subtitles) != 2 || *got.Subtitles[0].LanguageCode != "en" || got.Subtitles[0].LanguageName != "English" ||
-		got.Subtitles[1].LanguageCode != nil {
+	if len(got.Subtitles) != 2 || got.Subtitles[0].LanguageCode != "en" || got.Subtitles[0].LanguageName != "English" ||
+		got.Subtitles[1].LanguageCode != "" {
 		t.Errorf("subtitles = %+v", got.Subtitles)
 	}
 	if e.site.called("size:") != 3 {
@@ -643,6 +644,48 @@ func TestHDRezkaFailure_Codes(t *testing.T) {
 	}
 	if err := siteFailure(context.Canceled); err != context.Canceled {
 		t.Errorf("a canceled request = %v", err)
+	}
+}
+
+// Every JSON shape carries exactly the fields of the web's contract
+// (web/src/lib/api/contract/hdrezka.ts).
+func TestHDRezkaContractFields(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want string
+	}{
+		{"HDRezkaSearchResult", HDRezkaSearch{}, "items query"},
+		{"HDRezkaCandidate", HDRezkaSearchItem{}, "category kind match original_title path rating title url year"},
+		{"HDRezkaTitle", HDRezkaTitle{}, "kind original_title path post_id seasons title translator_id translators url year"},
+		{"HDRezkaTranslator", HDRezkaTranslator{}, "ads camrip default director id name premium"},
+		{"HDRezkaSeason", HDRezkaSeason{}, "episodes number"},
+		{"HDRezkaEpisode", HDRezkaEpisode{}, "library number"},
+		{"HDRezkaLibraryEpisode", HDRezkaLibraryEpisode{}, "air_date episode episode_id has_file name season source stream"},
+		{"HDRezkaStreams", HDRezkaStreams{}, "qualities subtitles"},
+		{"HDRezkaQuality", HDRezkaQuality{}, "available label premium resolution size_bytes"},
+		{"HDRezkaSubtitle", HDRezkaSubtitle{}, "language_code language_name"},
+		{"AssignShowStreamResult", HDRezkaShowResult{}, "assigned failed"},
+		{"AssignShowStreamResult.assigned", HDRezkaAssigned{}, "episode_id quality size_bytes"},
+		{"AssignShowStreamResult.failed", HDRezkaFailed{}, "code episode_id message"},
+	}
+	for _, tt := range tests {
+		raw, err := json.Marshal(tt.v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for k := range fields {
+			got = append(got, k)
+		}
+		slices.Sort(got)
+		if strings.Join(got, " ") != tt.want {
+			t.Errorf("%s fields = %v, want %s", tt.name, got, tt.want)
+		}
 	}
 }
 

@@ -525,7 +525,7 @@ type HDRezkaStreams struct {
 // HDRezkaQuality is one rendition.
 type HDRezkaQuality struct {
 	Label      string `json:"label"`      // e.g. "1080p", "1080p Ultra"
-	Resolution *int   `json:"resolution"` // lines; null when the label doesn't say
+	Resolution int    `json:"resolution"` // lines (2K is 1440, 4K 2160); 0 when the label doesn't say
 	Premium    bool   `json:"premium"`    // a teaser without an HDRezka Premium account
 	// Available is whether it can be assigned: it has a progressive MP4
 	// and isn't premium.
@@ -535,8 +535,8 @@ type HDRezkaQuality struct {
 
 // HDRezkaSubtitle is a subtitle track of the stream.
 type HDRezkaSubtitle struct {
-	LanguageCode *string `json:"language_code"` // ISO 639-1; null when the site gives none
-	LanguageName string  `json:"language_name"`
+	LanguageCode string `json:"language_code"` // ISO 639-1; "" when the site gives none
+	LanguageName string `json:"language_name"`
 }
 
 // Streams lists a movie's or an episode's qualities with their sizes
@@ -601,13 +601,13 @@ func (s *HDRezkaService) Streams(ctx context.Context, req HDRezkaStreamsRequest)
 	for i, q := range stream.Qualities {
 		h := sizes[i]
 		out.Qualities = append(out.Qualities, HDRezkaQuality{
-			Label: q.Label, Resolution: positiveInt(q.Resolution), Premium: q.Premium,
+			Label: q.Label, Resolution: q.Resolution, Premium: q.Premium,
 			Available: !q.Premium && q.MP4 != "",
 			SizeBytes: positiveInt64(h.size),
 		})
 	}
 	for _, sub := range stream.Subtitles {
-		out.Subtitles = append(out.Subtitles, HDRezkaSubtitle{LanguageCode: nonEmpty(sub.Code), LanguageName: sub.Language})
+		out.Subtitles = append(out.Subtitles, HDRezkaSubtitle{LanguageCode: sub.Code, LanguageName: sub.Language})
 	}
 	return out, nil
 }
