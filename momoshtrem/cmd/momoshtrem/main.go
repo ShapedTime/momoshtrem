@@ -361,6 +361,26 @@ func main() {
 		statusOpts.TMDB = tmdbClient.Ping
 	}
 
+	// Initialize subtitle repository (always, for VFS to show existing subtitles)
+	subtitleRepo := subtitle.NewRepository(db.DB)
+	libraryFS.SetSubtitleRepository(subtitleRepo)
+
+	// Initialize subtitle service. Always: stored subtitles list and torrent
+	// and HDRezka subtitles are recorded without OpenSubtitles; only search
+	// and download need its key.
+	var osFetcher opensubtitles.SubtitleFetcher
+	if cfg.OpenSubtitles.APIKey != "" {
+		osFetcher = opensubtitles.NewClient(
+			cfg.OpenSubtitles.APIKey,
+			cfg.OpenSubtitles.Username,
+			cfg.OpenSubtitles.Password,
+		)
+		slog.Info("Subtitle service initialized with OpenSubtitles client")
+	} else {
+		slog.Warn("OpenSubtitles API key not configured, subtitle download unavailable")
+	}
+	subtitleService := subtitle.NewService(osFetcher, subtitleRepo, cfg.Subtitles.DownloadPath)
+
 	// HDRezka, a second source of files: its routes, the status probe and
 	// streaming its files. Off, its files still list over WebDAV, but
 	// their reads fail.
@@ -377,6 +397,7 @@ func main() {
 			Shows:       showRepo,
 			Assignments: assignmentRepo,
 			Tree:        libraryFS,
+			Subtitles:   subtitleService,
 		})
 		apiOpts.HDRezka = hdrezkaService
 		statusOpts.HDRezka = hdrezkaService.Ping
@@ -403,26 +424,6 @@ func main() {
 		WebDAVPublicURL: webdavPublicURL,
 		HDRezkaURL:      cfg.HDRezka.URL,
 	})
-
-	// Initialize subtitle repository (always, for VFS to show existing subtitles)
-	subtitleRepo := subtitle.NewRepository(db.DB)
-	libraryFS.SetSubtitleRepository(subtitleRepo)
-
-	// Initialize subtitle service. Always: stored subtitles list and torrent
-	// subtitles are recorded without OpenSubtitles; only search and download
-	// need its key.
-	var osFetcher opensubtitles.SubtitleFetcher
-	if cfg.OpenSubtitles.APIKey != "" {
-		osFetcher = opensubtitles.NewClient(
-			cfg.OpenSubtitles.APIKey,
-			cfg.OpenSubtitles.Username,
-			cfg.OpenSubtitles.Password,
-		)
-		slog.Info("Subtitle service initialized with OpenSubtitles client")
-	} else {
-		slog.Warn("OpenSubtitles API key not configured, subtitle download unavailable")
-	}
-	subtitleService := subtitle.NewService(osFetcher, subtitleRepo, cfg.Subtitles.DownloadPath)
 
 	// The AI resolver (Claude Haiku) looks at the files the rules aren't
 	// sure about; without ANTHROPIC_API_KEY the jobs run on rules only.

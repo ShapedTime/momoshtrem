@@ -34,9 +34,11 @@ type fakeSite struct {
 	full        map[string][]hdrezka.SearchResult
 	searchErr   error
 	// size answers ContentLength; nil: sizeOf.
-	size    func(ctx context.Context, link string) (int64, error)
-	pingErr error
-	calls   []string
+	size func(ctx context.Context, link string) (int64, error)
+	// subtitle answers Subtitle; nil: a one-cue WebVTT naming the link.
+	subtitle func(ctx context.Context, link string) ([]byte, error)
+	pingErr  error
+	calls    []string
 }
 
 func (f *fakeSite) record(call string) {
@@ -98,6 +100,14 @@ func (f *fakeSite) ContentLength(ctx context.Context, link string) (int64, error
 	return sizeOf(link), nil
 }
 
+func (f *fakeSite) Subtitle(ctx context.Context, link string) ([]byte, error) {
+	f.record("subtitle:" + link)
+	if f.subtitle != nil {
+		return f.subtitle(ctx, link)
+	}
+	return []byte("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n" + link + "\n"), nil
+}
+
 func (f *fakeSite) Ping(context.Context) error { return f.pingErr }
 
 // sizeOf is a test link's size: by quality, plus the episode.
@@ -114,8 +124,10 @@ func sizeOf(link string) int64 {
 // the errors set by (season, episode). Invalidate bumps the key's links'
 // version. It tracks how many resolves run at once.
 type fakeStreams struct {
-	mu          sync.Mutex
-	errs        map[[2]int]error
+	mu   sync.Mutex
+	errs map[[2]int]error
+	// subtitles, when set, replace testStream's subtitle tracks.
+	subtitles   func(key hdrezka.StreamKey) []hdrezka.Subtitle
 	versions    map[hdrezka.StreamKey]int
 	keys        []hdrezka.StreamKey
 	invalidated int
@@ -131,6 +143,7 @@ func (f *fakeStreams) Resolve(ctx context.Context, key hdrezka.StreamKey) (*hdre
 	f.maxRunning = max(f.maxRunning, f.running)
 	err := f.errs[[2]int{key.Season, key.Episode}]
 	version := f.versions[key]
+	subtitles := f.subtitles
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()
@@ -147,7 +160,11 @@ func (f *fakeStreams) Resolve(ctx context.Context, key hdrezka.StreamKey) (*hdre
 	if err != nil {
 		return nil, err
 	}
-	return testStream(key, version), nil
+	stream := testStream(key, version)
+	if subtitles != nil {
+		stream.Subtitles = subtitles(key)
+	}
+	return stream, nil
 }
 
 func (f *fakeStreams) Invalidate(key hdrezka.StreamKey) {

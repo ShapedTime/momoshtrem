@@ -129,6 +129,8 @@ The links are signed and may be bound to the IP that asked for them, so run the 
 
 With `HDREZKA_ENABLED=true` the API serves `/api/hdrezka/*` and the assign routes (PLAN §6 "HDRezka (#63)"), and WebDAV streams the assigned files: momoshtrem resolves a stream's signed link (cached for at most 4 hours), then proxies the bytes from the CDN with Range requests, resolving the link again when the CDN refuses it. Opening a file does no I/O, so directory listings never touch the CDN. Signed links never appear in logs or errors. `/api/status` reports `hdrezka.reachable`, and the anti-bot page as `HDRezka asks for a browser check`.
 
+An assign also downloads the stream's subtitles: WebVTT tracks, such as the English and Russian ones of "Оригинал (+субтитры)". They're converted to SRT and stored in `{subtitles.download_path}/hdrezka/{movie|episode}/{id}/{lang}.srt`. WebDAV lists them next to the video, while it plays from HDRezka. Assigning another translator replaces them.
+
 ## Episode mapping
 
 Assigning a torrent (`POST /api/shows/{id}/assign-torrent`, or `/movies/{id}/…`) starts a mapping job and answers `202 {job_id}`; nothing blocks on the torrent. A worker (`internal/service/assignment_worker.go`) takes it from there:
