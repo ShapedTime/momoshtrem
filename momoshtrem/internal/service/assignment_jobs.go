@@ -87,21 +87,38 @@ func (e *JobConflictError) Error() string { return e.Message }
 
 func conflict(code, message string) error { return &JobConflictError{Code: code, Message: message} }
 
-// JobFailedError is a legacy assign (?wait=true) whose job failed.
+// JobFailedError is a legacy assign (?wait=true) whose job failed. Code is
+// the job's error_code (Failure*), Message its error.
 type JobFailedError struct {
 	JobID   int64
+	Code    string
 	Message string
-	Timeout bool // no peers sent the file list in time
 }
 
 func (e *JobFailedError) Error() string { return e.Message }
 
-// Job failure messages, shown to the user.
+// Why a job failed: its error_code.
 const (
-	msgMetadataTimeout = "No peers sent the torrent's file list in time."
-	msgNoVideos        = "This torrent has no video files."
-	msgNoTorrents      = "Torrents aren't available, so the file list can't be fetched."
-	msgTitleGone       = "The title isn't in the library any more."
+	FailureMetadataTimeout = "metadata_timeout" // no peers sent the file list in time
+	FailureNoVideos        = "no_videos"        // the torrent has no video file
+	FailureNoTorrents      = "no_torrents"      // no torrent client
+	FailureTitleGone       = "title_gone"       // the title left the library
+	FailureInvalidMagnet   = "invalid_magnet"   // the client rejected the magnet
+	FailureTorrent         = "torrent_error"    // the client failed otherwise
+	FailureInternal        = "internal"         // a bug or a database error
+)
+
+// failure is a job failure: its code and the message the user sees.
+type failure struct{ code, message string }
+
+var (
+	failMetadataTimeout = failure{FailureMetadataTimeout, "No peers sent the torrent's file list in time."}
+	failNoVideos        = failure{FailureNoVideos, "This torrent has no video files."}
+	failNoTorrents      = failure{FailureNoTorrents, "Torrents aren't available, so the file list can't be fetched."}
+	failTitleGone       = failure{FailureTitleGone, "The title isn't in the library any more."}
+	failInvalidMagnet   = failure{FailureInvalidMagnet, "The magnet link isn't valid."}
+	failTorrent         = failure{FailureTorrent, "The torrent couldn't be loaded."}
+	failInternal        = failure{FailureInternal, "Something went wrong while matching the files."}
 )
 
 const (
@@ -412,14 +429,13 @@ func (s *JobService) resolverConfigured() bool {
 	return !noop
 }
 
-// aiAvailable reports whether the AI may look at the job's files: a
-// resolver is configured, the classifier is enabled, and the show doesn't
-// use rules only.
+// aiAvailable reports whether the AI may look at the job's files: a show's
+// job (the resolver maps episodes; movie jobs never run it), a resolver is
+// configured, the classifier is enabled, and the show doesn't use rules
+// only.
 func (s *JobService) aiAvailable(settings library.AISettings, job *library.AssignmentJob) bool {
-	if !s.resolverConfigured() || !settings.ClassifierEnabled {
-		return false
-	}
-	return job.MediaType != library.JobTV || job.ClassifierMode != library.ClassifierRulesOnly
+	return job.MediaType == library.JobTV && s.resolverConfigured() && settings.ClassifierEnabled &&
+		job.ClassifierMode != library.ClassifierRulesOnly
 }
 
 // normalizeInfoHash lowercases a hex info hash and converts a base32 one

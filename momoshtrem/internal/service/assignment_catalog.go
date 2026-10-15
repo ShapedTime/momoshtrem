@@ -106,6 +106,10 @@ func hasLatinLetter(s string) bool {
 // failing that, by its position. Its episodes are the catalog's, in the
 // group's order; the list stops at the first episode the catalog doesn't
 // have, so positions stay right.
+//
+// Consecutive parts that name the same season ("Season 2 Part 1", "Season
+// 2 Part 2") are one release season: the second continues the first, as
+// long as the first wasn't cut short.
 func altOrderings(groups []*tmdb.EpisodeGroup, episodes []identify.Episode) []identify.AltOrdering {
 	type seKey struct{ season, number int }
 	ids := make(map[seKey]int64, len(episodes))
@@ -122,6 +126,7 @@ func altOrderings(groups []*tmdb.EpisodeGroup, episodes []identify.Episode) []id
 		sort.SliceStable(parts, func(i, j int) bool { return parts[i].Order < parts[j].Order })
 		ordering := identify.AltOrdering{Name: g.Name}
 		position := 0
+		last, lastComplete := -1, false // the group the previous part filled
 		for _, part := range parts {
 			number, special := groupSeason(part.Name)
 			if !special {
@@ -133,16 +138,25 @@ func altOrderings(groups []*tmdb.EpisodeGroup, episodes []identify.Episode) []id
 			eps := append([]tmdb.GroupEpisode(nil), part.Episodes...)
 			sort.SliceStable(eps, func(i, j int) bool { return eps[i].Order < eps[j].Order })
 			var episodeIDs []int64
+			complete := true
 			for _, ep := range eps {
 				id, ok := ids[seKey{ep.SeasonNumber, ep.EpisodeNumber}]
 				if !ok {
+					complete = false
 					break
 				}
 				episodeIDs = append(episodeIDs, id)
 			}
-			if len(episodeIDs) > 0 {
+			switch {
+			case len(episodeIDs) == 0:
+				last = -1
+			case last >= 0 && lastComplete && ordering.Groups[last].Number == number:
+				ordering.Groups[last].EpisodeIDs = append(ordering.Groups[last].EpisodeIDs, episodeIDs...)
+			default:
 				ordering.Groups = append(ordering.Groups, identify.AltGroup{Number: number, EpisodeIDs: episodeIDs})
+				last = len(ordering.Groups) - 1
 			}
+			lastComplete = complete
 		}
 		if len(ordering.Groups) > 0 {
 			out = append(out, ordering)

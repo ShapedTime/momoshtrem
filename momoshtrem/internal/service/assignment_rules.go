@@ -306,13 +306,15 @@ func settledStatus(listedProposals []*library.AssignmentProposal) library.JobSta
 
 // autoApplies reports whether a freshly classified job applies on its own
 // (with auto_apply_high_confidence on): not a dry run, no conflict,
-// nothing that maps pending and all of it high, and no unmatched video.
+// something to apply, nothing that maps pending and all of it high, and no
+// unmatched video. A torrent of extras alone (openings, endings) waits for
+// the user instead of ending applied with nothing written.
 func autoApplies(job *library.AssignmentJob, listedProposals []*library.AssignmentProposal) bool {
 	if job.DryRun {
 		return false
 	}
 	c := countsOf(listedProposals)
-	if c.Conflicts > 0 || c.Pending > 0 || c.Unmatched > 0 {
+	if c.ToApply == 0 || c.Conflicts > 0 || c.Pending > 0 || c.Unmatched > 0 {
 		return false
 	}
 	for _, p := range listedProposals {

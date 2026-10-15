@@ -284,6 +284,8 @@ func TestAutoApplies(t *testing.T) {
 		want   bool
 	}{
 		{"everything high", false, []*library.AssignmentProposal{matched, extra}, true},
+		{"nothing to apply (openings only)", false, []*library.AssignmentProposal{extra}, false},
+		{"nothing at all", false, nil, false},
 		{"a dry run never", true, []*library.AssignmentProposal{matched}, false},
 		{"pending", false, []*library.AssignmentProposal{matched, prop(2, ep, library.GroupNeedsReview, pen, "medium", 102)}, false},
 		{"accepted medium (an AI answer)", false, []*library.AssignmentProposal{matched, prop(2, ep, library.GroupMatched, acc, "medium", 102)}, false},

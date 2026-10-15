@@ -167,7 +167,7 @@ func (s *JobService) process(ctx context.Context, job *library.AssignmentJob) {
 	case library.JobMovie:
 		err = s.processMovie(ctx, job)
 	default:
-		err = s.fail(ctx, job, fmt.Sprintf("Unknown media type %q.", job.MediaType))
+		err = fmt.Errorf("unknown media type %q", job.MediaType)
 	}
 	switch {
 	case err == nil, errors.Is(err, errJobMoved), errors.Is(err, library.ErrJobNotFound):
@@ -175,18 +175,20 @@ func (s *JobService) process(ctx context.Context, job *library.AssignmentJob) {
 		log.Info("Assignment job interrupted; it resumes on the next start", "status", job.Status)
 	default:
 		log.Error("Assignment job failed", "error", err)
-		if ferr := s.fail(ctx, job, "Something went wrong while matching the files."); ferr != nil {
+		if ferr := s.fail(ctx, job, failInternal); ferr != nil {
 			log.Error("Failed to mark the job failed", "error", ferr)
 		}
 	}
 }
 
-// fail ends the job with a message for the user.
-func (s *JobService) fail(ctx context.Context, job *library.AssignmentJob, message string) error {
-	if _, err := s.jobs.Fail(ctx, job.ID, message); err != nil {
+// fail ends a working job with f. A job that isn't working any more (it
+// was classified, or discarded) is left alone.
+func (s *JobService) fail(ctx context.Context, job *library.AssignmentJob, f failure) error {
+	ok, err := s.jobs.Fail(ctx, job.ID, f.code, f.message)
+	if err != nil || !ok {
 		return err
 	}
-	s.log.Warn("Assignment job failed", "job_id", job.ID, "reason", message)
+	s.log.Warn("Assignment job failed", "job_id", job.ID, "code", f.code, "reason", f.message)
 	s.releaseTorrent(ctx, job.InfoHash, job.ID)
 	return nil
 }
@@ -197,25 +199,31 @@ func (s *JobService) fail(ctx context.Context, job *library.AssignmentJob, messa
 // asks it. A job that needs nothing reviewed applies on its own.
 func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob) error {
 	if job.ShowID == nil {
-		return s.fail(ctx, job, msgTitleGone)
+		return s.fail(ctx, job, failTitleGone)
 	}
 	show, err := s.shows.GetWithSeasonsAndEpisodesContext(ctx, *job.ShowID)
 	if err != nil {
 		return err
 	}
 	if show == nil {
-		return s.fail(ctx, job, msgTitleGone)
+		return s.fail(ctx, job, failTitleGone)
 	}
 
+	// A refresh is tried at most once per job, whether or not it works:
+	// one that failed would fail again, for up to refreshBudget more.
 	var (
-		wg        sync.WaitGroup
-		extras    CatalogExtras
-		refreshed bool
+		wg           sync.WaitGroup
+		extras       CatalogExtras
+		refreshTried bool
+		refreshed    bool
 	)
+	if metadataStale(show, s.now()) {
+		refreshTried = true
+	}
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		if metadataStale(show, s.now()) {
+		if refreshTried {
 			refreshed = s.refreshShow(ctx, show)
 		}
 	}()
@@ -229,7 +237,7 @@ func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob
 		return s.addFailed(ctx, job, addErr)
 	}
 	if !hasVideo(info.Files) {
-		return s.fail(ctx, job, msgNoVideos)
+		return s.fail(ctx, job, failNoVideos)
 	}
 	if refreshed {
 		if show, err = s.reloadShow(ctx, show.ID); err != nil || show == nil {
@@ -248,7 +256,7 @@ func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob
 	}
 	res := classify()
 	// A just-aired episode isn't in stale metadata: refresh and try again.
-	if !refreshed && unmatchedVideos(res.Proposals) && refreshDue(show, s.now()) && s.refreshShow(ctx, show) {
+	if !refreshTried && unmatchedVideos(res.Proposals) && refreshDue(show, s.now()) && s.refreshShow(ctx, show) {
 		if show, err = s.reloadShow(ctx, show.ID); err != nil || show == nil {
 			return s.failOr(ctx, job, err)
 		}
@@ -300,21 +308,21 @@ func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob
 // the job applies; otherwise one plausible film applies on its own.
 func (s *JobService) processMovie(ctx context.Context, job *library.AssignmentJob) error {
 	if job.MovieID == nil {
-		return s.fail(ctx, job, msgTitleGone)
+		return s.fail(ctx, job, failTitleGone)
 	}
 	movie, err := s.movies.GetByID(*job.MovieID)
 	if err != nil {
 		return err
 	}
 	if movie == nil {
-		return s.fail(ctx, job, msgTitleGone)
+		return s.fail(ctx, job, failTitleGone)
 	}
 	info, err := s.addTorrent(ctx, job.MagnetURI, job.InfoHash)
 	if err != nil {
 		return s.addFailed(ctx, job, err)
 	}
 	if !hasVideo(info.Files) {
-		return s.fail(ctx, job, msgNoVideos)
+		return s.fail(ctx, job, failNoVideos)
 	}
 
 	// The classifier reads the extras, subtitles and release group; the
@@ -437,14 +445,14 @@ func (s *JobService) addFailed(ctx context.Context, job *library.AssignmentJob, 
 	case ctx.Err() != nil:
 		return ctx.Err()
 	case errors.Is(err, torrent.ErrMetadataTimeout):
-		return s.fail(ctx, job, msgMetadataTimeout)
+		return s.fail(ctx, job, failMetadataTimeout)
 	case errors.Is(err, library.ErrTorrentServiceUnavailable):
-		return s.fail(ctx, job, msgNoTorrents)
+		return s.fail(ctx, job, failNoTorrents)
 	case errors.Is(err, torrent.ErrInvalidMagnet):
-		return s.fail(ctx, job, "The magnet link isn't valid.")
+		return s.fail(ctx, job, failInvalidMagnet)
 	}
 	s.log.Warn("Failed to add a torrent", "job_id", job.ID, "error", err)
-	return s.fail(ctx, job, "The torrent couldn't be loaded.")
+	return s.fail(ctx, job, failTorrent)
 }
 
 // failOr fails the job when the show is gone, else returns err.
@@ -452,7 +460,7 @@ func (s *JobService) failOr(ctx context.Context, job *library.AssignmentJob, err
 	if err != nil {
 		return err
 	}
-	return s.fail(ctx, job, msgTitleGone)
+	return s.fail(ctx, job, failTitleGone)
 }
 
 // refreshShow refreshes the show's metadata from TMDB; failures are logged

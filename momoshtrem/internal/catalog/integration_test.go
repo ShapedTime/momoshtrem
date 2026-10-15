@@ -180,13 +180,17 @@ func (it *integration) season(show *library.Show, number, count int, start strin
 	return ids
 }
 
+// assign makes the file the item's only active assignment.
 func (it *integration) assign(itemType library.ItemType, itemID int64, hash, path string) {
-	a := &library.TorrentAssignment{ItemType: itemType, ItemID: itemID, InfoHash: hash,
-		MagnetURI: "magnet:?xt=urn:btih:" + hash + "&dn=Release." + it.tag, FilePath: path, FileSize: 1000, Resolution: "1080p"}
-	if err := library.NewAssignmentRepository(it.db).Create(a); err != nil {
+	it.exec(`UPDATE torrent_assignments SET is_active = FALSE WHERE item_type = $1 AND item_id = $2`, itemType, itemID)
+	var id int64
+	if err := it.db.QueryRow(`
+		INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, resolution, is_active)
+		VALUES ($1, $2, $3, $4, $5, 1000, '1080p', TRUE) RETURNING id`,
+		itemType, itemID, hash, "magnet:?xt=urn:btih:"+hash+"&dn=Release."+it.tag, path).Scan(&id); err != nil {
 		it.t.Fatal(err)
 	}
-	it.t.Cleanup(func() { _, _ = it.db.Exec(`DELETE FROM torrent_assignments WHERE id = $1`, a.ID) })
+	it.t.Cleanup(func() { _, _ = it.db.Exec(`DELETE FROM torrent_assignments WHERE id = $1`, id) })
 }
 
 func (it *integration) queries(fn func()) int {

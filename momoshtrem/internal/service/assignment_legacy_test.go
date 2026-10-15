@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -166,6 +167,25 @@ func TestAssignMovieAndWait_PicksTheFilm(t *testing.T) {
 	}
 }
 
+// The legacy web client gives up before a slow file list arrives: the job
+// still ends applied.
+func TestAssignShowAndWait_OutlivesTheRequest(t *testing.T) {
+	hash := strings.Repeat("9", 40)
+	e := newJobEnv(t, info(hash, "Gone.Client.S01", file("Gone.Client.S01E01.mkv", gb)))
+	e.start()
+	showID, ids := e.show("Gone Client", [][3]any{{1, 1, "Pilot"}})
+
+	ctx, cancel := context.WithCancel(e.ctx)
+	cancel() // the client went away
+	res, err := e.svc.AssignShowAndWait(ctx, showID, AssignRequest{MagnetURI: magnet(hash)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.job(res.JobID).Status != library.JobApplied || e.active(library.ItemTypeEpisode, ids["S01E01"]) == nil {
+		t.Errorf("job = %s", e.job(res.JobID).Status)
+	}
+}
+
 // A job that fails answers the legacy request with its error.
 func TestAssignAndWait_Failure(t *testing.T) {
 	e := newJobEnv(t)
@@ -173,7 +193,7 @@ func TestAssignAndWait_Failure(t *testing.T) {
 	showID, _ := e.show("Lost Show", [][3]any{{1, 1, "Pilot"}})
 	_, err := e.svc.AssignShowAndWait(e.ctx, showID, AssignRequest{MagnetURI: magnet(strings.Repeat("f", 40))})
 	var failed *JobFailedError
-	if !errors.As(err, &failed) || !failed.Timeout || failed.Message != msgMetadataTimeout {
+	if !errors.As(err, &failed) || failed.Code != FailureMetadataTimeout || failed.Message != failMetadataTimeout.message {
 		t.Errorf("err = %v", err)
 	}
 	if _, err := e.svc.AssignShowAndWait(e.ctx, showID+1000, AssignRequest{MagnetURI: magnet(strings.Repeat("f", 40))}); !errors.Is(err, library.ErrShowNotFound) {

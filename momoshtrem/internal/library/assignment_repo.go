@@ -55,44 +55,6 @@ const assignmentUpsert = `ON CONFLICT (item_type, item_id, info_hash, file_path)
 		resolution = EXCLUDED.resolution, source = EXCLUDED.source,
 		confidence = EXCLUDED.confidence, match_source = EXCLUDED.match_source, created_at = NOW()`
 
-// Create makes assignment the item's only active one. Assigning a file the
-// item had before reactivates that row.
-func (r *AssignmentRepository) Create(assignment *TorrentAssignment) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Deactivate the item's other active assignments
-	_, err = tx.Exec(
-		`UPDATE torrent_assignments SET is_active = FALSE
-		 WHERE item_type = $1 AND item_id = $2 AND is_active = TRUE
-		   AND NOT (info_hash = $3 AND file_path = $4)`,
-		assignment.ItemType, assignment.ItemID, assignment.InfoHash, assignment.FilePath,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to deactivate existing assignments: %w", err)
-	}
-
-	err = tx.QueryRow(
-		`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size,
-		                                  resolution, source, confidence, match_source, is_active)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
-		 `+assignmentUpsert+`
-		 RETURNING id, created_at`,
-		assignment.ItemType, assignment.ItemID, assignment.InfoHash, assignment.MagnetURI,
-		assignment.FilePath, assignment.FileSize, nullString(assignment.Resolution), nullString(assignment.Source),
-		nullString(assignment.Confidence), nullString(assignment.MatchSource),
-	).Scan(&assignment.ID, &assignment.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to create assignment: %w", err)
-	}
-	assignment.IsActive = true
-
-	return tx.Commit()
-}
-
 // GetByID retrieves an assignment by its ID
 func (r *AssignmentRepository) GetByID(id int64) (*TorrentAssignment, error) {
 	row := r.db.QueryRow(
@@ -264,12 +226,4 @@ func (r *AssignmentRepository) DeleteByInfoHash(infoHash string) (int64, error) 
 		return 0, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	return affected, nil
-}
-
-// Helper to convert empty string to NULL
-func nullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
 }

@@ -385,31 +385,76 @@ func TestJobTx_WriteAssignments(t *testing.T) {
 	}
 }
 
-// The re-assign bug: assigning a file an item had before used to fail on
-// UNIQUE(item_type, item_id, info_hash, file_path).
-func TestAssignmentRepository_CreateReassignsTheSameFile(t *testing.T) {
+// Two jobs of one show, different torrents, applying the same episode at
+// once: under READ COMMITTED neither sees the other's insert, so without
+// the title lock both rows stayed active.
+func TestJobTx_WriteAssignmentsConcurrent(t *testing.T) {
 	db := openSchemaDB(t)
-	repo := NewAssignmentRepository(db)
-	_, eps := jobShow(t, db, 1)
-	a := func(hash string) *TorrentAssignment {
-		return &TorrentAssignment{ItemType: ItemTypeEpisode, ItemID: eps[1], InfoHash: hash, MagnetURI: "m",
-			FilePath: "E01.mkv", FileSize: 1, MatchSource: "manual"}
+	ctx := context.Background()
+	repo := NewAssignmentJobRepository(db)
+	show, eps := jobShow(t, db, 1)
+	movie := seedMovie(t, db, "Film", 2014)
+
+	type writer struct {
+		job   *AssignmentJob
+		write AssignmentWrite
 	}
-	first, second, again := a("1111"), a("2222"), a("1111")
-	for _, x := range []*TorrentAssignment{first, second, again} {
-		if err := repo.Create(x); err != nil {
-			t.Fatalf("create %s: %v", x.InfoHash, err)
+	var episodeWriters, movieWriters []writer
+	for _, hash := range []string{strings.Repeat("1", 40), strings.Repeat("2", 40)} {
+		job := newShowJob(show, hash)
+		if _, err := repo.Create(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+		episodeWriters = append(episodeWriters, writer{job, AssignmentWrite{ItemType: ItemTypeEpisode, InfoHash: hash,
+			MagnetURI: job.MagnetURI, ShowID: show.ID, Rows: []TorrentAssignment{{ItemID: eps[1], FilePath: hash + "/E01.mkv", FileSize: 1}}}})
+		movieWriters = append(movieWriters, writer{job, AssignmentWrite{ItemType: ItemTypeMovie, InfoHash: hash,
+			MagnetURI: job.MagnetURI, MovieID: movie.ID, Rows: []TorrentAssignment{{ItemID: movie.ID, FilePath: hash + "/Film.mkv", FileSize: 1}}}})
+	}
+
+	for _, tt := range []struct {
+		name     string
+		itemType ItemType
+		itemID   int64
+		writers  []writer
+	}{
+		{"episode", ItemTypeEpisode, eps[1], episodeWriters},
+		{"movie", ItemTypeMovie, movie.ID, movieWriters},
+	} {
+		for round := 0; round < 20; round++ {
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for _, w := range tt.writers {
+				wg.Add(1)
+				go func(w writer) {
+					defer wg.Done()
+					<-start
+					err := repo.Locked(ctx, w.job.ID, func(tx *JobTx) error { return tx.WriteAssignments(w.write) })
+					if err != nil {
+						t.Error(err)
+					}
+				}(w)
+			}
+			close(start)
+			wg.Wait()
+			var active int
+			if err := db.QueryRow(`SELECT count(*) FROM torrent_assignments WHERE item_type = $1 AND item_id = $2 AND is_active`,
+				tt.itemType, tt.itemID).Scan(&active); err != nil {
+				t.Fatal(err)
+			}
+			if active != 1 {
+				t.Fatalf("%s, round %d: %d active rows, want 1", tt.name, round, active)
+			}
 		}
 	}
-	if again.ID != first.ID {
-		t.Errorf("re-assignment made row %d, want row %d reactivated", again.ID, first.ID)
-	}
-	got, err := repo.GetActiveForItem(ItemTypeEpisode, eps[1])
-	if err != nil || got == nil || got.InfoHash != "1111" || got.MatchSource != "manual" {
-		t.Errorf("active = %+v, %v", got, err)
-	}
-	if rows := activeRows(t, db, eps[1]); len(rows) != 1 {
-		t.Errorf("active rows = %d, want 1", len(rows))
+
+	// A title that left the library can't be written to.
+	err := repo.Locked(ctx, episodeWriters[0].job.ID, func(tx *JobTx) error {
+		w := episodeWriters[0].write
+		w.ShowID = -1
+		return tx.WriteAssignments(w)
+	})
+	if !errors.Is(err, ErrShowNotFound) {
+		t.Errorf("unknown show: %v", err)
 	}
 }
 
@@ -430,17 +475,17 @@ func TestJobRepository_FailCancelTorrentInUse(t *testing.T) {
 	if used, _ := repo.TorrentInUse(ctx, hash, 0); !used {
 		t.Error("an open job doesn't count")
 	}
-	if ok, err := repo.Fail(ctx, job.ID, "No peers"); err != nil || !ok {
+	if ok, err := repo.Fail(ctx, job.ID, "metadata_timeout", "No peers"); err != nil || !ok {
 		t.Fatalf("fail = %v, %v", ok, err)
 	}
-	if ok, _ := repo.Fail(ctx, job.ID, "again"); ok {
+	if ok, _ := repo.Fail(ctx, job.ID, "internal", "again"); ok {
 		t.Error("a failed job failed again")
 	}
 	if ok, _ := repo.Cancel(ctx, job.ID); ok {
 		t.Error("a failed job was cancelled")
 	}
 	got, _ := repo.Get(ctx, job.ID)
-	if got.Status != JobFailed || got.Error != "No peers" {
+	if got.Status != JobFailed || got.Error != "No peers" || got.ErrorCode != "metadata_timeout" {
 		t.Errorf("job = %+v", got)
 	}
 	if used, _ := repo.TorrentInUse(ctx, hash, 0); used {

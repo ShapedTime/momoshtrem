@@ -14,7 +14,10 @@ import (
 // waits for it to stop working and applies it the old way, so the current
 // web UI keeps working. It goes through the same apply writer as review.
 
-// legacyWaitLimit bounds how long a legacy request waits for its job.
+// legacyWaitLimit bounds how long a legacy request waits for its job. The
+// wait and the apply don't end with the request: the legacy web client
+// gives up after 30 s while a torrent's file list can take 60 s, and the
+// job should still end applied.
 const legacyWaitLimit = 10 * time.Minute
 
 // AssignmentSummary contains counts of the assignment operation.
@@ -66,6 +69,7 @@ type MovieAssignmentResult struct {
 // files in a conflict, which are reported unmatched (their proposals stay
 // pending). The job ends applied.
 func (s *JobService) AssignShowAndWait(ctx context.Context, showID int64, req AssignRequest) (*ShowAssignmentResult, error) {
+	ctx = context.WithoutCancel(ctx) // see legacyWaitLimit
 	jobID, _, err := s.Assign(ctx, library.JobTV, showID, req)
 	if err != nil {
 		return nil, err
@@ -105,6 +109,7 @@ func (s *JobService) AssignShowAndWait(ctx context.Context, showID int64, req As
 // top-ranked candidate (or the file picked up front) is applied. It
 // returns library.ErrNoVideoFiles when no video can be the film.
 func (s *JobService) AssignMovieAndWait(ctx context.Context, movieID int64, req AssignRequest) (*MovieAssignmentResult, error) {
+	ctx = context.WithoutCancel(ctx) // see legacyWaitLimit
 	jobID, _, err := s.Assign(ctx, library.JobMovie, movieID, req)
 	if err != nil {
 		return nil, err
@@ -164,7 +169,7 @@ func (s *JobService) waitUntilClassified(ctx context.Context, id int64) (*librar
 		}
 		switch {
 		case job.Status == library.JobFailed:
-			return nil, &JobFailedError{JobID: id, Message: job.Error, Timeout: job.Error == msgMetadataTimeout}
+			return nil, &JobFailedError{JobID: id, Code: job.ErrorCode, Message: job.Error}
 		case job.Status == library.JobCancelled:
 			return nil, conflict(CodeJobClosed, "This mapping job was discarded.")
 		case !job.Status.Working():

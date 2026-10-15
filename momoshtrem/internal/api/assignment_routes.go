@@ -177,6 +177,23 @@ func (s *Server) jobAction(c *gin.Context, do func(context.Context, int64) (*ser
 	c.JSON(http.StatusOK, detail)
 }
 
+// failedJobStatus is the status a legacy assign (?wait=true) answers for a
+// failed job: no video 400 (as the synchronous assign did), no torrent
+// client 503, no file list in time 504, anything else 500.
+func failedJobStatus(code string) int {
+	switch code {
+	case service.FailureNoVideos, service.FailureInvalidMagnet:
+		return http.StatusBadRequest
+	case service.FailureNoTorrents:
+		return http.StatusServiceUnavailable
+	case service.FailureMetadataTimeout:
+		return http.StatusGatewayTimeout
+	case service.FailureTitleGone:
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
 // assignmentErrorResponse maps the job service's errors to the contract's
 // status codes.
 func assignmentErrorResponse(c *gin.Context, err error) {
@@ -185,10 +202,8 @@ func assignmentErrorResponse(c *gin.Context, err error) {
 	switch {
 	case errors.As(err, &jobConflict):
 		errorCodeResponse(c, http.StatusConflict, jobConflict.Code, jobConflict.Message)
-	case errors.As(err, &failed) && failed.Timeout:
-		errorResponse(c, http.StatusGatewayTimeout, failed.Message)
 	case errors.As(err, &failed):
-		errorResponse(c, http.StatusInternalServerError, failed.Message)
+		errorResponse(c, failedJobStatus(failed.Code), failed.Message)
 	case errors.Is(err, library.ErrJobNotFound):
 		errorResponse(c, http.StatusNotFound, "No such mapping job")
 	case errors.Is(err, library.ErrShowNotFound):

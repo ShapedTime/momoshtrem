@@ -316,15 +316,70 @@ func TestJob_Fails(t *testing.T) {
 
 	id := e.assignShow(showID, missing, nil)
 	d := e.detail(id)
-	if d.Job.Status != library.JobFailed || d.Job.Error == nil || *d.Job.Error != msgMetadataTimeout || len(d.Proposals) != 0 {
+	if d.Job.Status != library.JobFailed || d.Job.Error == nil || *d.Job.Error != failMetadataTimeout.message || len(d.Proposals) != 0 {
 		t.Errorf("timeout job = %+v", d.Job)
 	}
 	id = e.assignShow(showID, noVideo, nil)
-	if j := e.job(id); j.Status != library.JobFailed || j.Error != msgNoVideos {
+	if j := e.job(id); j.Status != library.JobFailed || j.Error != failNoVideos.message || j.ErrorCode != FailureNoVideos {
 		t.Errorf("no-video job = %s %q", j.Status, j.Error)
 	}
 	if _, err := e.svc.Apply(e.ctx, id); conflictCode(err) != CodeJobClosed {
 		t.Errorf("apply a failed job: %v", err)
+	}
+	if got := e.torrents.removals(); len(got) != 2 {
+		t.Errorf("removed = %v, want each failed job's torrent once", got)
+	}
+
+	// No torrent client: the job fails as such.
+	noClient := e.service(JobDeps{})
+	noClient.torrents = nil
+	id, _, err := noClient.Assign(e.ctx, library.JobTV, showID, AssignRequest{MagnetURI: magnet(strings.Repeat("5", 40))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc = noClient
+	e.run(id)
+	if j := e.job(id); j.Status != library.JobFailed || j.ErrorCode != FailureNoTorrents {
+		t.Errorf("no client = %s %q", j.Status, j.ErrorCode)
+	}
+}
+
+// fail only touches a job that's still working: a classified one stays as
+// it is, and its torrent isn't released.
+func TestJob_FailLeavesClassifiedJobs(t *testing.T) {
+	hash := strings.Repeat("6", 40)
+	e := newJobEnv(t, info(hash, "Kept.Show.S01", file("Kept.Show.S01E01.Pilot.mkv", gb), file("Kept.Show.S01E01.Extended.Cut.mkv", gb)))
+	showID, _ := e.show("Kept Show", [][3]any{{1, 1, "Pilot"}})
+	id := e.assignShow(showID, hash, nil)
+	job := e.job(id)
+	if job.Status != library.JobNeedsReview {
+		t.Fatalf("status = %s", job.Status)
+	}
+	if err := e.svc.fail(e.ctx, job, failInternal); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.job(id); got.Status != library.JobNeedsReview || got.ErrorCode != "" {
+		t.Errorf("job = %s %q", got.Status, got.ErrorCode)
+	}
+	if got := e.torrents.removals(); len(got) != 0 {
+		t.Errorf("removed = %v, want none", got)
+	}
+}
+
+// A torrent of extras alone (openings, endings) waits for the user rather
+// than ending applied with nothing written.
+func TestJob_ExtrasOnlyWaits(t *testing.T) {
+	hash := strings.Repeat("7", 40)
+	e := newJobEnv(t, info(hash, "[Group] Extras Show - Creditless",
+		file("[Group] Extras Show - NCOP1 (1080p).mkv", 100<<20), file("[Group] Extras Show - NCED1 (1080p).mkv", 100<<20)))
+	showID, _ := e.show("Extras Show", [][3]any{{1, 1, "One"}})
+	id := e.assignShow(showID, hash, nil)
+	d := e.detail(id)
+	if d.Job.Status != library.JobReady || d.Job.Counts.ToApply != 0 || d.Job.Counts.Ignored != 2 {
+		t.Errorf("job = %s %+v", d.Job.Status, d.Job.Counts)
+	}
+	if e.tree.count() != 0 {
+		t.Error("the tree was rebuilt for nothing")
 	}
 }
 
@@ -386,6 +441,7 @@ func TestJob_Movies(t *testing.T) {
 			file("Interstellar.2014.2160p.WEB-DL-GRP.en.srt", 80<<10)),
 	)
 	movieID := e.movie("Interstellar", 2014)
+	e.svc = e.service(JobDeps{Resolver: &fakeResolver{}}) // a real resolver: still no AI for movies
 
 	// A collection pack waits for a pick.
 	id, _, err := e.svc.Assign(e.ctx, library.JobMovie, movieID, AssignRequest{MagnetURI: magnet(pack)})
@@ -394,7 +450,7 @@ func TestJob_Movies(t *testing.T) {
 	}
 	e.run(id)
 	d := e.detail(id)
-	if d.Job.Status != library.JobNeedsReview || d.Job.Counts.Pending != 2 || d.Job.Progress.Seasons != nil || *d.Job.Torrent.VideoCount != 2 {
+	if d.Job.Status != library.JobNeedsReview || d.Job.Counts.Pending != 2 || d.Job.Progress.Seasons != nil || *d.Job.Torrent.VideoCount != 2 || d.Job.AIAvailable {
 		t.Fatalf("pack = %s %+v", d.Job.Status, d.Job.Counts)
 	}
 	for _, p := range d.Proposals[:2] {
@@ -540,6 +596,16 @@ func TestJob_RefreshesMetadata(t *testing.T) {
 	if refresher.calls != 2 {
 		t.Errorf("refreshed %d times, want 2 (cooldown)", refresher.calls)
 	}
+
+	// A stale refresh that fails isn't tried again for the unmatched file.
+	refresher.err = errors.New("TMDB is down")
+	if _, err := e.db.Exec(`UPDATE shows SET metadata_updated_at = NULL WHERE id = $1`, showID); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Discard(e.ctx, e.assignShow(showID, unmatched, nil))
+	if refresher.calls != 3 {
+		t.Errorf("refreshed %d times, want 3 (one try per job)", refresher.calls)
+	}
 }
 
 // The catalog gets TMDB's alternative titles as aliases and its
@@ -604,6 +670,45 @@ func TestGroupSeason(t *testing.T) {
 	}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("orderings = %+v", got)
+	}
+}
+
+// A season split into parts is one release season, so S02E14 of a
+// 13 + 12 split finds the second part's first episode.
+func TestAltOrderings_MergesSplitSeasons(t *testing.T) {
+	part := func(name string, order int, eps ...int) tmdb.EpisodeGroupGroup {
+		g := tmdb.EpisodeGroupGroup{Name: name, Order: order}
+		for i, e := range eps {
+			g.Episodes = append(g.Episodes, tmdb.GroupEpisode{SeasonNumber: 1, EpisodeNumber: e, Order: i})
+		}
+		return g
+	}
+	var catalog []identify.Episode
+	for e := 1; e <= 6; e++ {
+		catalog = append(catalog, identify.Episode{ID: int64(100 + e), Season: 1, Number: e})
+	}
+	tests := []struct {
+		name  string
+		parts []tmdb.EpisodeGroupGroup
+		want  []identify.AltGroup
+	}{
+		{"two parts of season 2", []tmdb.EpisodeGroupGroup{
+			part("Season 1", 0, 1, 2), part("Season 2 Part 1", 1, 3, 4), part("Season 2 Part 2", 2, 5, 6),
+		}, []identify.AltGroup{{Number: 1, EpisodeIDs: []int64{101, 102}}, {Number: 2, EpisodeIDs: []int64{103, 104, 105, 106}}}},
+		{"a cut-short part isn't continued", []tmdb.EpisodeGroupGroup{
+			part("Season 2 Part 1", 0, 3, 9), part("Season 2 Part 2", 1, 5, 6),
+		}, []identify.AltGroup{{Number: 2, EpisodeIDs: []int64{103}}, {Number: 2, EpisodeIDs: []int64{105, 106}}}},
+		{"only consecutive parts merge", []tmdb.EpisodeGroupGroup{
+			part("Season 2", 0, 1), part("Season 3", 1, 2), part("Season 2", 2, 3),
+		}, []identify.AltGroup{{Number: 2, EpisodeIDs: []int64{101}}, {Number: 3, EpisodeIDs: []int64{102}}, {Number: 2, EpisodeIDs: []int64{103}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := altOrderings([]*tmdb.EpisodeGroup{{Name: "Blu-ray", Groups: tt.parts}}, catalog)
+			if len(got) != 1 || !reflect.DeepEqual(got[0].Groups, tt.want) {
+				t.Errorf("groups = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }
 

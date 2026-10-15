@@ -33,7 +33,7 @@ type queryer interface {
 const jobColumns = `j.id, j.media_type, j.tmdb_id, j.show_id, j.movie_id,
 	j.info_hash, j.magnet_uri, j.torrent_name, COALESCE(j.indexer, ''), COALESCE(j.release_group, ''),
 	j.size_bytes, j.file_count, j.video_count, COALESCE(j.file_path, ''),
-	j.status, j.dry_run, j.hint, j.suggested_hints, j.ai_files, COALESCE(j.error, ''), COALESCE(j.ai_error, ''),
+	j.status, j.dry_run, j.hint, j.suggested_hints, j.ai_files, COALESCE(j.error, ''), COALESCE(j.error_code, ''), COALESCE(j.ai_error, ''),
 	j.created_at, j.updated_at, j.applied_at,
 	COALESCE(s.title, m.title, ''), COALESCE(s.year, m.year, 0), COALESCE(s.poster_path, m.poster_path, ''),
 	COALESCE(s.classifier_mode, 'auto'),
@@ -55,7 +55,7 @@ func scanJob(sc scanner) (*AssignmentJob, error) {
 		&j.ID, &j.MediaType, &j.TMDBID, &showID, &movieID,
 		&j.InfoHash, &j.MagnetURI, &j.TorrentName, &j.Indexer, &j.ReleaseGroup,
 		&size, &files, &videos, &j.FilePath,
-		&j.Status, &j.DryRun, &hint, &hints, &aiFiles, &j.Error, &j.AIError,
+		&j.Status, &j.DryRun, &hint, &hints, &aiFiles, &j.Error, &j.ErrorCode, &j.AIError,
 		&j.CreatedAt, &j.UpdatedAt, &applied,
 		&j.Title, &j.Year, &j.PosterPath, &j.ClassifierMode, &j.SeasonCount, &j.EpisodeCount,
 	)
@@ -331,7 +331,7 @@ func (r *AssignmentJobRepository) IDsWithStatus(ctx context.Context, status JobS
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan assignment job id: %w", err)
 		}
 		ids = append(ids, id)
 	}
@@ -362,13 +362,13 @@ func (r *AssignmentJobRepository) SetFileList(ctx context.Context, id int64, f F
 	return affected(res)
 }
 
-// Fail ends a working job with an error. It reports false when the job
-// isn't working any more.
-func (r *AssignmentJobRepository) Fail(ctx context.Context, id int64, message string) (bool, error) {
+// Fail ends a working job with an error: code tells code why, message the
+// user. It reports false when the job isn't working any more.
+func (r *AssignmentJobRepository) Fail(ctx context.Context, id int64, code, message string) (bool, error) {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE assignment_jobs SET status = 'failed', error = $2, updated_at = NOW()
-		WHERE id = $1 AND status = ANY($3)
-	`, id, message, workingStatuses())
+		UPDATE assignment_jobs SET status = 'failed', error_code = $2, error = $3, updated_at = NOW()
+		WHERE id = $1 AND status = ANY($4)
+	`, id, code, message, workingStatuses())
 	if err != nil {
 		return false, fmt.Errorf("failed to fail assignment job: %w", err)
 	}
@@ -658,9 +658,46 @@ type AssignmentWrite struct {
 
 // WriteAssignments applies w: the torrent's rows the job no longer maps
 // are deactivated, each item's other active rows too, and every row is
-// upserted active (a file the item had before is reactivated). Three
-// queries.
+// upserted active (a file the item had before is reactivated). It locks
+// the title first, so writes to one title never interleave. Four queries.
 func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
+	return writeAssignments(t.ctx, t.tx, w)
+}
+
+// lockTitle locks the title w writes to until tx ends. Under READ
+// COMMITTED two writers can't see each other's uncommitted rows, so two
+// applies mapping one episode to different torrents would otherwise both
+// leave a row active. FOR NO KEY UPDATE still lets jobs reference the
+// title meanwhile.
+func lockTitle(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
+	var query string
+	var id int64
+	var missing error
+	switch w.ItemType {
+	case ItemTypeEpisode:
+		query, id, missing = `SELECT 1 FROM shows WHERE id = $1 FOR NO KEY UPDATE`, w.ShowID, ErrShowNotFound
+	case ItemTypeMovie:
+		query, id, missing = `SELECT 1 FROM movies WHERE id = $1 FOR NO KEY UPDATE`, w.MovieID, ErrMovieNotFound
+	default:
+		return fmt.Errorf("unknown item type %q", w.ItemType)
+	}
+	var one int
+	err := tx.QueryRowContext(ctx, query, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return missing
+	}
+	if err != nil {
+		return fmt.Errorf("failed to lock the title: %w", err)
+	}
+	return nil
+}
+
+// writeAssignments is the assignment writer: Apply (and, in slice 4, the
+// manual override) write through it.
+func writeAssignments(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
+	if err := lockTitle(ctx, tx, w); err != nil {
+		return err
+	}
 	n := len(w.Rows)
 	items := make([]int64, n)
 	paths := make([]string, n)
@@ -683,7 +720,7 @@ func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 	var err error
 	switch w.ItemType {
 	case ItemTypeEpisode:
-		_, err = t.tx.ExecContext(t.ctx, `
+		_, err = tx.ExecContext(ctx, `
 			UPDATE torrent_assignments t SET is_active = FALSE
 			FROM episodes e JOIN seasons sn ON sn.id = e.season_id
 			WHERE t.item_type = 'episode' AND t.item_id = e.id AND sn.show_id = $1
@@ -692,7 +729,7 @@ func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 			                  WHERE m.item_id = t.item_id AND m.file_path = t.file_path)
 		`, w.ShowID, w.InfoHash, items, paths)
 	case ItemTypeMovie:
-		_, err = t.tx.ExecContext(t.ctx, `
+		_, err = tx.ExecContext(ctx, `
 			UPDATE torrent_assignments t SET is_active = FALSE
 			WHERE t.item_type = 'movie' AND t.item_id = $1 AND t.info_hash = $2 AND t.is_active
 			  AND NOT EXISTS (SELECT 1 FROM unnest($3::bigint[], $4::text[]) AS m(item_id, file_path)
@@ -708,7 +745,7 @@ func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 		return nil
 	}
 
-	if _, err := t.tx.ExecContext(t.ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE torrent_assignments t SET is_active = FALSE
 		FROM unnest($1::bigint[], $2::text[]) AS m(item_id, file_path)
 		WHERE t.item_type = $3 AND t.item_id = m.item_id AND t.is_active
@@ -717,7 +754,7 @@ func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 		return fmt.Errorf("failed to deactivate the items' other rows: %w", err)
 	}
 
-	if _, err := t.tx.ExecContext(t.ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size,
 		                                 resolution, source, confidence, match_source, is_active)
 		SELECT $1, m.item_id, $2, $3, m.file_path, m.file_size, NULLIF(m.resolution, ''), NULLIF(m.source, ''),

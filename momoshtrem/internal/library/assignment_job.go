@@ -98,7 +98,8 @@ type AssignmentJob struct {
 	Hint           *JobHint
 	SuggestedHints []string
 	AIFiles        *int
-	Error          string
+	Error          string // why it failed, for the user
+	ErrorCode      string // why it failed, for code (the service's failure kinds)
 	AIError        string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time

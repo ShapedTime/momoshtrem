@@ -85,6 +85,10 @@ func conflictErr(code string) error {
 	return &service.JobConflictError{Code: code, Message: "no: " + code}
 }
 
+func failedJob(code string) error {
+	return &service.JobFailedError{JobID: 1, Code: code, Message: "failed: " + code}
+}
+
 func TestAssignmentRoutes(t *testing.T) {
 	const magnetBody = `{"magnet_uri": "magnet:?xt=urn:btih:abc"}`
 	tests := []struct {
@@ -111,8 +115,13 @@ func TestAssignmentRoutes(t *testing.T) {
 		{"assign an unknown movie", "POST", "/api/movies/7/assign-torrent", magnetBody, library.ErrMovieNotFound, true, 404, CodeNotFound, "assign"},
 		{"assign and wait, show", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, nil, true, 201, "", "show-wait"},
 		{"assign and wait, movie", "POST", "/api/movies/7/assign-torrent?wait=true", magnetBody, nil, true, 201, "", "movie-wait"},
-		{"wait: no peers", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, &service.JobFailedError{Message: "No peers", Timeout: true}, true, 504, CodeTimeout, "show-wait"},
-		{"wait: failed", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, &service.JobFailedError{Message: "Broken"}, true, 500, CodeInternalError, "show-wait"},
+		{"wait: no peers", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureMetadataTimeout), true, 504, CodeTimeout, "show-wait"},
+		{"wait: no video", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureNoVideos), true, 400, CodeBadRequest, "show-wait"},
+		{"wait: a bad magnet", "POST", "/api/movies/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureInvalidMagnet), true, 400, CodeBadRequest, "movie-wait"},
+		{"wait: no torrent client", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureNoTorrents), true, 503, CodeUnavailable, "show-wait"},
+		{"wait: the title left", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureTitleGone), true, 404, CodeNotFound, "show-wait"},
+		{"wait: failed", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureInternal), true, 500, CodeInternalError, "show-wait"},
+		{"wait: torrent error", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, failedJob(service.FailureTorrent), true, 500, CodeInternalError, "show-wait"},
 		{"wait: no film", "POST", "/api/movies/7/assign-torrent?wait=true", magnetBody, library.ErrNoVideoFiles, true, 400, CodeBadRequest, "movie-wait"},
 		{"wait: discarded", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, conflictErr(service.CodeJobClosed), true, 409, service.CodeJobClosed, "show-wait"},
 		{"wait: still matching", "POST", "/api/shows/7/assign-torrent?wait=true", magnetBody, context.DeadlineExceeded, true, 504, CodeTimeout, "show-wait"},

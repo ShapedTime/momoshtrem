@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS assignment_jobs (
     hint            JSONB,           -- {season?, episode?, text?}
     suggested_hints JSONB NOT NULL DEFAULT '[]'::jsonb,
     ai_files      INTEGER,           -- files sent in the current or latest AI run
-    error         TEXT,              -- why it failed
+    error         TEXT,              -- why it failed, for the user
+    error_code    TEXT,              -- why it failed, for code: metadata_timeout, no_videos, no_torrents, ...
     ai_error      TEXT,              -- the latest AI run failed
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -94,6 +95,11 @@ CREATE TABLE IF NOT EXISTS assignment_proposals (
     linked_proposal_id    BIGINT REFERENCES assignment_proposals(id) ON DELETE SET NULL,
     UNIQUE (job_id, file_path)
 );
+
+-- ON DELETE SET NULL looks up the referencing rows: without these,
+-- deleting a big job's proposals scans the table once per row.
+CREATE INDEX IF NOT EXISTS idx_assignment_proposals_superseded_by ON assignment_proposals(superseded_by);
+CREATE INDEX IF NOT EXISTS idx_assignment_proposals_linked ON assignment_proposals(linked_proposal_id);
 
 -- Every AI call, shared by the classifier, recommendations and Ask.
 CREATE TABLE IF NOT EXISTS ai_usage (
