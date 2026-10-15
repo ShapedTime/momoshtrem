@@ -97,14 +97,28 @@ type subtitleDir struct {
 	more []subtitle.Item
 }
 
-// subtitles collects the subtitles of the video's items from subs.
+// subtitles collects the subtitles of the video's items from subs. A
+// grouped entry lists a torrent subtitle once, however many of its
+// episodes have it: assigns before jobs recorded one on every episode a
+// file mapped to.
 func (d subtitleDir) subtitles(subs map[subtitle.Item][]*subtitle.Subtitle) []*subtitle.Subtitle {
 	if len(d.more) == 0 {
 		return subs[d.item]
 	}
-	out := append([]*subtitle.Subtitle(nil), subs[d.item]...)
-	for _, item := range d.more {
-		out = append(out, subs[item]...)
+	type torrentFile struct{ hash, path string }
+	seen := map[torrentFile]bool{}
+	var out []*subtitle.Subtitle
+	for _, item := range append([]subtitle.Item{d.item}, d.more...) {
+		for _, sub := range subs[item] {
+			if sub.Source == subtitle.SourceTorrent {
+				key := torrentFile{sub.InfoHash, sub.FilePath}
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+			}
+			out = append(out, sub)
+		}
 	}
 	return out
 }

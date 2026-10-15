@@ -147,7 +147,12 @@ func TestAddSeasonEntries(t *testing.T) {
 	ep12 := subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: 12}
 	fake := &fakeSubtitles{subs: map[subtitle.Item][]*subtitle.Subtitle{
 		ep11: {{ID: 1, LanguageCode: "en", Format: "srt", Source: subtitle.SourceTorrent, InfoHash: hash, FilePath: "Pack/en.srt"}},
-		ep12: {{ID: 2, LanguageCode: "en", Format: "srt", Source: subtitle.SourceOpenSubtitles, FilePath: "/subs/12/en.srt"}},
+		ep12: {
+			{ID: 2, LanguageCode: "en", Format: "srt", Source: subtitle.SourceOpenSubtitles, FilePath: "/subs/12/en.srt"},
+			// Assigns before jobs recorded a torrent subtitle on every episode
+			// its file mapped to: the grouped entry lists it once.
+			{ID: 3, LanguageCode: "en", Format: "srt", Source: subtitle.SourceTorrent, InfoHash: hash, FilePath: "Pack/en.srt"},
+		},
 	}}
 	fs := &LibraryFS{subtitleRepo: fake}
 
