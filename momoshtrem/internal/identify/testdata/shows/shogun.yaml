@@ -1,0 +1,8 @@
+# The title has a diacritic releases drop: "Shōgun" → "Shogun".
+title: Shōgun
+year: 2024
+countries: [US]
+seasons:
+  - n: 1
+    runs: [{count: 10, first_air: 2024-02-27}]
+    names: {1: "Anjin", 2: "Servants of Two Masters"}

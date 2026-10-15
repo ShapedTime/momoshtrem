@@ -83,20 +83,19 @@ The `AssignmentRepository` is already in place with:
 
 ## Step 2.4: Identification Engine
 
-**Note**: Already implemented in Stage 1 at `momoshtrem/internal/identify/`.
+> **Superseded (#5).** The first-match regex identifier described in the original Stage 2 plan (`patterns.go`, `identifier.go`, `matcher.go`) has been replaced by the rules classifier in `momoshtrem/internal/identify/`. Read the package doc and `Classify` there, and `testdata/corpus/` for what it must get right.
 
-The identification engine automatically parses torrent filenames to extract episode information.
-
-**Patterns supported** (in order of confidence):
-- **High**: `S01E01`, `1x01`, `S01E01-E03` (ranges), `S01E01E02E03` (multi)
-- **Medium**: `Season 1 Episode 1`, `Episode 01` with folder context, anime format
-- **Low**: Concatenated formats (`0101`, `101`) with folder context
+The classifier maps every file of a torrent to the show's episodes, with a confidence and a short reason:
+- **Tokenizer** (`internal/identify/token/`): episode markers, quality tags, groups, years and dates, so resolutions, years and codecs are never episode numbers.
+- **Readings**, weighed together: aired `S01E01`/`1x01` (with ranges and multi-episode files), absolute numbers (anime), air dates (daily shows), season remaps for release seasons TMDB doesn't have, specials (season 0) and episode names.
+- **Torrent context**: folder seasons, ranges in names, and the show's title, which is never read as a marker.
+- **Adapter**: `internal/service/assignment_catalog.go` builds the classifier's catalog from a library show.
 
 **Key files**:
-- `internal/identify/types.go` - Core types (Confidence, QualityInfo, IdentifiedFile)
-- `internal/identify/patterns.go` - Compiled regex patterns
-- `internal/identify/identifier.go` - Main identification logic
-- `internal/identify/matcher.go` - Maps identified files to library episodes
+- `internal/identify/classify.go` - `Classify(Input) Result`
+- `internal/identify/match.go` - Readings, weights and confidence
+- `internal/identify/resolver.go` - `Resolver` interface for the AI resolver, and `MergeAI`
+- `internal/identify/movie.go` - `RankMovieFiles`
 
 ---
 
@@ -315,11 +314,10 @@ Verify end-to-end streaming.
 ```
 momoshtrem/
 ├── internal/
-│   ├── identify/           # Already implemented in Stage 1
-│   │   ├── types.go        # Core types
-│   │   ├── patterns.go     # Regex patterns
-│   │   ├── identifier.go   # Episode identification
-│   │   └── matcher.go      # Maps files to library
+│   ├── identify/           # Rules classifier (#5; replaced the Stage 1 regex identifier)
+│   │   ├── token/          # Tokenizer
+│   │   ├── classify.go     # Classify(Input) Result
+│   │   └── ...             # candidates, context, remap, match, dedupe, movie, resolver
 │   ├── torrent/
 │   │   ├── service.go      # Interface (Stage 1), implementation (Stage 2)
 │   │   ├── client.go       # anacrolix client setup (Stage 2)

@@ -1,0 +1,9 @@
+title: "Special Ops: Lioness"
+aliases: [Lioness]
+year: 2023
+seasons:
+  - n: 1
+    runs: [{count: 8, first_air: 2023-07-23}]
+    names: {1: "Truth Is Subjective"}
+  - n: 2
+    runs: [{count: 8, first_air: 2024-10-27}]

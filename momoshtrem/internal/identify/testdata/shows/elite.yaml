@@ -1,0 +1,7 @@
+# The title has a diacritic releases drop: "Élite" → "Elite".
+title: Élite
+year: 2018
+countries: [ES]
+seasons:
+  - {n: 1, runs: [{count: 8, first_air: 2018-10-05}]}
+  - {n: 2, runs: [{count: 8, first_air: 2019-09-06}]}

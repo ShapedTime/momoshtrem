@@ -1,0 +1,98 @@
+# Resolutions, years, codecs and audio channels that the old regexes read as
+# season and episode numbers. Schema: see anime.yaml.
+
+- id: resolution-fansub
+  show: frieren
+  tags: [resolution]
+  files:
+    - {path: "[Anime Time] Sousou no Frieren - 07 [1920x1080 HEVC 10bit][Dual Audio].mkv", expect: {eps: [S01E07], min_conf: high}}
+
+- id: resolution-scene
+  show: the-boys
+  tags: [resolution]
+  files:
+    - {path: The.Boys.S02E05.1920x1080.WEB.x264-GRP.mkv, expect: {eps: [S02E05], min_conf: high}}
+
+- id: resolution-only
+  show: frieren
+  tags: [resolution, no-episode]
+  files:
+    - {path: Frieren.1920x1080.mkv, expect: {kind: unknown}}
+
+- id: year-only
+  show: the-boys
+  tags: [year, no-episode]
+  files:
+    - {path: The.Boys.2019.1080p.WEB.H264-GRP.mkv, expect: {kind: unknown}}
+
+- id: year-before-episode
+  show: breaking-bad
+  tags: [year]
+  files:
+    - {path: Breaking.Bad.2008.S01E03.720p.BluRay.x264-GRP.mkv, expect: {eps: [S01E03], min_conf: high}}
+
+- id: year-doctor-who
+  show: doctor-who
+  tags: [year]
+  files:
+    - {path: Doctor.Who.2005.S01E01.Rose.720p.BluRay.x264-GRP.mkv, expect: {eps: [S01E01], min_conf: high}}
+
+- id: codec-x265
+  show: the-office
+  tags: [codec]
+  files:
+    - {path: The.Office.US.S05E10.Moroccan.Christmas.720p.WEB-DL.x265-GRP.mkv, expect: {eps: [S05E10], min_conf: high}}
+
+- id: resolution-2160p
+  show: breaking-bad
+  tags: [resolution]
+  files:
+    - {path: Breaking.Bad.S05E14.Ozymandias.2160p.WEB-DL.x264-GRP.mkv, expect: {eps: [S05E14], min_conf: high}}
+
+- id: audio-channels-fansub
+  show: jujutsu-kaisen
+  tags: [audio]
+  files:
+    - {path: "[Group] Jujutsu Kaisen - 47 [1080p][AAC 2.0].mkv", expect: {eps: [S02E23], min_conf: high}}
+
+- id: episode-1080
+  show: one-piece
+  tags: [resolution, absolute]
+  files:
+    - {path: "[Group] One Piece - 1080 [720p].mkv", expect: {eps: [S21E88], min_conf: high}}
+
+- id: bd-resolution-flac
+  show: spy-x-family
+  tags: [resolution, audio]
+  files:
+    - {path: "[Group] Spy x Family - 12 (BD 1920x1080 x264 FLAC)[A1B2C3D4].mkv", expect: {eps: [S01E12], min_conf: high}}
+
+- id: year-bluey
+  show: bluey
+  tags: [year]
+  files:
+    - {path: Bluey.2018.S02E01.Dance.Mode.1080p.DSNP.WEB-DL.mkv, size: 150MB, expect: {eps: [S02E01], min_conf: high}}
+
+- id: audio-dd51-h264
+  show: chernobyl
+  tags: [audio, codec]
+  files:
+    - {path: Chernobyl.S01E02.Please.Remain.Calm.1080p.WEB-DL.DD5.1.H.264-GRP.mkv, expect: {eps: [S01E02], min_conf: high}}
+
+- id: year-title-2160p
+  show: "1923"
+  tags: [year, codec]
+  files:
+    - {path: 1923.S01E02.Natures.Empty.Throne.2160p.WEB.H265-GRP.mkv, expect: {eps: [S01E02], min_conf: high}}
+
+- id: ten-bit-fansub
+  show: frieren
+  tags: [codec]
+  files:
+    - {path: "[Group] Sousou no Frieren - 12 (1080p HEVC 10-bit AAC) [ABCD1234].mkv", expect: {eps: [S01E12], min_conf: high}}
+
+- id: dts-hd-51
+  show: friends
+  tags: [audio]
+  files:
+    - {path: Friends.S03E05.1080p.BluRay.DTS-HD.MA.5.1.x264-GRP.mkv, expect: {eps: [S03E05], min_conf: high}}

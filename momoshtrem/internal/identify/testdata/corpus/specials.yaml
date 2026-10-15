@@ -1,0 +1,94 @@
+# Specials (season 0): explicit S00Exx, scene numbers that TMDB doesn't use,
+# specials found by title, specials turned off. Schema: see anime.yaml.
+
+- id: doctor-who-specials
+  show: doctor-who
+  golden: true
+  torrent: Doctor.Who.2005.Specials.1080p.BluRay.x264-GRP
+  tags: [specials, title]
+  files:
+    - {path: Doctor.Who.2005.S00E02.The.Christmas.Invasion.1080p.BluRay.x264-GRP.mkv, expect: {eps: [S00E02], min_conf: high}}
+    - {path: Doctor.Who.2005.S00E03.The.Runaway.Bride.1080p.BluRay.x264-GRP.mkv, expect: {eps: [S00E03], min_conf: high}}
+    - {path: Doctor.Who.2005.S00E04.Time.Crash.1080p.BluRay.x264-GRP.mkv, size: 400MB, expect: {eps: [S00E04], min_conf: high}}
+    - {path: Doctor.Who.2005.S00E05.Voyage.of.the.Damned.1080p.BluRay.x264-GRP.mkv, expect: {eps: [S00E05], min_conf: high}}
+    - {path: Doctor.Who.2005.S00E06.The.Next.Doctor.1080p.BluRay.x264-GRP.mkv, expect: {eps: [S00E06], min_conf: high}}
+    - {path: Doctor.Who.2005.S00E09.The.End.of.Time.Part.1.1080p.BluRay.x264-GRP.mkv, expect: {eps: [S00E09], min_conf: high}}
+    - {path: Doctor.Who.2005.S00E10.The.End.of.Time.Part.2.1080p.BluRay.x264-GRP.mkv, expect: {eps: [S00E10], min_conf: high}}
+
+- id: doctor-who-s04
+  show: doctor-who
+  golden: true
+  torrent: Doctor.Who.2005.S04.720p.BluRay.x264-GRP
+  tags: [specials, scene-special-numbers]
+  files:
+    - {path: Doctor.Who.2005.S04E00.Voyage.of.the.Damned.720p.BluRay.x264-GRP.mkv, expect: {eps: [S00E05], min_conf: high}}
+    - {path: Doctor.Who.2005.S04E01.Partners.in.Crime.720p.BluRay.x264-GRP.mkv, expect: {eps: [S04E01], min_conf: high}}
+    - {path: Doctor.Who.2005.S04E02.The.Fires.of.Pompeii.720p.BluRay.x264-GRP.mkv, expect: {eps: [S04E02], min_conf: high}}
+    - {path: Doctor.Who.2005.S04E10.Midnight.720p.BluRay.x264-GRP.mkv, expect: {eps: [S04E10], min_conf: high}}
+    - {path: Doctor.Who.2005.S04E13.Journeys.End.720p.BluRay.x264-GRP.mkv, expect: {eps: [S04E13], min_conf: high}}
+    - {path: Doctor.Who.2005.S04E14.The.Next.Doctor.720p.BluRay.x264-GRP.mkv, expect: {eps: [S00E06]}}
+    - {path: Doctor.Who.2005.S04E15.Planet.of.the.Dead.720p.BluRay.x264-GRP.mkv, expect: {eps: [S00E07]}}
+
+- id: doctor-who-misnumbered-special
+  show: doctor-who
+  tags: [specials, contradiction]
+  files:
+    - {path: Doctor.Who.S00E09.Time.Crash.720p.HDTV.x264-GRP.mkv, size: 300MB, expect: {eps: [S00E04], max_conf: medium}}
+
+- id: doctor-who-specials-off
+  show: doctor-who
+  drop_specials: true
+  tags: [specials, specials-off]
+  files:
+    - {path: Doctor.Who.2005.S00E04.Time.Crash.720p.HDTV.x264-GRP.mkv, size: 300MB, expect: {kind: special}}
+
+- id: doctor-who-children-in-need
+  show: doctor-who
+  tags: [specials, title]
+  files:
+    - {path: Doctor Who - Children in Need (2005).avi, size: 150MB, expect: {eps: [S00E01]}}
+
+- id: doctor-who-series-folder
+  show: doctor-who
+  torrent: Doctor Who (2005) Series 1 DVDRip
+  tags: [nxnn, series-word]
+  files:
+    - {path: Doctor Who - 1x01 - Rose.avi, size: 350MB, expect: {eps: [S01E01], min_conf: high}}
+    - {path: Doctor Who - 1x06 - Dalek.avi, size: 350MB, expect: {eps: [S01E06], min_conf: high}}
+
+- id: bluey-s01
+  show: bluey
+  golden: true
+  torrent: Bluey.S01.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP
+  tags: [scene, season-pack, short-titles]
+  files:
+    - {path: Bluey.S01E01.Magic.Xylophone.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP.mkv, size: 150MB, expect: {eps: [S01E01], min_conf: high}}
+    - {path: Bluey.S01E02.Hospital.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP.mkv, size: 150MB, expect: {eps: [S01E02], min_conf: high}}
+    - {path: Bluey.S01E03.Keepy.Uppy.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP.mkv, size: 150MB, expect: {eps: [S01E03], min_conf: high}}
+    - {path: Bluey.S01E04.Daddy.Robot.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP.mkv, size: 150MB, expect: {eps: [S01E04], min_conf: high}}
+    - {path: Bluey.S01E05.Shadowlands.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP.mkv, size: 150MB, expect: {eps: [S01E05], min_conf: high}}
+    - {path: Bluey.S01E07.Bike.1080p.DSNP.WEB-DL.AAC2.0.H.264-GRP.mkv, size: 150MB, expect: {eps: [S01E07], min_conf: high}}
+
+- id: bluey-s03-titles
+  show: bluey
+  golden: true
+  torrent: Bluey Season 3 (2021) [1080p]
+  tags: [title, folder-season]
+  files:
+    - {path: Bluey - Perfect.mp4, size: 150MB, expect: {eps: [S03E01]}}
+    - {path: Bluey - Ghostbasket.mp4, size: 150MB, expect: {eps: [S03E47]}}
+    - {path: Bluey - Surprise!.mp4, size: 150MB, expect: {eps: [S03E48]}}
+    - {path: Bluey - The Sign.mp4, size: 400MB, expect: {eps: [S03E49]}}
+
+- id: bluey-special
+  show: bluey
+  tags: [specials]
+  files:
+    - {path: Bluey.S00E01.Blueys.Big.Play.1080p.WEB.h264-GRP.mkv, expect: {eps: [S00E01], min_conf: high}}
+
+- id: bluey-hint-season
+  show: bluey
+  hint: {season: 2}
+  tags: [hint, bare-number]
+  files:
+    - {path: Bluey - 26.mp4, size: 150MB, expect: {eps: [S02E26]}}

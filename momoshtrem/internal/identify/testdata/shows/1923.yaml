@@ -1,0 +1,9 @@
+# The title is a year, and so is the first episode's name.
+title: "1923"
+year: 2022
+seasons:
+  - n: 1
+    runs: [{count: 8, first_air: 2022-12-18}]
+    names: {1: "1923", 2: "Nature's Empty Throne", 8: "Nothing Left to Lose"}
+  - n: 2
+    runs: [{count: 7, first_air: 2025-02-23}]

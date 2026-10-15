@@ -1,0 +1,24 @@
+title: Bluey
+year: 2018
+is_anime: false
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Bluey's Big Play", air: 2023-12-29}
+  - n: 1
+    runs: [{count: 52, first_air: 2018-10-01, days: [mon, tue, wed, thu, fri]}]
+    names:
+      1: "Magic Xylophone"
+      2: "Hospital"
+      3: "Keepy Uppy"
+      4: "Daddy Robot"
+      5: "Shadowlands"
+      6: "The Weekend"
+      7: "Bike"
+      8: "Fruit Bat"
+  - n: 2
+    runs: [{count: 52, first_air: 2020-03-17, days: [mon, tue, wed, thu, fri]}]
+    names: {1: "Dance Mode", 2: "Hammerbarn", 26: "Easter"}
+  - n: 3
+    runs: [{count: 49, first_air: 2021-09-06, days: [mon, tue, wed, thu, fri]}]
+    names: {1: "Perfect", 47: "Ghostbasket", 48: "Surprise!", 49: "The Sign"}

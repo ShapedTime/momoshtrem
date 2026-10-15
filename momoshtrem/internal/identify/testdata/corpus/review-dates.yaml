@@ -1,0 +1,22 @@
+# From the PR #52 review: dates written day first, month first, or with a
+# two-digit year. Schema: see anime.yaml.
+
+- id: review-date-day-first
+  show: the-daily-show
+  tags: [review, date]
+  files:
+    - {path: The.Daily.Show.13.03.2024.mkv, size: 900MB, expect: {eps: [S29E39]}}
+
+# 03.12.2024 is 3 December or 12 March; only 12 March aired.
+- id: review-date-either-way
+  show: the-daily-show
+  tags: [review, date]
+  files:
+    - {path: The.Daily.Show.03.12.2024.mkv, size: 900MB, expect: {eps: [S29E38]}}
+
+# A two-digit year can't be read reliably: no date, and not an episode.
+- id: review-date-two-digit-year
+  show: the-daily-show
+  tags: [review, date]
+  files:
+    - {path: The.Daily.Show.24.03.13.mkv, size: 900MB, expect: {kind: unknown}}

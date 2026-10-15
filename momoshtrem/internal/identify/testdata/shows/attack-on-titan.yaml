@@ -1,0 +1,27 @@
+# The OADs are season 0. "The Final Season" is TMDB S4, which fansubs number
+# from 01 again.
+title: Attack on Titan
+original_title: 進撃の巨人
+aliases: [Shingeki no Kyojin]
+year: 2013
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Ilse's Notebook: Memoirs of a Scout Regiment Member", air: 2013-12-09}
+      - {e: 2, name: "The Sudden Visitor: The Torturous Curse of Youth", air: 2014-04-09}
+      - {e: 3, name: "Distress", air: 2014-08-08}
+      - {e: 4, name: "No Regrets: Part 1", air: 2014-12-09}
+      - {e: 5, name: "No Regrets: Part 2", air: 2015-04-09}
+      - {e: 6, name: "Lost Girls: Wall Sina, Goodbye (Part 1)", air: 2017-12-08}
+      - {e: 7, name: "Lost Girls: Wall Sina, Goodbye (Part 2)", air: 2018-04-09}
+      - {e: 8, name: "Lost Girls: Lost in the Cruel World", air: 2018-08-09}
+  - n: 1
+    runs: [{count: 25, first_air: 2013-04-07}]
+    names: {1: "To You, in 2000 Years: The Fall of Shiganshina, Part 1"}
+  - {n: 2, runs: [{count: 12, first_air: 2017-04-01}]}
+  - {n: 3, runs: [{count: 22, first_air: 2018-07-23}]}
+  - n: 4
+    runs: [{count: 16, first_air: 2020-12-07}, {count: 14, first_air: 2022-01-10}]
+    names: {1: "The Other Side of the Sea"}

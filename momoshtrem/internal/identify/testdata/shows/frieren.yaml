@@ -1,0 +1,28 @@
+# TMDB keeps Frieren as one 38-episode season. Releases call the second cour
+# (January 2026 on) "S02", so S02E01 is TMDB S01E29.
+title: "Frieren: Beyond Journey's End"
+original_title: 葬送のフリーレン
+aliases: [Sousou no Frieren]
+year: 2023
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Frieren Mini Anime: Episode 1", air: 2023-10-06}
+      - {e: 2, name: "Frieren Mini Anime: Episode 2", air: 2023-10-13}
+      - {e: 3, name: "Recap: The Journey So Far", air: 2024-03-15}
+  - n: 1
+    runs:
+      - {count: 28, first_air: 2023-09-29}
+      - {count: 10, first_air: 2026-01-16}
+    types: {28: mid_season}
+    names:
+      1: "The Journey's End"
+      2: "It Didn't Have to Be Magic..."
+      3: "Killing Magic"
+      4: "The Land Where Souls Rest"
+      5: "Phantoms of the Dead"
+      28: "It Would Embarrass You"
+      29: "The Northern Plateau"
+      30: "The Golden Land"

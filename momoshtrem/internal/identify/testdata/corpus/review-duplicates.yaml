@@ -1,0 +1,38 @@
+# From the PR #52 review: copies of one episode in one torrent that differ
+# only by version or quality. The best copy is kept (version, then
+# REPACK/PROPER, then resolution, then size); the others are superseded,
+# not a conflict that assigns nothing. Schema: see anime.yaml.
+
+- id: review-dup-erai-v2
+  show: spy-x-family
+  torrent: "[Erai-raws] Spy x Family Season 2 - 05"
+  tags: [review, version]
+  files:
+    - {path: "[Erai-raws] Spy x Family Season 2 - 05 [1080p][Multiple Subtitle][ENG][POR-BR].mkv", expect: {extra: superseded}}
+    - {path: "[Erai-raws] Spy x Family Season 2 - 05 [1080p][v2][Multiple Subtitle][ENG][POR-BR].mkv", expect: {eps: [S02E05], min_conf: high}}
+
+- id: review-dup-frieren-v2
+  show: frieren
+  torrent: "[Group] Sousou no Frieren - 14"
+  tags: [review, version]
+  files:
+    - {path: "[Group] Sousou no Frieren - 14 [1080p].mkv", expect: {extra: superseded}}
+    - {path: "[Group] Sousou no Frieren - 14 (v2) [1080p].mkv", expect: {eps: [S01E14], min_conf: high}}
+
+- id: review-dup-repack
+  show: the-boys
+  torrent: The.Boys.S03E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb
+  tags: [review, repack]
+  files:
+    - {path: The.Boys.S03E01.Payback.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv, size: 3.1GB, expect: {extra: superseded}}
+    - {path: The.Boys.S03E01.Payback.REPACK.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb.mkv, size: 3.1GB, expect: {eps: [S03E01], min_conf: high}}
+
+- id: review-dup-two-qualities
+  show: breaking-bad
+  torrent: Breaking.Bad.S02.1080p.and.720p.BluRay.x264-GRP
+  tags: [review, quality]
+  files:
+    - {path: 1080p/Breaking.Bad.S02E01.Seven.Thirty-Seven.1080p.BluRay.x264-GRP.mkv, size: 2.5GB, expect: {eps: [S02E01], min_conf: high}}
+    - {path: 720p/Breaking.Bad.S02E01.Seven.Thirty-Seven.720p.BluRay.x264-GRP.mkv, size: 1.1GB, expect: {extra: superseded}}
+    - {path: 1080p/Breaking.Bad.S02E02.Grilled.1080p.BluRay.x264-GRP.mkv, size: 2.5GB, expect: {eps: [S02E02], min_conf: high}}
+    - {path: 720p/Breaking.Bad.S02E02.Grilled.720p.BluRay.x264-GRP.mkv, size: 1.1GB, expect: {extra: superseded}}

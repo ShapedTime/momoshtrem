@@ -1,0 +1,13 @@
+# Fansubs number season 2 on from season 1: "Jujutsu Kaisen - 25" is S2E01.
+title: Jujutsu Kaisen
+original_title: 呪術廻戦
+year: 2020
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 1
+    runs: [{count: 24, first_air: 2020-10-03}]
+    names: {1: "Ryomen Sukuna"}
+  - n: 2
+    runs: [{count: 23, first_air: 2023-07-06}]
+    names: {1: "Hidden Inventory"}

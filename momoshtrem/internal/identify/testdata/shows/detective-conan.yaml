@@ -1,0 +1,40 @@
+# TMDB lists the show as "Case Closed". Seasons 1-29 hold 1102 episodes, so
+# absolute #1120 is S30E18.
+title: Case Closed
+original_title: 名探偵コナン
+aliases: [Detective Conan, Meitantei Conan]
+year: 1996
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 1
+    runs: [{count: 38, first_air: 1996-01-08}]
+  - {n: 2, runs: [{count: 38}]}
+  - {n: 3, runs: [{count: 38}]}
+  - {n: 4, runs: [{count: 38}]}
+  - {n: 5, runs: [{count: 38}]}
+  - {n: 6, runs: [{count: 38}]}
+  - {n: 7, runs: [{count: 38}]}
+  - {n: 8, runs: [{count: 38}]}
+  - {n: 9, runs: [{count: 38}]}
+  - {n: 10, runs: [{count: 38}]}
+  - {n: 11, runs: [{count: 38}]}
+  - {n: 12, runs: [{count: 38}]}
+  - {n: 13, runs: [{count: 38}]}
+  - {n: 14, runs: [{count: 38}]}
+  - {n: 15, runs: [{count: 38}]}
+  - {n: 16, runs: [{count: 38}]}
+  - {n: 17, runs: [{count: 38}]}
+  - {n: 18, runs: [{count: 38}]}
+  - {n: 19, runs: [{count: 38}]}
+  - {n: 20, runs: [{count: 38}]}
+  - {n: 21, runs: [{count: 38}]}
+  - {n: 22, runs: [{count: 38}]}
+  - {n: 23, runs: [{count: 38}]}
+  - {n: 24, runs: [{count: 38}]}
+  - {n: 25, runs: [{count: 38}]}
+  - {n: 26, runs: [{count: 38}]}
+  - {n: 27, runs: [{count: 38}]}
+  - {n: 28, runs: [{count: 38}]}
+  - {n: 29, runs: [{count: 38}]}
+  - {n: 30, runs: [{count: 60}]}

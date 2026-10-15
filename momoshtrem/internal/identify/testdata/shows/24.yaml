@@ -1,0 +1,16 @@
+# The title is a number, and episode names are times of day.
+title: "24"
+year: 2001
+seasons:
+  - n: 1
+    runs: [{count: 24, first_air: 2001-11-06}]
+    names: {1: "12:00 A.M.-1:00 A.M.", 2: "1:00 A.M.-2:00 A.M."}
+  - {n: 2, runs: [{count: 24, first_air: 2002-10-29}]}
+  - n: 3
+    runs: [{count: 24, first_air: 2003-10-28}]
+    names: {5: "5:00 P.M.-6:00 P.M."}
+  - {n: 4, runs: [{count: 24, first_air: 2005-01-09}]}
+  - {n: 5, runs: [{count: 24, first_air: 2006-01-15}]}
+  - {n: 6, runs: [{count: 24, first_air: 2007-01-14}]}
+  - {n: 7, runs: [{count: 24, first_air: 2009-01-11}]}
+  - {n: 8, runs: [{count: 24, first_air: 2010-01-17}]}

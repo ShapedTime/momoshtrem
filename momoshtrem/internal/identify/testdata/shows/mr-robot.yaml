@@ -1,0 +1,16 @@
+# Episode names look like file names: "eps1.0_hellofriend.mov".
+title: Mr. Robot
+year: 2015
+seasons:
+  - n: 1
+    runs: [{count: 10, first_air: 2015-06-24}]
+    names:
+      1: "eps1.0_hellofriend.mov"
+      2: "eps1.1_ones-and-zer0es.mpeg"
+      3: "eps1.2_d3bug.mkv"
+      10: "eps1.9_zer0-day.avi"
+  - n: 2
+    runs: [{count: 12, first_air: 2016-07-13}]
+    names: {1: "eps2.0_unm4sk-pt1.tc"}
+  - {n: 3, runs: [{count: 10, first_air: 2017-10-11}]}
+  - {n: 4, runs: [{count: 13, first_air: 2019-10-06}]}

@@ -1,0 +1,53 @@
+# From the PR #52 review: season folders whose numbering restarts at 01,
+# with a file past the season's end. The folder decides how its numbers
+# read; an overflow file gets no episode and never flips the others.
+# Schema: see anime.yaml.
+
+- id: review-aot-season2-folder
+  show: attack-on-titan
+  torrent: "[Group] Shingeki no Kyojin Season 2 [BD 1080p]"
+  tags: [review, folder-season, overflow]
+  files:
+    - {path: "[Group] Shingeki no Kyojin - 01 [BD 1080p].mkv", expect: {eps: [S02E01]}}
+    - {path: "[Group] Shingeki no Kyojin - 02 [BD 1080p].mkv", expect: {eps: [S02E02]}}
+    - {path: "[Group] Shingeki no Kyojin - 12 [BD 1080p].mkv", expect: {eps: [S02E12]}}
+    - {path: "[Group] Shingeki no Kyojin - 13 [BD 1080p].mkv", expect: {kind: unknown}}
+
+- id: review-spyxfamily-season2-folder
+  show: spy-x-family
+  torrent: Spy x Family Season 2 [1080p]
+  tags: [review, folder-season, overflow]
+  files:
+    - {path: "Spy x Family - 01 [1080p].mkv", expect: {eps: [S02E01]}}
+    - {path: "Spy x Family - 06 [1080p].mkv", expect: {eps: [S02E06]}}
+    - {path: "Spy x Family - 13 [1080p].mkv", expect: {kind: unknown}}
+
+- id: review-spyxfamily-s3-folder
+  show: spy-x-family
+  torrent: "[Group] Spy x Family S3 [1080p]"
+  tags: [review, folder-season, overflow]
+  files:
+    - {path: "[Group] Spy x Family - 01 [1080p].mkv", expect: {eps: [S03E01]}}
+    - {path: "[Group] Spy x Family - 13 [1080p].mkv", expect: {eps: [S03E13]}}
+    - {path: "[Group] Spy x Family - 14 [1080p].mkv", expect: {kind: unknown}}
+
+- id: review-jjk-season2-folder
+  show: jujutsu-kaisen
+  torrent: "[Group] Jujutsu Kaisen Season 2 [1080p]"
+  tags: [review, folder-season, overflow]
+  files:
+    - {path: "[Group] Jujutsu Kaisen - 01 [1080p].mkv", expect: {eps: [S02E01]}}
+    - {path: "[Group] Jujutsu Kaisen - 23 [1080p].mkv", expect: {eps: [S02E23]}}
+    - {path: "[Group] Jujutsu Kaisen - 24 [1080p].mkv", expect: {kind: unknown}}
+
+# A season-1 batch: the folder's season and the absolute number agree, so
+# it's as sure as the same file alone.
+- id: review-season1-batch
+  show: spy-x-family
+  golden: true
+  torrent: "[Anime Time] Spy x Family (Season 01) [1080p][HEVC 10bit x265][AAC][Multi Sub] (Batch)"
+  tags: [review, folder-season, batch]
+  files:
+    - {path: "[Anime Time] Spy x Family - 01 [1080p][HEVC 10bit x265][AAC][Multi Sub].mkv", expect: {eps: [S01E01], min_conf: high}}
+    - {path: "[Anime Time] Spy x Family - 12 [1080p][HEVC 10bit x265][AAC][Multi Sub].mkv", expect: {eps: [S01E12], min_conf: high}}
+    - {path: "[Anime Time] Spy x Family - 25 [1080p][HEVC 10bit x265][AAC][Multi Sub].mkv", expect: {eps: [S01E25], min_conf: high}}

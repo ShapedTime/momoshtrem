@@ -1,0 +1,23 @@
+title: The Boys
+year: 2019
+seasons:
+  - n: 1
+    runs: [{count: 8, first_air: 2019-07-26}]
+    names: {1: "The Name of the Game", 2: "Cherry"}
+  - n: 2
+    runs: [{count: 8, first_air: 2020-09-04}]
+    names: {3: "Over the Hill with the Swords of a Thousand Men", 5: "We Gotta Go Now"}
+  - n: 3
+    runs: [{count: 8, first_air: 2022-06-03}]
+    names: {1: "Payback"}
+  - n: 4
+    runs: [{count: 8, first_air: 2024-06-13}]
+    names:
+      1: "Department of Dirty Tricks"
+      2: "Life Among the Septics"
+      3: "We'll Keep the Red Flag Flying Here"
+      4: "Wisdom of the Ages"
+      5: "Beware the Jabberwock, My Son"
+      6: "Dirty Business"
+      7: "The Insider"
+      8: "Assassination Run"

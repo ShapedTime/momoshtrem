@@ -1,0 +1,47 @@
+# TMDB keeps the 2005 revival's specials in season 0. Scene releases number
+# them their own way (S04E00, S04E14, ...).
+title: Doctor Who
+year: 2005
+seasons:
+  - n: 0
+    episodes:
+      - {e: 1, name: "Children in Need Special", air: 2005-11-18}
+      - {e: 2, name: "The Christmas Invasion", air: 2005-12-25}
+      - {e: 3, name: "The Runaway Bride", air: 2006-12-25}
+      - {e: 4, name: "Time Crash", air: 2007-11-16}
+      - {e: 5, name: "Voyage of the Damned", air: 2007-12-25}
+      - {e: 6, name: "The Next Doctor", air: 2008-12-25}
+      - {e: 7, name: "Planet of the Dead", air: 2009-04-11}
+      - {e: 8, name: "The Waters of Mars", air: 2009-11-15}
+      - {e: 9, name: "The End of Time (1)", air: 2009-12-25}
+      - {e: 10, name: "The End of Time (2)", air: 2010-01-01}
+  - n: 1
+    runs: [{count: 13, first_air: 2005-03-26}]
+    names:
+      1: "Rose"
+      2: "The End of the World"
+      3: "The Unquiet Dead"
+      4: "Aliens of London"
+      5: "World War Three"
+      6: "Dalek"
+  - n: 2
+    runs: [{count: 13, first_air: 2006-04-15}]
+    names: {1: "New Earth", 2: "Tooth and Claw"}
+  - n: 3
+    runs: [{count: 13, first_air: 2007-03-31}]
+    names: {1: "Smith and Jones"}
+  - n: 4
+    runs: [{count: 13, first_air: 2008-04-05}]
+    names:
+      1: "Partners in Crime"
+      2: "The Fires of Pompeii"
+      3: "Planet of the Ood"
+      4: "The Sontaran Stratagem"
+      5: "The Poison Sky"
+      10: "Midnight"
+      11: "Turn Left"
+      12: "The Stolen Earth"
+      13: "Journey's End"
+  - n: 5
+    runs: [{count: 13, first_air: 2010-04-03}]
+    names: {1: "The Eleventh Hour", 2: "The Beast Below"}

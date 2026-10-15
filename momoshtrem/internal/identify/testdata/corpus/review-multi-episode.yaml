@@ -1,0 +1,44 @@
+# From the PR #52 review: two episodes in one file, written with joiners.
+# Schema: see anime.yaml.
+
+- id: review-multi-nxnn-ampersand
+  show: friends
+  tags: [review, multi-episode]
+  files:
+    - {path: "Friends - 2x12 & 2x13 - The One After the Super Bowl.avi", size: 700MB, expect: {eps: [S02E12, S02E13], min_conf: high}}
+
+- id: review-multi-sxxeyy-ampersand
+  show: friends
+  tags: [review, multi-episode]
+  files:
+    - {path: "Friends - S02E12 & S02E13 - The One After the Super Bowl.mkv", expect: {eps: [S02E12, S02E13], min_conf: high}}
+
+- id: review-multi-sxxeyy-adjacent
+  show: friends
+  tags: [review, multi-episode]
+  files:
+    - {path: Friends.S02E12.S02E13.The.One.After.the.Super.Bowl.1080p.BluRay.x265-GRP.mkv, expect: {eps: [S02E12, S02E13], min_conf: high}}
+
+- id: review-multi-nxnn-plus
+  show: the-office
+  tags: [review, multi-episode]
+  files:
+    - {path: The Office - 6x04 + 6x05 - Niagara.avi, size: 700MB, expect: {eps: [S06E04, S06E05], min_conf: high}}
+
+- id: review-multi-nxnn-comma
+  show: friends
+  tags: [review, multi-episode]
+  files:
+    - {path: "Friends - 2x12, 2x13 - The One After the Super Bowl.avi", size: 700MB, expect: {eps: [S02E12, S02E13], min_conf: high}}
+
+- id: review-multi-nxnn-and
+  show: friends
+  tags: [review, multi-episode]
+  files:
+    - {path: Friends - 2x12 and 2x13.avi, size: 700MB, expect: {eps: [S02E12, S02E13], min_conf: high}}
+
+- id: review-multi-sxxeyy-plus
+  show: friends
+  tags: [review, multi-episode]
+  files:
+    - {path: Friends S02E12+E13 The One After the Super Bowl.mkv, expect: {eps: [S02E12, S02E13], min_conf: high}}

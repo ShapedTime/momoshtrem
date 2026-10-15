@@ -1,57 +1,139 @@
+// Package identify maps the files of a torrent to a show's episodes.
+//
+// Classify is pure: it reads file paths, sizes and a ShowCatalog, and
+// returns one Proposal per file with its target episodes, a confidence and
+// a short reason. It never imports the library or the subtitle packages;
+// internal/service builds the catalog from a library show.
+//
+// The rules are built to know when they aren't sure: a high-confidence
+// proposal may be applied without review, so the corpus test
+// (testdata/corpus) holds them to zero wrong high results.
 package identify
 
-// Confidence represents the confidence level of episode identification
+// TorrentFile is a file inside a torrent. Path runs from the torrent's root;
+// in a multi-file torrent its first segment is the torrent's folder.
+type TorrentFile struct {
+	Path string
+	Size int64
+}
+
+// Confidence is how sure a proposal is. High proposals may be applied
+// without review.
 type Confidence string
 
 const (
 	ConfidenceHigh   Confidence = "high"
 	ConfidenceMedium Confidence = "medium"
 	ConfidenceLow    Confidence = "low"
-	ConfidenceNone   Confidence = "none"
+	// ConfidenceNone is a proposal without a target.
+	ConfidenceNone Confidence = ""
 )
 
-// FileType represents the type of media file
-type FileType string
+// Rank orders confidences: none 0, low 1, medium 2, high 3.
+func (c Confidence) Rank() int {
+	switch c {
+	case ConfidenceHigh:
+		return 3
+	case ConfidenceMedium:
+		return 2
+	case ConfidenceLow:
+		return 1
+	}
+	return 0
+}
+
+// Valid reports whether c is high, medium or low.
+func (c Confidence) Valid() bool { return c.Rank() > 0 }
+
+// Kind is what a file is. The job contract (PLAN §6 "Assignment") folds it
+// into kind, group and extra_type:
+//   - episode: kind episode; group matched when high, else needs_review;
+//   - special: kind episode; group specials when high, needs_review with a
+//     lower confidence, unmatched without a target;
+//   - unknown: kind episode, group unmatched;
+//   - extra and sample: kind extra, group extras, with their ExtraType;
+//   - subtitle: kind subtitle, following LinkedVideo.
+type Kind string
 
 const (
-	FileTypeVideo    FileType = "video"
-	FileTypeSubtitle FileType = "subtitle"
+	KindEpisode  Kind = "episode"  // a regular episode (or several)
+	KindSpecial  Kind = "special"  // a season-0 episode, or a file that looks like one
+	KindExtra    Kind = "extra"    // openings, trailers, fonts, superseded versions...: ignored by default
+	KindSample   Kind = "sample"   // a sample clip: ignored by default
+	KindSubtitle Kind = "subtitle" // follows the video it belongs to
+	KindUnknown  Kind = "unknown"  // a video the rules couldn't place
 )
 
-// QualityInfo contains quality metadata extracted from filenames
-type QualityInfo struct {
-	Resolution string `json:"resolution"` // 2160p, 1080p, 720p, 480p
-	Source     string `json:"source"`     // BluRay, WEB-DL, HDTV
-	Codec      string `json:"codec"`      // x264, x265, HEVC
-	HDR        bool   `json:"hdr"`
+// ExtraType says what an extra (or a sample) is.
+type ExtraType string
+
+const (
+	ExtraOpening    ExtraType = "opening"
+	ExtraEnding     ExtraType = "ending"
+	ExtraSample     ExtraType = "sample"
+	ExtraTrailer    ExtraType = "trailer"
+	ExtraFeaturette ExtraType = "featurette"
+	ExtraFont       ExtraType = "font"
+	ExtraInfo       ExtraType = "info"
+	ExtraImage      ExtraType = "image"
+	ExtraSuperseded ExtraType = "superseded"
+	ExtraOther      ExtraType = "other"
+)
+
+// Source is who decided a proposal.
+type Source string
+
+const (
+	SourceRules Source = "rules"
+	SourceAI    Source = "ai"
+)
+
+// Method names the evidence behind a proposal's targets.
+type Method string
+
+const (
+	MethodSxxEyy        Method = "sxxeyy"         // "S01E05" in the name
+	MethodNxNN          Method = "nxnn"           // "1x05"
+	MethodSeasonNumber  Method = "season_number"  // "S2 - 05", "Season 3 - 01"
+	MethodFolderSeason  Method = "folder_season"  // a bare number read in the folder's (or the only) season
+	MethodAbsolute      Method = "absolute"       // a bare number read as an absolute episode number
+	MethodDate          Method = "date"           // an air date
+	MethodRemapGroup    Method = "remap_group"    // a release season mapped through a TMDB episode group
+	MethodRemapCour     Method = "remap_cour"     // a release season mapped to a cour of a TMDB season
+	MethodRemapOverflow Method = "remap_overflow" // an episode past its season's end, counted on
+	MethodSpecialNumber Method = "special_number" // "S00E05", "OVA 2"
+	MethodTitle         Method = "title"          // the episode's name in the file name
+	MethodConcatenated  Method = "concatenated"   // "101" read as S01E01
+	MethodHint          Method = "hint"           // the user's hint
+	MethodLinked        Method = "linked"         // a subtitle following its video
+	MethodAI            Method = "ai"             // the AI resolver
+)
+
+// Target is an episode a file maps to.
+type Target struct {
+	EpisodeID int64 `json:"episode_id"`
+	Season    int   `json:"season"`
+	Episode   int   `json:"episode"`
 }
 
-// IdentifiedFile represents a file with identified episode information
-type IdentifiedFile struct {
-	FilePath         string      `json:"file_path"`
-	FileSize         int64       `json:"file_size"`
-	FileType         FileType    `json:"file_type"`
-	Season           int         `json:"season"`
-	Episodes         []int       `json:"episodes"`           // Expanded list, e.g., [1,2,3,4,5] for E01-E05
-	IsSpecial        bool        `json:"is_special"`
-	Quality          QualityInfo `json:"quality"`
-	Confidence       Confidence  `json:"confidence"`
-	PatternUsed      string      `json:"pattern_used"`
-	NeedsReview      bool        `json:"needs_review"`
-	SeasonFromFolder bool        `json:"season_from_folder"` // true if season extracted from folder path
+// Proposal is the classifier's answer for one file.
+type Proposal struct {
+	Path      string    `json:"path"`
+	Size      int64     `json:"size"`
+	Kind      Kind      `json:"kind"`
+	ExtraType ExtraType `json:"extra_type,omitempty"` // extras and samples
+	// Targets are the episodes the file maps to, in season and episode
+	// order: several for a multi-episode file, none when unmatched.
+	Targets    []Target   `json:"targets"`
+	Confidence Confidence `json:"confidence"` // ConfidenceNone without targets
+	Method     Method     `json:"method,omitempty"`
+	Source     Source     `json:"source"`
+	Reason     string     `json:"reason"` // at most 120 characters
+	// LinkedVideo is the video a subtitle belongs to.
+	LinkedVideo string `json:"linked_video,omitempty"`
+	// SupersededBy is the newer version (v2) that replaces this file.
+	SupersededBy string `json:"superseded_by,omitempty"`
 }
 
-// IdentificationResult is the result of identifying episodes in a torrent
-type IdentificationResult struct {
-	TorrentName       string           `json:"torrent_name"`
-	IdentifiedFiles   []IdentifiedFile `json:"identified_files"`
-	UnidentifiedFiles []string         `json:"unidentified_files"`
-	TotalFiles        int              `json:"total_files"`
-	IdentifiedCount   int              `json:"identified_count"`
-}
-
-// TorrentFile represents a file in a torrent (input to identifier)
-type TorrentFile struct {
-	Path string
-	Size int64
-}
+// HasTarget reports whether the proposal maps to at least one episode.
+func (p *Proposal) HasTarget() bool { return len(p.Targets) > 0 }

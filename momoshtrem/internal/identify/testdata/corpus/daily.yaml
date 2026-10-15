@@ -1,0 +1,55 @@
+# Daily and weekly shows named by air date. Schema: see anime.yaml.
+
+- id: daily-show-week
+  show: the-daily-show
+  golden: true
+  torrent: The.Daily.Show.Week.of.2024.03.11.1080p.WEB.h264-EDITH
+  tags: [date, daily]
+  files:
+    - {path: The.Daily.Show.2024.03.11.Brian.Tyree.Henry.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S29E37], min_conf: high}}
+    - {path: The.Daily.Show.2024.03.12.Jane.Goodall.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S29E38], min_conf: high}}
+    - {path: The.Daily.Show.2024.03.13.Ken.Burns.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S29E39], min_conf: high}}
+    - {path: The.Daily.Show.2024.03.14.Hasan.Minhaj.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S29E40], min_conf: high}}
+
+- id: daily-show-iso-date
+  show: the-daily-show
+  tags: [date]
+  files:
+    - {path: The Daily Show 2024-03-14 Hasan Minhaj 720p.mkv, size: 500MB, expect: {eps: [S29E40], min_conf: high}}
+
+- id: daily-show-compact-date
+  show: the-daily-show
+  tags: [date]
+  files:
+    - {path: The.Daily.Show.20240312.720p.WEB.mkv, size: 500MB, expect: {eps: [S29E38], min_conf: high}}
+
+- id: daily-show-not-in-tmdb
+  show: the-daily-show
+  tags: [date, tmdb-behind]
+  files:
+    - {path: The.Daily.Show.2024.06.20.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {kind: unknown}}
+
+- id: daily-show-2025
+  show: the-daily-show
+  tags: [date]
+  files:
+    - {path: The.Daily.Show.2025.01.07.1080p.WEB.h264-EDITH.mkv, size: 900MB, expect: {eps: [S30E02], min_conf: high}}
+
+- id: last-week-tonight
+  show: last-week-tonight
+  golden: true
+  tags: [date, weekly]
+  files:
+    - {path: Last.Week.Tonight.with.John.Oliver.2024.03.17.1080p.WEB.h264-EDITH.mkv, size: 1.5GB, expect: {eps: [S11E05], min_conf: high}}
+
+- id: last-week-tonight-se
+  show: last-week-tonight
+  tags: [scene]
+  files:
+    - {path: Last.Week.Tonight.with.John.Oliver.S11E05.1080p.WEB.h264-EDITH.mkv, size: 1.5GB, expect: {eps: [S11E05], min_conf: high}}
+
+- id: last-week-tonight-dashed
+  show: last-week-tonight
+  tags: [date]
+  files:
+    - {path: Last Week Tonight with John Oliver - 2023-02-26.mkv, size: 1.5GB, expect: {eps: [S10E02], min_conf: high}}

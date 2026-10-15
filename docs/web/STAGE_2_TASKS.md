@@ -1,5 +1,7 @@
 # Stage 2: Infuse Media Identification - Implementation Tasks
 
+> **Historical.** This is the original Stage 2 plan from the distribyted era. Its episode identifier (`patterns.go`, `identifier.go`, `FallbackHandler`) was built as `momoshtrem/internal/identify` and has since been replaced by the rules classifier (#5): `Classify` in `momoshtrem/internal/identify`, with an AI `Resolver` instead of the fallback handler. Don't build from the tasks below.
+
 Solve Infuse's inability to identify TV shows/movies from distribyted's WebDAV by adding TMDB metadata support and virtual file renaming.
 
 ---

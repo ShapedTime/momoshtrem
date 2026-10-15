@@ -1,0 +1,13 @@
+# Season 1 is two cours (12 + 13) that TMDB keeps together.
+title: Spy x Family
+original_title: SPY×FAMILY
+year: 2022
+is_anime: true
+ordering: absolute
+seasons:
+  - n: 1
+    runs: [{count: 12, first_air: 2022-04-09}, {count: 13, first_air: 2022-10-01}]
+  - n: 2
+    runs: [{count: 12, first_air: 2023-10-07}]
+  - n: 3
+    runs: [{count: 13, first_air: 2025-10-04}]
