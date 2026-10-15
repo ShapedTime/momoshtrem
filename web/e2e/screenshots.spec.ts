@@ -198,6 +198,45 @@ test.describe('HDRezka sheet', () => {
     await shoot(page, testInfo, 'hdrezka/blocked');
   });
 
+  test('show: episodes', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/209867?sheet=hdrezka&show=209867&season=1');
+    await page.getByRole('button', { name: 'Use Провожающая в последний путь Фрирен (2023)' }).click();
+    await page.getByText('10 episodes selected').waitFor();
+    await page.getByRole('radio', { name: '1080p, 640 MB an episode' }).waitFor();
+    await page.getByRole('heading', { name: 'Episodes', exact: true }).evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/show-episodes');
+  });
+
+  test('show: seasons', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/95396?sheet=hdrezka&show=95396&season=2');
+    await page.getByRole('button', { name: 'Use Разделение (2022)' }).click();
+    await page.getByRole('button', { name: /^Select all/ }).click();
+    await page.getByRole('heading', { name: 'Episodes', exact: true }).evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/show-seasons');
+  });
+
+  test('show: partial failure', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'hdrezka-partial'));
+    await signIn(page, '/tv/209867?sheet=hdrezka&show=209867&season=1');
+    await page.getByRole('button', { name: 'Use Провожающая в последний путь Фрирен (2023)' }).click();
+    await page.getByRole('radio', { name: '1080p, 640 MB an episode' }).waitFor();
+    await page.getByRole('button', { name: 'Stream 10 episodes' }).click();
+    const alert = page.getByRole('alert');
+    await alert.waitFor();
+    await alert.evaluate((banner) => banner.scrollIntoView({ block: 'end' }));
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/show-partial');
+  });
+
+  test('episode sheet', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/95396?sheet=episode&tmdb=95396&se=S02E05');
+    await page.getByText('Source: Torrent').waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'hdrezka/episode-sheet');
+  });
+
   test('ready with the stream', async ({ page }, testInfo) => {
     await open(page);
     await page.getByRole('button', { name: BEST }).click();
