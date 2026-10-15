@@ -1,0 +1,28 @@
+# Weekly, one grouped PR per ecosystem. Runbook: docs/ops/CI.md
+version: 2
+updates:
+  # Workflow actions (pinned by commit SHA; Dependabot updates the SHA and its comment)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Skip releases younger than a week: a hijacked release is usually caught by then
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Dockerfile base images
+  - package-ecosystem: docker
+    directories:
+      - /momoshtrem
+      - /web
+    schedule:
+      interval: weekly
+    # Skip releases younger than a week: a hijacked release is usually caught by then
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        patterns: ["*"]

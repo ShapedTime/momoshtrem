@@ -77,7 +77,8 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 
 ```
  PR ───────────► CI checks (Go vet/test, web lint/tsc/jest, docker build)
- merge to main ─► CI builds images ─► GHCR  momoshtrem:<sha>  web:<sha>
+ merge to main ─► CI builds images ─► GHCR  ghcr.io/shapedtime/momoshtrem:<sha>
+                                            ghcr.io/shapedtime/momoshtrem-web:<sha>
 
  "Deploy" button (workflow_dispatch, pick a sha)
       └─► moves the `production` ref to <sha>

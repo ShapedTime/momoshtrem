@@ -1,0 +1,157 @@
+# Checks every PR, and publishes images for every main commit whose checks
+# passed. Runbook: docs/ops/CI.md
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to a PR cancels its older run. Every main commit runs to the end,
+# so each one gets its images.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: momoshtrem_test
+          POSTGRES_USER: momoshtrem
+          POSTGRES_PASSWORD: momoshtrem
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U momoshtrem"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # A throwaway database, so the Postgres integration tests run instead of skipping
+      MOMOSHTREM_TEST_DATABASE_URL: postgres://momoshtrem:momoshtrem@localhost:5432/momoshtrem_test?sslmode=disable
+    defaults:
+      run:
+        working-directory: momoshtrem
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: momoshtrem/go.mod
+          cache-dependency-path: momoshtrem/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Test on the Node major the image ships with, so a Dependabot bump of
+      # web/Dockerfile is checked here too
+      - id: node
+        run: echo "major=$(sed -n 's/^FROM node:\([0-9]*\)-.*/\1/p' Dockerfile | head -n 1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.node.outputs.major }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  # PRs: prove both images still build. Runs next to the checks, not after them.
+  image:
+    if: github.event_name == 'pull_request'
+    name: image (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: momoshtrem
+            context: momoshtrem
+          - image: momoshtrem-web
+            context: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: false
+          # Read the cache main writes; PR runs don't write, so they can't evict it
+          cache-from: type=gha,scope=${{ matrix.image }}
+
+  # main: publish ghcr.io/shapedtime/<image>:<full sha>, only once the checks passed
+  publish:
+    if: github.event_name == 'push' && github.repository == 'ShapedTime/momoshtrem'
+    needs: [go, web]
+    name: publish (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # push to GHCR with GITHUB_TOKEN
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: momoshtrem
+            context: momoshtrem
+            # Reported by /api/status
+            build-args: VERSION=${{ github.sha }}
+          - image: momoshtrem-web
+            context: web
+            build-args: ''
+    env:
+      IMAGE: ghcr.io/shapedtime/${{ matrix.image }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Tags are immutable: a re-run never replaces an image that may already be deployed
+      - id: existing
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "$IMAGE is already published; skipping" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}
+          build-args: ${{ matrix.build-args }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max

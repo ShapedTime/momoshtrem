@@ -27,7 +27,7 @@ describe('getWebStatus', () => {
     );
     const result = await getWebStatus(false);
     expect(token).toBe('shared-secret');
-    expect(result.ok && result.status.version).toBe('0.9.2');
+    expect(result.ok && result.status.version).toBe(systemStatus().version);
     expect(result.ok && result.status.web?.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 

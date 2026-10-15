@@ -20,9 +20,6 @@ data/
 # macOS
 .DS_Store
 
-# GitHub (if using private workflows)
-.github/
-
 # IDE
 .idea/
 .vscode/

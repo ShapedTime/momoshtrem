@@ -12,7 +12,7 @@ import { PlaceholderSection } from './PlaceholderSection';
 import { PlaybackSection } from './PlaybackSection';
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections';
 import { StatusSection } from './StatusSection';
-import { serviceRows, summarize } from './status-model';
+import { serviceRows, summarize, versionLabel } from './status-model';
 
 const GROUPS = ['Integrations', 'Preferences', 'Playback', 'System'] as const;
 
@@ -104,7 +104,7 @@ export function SettingsView() {
             <LogOut size={18} aria-hidden="true" /> Log out
           </button>
           <p className="t-small px-3 text-fg-3">
-            momoshtrem {status ? `${status.version} · web ${status.web?.version ?? ''}` : ''}
+            momoshtrem {status ? `${versionLabel(status.version)} · web ${status.web ? versionLabel(status.web.version) : ''}` : ''}
           </p>
         </nav>
 
