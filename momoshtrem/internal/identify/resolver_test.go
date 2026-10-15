@@ -2,6 +2,7 @@ package identify
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -205,6 +206,27 @@ func TestFlagDisagreements(t *testing.T) {
 	if d := disputes[0]; d.Path != "a.mkv" || targetLabel(d.Rules) != "S01E28" || targetLabel(d.AI) != "S00E03" ||
 		d.AIKind != KindEpisode || d.AIConfidence != ConfidenceHigh {
 		t.Errorf("dispute = %+v", d)
+	}
+}
+
+func TestAgreements(t *testing.T) {
+	cat := show(t, "frieren")
+	rules := []Proposal{
+		{Path: "a.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 28), 1, 28}}, Confidence: ConfidenceHigh, Source: SourceRules},
+		{Path: "b.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 5), 1, 5}}, Confidence: ConfidenceMedium, Source: SourceRules},
+		{Path: "c.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 1), 1, 1}, {fixtureID(1, 2), 1, 2}}, Confidence: ConfidenceHigh, Source: SourceRules},
+		{Path: "d.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 3), 1, 3}}, Confidence: ConfidenceHigh, Source: SourceRules},
+		{Path: "e.mkv", Kind: KindEpisode, Targets: []Target{{fixtureID(1, 4), 1, 4}}, Confidence: ConfidenceHigh, Source: SourceRules},
+	}
+	got := Agreements(rules, []AIFile{
+		{Path: "a.mkv", Kind: KindEpisode, AbsoluteNumber: intp(28), Confidence: ConfidenceMedium},          // by absolute number
+		{Path: "b.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{5}, Confidence: ConfidenceHigh}, // rules not high
+		{Path: "c.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{2, 1}, Confidence: ConfidenceHigh},
+		{Path: "d.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{3}, Confidence: ConfidenceLow},  // too unsure
+		{Path: "e.mkv", Kind: KindEpisode, Season: intp(1), Episodes: []int{5}, Confidence: ConfidenceHigh}, // disagrees
+	}, cat)
+	if !reflect.DeepEqual(got, map[string]bool{"a.mkv": true, "c.mkv": true}) {
+		t.Errorf("Agreements = %v", got)
 	}
 }
 

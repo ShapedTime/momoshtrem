@@ -173,7 +173,7 @@ func (s *JobService) runRecheck(ctx context.Context, id int64, scope RecheckScop
 		paths = append(paths, p.FilePath)
 	}
 
-	rctx, cancel := context.WithTimeout(ctx, resolveTime(len(paths)))
+	rctx, cancel := context.WithTimeout(ctx, s.resolveTime(id, len(paths)))
 	out, aiErr := s.resolver.Resolve(rctx, resolveInput(job, show, cat, job.TorrentName, files, rules, paths, settings))
 	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
 	cancel()
@@ -197,7 +197,8 @@ func (s *JobService) runRecheck(ctx context.Context, id int64, scope RecheckScop
 			for _, d := range disputes {
 				disputed[d.Path] = true
 			}
-			changed := recheckChanges(t.Proposals, rules, merged, scope, hinted, disputed)
+			agreed := identify.Agreements(rules, out.Files, cat)
+			changed := recheckChanges(t.Proposals, rules, merged, scope, hinted, disputed, agreed)
 			if err := t.UpdateProposals(changed); err != nil {
 				return err
 			}
@@ -209,10 +210,21 @@ func (s *JobService) runRecheck(ctx context.Context, id int64, scope RecheckScop
 	})
 }
 
+// maxResolveWaves caps the time an AI run gets (15 minutes): a bigger
+// scope keeps the answers it got in time, as a partial run.
+const maxResolveWaves = 10
+
 // resolveTime is the time an AI run over n files gets: resolveBudget per
-// wave of requests (ai.Waves), so a big ai_always pack can finish.
-func resolveTime(n int) time.Duration {
-	return resolveBudget * time.Duration(ai.Waves(n))
+// wave of requests (ai.Waves), so a big ai_always pack can finish, up to
+// maxResolveWaves waves.
+func (s *JobService) resolveTime(jobID int64, n int) time.Duration {
+	waves := ai.Waves(n)
+	if waves > maxResolveWaves {
+		s.log.Warn("AI run capped: answers past the time limit are left out", "job_id", jobID, "files", n,
+			"waves", waves, "limit", resolveBudget*maxResolveWaves)
+		waves = maxResolveWaves
+	}
+	return resolveBudget * time.Duration(waves)
 }
 
 // resolveInput is what the resolver gets for a job: the files and the
@@ -359,8 +371,12 @@ func rulesHigh(r identify.Proposal, p *library.AssignmentProposal) bool {
 // accepted proposal never loses its target. The decision stays too, except
 // that a disputed proposal on its group's default acceptance goes back to
 // pending, as on the first run, so the job waits for the user.
+//
+// When the AI agrees with a high rules answer an earlier re-check flagged
+// (agreed), the flag is lifted: the rules' confidence and reason come back,
+// and the decision stays (pending) for the user.
 func recheckChanges(current []*library.AssignmentProposal, before, after []identify.Proposal, scope RecheckScope,
-	hinted bool, disputed map[string]bool) []*library.AssignmentProposal {
+	hinted bool, disputed, agreed map[string]bool) []*library.AssignmentProposal {
 	type pair struct{ before, after identify.Proposal }
 	byPath := make(map[string]pair, len(before))
 	for i := range before {
@@ -369,7 +385,7 @@ func recheckChanges(current []*library.AssignmentProposal, before, after []ident
 	var changed []*library.AssignmentProposal
 	for _, p := range recheckScope(current, scope) {
 		pr, ok := byPath[p.FilePath]
-		if !ok || sameAnswer(pr.before, pr.after) {
+		if !ok || (sameAnswer(pr.before, pr.after) && !agreed[p.FilePath]) {
 			continue
 		}
 		a := pr.after

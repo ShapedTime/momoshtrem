@@ -368,15 +368,44 @@ func TestJob_FirstRunPartialAnswers(t *testing.T) {
 	}
 }
 
-// An AI run gets 90 seconds a wave of requests, so a big pack finishes.
+// An AI run gets 90 seconds a wave of requests, so a big pack finishes,
+// up to 15 minutes.
 func TestResolveTime(t *testing.T) {
+	s := NewJobService(JobDeps{})
 	for _, tt := range []struct {
 		files int
 		want  time.Duration
-	}{{1, 90 * time.Second}, {240, 90 * time.Second}, {241, 180 * time.Second}, {1000, 450 * time.Second}} {
-		if got := resolveTime(tt.files); got != tt.want {
+	}{{1, 90 * time.Second}, {240, 90 * time.Second}, {241, 180 * time.Second}, {1000, 450 * time.Second},
+		{2400, 15 * time.Minute}, {5000, 15 * time.Minute}} {
+		if got := s.resolveTime(1, tt.files); got != tt.want {
 			t.Errorf("resolveTime(%d) = %v, want %v", tt.files, got, tt.want)
 		}
+	}
+}
+
+// When the AI later agrees with a high rules answer a re-check flagged,
+// the flag is lifted: the rules' confidence and reason come back, and the
+// proposal stays pending for the user.
+func TestReclassify_AgreementLiftsFlag(t *testing.T) {
+	r := newRecheckEnv(t)
+	r.resolver.answer(aiEpisode(r.one, 1, 3, identify.ConfidenceHigh, "the third"))
+	d := r.recheck(RecheckAll, "")
+	if one := proposalByPath(d, "S01E01.1080p.WEB-GRP.mkv"); !strings.HasPrefix(one.Reason, "AI suggests") || one.Decision != "pending" {
+		t.Fatalf("flagged = %+v", one)
+	}
+
+	r.resolver.answer(aiEpisode(r.one, 1, 1, identify.ConfidenceHigh, "S01E01"))
+	d = r.recheck(RecheckAll, "")
+	one := proposalByPath(d, "S01E01.1080p.WEB-GRP.mkv")
+	if targetLabels(one) != "S01E01" || *one.Confidence != "high" || one.Source != "rules" || strings.HasPrefix(one.Reason, "AI suggests") ||
+		one.Reason == "" || one.Decision != "pending" || !one.Updated {
+		t.Errorf("after the AI agrees = %s %s %s %q %s updated %v", targetLabels(one), *one.Confidence, one.Source, one.Reason, one.Decision, one.Updated)
+	}
+
+	// Agreeing again changes nothing.
+	d = r.recheck(RecheckAll, "")
+	if one := proposalByPath(d, "S01E01.1080p.WEB-GRP.mkv"); one.Updated || *one.Confidence != "high" {
+		t.Errorf("a second agreement = %+v", one)
 	}
 }
 

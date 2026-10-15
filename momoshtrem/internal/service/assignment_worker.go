@@ -564,7 +564,7 @@ func seasonLikeGroup(t int) bool {
 // reports whether the run succeeded (and the job is still resolving).
 func (s *JobService) resolveFirst(ctx context.Context, job *library.AssignmentJob, show *library.Show, cat *identify.ShowCatalog,
 	info *torrent.TorrentInfo, rules []identify.Proposal, scope []string, settings library.AISettings) bool {
-	rctx, cancel := context.WithTimeout(ctx, resolveTime(len(scope)))
+	rctx, cancel := context.WithTimeout(ctx, s.resolveTime(job.ID, len(scope)))
 	out, aiErr := s.resolver.Resolve(rctx, resolveInput(job, show, cat, info.Name, info.Files, rules, scope, settings))
 	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
 	cancel()

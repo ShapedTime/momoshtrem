@@ -42,18 +42,16 @@ func (s *AIStore) CacheGet(ctx context.Context, key string) ([]byte, bool, error
 }
 
 // CachePut stores a JSON payload under key for ttl (0: no expiry),
-// replacing any earlier one.
+// replacing any earlier one. The expiry is computed by the database, whose
+// clock CacheGet and DeleteExpiredCache compare it with.
 func (s *AIStore) CachePut(ctx context.Context, feature, key string, payload []byte, ttl time.Duration) error {
-	var expires any
-	if ttl > 0 {
-		expires = time.Now().Add(ttl)
-	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO ai_cache (key, feature, payload, created_at, expires_at)
-		VALUES ($1, $2, $3::jsonb, NOW(), $4)
+		VALUES ($1, $2, $3::jsonb, NOW(),
+		        CASE WHEN $4::bigint > 0 THEN NOW() + $4::bigint * INTERVAL '1 microsecond' END)
 		ON CONFLICT (key) DO UPDATE
 		SET feature = EXCLUDED.feature, payload = EXCLUDED.payload, created_at = NOW(), expires_at = EXCLUDED.expires_at
-	`, key, feature, string(payload), expires)
+	`, key, feature, string(payload), ttl.Microseconds())
 	if err != nil {
 		return fmt.Errorf("failed to write the AI cache: %w", err)
 	}

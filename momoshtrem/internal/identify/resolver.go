@@ -297,6 +297,37 @@ func FlagDisagreements(merged []Proposal, ai []AIFile, cat *ShowCatalog) ([]Prop
 	return out, disputes
 }
 
+// Agreements lists the files whose high-confidence rules answer the AI
+// confirms: it names the same episodes, at medium or high confidence. It's
+// FlagDisagreements' other half: a re-check uses it to lift a flag an
+// earlier run set, once the AI agrees with the rules.
+func Agreements(rules []Proposal, ai []AIFile, cat *ShowCatalog) map[string]bool {
+	byPath := make(map[string]Proposal, len(rules))
+	for _, p := range rules {
+		byPath[p.Path] = p
+	}
+	ix := newIndex(cat, time.Time{})
+	out := map[string]bool{}
+	seen := map[string]bool{}
+	for _, a := range ai {
+		p, ok := byPath[a.Path]
+		if !ok || seen[a.Path] {
+			continue
+		}
+		seen[a.Path] = true
+		if p.Source != SourceRules || p.Confidence != ConfidenceHigh || ClassOf(p.Path) != ClassVideo ||
+			(p.Kind != KindEpisode && p.Kind != KindSpecial) ||
+			(a.Kind != KindEpisode && a.Kind != KindSpecial) ||
+			(a.Confidence != ConfidenceHigh && a.Confidence != ConfidenceMedium) {
+			continue
+		}
+		if eps := ix.resolveAI(a); eps != nil && sameTargets(targetsOf(eps), p.Targets) {
+			out[p.Path] = true
+		}
+	}
+	return out
+}
+
 // sameTargets reports whether two target lists name the same episodes.
 func sameTargets(a, b []Target) bool {
 	if len(a) != len(b) {
