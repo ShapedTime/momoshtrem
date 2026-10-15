@@ -8,14 +8,27 @@ interface NeedsReviewBannerProps {
   movie?: boolean;
 }
 
-/** Files the matcher wasn't sure about (B2): one link to the mapping review (#5). Nothing when none need review. */
+/**
+ * The way back to an open mapping review (B2, #5): files the matcher wasn't
+ * sure about, or (count 0) a job with nothing to decide that waits for Apply,
+ * or for its AI check (`review_job_id` stays set, PLAN §6 "Review rules").
+ * Nothing when nothing waits.
+ */
 export function NeedsReviewBanner({ count, jobId, movie = false }: NeedsReviewBannerProps) {
-  if (count <= 0 || (movie && jobId === null)) return null;
   const action = jobId !== null && (
     <ButtonLink href={`/mapping/${jobId}`} size="sm">
       Review mapping
     </ButtonLink>
   );
+  if (count <= 0) {
+    if (jobId === null) return null;
+    return (
+      <Banner tone="review" title="Finish this torrent’s mapping" action={action}>
+        Open it to check and apply. Infuse shows {movie ? 'the movie' : 'the episodes'} once it’s applied.
+      </Banner>
+    );
+  }
+  if (movie && jobId === null) return null;
   if (movie) {
     return (
       <Banner tone="review" title="Pick the file to use" action={action}>

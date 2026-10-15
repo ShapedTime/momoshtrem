@@ -234,6 +234,18 @@ test.describe('mapping review', () => {
     await shoot(page, testInfo, 'mapping/applied');
   });
 
+  test('ready to apply: the show’s way back', async ({ page }, testInfo) => {
+    await signIn(page, '/mapping/101');
+    await page.getByRole('button', { name: 'Accept all 2' }).click();
+    await page.getByText('1 file stays unmapped. You can map it later.').waitFor();
+    await page.getByRole('link', { name: 'Back to Frieren' }).click();
+    const banner = page.locator('.banner').filter({ hasText: 'Finish this torrent’s mapping' });
+    await banner.waitFor();
+    await banner.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'show/ready-to-apply');
+  });
+
   test('recheck: open', async ({ page }, testInfo) => {
     await signIn(page, '/mapping/101');
     const panel = page.getByRole('region', { name: 'Re-check with AI' });

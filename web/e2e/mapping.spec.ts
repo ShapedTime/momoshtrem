@@ -117,6 +117,23 @@ test.describe('mapping review', () => {
     await expect(page.getByRole('link', { name: 'Review mapping' })).toHaveCount(0);
   });
 
+  test('a job with nothing left to decide keeps its way in from the show until it’s applied', async ({ page }) => {
+    // Accept the pending files without applying: the job is ready, needs_review is 0, review_job_id stays set
+    await signIn(page, '/mapping/101');
+    await page.getByRole('button', { name: 'Accept all 2' }).click();
+    await expect(page.locator('.map-foot-msg')).toHaveText('1 file stays unmapped. You can map it later.');
+    await page.getByRole('link', { name: 'Back to Frieren' }).click();
+    await expect(page).toHaveURL(/\/tv\/209867$/);
+
+    const banner = page.locator('.banner').filter({ hasText: 'Finish this torrent’s mapping' });
+    await expect(banner).toContainText('Open it to check and apply. Infuse shows the episodes once it’s applied.');
+    await expect(page.getByText(/need a quick review|needs a quick review/)).toHaveCount(0);
+    await expectAccessibleAndContained(page);
+    await banner.getByRole('link', { name: 'Review mapping' }).click();
+    await expect(page).toHaveURL(/\/mapping\/101$/);
+    await expect(applyButton(page)).toHaveAttribute('aria-disabled', 'false');
+  });
+
   test('Doctor Who: a conflict blocks Apply, and clicking it goes to the conflict', async ({ page }) => {
     await signIn(page, '/mapping/103');
     await expect(page.locator('.map-foot-msg')).toHaveText('Two files point at the same episode. Keep one.');
