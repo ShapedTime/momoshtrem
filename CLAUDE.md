@@ -156,8 +156,9 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/library/assignment_job*.go`, `ai_store.go`, `settings_ai.go` - Jobs and proposals (claimed with `FOR UPDATE SKIP LOCKED`), `ai_usage` and `ai_cache`, AI settings in `app_settings`
 - `cmd/classifier-eval/` - The classifier on the golden corpus, rules and AI modes (Commands above)
 - `internal/subtitle/` - Subtitles: OpenSubtitles search ranked by release match, downloads, torrent subtitles
-- `internal/hdrezka/` - HDRezka client: search, title pages and translations, CDN streams (MP4 qualities, subtitles), sizes, ranking against TMDB (`cmd/momoshtrem/probe.go`: `hdrezka-probe`)
-- `internal/vfs/library_fs.go` - Virtual filesystem
+- `internal/hdrezka/` - HDRezka client: search, title pages and translations, CDN streams (MP4 qualities, subtitles), sizes, ranking against TMDB (`cmd/momoshtrem/probe.go`: `hdrezka-probe`); `resolver.go` caches signed links, `streamer.go` opens Range bodies on the CDN
+- `internal/service/hdrezka*.go` - HDRezka search, titles, streams and synchronous assigns (`_assign`); `hdrezka_source.go` streams stored streams for the VFS
+- `internal/vfs/library_fs.go` - Virtual filesystem; `remote_file.go` streams non-torrent (HDRezka) files
 - `internal/torrent/service.go` - Torrent service interface
 - `internal/streaming/prioritizer.go` - Piece prioritization
 
