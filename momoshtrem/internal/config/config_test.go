@@ -15,6 +15,7 @@ var envVars = []string{
 	"WEBDAV_AUTH_ENABLED", "WEBDAV_USERNAME", "WEBDAV_PASSWORD",
 	"DATABASE_URL", "METRICS_ENABLED", "METRICS_PORT",
 	"TMDB_API_KEY", "TMDB_LANGUAGE", "TMDB_RPS", "JACKETT_URL", "JACKETT_API_KEY", "ANTHROPIC_API_KEY",
+	"HDREZKA_ENABLED", "HDREZKA_URL",
 	"TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "SECRET_KEY",
 	"OPENSUBTITLES_API_KEY", "OPENSUBTITLES_USERNAME", "OPENSUBTITLES_PASSWORD",
 }
@@ -301,6 +302,73 @@ func TestLoad_TMDBSettings(t *testing.T) {
 				t.Errorf("TMDB = (%q, %d), want (%q, %d)", cfg.TMDB.Language, cfg.TMDB.RPS, tt.wantLang, tt.wantRPS)
 			}
 		})
+	}
+}
+
+func TestLoad_HDRezka(t *testing.T) {
+	tests := []struct {
+		name        string
+		file        string
+		env         map[string]string
+		wantEnabled bool
+		wantURL     string
+		wantErr     string // "" means valid
+	}{
+		{"defaults", "", nil, false, "https://rezka.ag", ""},
+		{"file", "hdrezka:\n  enabled: true\n  url: https://hdrezka.me\n", nil, true, "https://hdrezka.me", ""},
+		{"env wins over file", "hdrezka:\n  url: https://hdrezka.me\n", map[string]string{"HDREZKA_ENABLED": "true", "HDREZKA_URL": "http://mirror.example:8080"}, true, "http://mirror.example:8080", ""},
+		{"trailing slash trimmed", "", map[string]string{"HDREZKA_URL": "https://rezka.ag/"}, false, "https://rezka.ag", ""},
+		{"enabled not a bool", "", map[string]string{"HDREZKA_ENABLED": "sometimes"}, false, "", "HDREZKA_ENABLED"},
+		{"no scheme", "", map[string]string{"HDREZKA_URL": "rezka.ag"}, false, "", "HDREZKA_URL"},
+		{"unsupported scheme", "", map[string]string{"HDREZKA_URL": "ftp://rezka.ag"}, false, "", "HDREZKA_URL"},
+		{"path", "", map[string]string{"HDREZKA_URL": "https://rezka.ag/films"}, false, "", "HDREZKA_URL"},
+		{"query", "", map[string]string{"HDREZKA_URL": "https://rezka.ag?x=1"}, false, "", "HDREZKA_URL"},
+		{"empty in file", "hdrezka:\n  url: \"\"\n", nil, false, "", "HDREZKA_URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, tt.file)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: want an error naming %s, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.HDRezka.Enabled != tt.wantEnabled || cfg.HDRezka.URL != tt.wantURL {
+				t.Errorf("HDRezka = %+v, want enabled %v, url %q", cfg.HDRezka, tt.wantEnabled, tt.wantURL)
+			}
+		})
+	}
+}
+
+func TestLoadWithoutDatabase(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HDREZKA_URL", "https://hdrezka.me")
+
+	cfg, err := LoadWithoutDatabase("")
+	if err != nil {
+		t.Fatalf("LoadWithoutDatabase: %v", err)
+	}
+	if cfg.HDRezka.URL != "https://hdrezka.me" {
+		t.Errorf("HDRezka.URL = %q", cfg.HDRezka.URL)
+	}
+
+	// Everything else is still checked.
+	t.Setenv("HDREZKA_URL", "rezka.ag")
+	if _, err := LoadWithoutDatabase(""); err == nil || !strings.Contains(err.Error(), "HDREZKA_URL") {
+		t.Fatalf("LoadWithoutDatabase: want an HDREZKA_URL error, got %v", err)
 	}
 }
 
