@@ -14,7 +14,7 @@
 
 The commands are the ones in `CLAUDE.md` "Commands". A new push to a PR cancels that PR's older run. `main` runs are never cancelled, so every commit gets its images.
 
-**A green `main` commit** is one whose `publish` jobs succeeded. Its images exist, and its checks passed on that exact commit. The Deploy button (#38) offers only these.
+**A green `main` commit** is one whose `publish` jobs succeeded. Its images exist, and its checks passed on that exact commit. The Deploy button (#38) offers only these. Until it exists, [`DEPLOY.md`](DEPLOY.md) deploys them by hand.
 
 ## 2. Images
 

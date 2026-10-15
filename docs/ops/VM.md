@@ -41,7 +41,7 @@ Set `ssd=1` only if the storage is an SSD.
 | Encryption | none | The VM has to boot unattended. |
 | Root disk layout | LVM; `ubuntu-lv` fills `ubuntu-vg` | The installer takes only half by default (§4). |
 | Data disk layout | one GPT partition, ext4, mounted at `/mnt/data` by UUID | The installer writes a UUID entry in fstab. |
-| Network | DHCP | The IP comes from a router reservation. Until cutover the VM has a temporary LAN IP. At cutover, 192.168.0.81 moves to its MAC (§6). |
+| Network | DHCP | The IP comes from a router reservation for the VM's MAC. It keeps the address it first got, 192.168.0.99, for good; at cutover the router forwards move to it (§6). |
 | User | `agha`, in `sudo`, with a password | Ansible asks for this sudo password at run time (PLAN §7). Keep it in the password manager. |
 | SSH | OpenSSH, key-only, with the Mac's key; root login off | |
 | Snaps | none | Docker comes from Docker's apt repository (#34), and the Docker snap would clash with it. |
@@ -123,7 +123,7 @@ Note the MAC from **Hardware → Network Device**. The cutover needs it.
 Start the VM and open the console. In the installer:
 
 1. **Type of installation:** Ubuntu Server, not minimized. Leave "Search for third-party drivers" off.
-2. **Network:** leave DHCP on. Note the address it gets; this is the temporary IP.
+2. **Network:** leave DHCP on. Note the address it gets; §6 makes it permanent.
 3. **Guided storage:** pick **Use an entire disk** and choose the **32 GiB** disk. Leave "Set up this disk as an LVM group" ticked, and LUKS encryption off.
    - The disks show up as QEMU hard disks. Tell them apart by size, not by name.
 4. **Storage configuration** (the summary screen):
@@ -145,11 +145,11 @@ sudo lvextend -r -l +100%FREE ubuntu-vg/ubuntu-lv
 
 ## 5. First login and the hand-off state
 
-**On the Mac**, add an SSH alias for the temporary IP in `~/.ssh/config`, then copy the key across:
+**On the Mac**, add an SSH alias for the VM's IP in `~/.ssh/config`, then copy the key across:
 
 ```
 Host momoshtrem-v2
-  HostName <temporary-ip>
+  HostName <vm-ip>
   User agha
 ```
 
@@ -157,7 +157,7 @@ Host momoshtrem-v2
 ssh-copy-id momoshtrem-v2
 ```
 
-At cutover, `momoshtrem-v2` moves to 192.168.0.81 (§6).
+The VM keeps this address, so the alias stays as it is after the cutover (§6).
 
 **On the VM**, make SSH key-only. Keep a second session open until you have checked that you can log in:
 
@@ -205,9 +205,9 @@ Nothing else is installed or configured by hand. The rest belongs to:
 
 These happen at or after the cutover (#42 §3–4). They're listed here because they change the VM or its neighbours.
 
-- **The IP.** On the router, move the DHCP reservation for 192.168.0.81 to this VM's MAC once the old VM is shut down. Then reboot this VM so that it picks up the address.
-- **The SSH alias.** Point `momoshtrem-v2` at 192.168.0.81, and remove the old VM's host key for that address with `ssh-keygen -R 192.168.0.81`. `momoshtrem-vm` now reaches the new VM too; drop it once the old VM is deleted.
-- **RAM.** If the VM was built with less than 8 GiB (§2), shut it down, set 8192 MiB and start it again.
+- **The IP.** The VM keeps 192.168.0.99. On the router, make it a DHCP reservation for this VM's MAC. Once the old VM is shut down, point the port forwards (36911 and 3000) at .99. The old VM keeps its .81 reservation, so a rollback only moves the forwards back (PLAN §6).
+- **The SSH alias.** `momoshtrem-v2` doesn't change. Drop `momoshtrem-vm` once the old VM is deleted.
+- **RAM.** Raise it to 8 GiB once the old VM is off: shut the VM down, set 8192 MiB and start it again. It was built with about 6 GiB for the overlap (§2).
 - **The old VM.** Turn its **Start at boot** off once it's stopped. Otherwise a host reboot brings it back, with its own stack, until it's deleted.
 - **The data disk.** After the cutover, grow it from 70 to 120 GiB:
   1. In Proxmox, **Hardware → Hard Disk (scsi1) → Disk Action → Resize**, and add 50 GiB.

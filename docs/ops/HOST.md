@@ -110,7 +110,7 @@ JACKETT_DATA=/mnt/data/jackett
 
 - **It waits for a deploy.** `ConditionPathExists=/opt/momoshtrem/compose.yml` means that until #38 deploys, the unit is skipped, not failed.
 - **It has no `ExecStop`.** Shutdown stops the containers anyway. A `docker compose down` would remove them, and the stack would then depend on this unit to come back.
-- **The contract with #38.** The compose file and `.env` in `app_dir` must describe the deployed commit on their own, image tag included. Nothing is passed on the command line, so a plain `up -d` at boot brings back exactly what was deployed. `app_dir` is a variable, and #38 may move it.
+- **The contract with #38.** The compose file and `.env` in `app_dir` must describe the deployed commit on their own, image tag included. Nothing is passed on the command line, so a plain `up -d` at boot brings back exactly what was deployed. `app_dir` is a variable, and #38 may move it. Until #38 exists, [`DEPLOY.md`](DEPLOY.md) writes them by hand.
 
 ## 6. Firewall and lockout recovery
 
