@@ -35,6 +35,10 @@
 // metadata version, hint and scope. Every API call's usage is recorded with
 // its cost from the price table (cost.go), whether or not its answer could
 // be used.
+//
+// More than 60 files are split into requests that run side by side (four at
+// most), so a run takes about as long as one request: the caller's context
+// bounds it.
 package ai
 
 import (
@@ -47,6 +51,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
@@ -55,8 +60,12 @@ import (
 const DefaultModel = "claude-haiku-5-5"
 
 // DefaultTimeout bounds one API request. The SDK retries 429s, 5xx and
-// timeouts twice, so a call can take up to three times as long.
+// timeouts twice, so a call can take up to three times as long; the
+// caller's context bounds the whole run.
 const DefaultTimeout = 2 * time.Minute
+
+// maxConcurrentCalls bounds the requests one Resolve runs at once.
+const maxConcurrentCalls = 4
 
 // messagesAPI is the one SDK method the resolver uses; tests use a fake.
 type messagesAPI interface {
@@ -151,14 +160,31 @@ func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (ident
 		}
 	}
 
+	// A big scope is split into requests that run side by side, so the
+	// whole run takes about as long as one request.
+	reqs := buildRequests(in, scope)
+	type result struct {
+		files []identify.AIFile
+		usage identify.Usage
+	}
+	results := make([]result, len(reqs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrentCalls)
+	for i, q := range reqs {
+		g.Go(func() error {
+			files, usage, err := r.call(gctx, q, in.JobID)
+			results[i] = result{files, usage}
+			return err
+		})
+	}
+	err := g.Wait()
 	out := identify.ResolveOutput{Usage: identify.Usage{Model: r.model}}
-	for _, q := range buildRequests(in, scope) {
-		files, usage, err := r.call(ctx, q, in.JobID)
-		out.Usage = out.Usage.Add(usage)
-		if err != nil {
-			return identify.ResolveOutput{Usage: out.Usage}, err
-		}
-		out.Files = append(out.Files, files...)
+	for _, res := range results {
+		out.Usage = out.Usage.Add(res.usage)
+		out.Files = append(out.Files, res.files...)
+	}
+	if err != nil {
+		return identify.ResolveOutput{Usage: out.Usage}, err
 	}
 	if cacheable {
 		r.store(ctx, key, out.Files)
@@ -177,7 +203,9 @@ func (r *Resolver) call(ctx context.Context, q request, ref int64) ([]identify.A
 		return nil, identify.Usage{Model: r.model}, err
 	}
 	usage := usageOf(r.model, resp.Usage)
-	if err := r.usage.Record(ctx, usage, ref); err != nil {
+	// Recorded even when the run was cancelled meanwhile (another request
+	// failed, or shutdown): the tokens were spent.
+	if err := r.usage.Record(context.WithoutCancel(ctx), usage, ref); err != nil {
 		r.log.Warn("Failed to record AI usage", "error", err, "job_id", ref)
 	}
 	files, err := q.parse(resp)

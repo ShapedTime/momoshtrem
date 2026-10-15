@@ -13,26 +13,10 @@ import (
 // Extras, samples and subtitles aren't asked about: the rules find extras
 // by name and markers, and subtitles follow their video.
 func UnsureFiles(rules []identify.Proposal) []string {
-	owners := map[int64]int{}
-	for _, p := range rules {
-		if isEpisodeVideo(p) {
-			for _, t := range p.Targets {
-				owners[t.EpisodeID]++
-			}
-		}
-	}
+	conflicts := identify.Conflicts(rules)
 	var out []string
-	for _, p := range rules {
-		if !isEpisodeVideo(p) {
-			continue
-		}
-		unsure := !p.HasTarget() || p.Confidence != identify.ConfidenceHigh
-		for _, t := range p.Targets {
-			if owners[t.EpisodeID] > 1 {
-				unsure = true
-			}
-		}
-		if unsure {
+	for i, p := range rules {
+		if isEpisodeVideo(p) && (!p.HasTarget() || p.Confidence != identify.ConfidenceHigh || len(conflicts[i]) > 0) {
 			out = append(out, p.Path)
 		}
 	}

@@ -168,6 +168,27 @@ func TestResolveSplitsBigScopes(t *testing.T) {
 	if out.Usage.InputTokens != 3000 || out.Usage.OutputTokens != 600 {
 		t.Errorf("usage isn't summed: %+v", out.Usage)
 	}
+	// The answers come back in the files' order, whichever request ends
+	// first.
+	if out.Files[0].Path != "Big/Show - 001.mkv" || out.Files[1].Path != "Big/Show - 061.mkv" || out.Files[2].Path != "Big/Show - 121.mkv" {
+		t.Errorf("answers out of order: %s, %s, %s", out.Files[0].Path, out.Files[1].Path, out.Files[2].Path)
+	}
+
+	// One failing request fails the run, without answers, but the usage
+	// of those that answered is still returned.
+	failing := &fakeClient{respond: func(_ int, p anthropic.MessageNewParams) (*anthropic.Message, error) {
+		if strings.Contains(p.Messages[0].Content[1].OfText.Text, "Part 2 of 3") {
+			return nil, sdkError(529, "overloaded_error")
+		}
+		return answer(t), nil
+	}}
+	out, err = newTest(t, failing, Config{}).Resolve(context.Background(), in)
+	if !errors.Is(err, ErrUnavailable) || len(out.Files) != 0 {
+		t.Errorf("a failing request: %v, %d answers", err, len(out.Files))
+	}
+	if out.Usage.InputTokens == 0 || out.Usage.InputTokens > 2000 {
+		t.Errorf("usage of the requests that answered = %+v", out.Usage)
+	}
 }
 
 func TestResolveCache(t *testing.T) {
