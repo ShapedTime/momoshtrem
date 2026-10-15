@@ -65,7 +65,7 @@ test.describe('HDRezka', () => {
     await expect(page).toHaveURL(/\/movie\/1054867$/);
     await expect(page.getByRole('region', { name: 'Ready in Infuse' })).toContainText('HDRezka · Оригинал (+субтитры) · 1080p · 4.3 GB');
     const current = page.getByRole('region', { name: 'Current stream' });
-    await expect(current).toContainText('Битва за битвой');
+    await expect(current).toContainText('One Battle After Another');
     await expect(current.getByRole('link', { name: 'Open on HDRezka' })).toHaveAttribute('href', 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html');
     await expectAccessibleAndContained(page);
 

@@ -154,7 +154,8 @@ export const hdrezkaHandlers = [
     const pick = resolvePick(body);
     if (pick instanceof Response) return pick;
     assignMovieStream(found.row, {
-      title: pick.seed.title,
+      // HDRezka's original title, else its own
+      title: pick.seed.original_title ?? pick.seed.title,
       url: HDREZKA_URL + pick.seed.path,
       translator: pick.translator.name,
       quality: pick.quality,
@@ -168,8 +169,8 @@ export const hdrezkaHandlers = [
     if (failed) return failed;
     const body = await jsonBody(request);
     if (!isShowRequest(body)) return apiError(422, 'validation_error', 'Send {url, translator_id, quality, items: [{episode_id, season, episode}]}.');
-    if (body.items.length < 1 || body.items.length > MAX_EPISODES) {
-      return apiError(422, 'validation_error', `Send 1–${MAX_EPISODES} episodes a request.`);
+    if (body.items.length < 1 || body.items.length > MAX_EPISODES || new Set(body.items.map((item) => item.episode_id)).size < body.items.length) {
+      return apiError(400, 'bad_request', `Send 1–${MAX_EPISODES} different episodes a request.`);
     }
     const found = findByLibraryId(mockLibrary(), 'tv', Number(params.id));
     if (!found) return notFound('No such show');

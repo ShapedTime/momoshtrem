@@ -246,18 +246,17 @@ export function seedTranslators(seed: TitleSeed, everyPremium: boolean): HDRezka
 }
 
 /**
- * The translator a request means: the entry with its id and flags, or, with
- * no flags sent, the first entry with the id (PLAN §6 "Translator cuts").
+ * The translator a request means (PLAN §6 "Translators and cuts"): the first
+ * entry with the id whose flags match every flag sent; a flag left out
+ * doesn't constrain.
  */
 export function findCut(
   translators: HDRezkaTranslator[],
   id: number | null,
   flags: { camrip?: boolean; ads?: boolean; director?: boolean }
 ): HDRezkaTranslator | undefined {
-  const sent = flags.camrip !== undefined || flags.ads !== undefined || flags.director !== undefined;
-  return translators.find(
-    (t) => t.id === id && (!sent || (t.camrip === Boolean(flags.camrip) && t.ads === Boolean(flags.ads) && t.director === Boolean(flags.director)))
-  );
+  const matches = (value: boolean, wanted: boolean | undefined) => wanted === undefined || value === wanted;
+  return translators.find((t) => t.id === id && matches(t.camrip, flags.camrip) && matches(t.ads, flags.ads) && matches(t.director, flags.director));
 }
 
 const postId = (path: string) => Number(/\/(\d+)-/.exec(path)?.[1] ?? 0);

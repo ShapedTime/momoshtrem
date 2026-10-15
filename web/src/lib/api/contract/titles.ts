@@ -52,7 +52,7 @@ export type FileSource = 'torrent' | 'hdrezka';
 /** A movie playing from HDRezka (#63); `torrent` is null while it's set. */
 export interface TitleStream {
   provider: 'hdrezka';
-  /** The site's title, e.g. "Интерстеллар". */
+  /** HDRezka's original title, else its (Russian) title. */
   title: string;
   /** The title page, to open on HDRezka. */
   url: string;
