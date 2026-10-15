@@ -1,5 +1,5 @@
 import { ApiError } from '@/lib/api/client';
-import { hdrezkaLink, hdrezkaProblem, replaceFileConfirm, shorterQuery } from '@/lib/hdrezka/copy';
+import { hdrezkaLink, hdrezkaProblem, replaceEpisodesConfirm, replaceFileConfirm, searchNameFor, shorterQuery } from '@/lib/hdrezka/copy';
 import { clearDraft, loadDraft, saveDraft } from '@/lib/hdrezka/session';
 
 describe('hdrezkaProblem', () => {
@@ -34,6 +34,17 @@ describe('hdrezkaLink', () => {
   });
 });
 
+describe('searchNameFor', () => {
+  it.each([
+    [{ title: 'Interstellar', original_title: null }, 'Interstellar'],
+    [{ title: 'Amélie', original_title: 'Le Fabuleux Destin d’Amélie Poulain' }, 'Le Fabuleux Destin d’Amélie Poulain'],
+    [{ title: 'Brother', original_title: 'Брат' }, 'Брат'],
+    [{ title: 'Frieren: Beyond Journey’s End', original_title: '葬送のフリーレン' }, 'Frieren: Beyond Journey’s End'],
+  ])('%o → %s', (title, query) => {
+    expect(searchNameFor(title)).toBe(query);
+  });
+});
+
 describe('shorterQuery', () => {
   it.each([
     ['Interstellar 2014', 'Interstellar'],
@@ -58,6 +69,23 @@ describe('replaceFileConfirm', () => {
       title: 'Switch Dune: Part Two to Оригинал (+субтитры) in 1080p?',
       description: 'Infuse plays it from now on, instead of Дубляж in 720p.',
     });
+  });
+});
+
+describe('replaceEpisodesConfirm', () => {
+  it('counts the episodes that have a file, and warns about new .mp4 files', () => {
+    const words = replaceEpisodesConfirm('Severance', { count: 9, withFile: 4, code: null });
+    expect(words).toMatchObject({ title: 'Stream 9 episodes of Severance from HDRezka?', confirmLabel: 'Stream 9 episodes' });
+    expect(words.description).toMatch(/^4 of them already have a file\. Infuse plays the HDRezka streams from now on\./);
+    expect(words.description).toMatch(/new file \(it ends in \.mp4\), so Infuse may forget where you stopped/);
+  });
+
+  it('names a single episode', () => {
+    expect(replaceEpisodesConfirm('Severance', { count: 1, withFile: 1, code: 'S02E05' })).toMatchObject({
+      title: 'Stream S02E05 of Severance from HDRezka?',
+      confirmLabel: 'Stream it',
+    });
+    expect(replaceEpisodesConfirm('Severance', { count: 2, withFile: 2, code: null }).description).toMatch(/^They all have a file already\./);
   });
 });
 

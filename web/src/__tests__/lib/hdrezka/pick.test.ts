@@ -10,6 +10,7 @@ import {
   subtitlesLine,
   translatorBlocked,
   translatorChips,
+  translatorCut,
   translatorKey,
   weakMatchNote,
 } from '@/lib/hdrezka/pick';
@@ -121,15 +122,42 @@ describe('voice-overs', () => {
     expect(translatorBlocked(voice(1, 'A'))).toBeNull();
   });
 
-  it('starts on the kept one, else the answer’s, else the default, skipping premium', () => {
-    const dub = voice(56, 'Дубляж', { default: true });
+  it('sends a cut’s flags with its id', () => {
+    expect(translatorCut(voice(111, 'HDrezka Studio', { director: true }))).toEqual({ camrip: false, ads: false, director: true });
+  });
+
+  describe('defaultTranslator: session pick > what streams now > remembered > page default > first without Premium', () => {
+    const studio = voice(111, 'HDrezka Studio', { default: true });
+    const studioCut = voice(111, 'HDrezka Studio', { director: true });
     const original = voice(238, 'Оригинал (+субтитры)');
+    const lostfilm = voice(10, 'LostFilm');
     const premium = voice(1, 'Дубляж (Ultra HD)', { premium: true });
-    expect(defaultTranslator(title([dub, original, premium], 238))).toBe(original);
-    expect(defaultTranslator(title([dub, original, premium], 238), '56')).toBe(dub);
-    expect(defaultTranslator(title([dub, original, premium], 1))).toBe(dub);
-    expect(defaultTranslator(title([premium, original], 1))).toBe(original);
-    expect(defaultTranslator(title([premium], 1))).toBeNull();
+    const all = title([studio, original, lostfilm, premium, studioCut], 111);
+
+    it('keeps what was picked earlier this session, over everything else', () => {
+      expect(defaultTranslator(all, { keep: '111-d', current: 'LostFilm', remembered: { id: 238 } })).toBe(studioCut);
+    });
+
+    it('then what the title streams now', () => {
+      expect(defaultTranslator(all, { current: 'LostFilm', remembered: { id: 238 } })).toBe(lostfilm);
+    });
+
+    it('then the voice-over remembered from the last assign, cut and all', () => {
+      expect(defaultTranslator(all, { remembered: { id: 238 } })).toBe(original);
+      expect(defaultTranslator(all, { remembered: { id: 111, director: true } })).toBe(studioCut);
+    });
+
+    it('then the page’s default', () => {
+      expect(defaultTranslator(all)).toBe(studio);
+      expect(defaultTranslator(all, { remembered: { id: 99 }, current: 'Gone' })).toBe(studio);
+      expect(defaultTranslator(title([original, lostfilm], 10))).toBe(lostfilm);
+    });
+
+    it('never a premium one, whoever asks for it', () => {
+      expect(defaultTranslator(all, { keep: '1', current: 'Дубляж (Ultra HD)', remembered: { id: 1 } })).toBe(studio);
+      expect(defaultTranslator(title([premium, original], 1))).toBe(original);
+      expect(defaultTranslator(title([premium], 1))).toBeNull();
+    });
   });
 });
 
@@ -154,7 +182,8 @@ describe('qualities', () => {
   });
 
   it('notes the size, or why it can’t be picked', () => {
-    expect(list.map(qualityNote)).toEqual(['1.4 GB', '2.9 GB', '4.3 GB', 'Premium', 'Not offered']);
+    expect(list.map((q) => qualityNote(q))).toEqual(['1.4 GB', '2.9 GB', '4.3 GB', 'Premium', 'Not offered']);
+    expect(qualityNote(list[2], true)).toBe('4.3 GB an episode');
   });
 
   it('lists the stream’s subtitles', () => {

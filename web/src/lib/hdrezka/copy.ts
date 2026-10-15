@@ -48,6 +48,16 @@ export function hdrezkaLink(text: string): string | null {
 }
 
 /**
+ * What to search HDRezka for first: the original title, which HDRezka keeps
+ * next to its Russian one, unless it's in another script (Japanese, Korean…):
+ * then the English title finds it better.
+ */
+export function searchNameFor(title: { title: string; original_title: string | null }): string {
+  const original = title.original_title;
+  return original && /^[\p{Script=Latin}\p{Script=Cyrillic}\p{N}\p{P}\p{S}\s]+$/u.test(original) ? original : title.title;
+}
+
+/**
  * Shorter queries to suggest when nothing matched, best first: without the
  * year, the part before a colon, then without the last word.
  */
@@ -79,5 +89,24 @@ export function replaceFileConfirm(
     description:
       'Infuse plays the HDRezka stream from now on, instead of the torrent. It may show up as a new file (it ends in .mp4), so Infuse may forget where you stopped.',
     confirmLabel: 'Use HDRezka',
+  };
+}
+
+/**
+ * What the confirm dialog says before streams replace episodes' files: how
+ * many of the picked episodes already have one, and that Infuse may see
+ * them as new files.
+ */
+export function replaceEpisodesConfirm(
+  showName: string,
+  episodes: { count: number; withFile: number; code: string | null }
+): { title: string; description: string; confirmLabel: string } {
+  const { count, withFile, code } = episodes;
+  const one = count === 1;
+  const already = one ? 'It already has a file.' : withFile === count ? 'They all have a file already.' : `${withFile} of them already have a file.`;
+  return {
+    title: `Stream ${one && code ? code : `${count} episodes`} of ${showName} from HDRezka?`,
+    description: `${already} Infuse plays the HDRezka ${one ? 'stream' : 'streams'} from now on. An episode that came from a torrent may show up as a new file (it ends in .mp4), so Infuse may forget where you stopped.`,
+    confirmLabel: one ? 'Stream it' : `Stream ${count} episodes`,
   };
 }

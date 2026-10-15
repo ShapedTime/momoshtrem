@@ -33,7 +33,20 @@
   .hd-quality { align-items: flex-start; padding: var(--sp-3); }
   .radio-card.is-blocked { cursor: not-allowed; background: transparent; border-style: dashed; color: var(--text-3); }
 
+  /* A show's episodes: checkbox rows, "E05 · name → S01E05", the source under it, the state at the end */
+  .hd-episodes { display: flex; flex-direction: column; gap: 2px; }
+  .hd-ep { display: flex; align-items: center; gap: var(--sp-3); min-height: 56px; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--surface-1); cursor: pointer; }
+  .hd-ep:hover { background: var(--surface-2); }
+  .hd-ep input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); flex-shrink: 0; }
+  .hd-ep:has(input:checked) { background: var(--accent-soft); }
+  .hd-ep:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+  .hd-ep.is-blocked { cursor: not-allowed; background: transparent; }
+  .hd-ep-name { display: flex; min-width: 0; align-items: baseline; gap: 0 0.25em; font-weight: var(--w-medium); color: var(--text-1); white-space: nowrap; }
+  .hd-ep-name b { font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
+  .hd-ep .pill { flex-shrink: 0; }
+
   /* The sticky foot: what's picked, then Use HDRezka */
   .source-sheet .sheet-foot { align-items: center; }
   .hd-foot-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hd-foot-summary .progress { width: 100%; }
 }
