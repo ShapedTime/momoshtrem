@@ -7,11 +7,13 @@ import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { useOverArt } from '@/components/shell/ShellContext';
 import { NotFoundView } from '@/components/system/NotFoundView';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { DOWNLOAD_POLL_MS, useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
 import { seasonQuery, titleKeys } from '@/lib/api/endpoints';
 import { useSheet } from '@/lib/sheets/useSheet';
+import { showSourceParams } from '@/lib/source/context';
 import { type JumpDestination, selectedSeason } from '@/lib/title/episodes';
 import { titleFacts } from '@/lib/title/facts';
 import { legacySearchContext } from '@/lib/title/legacy-search';
@@ -76,7 +78,8 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
   const searchParams = useSearchParams();
   const seasonNumber = selectedSeason(searchParams.get('season'), show);
   const season = useSeasonState(show, seasonNumber);
-  const copy = primaryActionFor(show);
+  const hdrezka = useHDRezkaEnabled();
+  const copy = primaryActionFor(show, { hdrezka });
   const { library } = show;
   useDocumentTitle(show.title);
 
@@ -112,15 +115,15 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
   const findEpisode = (episode: EpisodeSummary) =>
     openLegacySearch(legacySearchContext(show, { season: episode.season_number, episode: episode.episode_number }));
 
+  const streamFromHDRezka = (scope: { season?: number; episode?: number }) => sheets.open('hdrezka', showSourceParams(show.tmdb_id, scope));
   const onAction = (intent: StageIntent) => {
+    // One missing episode: that episode; a run: its season; nothing yet: the show
+    const { missing } = library;
+    const scope = !library.episodes_ready || !missing ? {} : missing.count === 1 ? { season: missing.season_number, episode: missing.from } : { season: missing.season_number };
     if (intent === 'add') actions.add();
     else if (intent === 'how_to_play') sheets.open('infuse-setup', infuseSetupParams({ path: library.webdav_path, url: library.webdav_url }));
-    else if (intent === 'find') {
-      // One missing episode: search for it; a run: its season; nothing yet: the show
-      const { missing } = library;
-      const scope = !library.episodes_ready || !missing ? {} : missing.count === 1 ? { season: missing.season_number, episode: missing.from } : { season: missing.season_number };
-      openLegacySearch(legacySearchContext(show, scope));
-    }
+    else if (intent === 'find') openLegacySearch(legacySearchContext(show, scope));
+    else if (intent === 'hdrezka') streamFromHDRezka(scope);
   };
 
   return (
@@ -128,7 +131,15 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
       <TitleHero
         title={show}
         panel={<PrimaryPanel copy={copy} onAction={onAction} busy={actions.adding ? 'add' : null} titleName={show.title} />}
-        renderMore={(placement) => <TitleMoreMenu title={show} placement={placement} onRefresh={actions.refresh} onRemove={actions.remove} />}
+        renderMore={(placement) => (
+          <TitleMoreMenu
+            title={show}
+            placement={placement}
+            onRefresh={actions.refresh}
+            onRemove={actions.remove}
+            onStreamFromHDRezka={hdrezka ? () => streamFromHDRezka(seasonNumber === null ? {} : { season: seasonNumber }) : undefined}
+          />
+        )}
       />
       <div className="page detail-body">
         <div className="page-sections">
@@ -139,6 +150,7 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
             season={season}
             onOpenSettings={() => sheets.open('show-settings', { tmdb: String(show.tmdb_id) })}
             onFindSeason={(number) => openLegacySearch(legacySearchContext(show, { season: number }))}
+            onStreamSeason={hdrezka ? (number) => streamFromHDRezka({ season: number }) : undefined}
             onFindEpisode={findEpisode}
             onOpenEpisode={(episode) => sheets.open('episode', episodeSheetParams(show, episode))}
             view={view}

@@ -166,10 +166,12 @@ interface QualityStepProps {
   onRetry: () => void;
   selected: HDRezkaQuality | null;
   onSelect: (quality: HDRezkaQuality) => void;
+  /** A show's: sizes are an episode's. */
+  perEpisode?: boolean;
 }
 
 /** Step 3: the quality, with sizes; premium and HLS-only ones can't be picked. Then the stream's subtitles. */
-export function QualityStep({ status, streams, error, onRetry, selected, onSelect }: QualityStepProps) {
+export function QualityStep({ status, streams, error, onRetry, selected, onSelect, perEpisode = false }: QualityStepProps) {
   const headingId = useId();
   const name = useId();
   return (
@@ -196,7 +198,7 @@ export function QualityStep({ status, streams, error, onRetry, selected, onSelec
                     type="radio"
                     name={name}
                     value={q.label}
-                    aria-label={`${q.label}, ${qualityNote(q)}`}
+                    aria-label={`${q.label}, ${qualityNote(q, perEpisode)}`}
                     checked={selected?.label === q.label}
                     disabled={!usable}
                     onChange={() => onSelect(q)}
@@ -208,7 +210,7 @@ export function QualityStep({ status, streams, error, onRetry, selected, onSelec
                         Premium
                       </Chip>
                     ) : (
-                      <span className="t-small text-fg-2 tabular-nums">{qualityNote(q)}</span>
+                      <span className="t-small text-fg-2 tabular-nums">{qualityNote(q, perEpisode)}</span>
                     )}
                   </span>
                 </label>

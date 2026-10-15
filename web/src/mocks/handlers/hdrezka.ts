@@ -7,7 +7,7 @@ import type {
   HDRezkaTranslator,
   StreamEpisodeTarget,
 } from '@/lib/api/contract';
-import { buildHDRezkaTitle, buildStreams, findSeed, HDREZKA_URL, searchHDRezka, seedTranslators, type TitleSeed, titlePath } from '../fixtures/hdrezka';
+import { buildHDRezkaTitle, buildStreams, findCut, findSeed, HDREZKA_URL, searchHDRezka, seedTranslators, type TitleSeed, titlePath } from '../fixtures/hdrezka';
 import { assignEpisodeStream, assignMovieStream, findByLibraryId, findEpisode } from '../fixtures/titles';
 import { scenario } from '../scenario';
 import { mockLibrary } from './titles';
@@ -16,6 +16,14 @@ import { apiError, isRecord, jsonBody, latency, noContent, notFound } from './ut
 /** HDRezka (PLAN §6 "HDRezka (#63)"); scenarios in ../scenario.ts. */
 
 const MAX_EPISODES = 30;
+
+/** `hdrezka-partial`: episodes that already failed once, so Retry gets them through. */
+let failedOnce = new Set<number>();
+
+/** Tests: forget which episodes failed. */
+export function resetMockHDRezka(): void {
+  failedOnce = new Set();
+}
 
 /** The backend's answers when HDRezka is off or failing: never 401 or 403. */
 function outage(): Response | null {
@@ -40,8 +48,24 @@ const positive = (value: string | null) => {
   return value !== null && Number.isInteger(n) && n > 0 ? n : null;
 };
 
+const optionalFlag = (value: unknown) => value === undefined || typeof value === 'boolean';
+
 function isStreamRequest(body: unknown): body is AssignMovieStreamRequest {
-  return isRecord(body) && typeof body.url === 'string' && typeof body.translator_id === 'number' && typeof body.quality === 'string';
+  return (
+    isRecord(body) &&
+    typeof body.url === 'string' &&
+    typeof body.translator_id === 'number' &&
+    typeof body.quality === 'string' &&
+    optionalFlag(body.camrip) &&
+    optionalFlag(body.ads) &&
+    optionalFlag(body.director)
+  );
+}
+
+/** `?camrip=true&…` as the backend reads them: a flag left out is undefined. */
+function queryFlags(params: URLSearchParams) {
+  const flag = (name: string) => (params.has(name) ? params.get(name) === 'true' : undefined);
+  return { camrip: flag('camrip'), ads: flag('ads'), director: flag('director') };
 }
 
 const isTarget = (item: unknown): item is StreamEpisodeTarget =>
@@ -53,13 +77,13 @@ function isShowRequest(body: unknown): body is AssignShowStreamRequest {
 
 type Resolved = { seed: TitleSeed; translator: HDRezkaTranslator; quality: string; size_bytes: number };
 
-/** Checks a stream pick as the backend does before it writes: the title, the voice-over, then the quality. */
+/** Checks a stream pick as the backend does before it writes: the title, the voice-over (and its cut), then the quality. */
 function resolvePick(body: AssignMovieStreamRequest): Resolved | Response {
   const path = titlePath(body.url);
   if (!path) return apiError(422, 'validation_error', 'That isn’t an HDRezka title page.');
   const seed = findSeed(path);
   if (!seed) return notFound('No title at that address on HDRezka.');
-  const translator = seedTranslators(seed, everyPremium()).find((t) => t.id === body.translator_id);
+  const translator = findCut(seedTranslators(seed, everyPremium()), body.translator_id, body);
   if (!translator) return apiError(422, 'validation_error', 'This title has no such voice-over.');
   if (translator.premium) return apiError(409, 'premium_only', PREMIUM_ONLY);
   const quality = buildStreams(seed, translator).qualities.find((q) => q.label === body.quality);
@@ -101,7 +125,6 @@ export const hdrezkaHandlers = [
       buildHDRezkaTitle(seed, mockLibrary(), {
         translatorId: positive(params.get('translator_id')),
         showId: positive(params.get('show_id')),
-        movieId: positive(params.get('movie_id')),
         everyPremium: everyPremium(),
       })
     );
@@ -115,7 +138,7 @@ export const hdrezkaHandlers = [
     if (!path) return apiError(422, 'validation_error', 'That isn’t an HDRezka title page.');
     const seed = findSeed(path);
     if (!seed) return notFound('No title at that address on HDRezka.');
-    const translator = seedTranslators(seed, everyPremium()).find((t) => t.id === positive(params.get('translator_id')));
+    const translator = findCut(seedTranslators(seed, everyPremium()), positive(params.get('translator_id')), queryFlags(params));
     if (!translator) return apiError(422, 'validation_error', 'This title has no such voice-over.');
     if (translator.premium) return apiError(409, 'premium_only', PREMIUM_ONLY);
     return HttpResponse.json(buildStreams(seed, translator));
@@ -131,7 +154,8 @@ export const hdrezkaHandlers = [
     const pick = resolvePick(body);
     if (pick instanceof Response) return pick;
     assignMovieStream(found.row, {
-      title: pick.seed.title,
+      // HDRezka's original title, else its own
+      title: pick.seed.original_title ?? pick.seed.title,
       url: HDREZKA_URL + pick.seed.path,
       translator: pick.translator.name,
       quality: pick.quality,
@@ -145,8 +169,8 @@ export const hdrezkaHandlers = [
     if (failed) return failed;
     const body = await jsonBody(request);
     if (!isShowRequest(body)) return apiError(422, 'validation_error', 'Send {url, translator_id, quality, items: [{episode_id, season, episode}]}.');
-    if (body.items.length < 1 || body.items.length > MAX_EPISODES) {
-      return apiError(422, 'validation_error', `Send 1–${MAX_EPISODES} episodes a request.`);
+    if (body.items.length < 1 || body.items.length > MAX_EPISODES || new Set(body.items.map((item) => item.episode_id)).size < body.items.length) {
+      return apiError(400, 'bad_request', `Send 1–${MAX_EPISODES} different episodes a request.`);
     }
     const found = findByLibraryId(mockLibrary(), 'tv', Number(params.id));
     if (!found) return notFound('No such show');
@@ -156,7 +180,8 @@ export const hdrezkaHandlers = [
     body.items.forEach((item, i) => {
       if (findEpisode(item.episode_id)?.tmdbId !== found.entry.tmdb_id) {
         result.failed.push({ episode_id: item.episode_id, code: 'not_found', message: 'That episode isn’t in this show.' });
-      } else if (scenario() === 'hdrezka-partial' && i % 3 === 2) {
+      } else if (scenario() === 'hdrezka-partial' && i % 3 === 2 && !failedOnce.has(item.episode_id)) {
+        failedOnce.add(item.episode_id);
         result.failed.push({ episode_id: item.episode_id, code: 'timeout', message: 'HDRezka took too long to answer for this episode.' });
       } else {
         assignEpisodeStream(found.row, item.episode_id, { translator: pick.translator.name, quality: pick.quality });

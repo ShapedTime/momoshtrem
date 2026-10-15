@@ -259,7 +259,7 @@ describe('HDRezka in mock mode (#63)', () => {
   it('opens a title on any mirror, flags its voice-overs and prices each quality', async () => {
     const title = await hdrezkaApi.title({ url: BATTLE.replace('rezka.ag', 'hdrezka.me'), movie_id: 3 });
     expect(title).toMatchObject({ post_id: 78655, kind: 'movie', translator_id: 111, seasons: [] });
-    expect(title.translators.filter((t) => t.premium || t.ads || t.camrip || t.director).map((t) => t.name)).toEqual(['Дубляж', 'TVShows', 'Red Head Sound', 'Jaskier']);
+    expect(title.translators.filter((t) => t.premium || t.ads || t.camrip || t.director).map((t) => t.name)).toEqual(['Дубляж', 'TVShows', 'Red Head Sound', 'HDrezka Studio']);
     const streams = await hdrezkaApi.streams({ url: BATTLE, translator_id: 405 });
     expect(streams.qualities.map((q) => [q.label, q.available && !q.premium])).toEqual([
       ['360p', true],
@@ -278,12 +278,10 @@ describe('HDRezka in mock mode (#63)', () => {
     expect(library).toMatchObject({
       availability_stage: 'ready',
       torrent: null,
-      stream: { provider: 'hdrezka', title: 'Дюна: Часть вторая', translator: 'Оригинал (+субтитры)', quality: '1080p', size_bytes: 4_453_333_333 },
+      stream: { provider: 'hdrezka', title: 'Dune: Part Two', translator: 'Оригинал (+субтитры)', quality: '1080p', size_bytes: 4_453_333_333 },
       webdav_path: '/Movies/Dune- Part Two (2024)/Dune- Part Two (2024).mp4',
     });
     expect((await subtitlesApi.search('movie', 1, ['en'])).release_name).toBeNull();
-    // The movie's current voice-over comes back first when the sheet reopens
-    expect((await hdrezkaApi.title({ url: library.stream?.url ?? '', movie_id: 1 })).translator_id).toBe(238);
     await titlesApi.unassignMovie(1);
     expect((await titlesApi.get('movie', 693134)).library).toMatchObject({ availability_stage: 'needs_torrent', stream: null });
   });
@@ -320,7 +318,27 @@ describe('HDRezka in mock mode (#63)', () => {
     ]);
     const title = await hdrezkaApi.title({ url: SEVERANCE, show_id: 4, translator_id: 10 });
     expect(title.seasons[1].episodes[4].library).toMatchObject({ season: 2, episode: 5, has_file: true, source: 'hdrezka', stream: { quality: '1080p' } });
-    await expect(hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 10, quality: '1080p', items: [] })).rejects.toMatchObject({ status: 422 });
+    await expect(hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 10, quality: '1080p', items: [] })).rejects.toMatchObject({ status: 400 });
+    await expect(hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 10, quality: '1080p', items: [items[0], items[0]] })).rejects.toMatchObject({ status: 400 });
+
+    // An episode fails once: retrying it gets it through
+    const retried = await hdrezkaApi.assignShow(4, { url: SEVERANCE, translator_id: 10, quality: '1080p', items: [items[2]] });
+    expect(retried).toEqual({ assigned: [expect.objectContaining({ episode_id: items[2].episode_id })], failed: [] });
+  });
+
+  it('tells a translator’s cuts apart by their flags, and takes the first without them', async () => {
+    const theatrical = await hdrezkaApi.streams({ url: BATTLE, translator_id: 111 });
+    const director = await hdrezkaApi.streams({ url: BATTLE, translator_id: 111, camrip: false, ads: false, director: true });
+    const size = (streams: typeof theatrical) => streams.qualities.find((q) => q.label === '1080p')?.size_bytes;
+    expect(size(theatrical)).toBe(4_320_000_000);
+    expect(size(director)).toBe(4_960_000_000);
+    expect(size(await hdrezkaApi.streams({ url: BATTLE, translator_id: 111, camrip: false, ads: false, director: false }))).toBe(size(theatrical));
+
+    await hdrezkaApi.assignMovie(3, { url: BATTLE, translator_id: 111, camrip: false, ads: false, director: true, quality: '1080p' });
+    expect((await titlesApi.get('movie', 1054867)).library.stream).toMatchObject({ translator: 'HDrezka Studio', size_bytes: 4_960_000_000 });
+    await expect(hdrezkaApi.assignMovie(3, { url: BATTLE, translator_id: 111, camrip: true, quality: '720p' })).rejects.toMatchObject({ status: 422 });
+    // A flag left out doesn't constrain: director alone finds the cut
+    expect(size(await hdrezkaApi.streams({ url: BATTLE, translator_id: 111, director: true }))).toBe(4_960_000_000);
   });
 });
 

@@ -106,7 +106,7 @@ test.describe('show page', () => {
     await expect(page.getByRole('region', { name: 'Episodes 28–38 have no torrent' })).toBeVisible();
   });
 
-  test('the episode sheet closes with Escape and with Back, and hands Replace to the search', async ({ page }) => {
+  test('the episode sheet closes with Escape and with Back, and hands Replace to the search', async ({ page }, testInfo) => {
     await signIn(page, '/tv/209867');
     const options = page.getByRole('button', { name: /^S01E28 options/ });
     const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again' });
@@ -128,7 +128,10 @@ test.describe('show page', () => {
     await expect(page).toHaveURL(/\/tv\/209867$/);
 
     await openSheet();
-    await sheet.getByRole('button', { name: 'Replace torrent' }).click();
+    // With HDRezka set up, Replace is a menu: a torrent, or a stream (#67)
+    await sheet.getByRole('button', { name: 'Replace' }).click();
+    if (testInfo.project.name === 'mobile') await page.getByRole('dialog', { name: 'Replace with' }).getByRole('button', { name: 'Find a torrent' }).click();
+    else await page.getByRole('menuitem', { name: 'Find a torrent' }).click();
     await expect(sheet).toBeHidden();
     const search = page.getByRole('dialog', { name: `Search: ${FRIEREN} S01E28` });
     await expect(search).toBeVisible();

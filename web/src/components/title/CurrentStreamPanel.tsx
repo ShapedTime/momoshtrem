@@ -22,9 +22,7 @@ export function CurrentStreamPanel({ stream, onChange, onReplaceWithTorrent }: C
       <h2 className="t-title-3" id="stream-h">
         Current stream
       </h2>
-      <p className="hd-name" lang="ru">
-        {stream.title}
-      </p>
+      <p className="hd-name">{stream.title}</p>
       <div className="chips">
         <Chip tone="accent">HDRezka</Chip>
         <Chip>

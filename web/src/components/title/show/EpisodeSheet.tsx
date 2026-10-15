@@ -1,14 +1,18 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { RefreshCw, Search, Trash2 } from 'lucide-react';
+import { MonitorPlay, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { ReplaceMenu } from '@/components/source/ReplaceMenu';
 import { Banner, Button, CopyField, FilePath, LoadingRegion, Sheet, Skeleton, SkeletonText, StatusPill } from '@/components/ui';
+import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
 import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { useRemoveEpisodeFile } from '@/hooks/useTitle';
 import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
 import { seasonQuery, titleQuery } from '@/lib/api/endpoints';
 import type { SheetComponentProps } from '@/lib/sheets/registry';
+import { useSheet } from '@/lib/sheets/useSheet';
+import { showSourceParams } from '@/lib/source/context';
 import { episodeCode, parseEpisodeCode } from '@/lib/title/episodes';
 import { formatDate } from '@/lib/title/format';
 import { legacySearchContext } from '@/lib/title/legacy-search';
@@ -22,6 +26,13 @@ export const episodeSheetParams = (show: Pick<ShowTitle, 'tmdb_id'>, episode: Pi
 
 const hasFile = (episode: EpisodeSummary) => episode.webdav_path !== null;
 
+/** Where the episode's file comes from: "Torrent", or "HDRezka · LostFilm · 1080p" (#63). */
+function sourceLine(episode: EpisodeSummary): string | null {
+  if (!hasFile(episode)) return null;
+  if (episode.source === 'hdrezka') return ['HDRezka', episode.stream?.translator, episode.stream?.quality].filter(Boolean).join(' · ');
+  return episode.source === 'torrent' ? 'Torrent' : null;
+}
+
 /** "/TV Shows/Frieren (2023)/Season 01/…mkv" → "TV Shows › Frieren (2023) › Season 01". */
 const folderTrail = (path: string) => path.split('/').filter(Boolean).slice(0, -1).join(' › ');
 
@@ -29,11 +40,17 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
   const code = episodeCode(episode.season_number, episode.episode_number);
   const subtitles = useItemSubtitles('episode', hasFile(episode) ? episode.id : null, episode.webdav_path);
   const { remove, removing } = useRemoveEpisodeFile();
+  const hdrezka = useHDRezkaEnabled();
+  const sheets = useSheet();
+  const scope = { season: episode.season_number, episode: episode.episode_number };
   const find = () => {
     close();
     // The page shows the search once the sheet has gone (a sheet traps focus)
-    openLegacySearch(legacySearchContext(show, { season: episode.season_number, episode: episode.episode_number }));
+    openLegacySearch(legacySearchContext(show, scope));
   };
+  // Over this sheet in history: Back (or closing it) comes back here
+  const streamFromHDRezka = () => sheets.open('hdrezka', showSourceParams(show.tmdb_id, scope));
+  const source = sourceLine(episode);
   const facts = [episode.runtime ? `${episode.runtime} min` : null, episode.air_date ? formatDate(episode.air_date) : null].filter(Boolean);
 
   return (
@@ -54,12 +71,21 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
             <CopyField value={episode.webdav_path} label="WebDAV path of this episode" hint="Find it in Infuse under the same folders">
               <FilePath path={episode.webdav_path} />
             </CopyField>
+            {source && (
+              <p className="t-small text-fg-2">
+                Source: <span lang={episode.source === 'hdrezka' ? 'ru' : undefined}>{source}</span>
+              </p>
+            )}
           </section>
           <SubtitlesPanel {...subtitles} />
           <div className="flex flex-wrap gap-2">
-            <Button onClick={find}>
-              <RefreshCw size={16} aria-hidden="true" /> Replace torrent
-            </Button>
+            {hdrezka ? (
+              <ReplaceMenu onFindTorrent={find} onStreamFromHDRezka={streamFromHDRezka} nested />
+            ) : (
+              <Button onClick={find}>
+                <RefreshCw size={16} aria-hidden="true" /> {episode.source === 'hdrezka' ? 'Replace with a torrent' : 'Replace torrent'}
+              </Button>
+            )}
             <Button
               variant="danger-quiet"
               loading={removing}
@@ -74,9 +100,16 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
       ) : episode.state === 'upcoming' ? (
         <p className="text-fg-2">It hasn’t aired yet. Find a torrent once it’s out.</p>
       ) : (
-        <Button variant="primary" onClick={find} className="self-start">
-          <Search size={16} aria-hidden="true" /> Find a torrent for {code}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={find}>
+            <Search size={16} aria-hidden="true" /> Find a torrent for {code}
+          </Button>
+          {hdrezka && (
+            <Button onClick={streamFromHDRezka}>
+              <MonitorPlay size={16} aria-hidden="true" /> Stream from HDRezka
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

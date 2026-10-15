@@ -41,6 +41,8 @@ interface EpisodesSectionProps {
   season: SeasonState;
   onOpenSettings: () => void;
   onFindSeason: (seasonNumber: number) => void;
+  /** Opens HDRezka on a season; left out while HDRezka is off. */
+  onStreamSeason?: (seasonNumber: number) => void;
   onFindEpisode: (episode: EpisodeSummary) => void;
   onOpenEpisode: (episode: EpisodeSummary) => void;
   view: EpisodeView;
@@ -71,7 +73,7 @@ interface SeasonBodyProps extends Omit<EpisodesSectionProps, 'season' | 'seasonN
  * so its state (expanded, pressed chip) starts over on another tab.
  */
 function SeasonBody(props: SeasonBodyProps) {
-  const { show, season, summary, view, onViewChange, onJumpToSeason, initialTarget, onFindSeason, onFindEpisode, onOpenEpisode, ref } = props;
+  const { show, season, summary, view, onViewChange, onJumpToSeason, initialTarget, onFindSeason, onStreamSeason, onFindEpisode, onOpenEpisode, ref } = props;
   const { episodes, ranges, season_number: number } = season;
   const list = useRef<EpisodeListHandle>(null);
   const collapsed = earlierWatched(episodes);
@@ -131,6 +133,7 @@ function SeasonBody(props: SeasonBodyProps) {
         upcoming={summary.upcoming}
         onFindSeason={() => onFindSeason(number)}
         onFindMissing={() => (firstMissing ? onFindEpisode(firstMissing) : onFindSeason(number))}
+        onStreamSeason={onStreamSeason && (() => onStreamSeason(number))}
       />
       {episodes.length === 0 ? (
         <p className="t-small text-fg-3">TMDB lists no episodes for this season yet.</p>

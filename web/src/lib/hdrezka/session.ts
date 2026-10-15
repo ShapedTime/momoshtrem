@@ -19,6 +19,10 @@ export interface HDRezkaDraft {
   translator: string | null;
   /** A quality's label. */
   quality: string | null;
+  /** Shows: the HDRezka season tab; null opens the scope's. */
+  season?: number | null;
+  /** Shows: the selected episodes (`episodeKey`); null selects the default (missing ones, or the scope's episode). */
+  episodes?: string[] | null;
 }
 
 const drafts = new Map<string, HDRezkaDraft>();

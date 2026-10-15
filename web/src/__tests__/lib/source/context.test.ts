@@ -1,5 +1,5 @@
 import type { MovieTitle, ShowTitle } from '@/lib/api/contract';
-import { legacyScope, sourceContext, sourceHeading, sourceParams } from '@/lib/source/context';
+import { legacyScope, showSourceParams, sourceContext, sourceHeading, sourceParams } from '@/lib/source/context';
 import { buildTitle } from '@/mocks/fixtures/titles';
 
 const params = (query: string) => new URLSearchParams(query);
@@ -19,6 +19,14 @@ describe('sourceContext', () => {
     const context = sourceContext(params('show=209867&season=1&se=S01E29'));
     expect(context && sourceParams(context)).toEqual({ show: '209867', season: '1', se: 'S01E29' });
     expect(context && legacyScope(context)).toEqual({ season: 1, episode: 29 });
+  });
+});
+
+describe('showSourceParams', () => {
+  it('opens a show, a season or an episode', () => {
+    expect(showSourceParams(95396, {})).toEqual({ show: '95396' });
+    expect(showSourceParams(95396, { season: 2 })).toEqual({ show: '95396', season: '2' });
+    expect(showSourceParams(95396, { season: 2, episode: 5 })).toEqual({ show: '95396', season: '2', se: 'S02E05' });
   });
 });
 

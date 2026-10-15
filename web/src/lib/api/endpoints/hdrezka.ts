@@ -18,8 +18,8 @@ export const hdrezkaKeys = {
   search: ({ media_type, tmdb_id, q }: HDRezkaSearchParams) => ['hdrezka', 'search', media_type, tmdb_id, q ?? null] as const,
   title: ({ url, translator_id, show_id, movie_id }: HDRezkaTitleParams) =>
     ['hdrezka', 'titles', url, translator_id ?? null, show_id ?? null, movie_id ?? null] as const,
-  streams: ({ url, translator_id, season, episode }: HDRezkaStreamsParams) =>
-    ['hdrezka', 'streams', url, translator_id, season ?? null, episode ?? null] as const,
+  streams: ({ url, translator_id, camrip, ads, director, season, episode }: HDRezkaStreamsParams) =>
+    ['hdrezka', 'streams', url, translator_id, camrip ?? null, ads ?? null, director ?? null, season ?? null, episode ?? null] as const,
 };
 
 export const hdrezkaApi = {

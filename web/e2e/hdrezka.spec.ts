@@ -4,8 +4,9 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
 
 /**
  * HDRezka as a second source (#67), against the MSW mocks: One Battle After
- * Another needs a file, Dune: Part Two plays from a torrent. Scenarios in
- * src/mocks/scenario.ts (hdrezka-blocked, -premium, -off).
+ * Another needs a file, Dune: Part Two plays from a torrent, Frieren misses
+ * episodes 29–38. Scenarios in src/mocks/scenario.ts (hdrezka-blocked,
+ * -premium, -partial, -off).
  */
 
 /** axe and no sideways scrolling at this width and at 320 px. */
@@ -24,6 +25,7 @@ async function expectAccessibleAndContained(page: Page) {
 const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
 const sheet = (page: Page) => page.getByRole('dialog', { name: /^Find a source · / });
 const BEST = 'Битва за битвой (2025)';
+const FRIEREN_HIT = 'Провожающая в последний путь Фрирен (2023)';
 
 /** The panel's button on desktop, the dock's icon on phone: both "Stream from HDRezka". */
 async function openFromPanel(page: Page) {
@@ -49,7 +51,7 @@ test.describe('HDRezka', () => {
     await expectAccessibleAndContained(page);
 
     await best.getByRole('button', { name: `Use ${BEST}` }).click();
-    await expect(dialog.getByRole('radio', { name: 'HDrezka Studio' })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: 'HDrezka Studio', exact: true })).toBeChecked();
     await expect(dialog.getByRole('radio', { name: 'Дубляж, Premium' })).toBeDisabled();
     await dialog.getByRole('radio', { name: 'Оригинал (+субтитры)' }).check();
     await expect(dialog.getByText('Subtitles: English, Русский')).toBeVisible();
@@ -63,7 +65,7 @@ test.describe('HDRezka', () => {
     await expect(page).toHaveURL(/\/movie\/1054867$/);
     await expect(page.getByRole('region', { name: 'Ready in Infuse' })).toContainText('HDRezka · Оригинал (+субтитры) · 1080p · 4.3 GB');
     const current = page.getByRole('region', { name: 'Current stream' });
-    await expect(current).toContainText('Битва за битвой');
+    await expect(current).toContainText('One Battle After Another');
     await expect(current.getByRole('link', { name: 'Open on HDRezka' })).toHaveAttribute('href', 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html');
     await expectAccessibleAndContained(page);
 
@@ -103,14 +105,14 @@ test.describe('HDRezka', () => {
     await signIn(page, '/movie/1054867');
     await openFromPanel(page);
     await sheet(page).getByRole('button', { name: `Use ${BEST}` }).click();
-    await sheet(page).getByRole('radio', { name: 'Jaskier, Director’s cut' }).check();
+    await sheet(page).getByRole('radio', { name: 'HDrezka Studio, Director’s cut' }).check();
     await sheet(page).getByRole('button', { name: 'Close (your choices are kept)' }).click();
     await expect(sheet(page)).toBeHidden();
     await expect(page).toHaveURL(/\/movie\/1054867$/);
 
     await openFromPanel(page);
     await expect(sheet(page).getByText('Picked up where you left off')).toBeVisible();
-    await expect(sheet(page).getByRole('radio', { name: 'Jaskier, Director’s cut' })).toBeChecked();
+    await expect(sheet(page).getByRole('radio', { name: 'HDrezka Studio, Director’s cut' })).toBeChecked();
 
     await sheet(page).getByRole('tab', { name: 'Torrents' }).click();
     await expect(sheet(page)).toBeHidden();
@@ -162,5 +164,90 @@ test.describe('HDRezka', () => {
     await page.getByRole('button', { name: 'More actions for One Battle After Another' }).click();
     await expect(page.getByText('Refresh from TMDB')).toBeVisible();
     await expect(page.getByText('Stream from HDRezka…')).toHaveCount(0);
+  });
+
+  test('stream a show’s missing episodes: selected for you, then ready from HDRezka', async ({ page }) => {
+    await signIn(page, '/tv/209867');
+    await expect(page.getByRole('region', { name: 'Episodes 29–38 have no torrent' })).toBeVisible();
+    // The panel's secondary on desktop, the dock's icon on phone; a run opens on its season
+    await page.getByRole('button', { name: 'Stream from HDRezka' }).click();
+    await expect(page).toHaveURL(/[?&]sheet=hdrezka&show=209867&season=1/);
+    const dialog = sheet(page);
+    await expect(dialog).toHaveAccessibleName('Find a source · Frieren: Beyond Journey’s End Season 1');
+    await dialog.getByRole('button', { name: `Use ${FRIEREN_HIT}` }).click();
+    await expect(dialog.getByRole('radio', { name: 'AniLibria' })).toBeChecked();
+    const list = dialog.getByRole('list', { name: 'Season 1 episodes on HDRezka' });
+    await expect(list.getByRole('checkbox', { name: /^E29 · .+ → S01E29$/ })).toBeChecked();
+    await expect(list.getByRole('checkbox', { name: /^E28 · / })).not.toBeChecked();
+    await expect(list.getByRole('checkbox', { name: /^E28 · / }).locator('xpath=ancestor::label')).toContainText('Torrent');
+    await expect(dialog.getByText('10 episodes selected')).toBeVisible();
+    await expect(dialog.getByRole('radio', { name: '1080p, 640 MB an episode' })).toBeChecked();
+    await expectAccessibleAndContained(page);
+
+    await dialog.getByRole('button', { name: 'Stream 10 episodes' }).click();
+    await expect(page.getByRole('status').filter({ hasText: '10 episodes of Frieren: Beyond Journey’s End · ready in Infuse' })).toBeVisible();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('region', { name: 'Ready in Infuse' })).toBeVisible();
+
+    // The rows are ready, and the episode sheet names the source
+    await page.getByRole('button', { name: /^S01E30 options/ }).click();
+    const episode = page.getByRole('dialog', { name: 'Mimic' });
+    await expect(episode).toContainText('Source: HDRezka · AniLibria · 1080p');
+    await expect(episode.getByLabel('WebDAV path of this episode')).toContainText('S01E30 - Mimic.mp4');
+  });
+
+  test('a partial failure: what failed stays, and Retry streams only those', async ({ page }) => {
+    await scenario(page, 'hdrezka-partial');
+    await signIn(page, '/tv/209867?sheet=hdrezka&show=209867&season=1');
+    const dialog = sheet(page);
+    await dialog.getByRole('button', { name: `Use ${FRIEREN_HIT}` }).click();
+    await expect(dialog.getByRole('radio', { name: '1080p, 640 MB an episode' })).toBeChecked();
+    await dialog.getByRole('button', { name: 'Stream 10 episodes' }).click();
+
+    const alert = dialog.getByRole('alert');
+    await expect(alert).toContainText('3 episodes didn’t stream');
+    await expect(alert).toContainText('S01E31, S01E34, S01E37. HDRezka took too long to answer for this episode. The rest are ready in Infuse.');
+    await expect(dialog.getByText('3 episodes selected')).toBeVisible();
+    await expect(dialog.getByRole('list', { name: 'Season 1 episodes on HDRezka' }).getByRole('checkbox', { name: /^E30 · / }).locator('xpath=ancestor::label')).toContainText('HDRezka · AniLibria');
+    await expectAccessibleAndContained(page);
+
+    await alert.getByRole('button', { name: 'Retry them' }).click();
+    await expect(page.getByRole('status').filter({ hasText: '3 episodes of Frieren: Beyond Journey’s End · ready in Infuse' })).toBeVisible();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('from the episode sheet: just that episode, and back to it afterwards', async ({ page }) => {
+    await signIn(page, '/tv/209867?sheet=episode&tmdb=209867&se=S01E30');
+    const episode = page.getByRole('dialog', { name: 'Mimic' });
+    await episode.getByRole('button', { name: 'Stream from HDRezka' }).click();
+    const dialog = sheet(page);
+    await expect(dialog).toHaveAccessibleName('Find a source · Frieren: Beyond Journey’s End S01E30 · Mimic');
+    await dialog.getByRole('button', { name: `Use ${FRIEREN_HIT}` }).click();
+    await expect(dialog.getByText('1 episode selected')).toBeVisible();
+    await expect(dialog.getByRole('checkbox', { name: /^E30 · / })).toBeChecked();
+    await dialog.getByRole('button', { name: 'Stream 1 episode' }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(episode).toContainText('Source: HDRezka · AniLibria · 1080p');
+    await expectAccessibleAndContained(page);
+  });
+
+  test('replacing an episode’s torrent asks first, from Replace in the episode sheet', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/95396?sheet=episode&tmdb=95396&se=S02E05');
+    const episode = page.getByRole('dialog', { name: 'Trojan’s Horse' });
+    await expect(episode).toContainText('Source: Torrent');
+    await episode.getByRole('button', { name: 'Replace' }).click();
+    if (testInfo.project.name === 'mobile') await page.getByRole('dialog', { name: 'Replace with' }).getByRole('button', { name: 'Stream from HDRezka' }).click();
+    else await page.getByRole('menuitem', { name: 'Stream from HDRezka' }).click();
+    const dialog = sheet(page);
+    await dialog.getByRole('button', { name: 'Use Разделение (2022)' }).click();
+    await expect(dialog.getByRole('checkbox', { name: /^E05 · Trojan’s Horse → S02E05$/ })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: /^1080p, / })).toBeChecked();
+    await dialog.getByRole('button', { name: 'Stream 1 episode' }).click();
+    const confirm = page.getByRole('alertdialog', { name: 'Stream S02E05 of Severance from HDRezka?' });
+    await expect(confirm).toContainText('It already has a file.');
+    await confirm.getByRole('button', { name: 'Stream it' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(episode).toContainText('Source: HDRezka · HDrezka Studio · 1080p');
   });
 });

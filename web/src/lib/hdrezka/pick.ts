@@ -5,6 +5,7 @@ import type {
   HDRezkaTitle,
   HDRezkaTranslator,
   MediaType,
+  TranslatorCut,
 } from '@/lib/api/contract';
 import { formatBytes } from '@/lib/title/format';
 
@@ -77,9 +78,14 @@ export const weakMatchNote = (target: MatchTarget) =>
 
 /* ---- Voice-overs ------------------------------------------------------------ */
 
-/** One translator id can come in several cuts; its flags tell them apart. */
-export const translatorKey = (t: HDRezkaTranslator) =>
-  `${t.id}${t.camrip ? '-c' : ''}${t.ads ? '-a' : ''}${t.director ? '-d' : ''}`;
+/** A translator and its cut: one id can come several times, and its flags tell them apart. */
+export type TranslatorRef = Pick<HDRezkaTranslator, 'id'> & TranslatorCut;
+
+/** "111", or "111-d" for its director's cut: the voice-over's identity in keys, selection and session state. */
+export const translatorKey = (t: TranslatorRef) => `${t.id}${t.camrip ? '-c' : ''}${t.ads ? '-a' : ''}${t.director ? '-d' : ''}`;
+
+/** The flags to send with the id (`/hdrezka/streams`, the movie assign), so the server takes this cut. */
+export const translatorCut = (t: HDRezkaTranslator): Required<TranslatorCut> => ({ camrip: t.camrip, ads: t.ads, director: t.director });
 
 /** A `Chip` tone. */
 export interface TranslatorChip {
@@ -102,17 +108,31 @@ export function translatorChips(t: HDRezkaTranslator): TranslatorChip[] {
 export const translatorBlocked = (t: HDRezkaTranslator): string | null =>
   t.premium ? 'Needs an HDRezka Premium account, which momoshtrem doesn’t use' : null;
 
+/** What the voice-over to start on depends on, besides the title's own list. */
+export interface TranslatorPrefs {
+  /** Picked earlier this session for this context (`translatorKey`). */
+  keep?: string | null;
+  /** The name of the voice-over this title streams now (a movie's stream, or its episodes'). */
+  current?: string | null;
+  /** The last voice-over a stream was assigned with, on any title (`remembered.ts`). */
+  remembered?: TranslatorRef | null;
+}
+
 /**
- * The voice-over to start on: the one kept from earlier, else the one the
- * answer is for (a movie's current stream, or the page's default), else the
- * page's default, else the first that plays without Premium.
+ * The voice-over to start on, never a premium one: what was picked earlier
+ * this session, else what the title streams now, else the one remembered
+ * from the last assign (usually "Оригинал (+субтитры)"), else the page's
+ * default, else the first that plays without an account.
  */
-export function defaultTranslator(title: HDRezkaTitle, keep: string | null = null): HDRezkaTranslator | null {
+export function defaultTranslator(title: HDRezkaTitle, prefs: TranslatorPrefs = {}): HDRezkaTranslator | null {
   const usable = title.translators.filter((t) => !t.premium);
+  const { keep, current, remembered } = prefs;
   return (
-    usable.find((t) => translatorKey(t) === keep) ??
-    usable.find((t) => t.id === title.translator_id) ??
+    (keep ? usable.find((t) => translatorKey(t) === keep) : undefined) ??
+    (current ? usable.find((t) => t.name === current) : undefined) ??
+    (remembered ? usable.find((t) => translatorKey(t) === translatorKey(remembered)) : undefined) ??
     usable.find((t) => t.default) ??
+    usable.find((t) => t.id === title.translator_id) ??
     usable[0] ??
     null
   );
@@ -131,11 +151,12 @@ export function defaultQuality(qualities: HDRezkaQuality[], keep: string | null 
   return usable.reduce<HDRezkaQuality | null>((best, q) => (best === null || q.resolution >= best.resolution ? q : best), null);
 }
 
-/** Under a quality's label: its size, or why it can't be picked. */
-export function qualityNote(q: HDRezkaQuality): string {
+/** Under a quality's label: its size (an episode's, for a show), or why it can't be picked. */
+export function qualityNote(q: HDRezkaQuality, perEpisode = false): string {
   if (q.premium) return 'Premium';
   if (!q.available) return 'Not offered';
-  return q.size_bytes !== null ? formatBytes(q.size_bytes) : 'Size unknown';
+  if (q.size_bytes === null) return 'Size unknown';
+  return perEpisode ? `${formatBytes(q.size_bytes)} an episode` : formatBytes(q.size_bytes);
 }
 
 /** "Subtitles: English, Русский" for the voice-over's stream. */
