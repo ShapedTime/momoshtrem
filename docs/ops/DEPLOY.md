@@ -87,7 +87,7 @@ In `/opt/momoshtrem`:
 6. **`caddy_data`.** The pinned project name makes the volume `momoshtrem_caddy_data`. A throwaway container creates it and unpacks the old volume into it:
    ```bash
    docker compose run --rm --no-deps -T caddy tar -xf - -C /data < ~/restore/caddy_data.tar
-   docker compose run --rm --no-deps caddy ls /data/caddy/pki/authorities/local   # root.crt and intermediate.crt: the CA Infuse trusts
+   docker compose run --rm --no-deps caddy ls /data/caddy/pki/authorities/local   # root.crt and intermediate.crt: the old internal CA (unused since #19)
    ```
 7. **`config.yaml`** in `/mnt/data/momoshtrem/config`. Keep only what env doesn't cover and what differs from the defaults. Secrets go in `.env`. Set the cache cap from VM.md §1:
    ```yaml

@@ -52,7 +52,7 @@ export async function verifySessionToken(
 
 /** Cookie attributes shared by sign-in and sign-out. */
 function sessionCookieOptions() {
-  // SECURE_COOKIES=false allows plain-HTTP LAN deployments (until HTTPS lands, PLAN G4)
+  // SECURE_COOKIES=false allows signing in over plain HTTP, such as http://localhost:3000
   const secure = process.env.SECURE_COOKIES !== 'false' && process.env.NODE_ENV === 'production';
   return { httpOnly: true, secure, sameSite: 'lax' as const, path: '/' };
 }

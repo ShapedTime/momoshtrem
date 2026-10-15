@@ -127,7 +127,7 @@ Based on a code audit and a live audit on 2026-10-11. Screenshots of the current
 
 ```
                  Browser (phone / laptop; installable PWA)
-                          │ HTTPS (Caddy, real cert via DuckDNS DNS-01)
+                          │ HTTPS (Caddy, Let's Encrypt over TLS-ALPN)
                           ▼
              web: Next.js 16 BFF (:3000, internal only)
    auth (username+password, JWT cookie) · TMDB browse/discover/search
@@ -477,10 +477,10 @@ Related endpoints:
   - Jest tests cover redirect validation, the 401 behaviour and username checks.
   - Manual check (best after G4): Chrome and Safari offer to save the login and then autofill it.
 
-**G4 · HTTPS** (infra; needs the user for router and port changes)
-- Build Caddy with the `caddy-dns/duckdns` module and use DNS-01 (`DUCKDNS_TOKEN` is already in `.env`) to get a real certificate for `momoshtrem.duckdns.org`. This replaces `tls internal`.
-- Serve web through Caddy on 443 (or a chosen port).
-- Stop publishing `3000:3000` and set `SECURE_COOKIES=true`.
+**G4 · HTTPS** (infra; needs the user for router and port changes). Done in #19.
+- Caddy gets a Let's Encrypt certificate for the DuckDNS name over TLS-ALPN on 443, so the stock image does it and port 80 stays closed. The first plan was DNS-01 through a custom Caddy build. The user chose TLS-ALPN in #19, which needs no custom image and no `DUCKDNS_TOKEN`. This replaces `tls internal`.
+- Serve web through Caddy on 443.
+- Stop publishing `3000:3000` (web is on the VM's loopback only), and default to `SECURE_COOKIES=true` and `TRUSTED_PROXY_HOPS=1`.
 - Move WebDAV onto the same certificate.
 - Acceptance: a valid certificate in Chrome and Safari; port 3000 isn't reachable from outside; Infuse still connects to WebDAV.
 

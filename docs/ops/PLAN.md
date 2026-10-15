@@ -38,7 +38,7 @@
 | D5 | **Build a fresh VM and cut over** | Reversed on 2026-10-15 (#42): the as-is inventory found too much to fix in place. The new VM is created by hand from [`VM.md`](VM.md), configured by Ansible and deployed from scratch, and the data is copied across. It keeps its own IP, 192.168.0.99: at cutover the router forwards (36911 and 3000) move to it, and the old VM keeps the .81 reservation. The old VM stays, stopped, as the way back until the new one is proven. The user takes Proxmox snapshots by hand before risky steps. |
 | D6 | **Secrets live only on the VM** and in the encrypted backup | `.env` is managed by hand on the VM. Secrets never go in the repo or in GitHub, and there is no Ansible Vault. The break-glass values the VM can't hold live in the user's password manager (§7). |
 | D7 | **Images live on GHCR, tagged by the full commit SHA** | The images are public, since the code is public anyway. Tags are immutable, and the VM never builds. |
-| D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | compose publishes them on the VM's loopback only (`127.0.0.1:9117` and `127.0.0.1:9090`), so an SSH tunnel reaches them: `ssh -L 9117:localhost:9117 momoshtrem-v2`. |
+| D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | compose publishes them on the VM's loopback only (`127.0.0.1:9117` and `127.0.0.1:9090`, and the web app's `127.0.0.1:3000` since #19), so an SSH tunnel reaches them: `ssh -L 9117:localhost:9117 momoshtrem-v2`. |
 | D9 | **Go-live happens at cutover** | The first deploy is current `main` (v2). The old VM went down before #35 and #38 existed (§9), so it's deployed by hand and protected by the #33 copy and a Proxmox snapshot. Later deploys go through the pipeline, behind a pre-deploy dump and the B2 backup. |
 
 ## 3. Current state: findings that drive this plan
@@ -109,7 +109,7 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 | Jackett `/config` | `/mnt/data/3/jackett` | **Critical** | The indexer setup. Its API key must match `JACKETT_API_KEY`, so restore the two together. |
 | momoshtrem `config.yaml` | `.../momoshtrem/config` | Back up | Tuning: cache size, ports, metrics. |
 | Downloaded subtitles | `.../data/data/subtitles` | Back up | DB rows point at these files, and downloading them again uses up OpenSubtitles quota. |
-| `caddy_data` volume | `momoshtrem_caddy_data`, a Docker named volume | Back up | Caddy's internal CA. If it's lost, Infuse has to trust a new certificate. The pinned project name fixes the volume's name (#37). |
+| `caddy_data` volume | `momoshtrem_caddy_data`, a Docker named volume | Back up | The Let's Encrypt account and certificate (#19), and the old internal CA, now unused. If it's lost, Caddy gets a new certificate when it starts; nothing has to be trusted again. The pinned project name fixes the volume's name (#37). |
 | Deploy state | new in #38 | Back up | The current, previous and last-failed commit. |
 | Caddyfile | the repo (#37) | Tracked | Its host values and the WebDAV hash come from `.env`. |
 | Torrent cache | `.../data/data/torrents` (90 GB) | Excluded | Rebuilds itself. Never move it; delete it if the space is needed. |
@@ -215,8 +215,8 @@ Epic #32 is done when all of these hold:
   - Mitigation: the as-is inventory (#33) lists the state, the restore is rehearsed on the Mac with the real dump first, and the old VM is kept until the new one has three green nightly backups.
 - **The v2 jump at cutover.** Several migrations and a backfill all happen in one deploy.
   - Mitigation: a rehearsal of the restore and migrations on the Mac first, a snapshot, and the H3 smoke test. The old VM is the way back (§6).
-- **Losing the Caddy CA.** A new `caddy_data` volume means a new CA, and then Infuse stops trusting the certificate.
-  - Mitigation: #37 pins the project name, so the volume is always `momoshtrem_caddy_data`. The cutover copies the old volume into it, and #35 backs it up.
+- **Losing `caddy_data`.** Since #19 it holds a Let's Encrypt certificate, so a new volume only means a new certificate. Let's Encrypt allows 5 a week for the same name.
+  - Mitigation: #37 pins the project name, so the volume is always `momoshtrem_caddy_data`, and #35 backs it up.
 - **Disk pressure.** The old VM's root disk filled up, and the new data disk is 70 GiB until cutover.
   - Mitigation: the new root LV fills its disk and the VM never builds (VM.md §1). Image retention (§8) keeps it that way. The torrent cache cap is 52 GiB until the data disk grows to 120 GiB.
 - **One person, one VM.** Accepted. The runbook is the mitigation.

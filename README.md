@@ -93,7 +93,7 @@ The frontend talks to TMDB for metadata, Jackett for torrent search, and momosht
 
 3. **Configure Caddy (reverse proxy)**
 
-   The tracked [`Caddyfile`](Caddyfile) reads its values from `.env`. Set `WEBDAV_HOST` (your domain or hostname), `WEBDAV_USER`, and `WEBDAV_PASSWORD_HASH` from:
+   The tracked [`Caddyfile`](Caddyfile) reads its values from `.env`. Set `WEBDAV_HOST` (your public hostname, for the web UI and WebDAV), `WEBDAV_USER`, and `WEBDAV_PASSWORD_HASH` from:
    ```bash
    docker run --rm caddy:2.11.7-alpine caddy hash-password --plaintext "YourPassword"
    ```
@@ -113,7 +113,7 @@ The frontend talks to TMDB for metadata, Jackett for torrent search, and momosht
      docker compose up -d
      ```
 
-6. **Open the web UI** at `http://localhost:3000`
+6. **Open the web UI** at `https://your-domain`. Caddy gets a Let's Encrypt certificate for `WEBDAV_HOST` over port 443, so forward 443 to the server first. Port 80 isn't needed. On the server itself, the web app also answers at `http://localhost:3000`.
 
 7. **Connect your player** (Infuse, VLC, nPlayer, etc.) to WebDAV at `https://your-domain:36911` with `WEBDAV_USER` and its password.
 
@@ -180,12 +180,12 @@ The virtual filesystem is built from your library database. When you add a movie
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **web** (momoshtrem-web) | 3000 | Next.js web UI for browsing, searching, and managing your library |
+| **web** (momoshtrem-web) | 3000 (loopback) | Next.js web UI for browsing, searching, and managing your library |
 | **momoshtrem** | 4444 (internal) | Go backend — REST API, torrent client, library management |
 | **momoshtrem WebDAV** | 36911 | Virtual filesystem endpoint for media players |
 | **Jackett** | 9117 (loopback) | Torrent indexer aggregator — search across multiple trackers |
 | **PostgreSQL** | 5432 (internal) | Library and metadata storage |
-| **Caddy** | 36911, 5050 | Reverse proxy — HTTPS and basic auth for WebDAV, LAN-only pgAdmin |
+| **Caddy** | 443, 36911, 5050 | Reverse proxy — HTTPS (Let's Encrypt) for the web UI and WebDAV, basic auth for WebDAV, LAN-only pgAdmin |
 
 ## Contributing
 
