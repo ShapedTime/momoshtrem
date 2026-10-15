@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/shapedtime/momoshtrem/internal/identify/corpus"
 )
 
 // classifyOne classifies a single-file torrent for a fixture show.
@@ -255,7 +257,7 @@ func TestClassifyIsDeterministic(t *testing.T) {
 		if !c.Golden {
 			continue
 		}
-		in := c.input(t)
+		in := caseInput(t, c)
 		a, b := Classify(in), Classify(in)
 		if !reflect.DeepEqual(a, b) {
 			t.Errorf("%s: two runs differ", c.ID)
@@ -273,7 +275,7 @@ func TestClassifyDoesNotModifyCatalog(t *testing.T) {
 }
 
 func TestPackContext(t *testing.T) {
-	var frierenS2, onePiece corpusCase
+	var frierenS2, onePiece corpus.Case
 	for _, c := range loadCorpus(t) {
 		switch c.ID {
 		case "frieren-scene-s02":
@@ -282,7 +284,7 @@ func TestPackContext(t *testing.T) {
 			onePiece = c
 		}
 	}
-	res := Classify(frierenS2.input(t))
+	res := Classify(caseInput(t, frierenS2))
 	if res.Pack.Type != PackSeason || res.Pack.Group != "VARYG" {
 		t.Errorf("Frieren S02 pack: %+v", res.Pack)
 	}
@@ -290,7 +292,7 @@ func TestPackContext(t *testing.T) {
 		t.Errorf("Frieren S02 folder season = %d, want 2", s)
 	}
 
-	res = Classify(onePiece.input(t))
+	res = Classify(caseInput(t, onePiece))
 	if res.Pack.NameRange != [2]int{1071, 1075} || res.Pack.DirMode[onePiece.Torrent] != DirAbsolute {
 		t.Errorf("One Piece pack: %+v", res.Pack)
 	}

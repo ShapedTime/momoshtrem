@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,9 @@ type Options struct {
 	TraktConfigured         bool
 	AIConfigured            bool
 	OpenSubtitlesConfigured bool
+	// AICost is what the AI features have cost this month (ai_usage).
+	// Optional: without it, or when it fails, mtd_cost_usd is null.
+	AICost func(ctx context.Context) (float64, error)
 
 	// ProbeTimeout bounds each check; zero means DefaultProbeTimeout.
 	ProbeTimeout time.Duration
@@ -110,7 +114,8 @@ type TraktStatus struct {
 	Connected  bool `json:"connected"`
 }
 
-// AIStatus reports the Anthropic integration. MTDCostUSD is filled in by B2.
+// AIStatus reports the Anthropic integration. MTDCostUSD is what every AI
+// feature has cost this month; null when it can't be read.
 type AIStatus struct {
 	Configured bool     `json:"configured"`
 	MTDCostUSD *float64 `json:"mtd_cost_usd"`
@@ -215,13 +220,31 @@ func (s *Service) check(ctx context.Context) Report {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go func() { defer wg.Done(); r.DB = s.checkDB(ctx) }()
 	go func() { defer wg.Done(); r.Jackett = s.runProbe(ctx, "jackett", s.opts.Jackett) }()
 	go func() { defer wg.Done(); r.TMDB = s.runProbe(ctx, "tmdb", s.opts.TMDB) }()
+	go func() { defer wg.Done(); r.AI.MTDCostUSD = s.aiCost(ctx) }()
 	wg.Wait()
 
 	return r
+}
+
+// aiCost reads this month's AI cost, rounded to a hundredth of a cent;
+// nil when it isn't configured or fails.
+func (s *Service) aiCost(ctx context.Context) *float64 {
+	if s.opts.AICost == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.opts.ProbeTimeout)
+	defer cancel()
+	cost, err := s.opts.AICost(ctx)
+	if err != nil {
+		slog.Warn("Status: AI cost query failed", "error", err)
+		return nil
+	}
+	cost = math.Round(cost*10_000) / 10_000
+	return &cost
 }
 
 func (s *Service) webDAVStatus() WebDAVStatus {

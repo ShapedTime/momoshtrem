@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/shapedtime/momoshtrem/internal/identify"
+	"github.com/shapedtime/momoshtrem/internal/identify/ai"
 	"github.com/shapedtime/momoshtrem/internal/library"
 )
 
@@ -453,7 +454,9 @@ func TestPickMovie(t *testing.T) {
 	}
 }
 
-func TestUnsurePaths(t *testing.T) {
+// The worker asks the AI about ai.Scope's files: the unsure main videos,
+// or every one in ai_always.
+func TestAIScope(t *testing.T) {
 	props := []identify.Proposal{
 		{Path: "a.mkv", Kind: identify.KindEpisode, Targets: []identify.Target{tgt(1, 1, 1)}, Confidence: identify.ConfidenceHigh},
 		{Path: "b.mkv", Kind: identify.KindEpisode, Targets: []identify.Target{tgt(2, 1, 2)}, Confidence: identify.ConfidenceMedium},
@@ -463,10 +466,10 @@ func TestUnsurePaths(t *testing.T) {
 		{Path: "f.mkv", Kind: identify.KindEpisode, Targets: []identify.Target{tgt(3, 1, 3)}, Confidence: identify.ConfidenceHigh},
 		{Path: "g.mkv", Kind: identify.KindEpisode, Targets: []identify.Target{tgt(3, 1, 3)}, Confidence: identify.ConfidenceHigh},
 	}
-	if got := unsurePaths(props, library.ClassifierAuto); !reflect.DeepEqual(got, []string{"b.mkv", "c.mkv", "f.mkv", "g.mkv"}) {
+	if got := ai.Scope(props, false); !reflect.DeepEqual(got, []string{"b.mkv", "c.mkv", "f.mkv", "g.mkv"}) {
 		t.Errorf("auto = %v", got)
 	}
-	if got := unsurePaths(props, library.ClassifierAIAlways); len(got) != 5 {
+	if got := ai.Scope(props, true); len(got) != 5 {
 		t.Errorf("ai_always = %v, want every main video", got)
 	}
 }

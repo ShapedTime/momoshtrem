@@ -151,9 +151,18 @@ type JobDeps struct {
 	// Resolver is the AI resolver. Nil or identify.NoopResolver means AI
 	// isn't available.
 	Resolver identify.Resolver
+	// AICache is pruned of expired answers by the janitor. Optional.
+	AICache CachePruner
 	// Workers is how many jobs run at once (2 when 0).
 	Workers int
 }
+
+// CachePruner removes expired AI answers. *library.AIStore implements it.
+type CachePruner interface {
+	DeleteExpiredCache(ctx context.Context) (int64, error)
+}
+
+var _ CachePruner = (*library.AIStore)(nil)
 
 // JobService runs assignment jobs (PLAN §6 "Assignment"): assigning a
 // torrent creates a job, a worker fetches its file list and classifies
@@ -171,14 +180,18 @@ type JobService struct {
 	refresher   ShowRefresher
 	tmdb        CatalogSource
 	resolver    identify.Resolver
+	aiCache     CachePruner
 	workers     int
 	now         func() time.Time
 	log         *slog.Logger
 
-	// The worker pool (assignment_worker.go).
+	// The worker pool (assignment_worker.go); re-checks run in runCtx and
+	// count in wg too.
 	wake      chan struct{}
 	stop      context.CancelFunc
 	wg        sync.WaitGroup
+	runMu     sync.Mutex
+	runCtx    context.Context
 	hashLocks keyedMutex
 	// pollInterval is how often a waiting legacy request re-reads its job.
 	pollInterval time.Duration
@@ -202,6 +215,7 @@ func NewJobService(d JobDeps) *JobService {
 		refresher:    d.Metadata,
 		tmdb:         d.TMDB,
 		resolver:     d.Resolver,
+		aiCache:      d.AICache,
 		workers:      workers,
 		now:          time.Now,
 		log:          slog.With("component", "assignment-jobs"),

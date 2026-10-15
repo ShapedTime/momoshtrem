@@ -123,6 +123,24 @@ func TestReport_AllConfigured(t *testing.T) {
 	}
 }
 
+// ai.mtd_cost_usd is this month's AI cost, rounded to a hundredth of a
+// cent; null when it can't be read.
+func TestReport_AICost(t *testing.T) {
+	r := NewService(Options{DB: &fakeDB{}, AIConfigured: true, AICost: func(context.Context) (float64, error) {
+		return 0.0123456, nil
+	}}).Report(context.Background(), false)
+	if r.AI.MTDCostUSD == nil || *r.AI.MTDCostUSD != 0.0123 {
+		t.Errorf("ai = %+v", r.AI)
+	}
+
+	r = NewService(Options{DB: &fakeDB{}, AIConfigured: true, AICost: func(context.Context) (float64, error) {
+		return 0, errors.New("db down")
+	}}).Report(context.Background(), false)
+	if r.AI.MTDCostUSD != nil {
+		t.Errorf("a failed query = %v, want null", *r.AI.MTDCostUSD)
+	}
+}
+
 func TestReport_Unconfigured(t *testing.T) {
 	svc := NewService(Options{
 		Version: "dev",

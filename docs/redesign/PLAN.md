@@ -168,7 +168,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 
 **`002_app_settings.sql` (G2)**
 - `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults.
-  - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`) and `auto_apply_high_confidence` (true). `library.SettingsRepository.AISettings` reads it; #9 serves the endpoints.
+  - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`; `claude-sonnet-5-5` and `claude-opus-5-5` are priced too) and `auto_apply_high_confidence` (true), and the AI resolver (B3) `monthly_budget_usd` (none: no cap; once every AI feature's spend this month reaches it, AI calls are skipped). `library.SettingsRepository.AISettings` reads it; #9 serves the endpoints.
 
 **`003_metadata.sql` (B1)**
 - `movies`: add `imdb_id`, `poster_path`, `backdrop_path`, `runtime`, `genres jsonb`, `metadata_updated_at`.
@@ -202,8 +202,8 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - `confidence` (`high|medium|low`, NULL), `source` (`rules|ai|manual`), `reason` (≤ 120 characters).
   - `decision` (`pending|accepted|ignored`), `user_decided bool`, `updated bool`, `hinted bool`.
   - `superseded_by` (FK to the proposal that replaces it, its v2) and `linked_proposal_id` (a subtitle's video), both `ON DELETE SET NULL` and indexed (deleting a big job's proposals otherwise scans the table once per row).
-- `ai_usage(id, feature classifier|recs|ask, model, input_tokens, output_tokens, cache_read_tokens, web_searches, cost_usd numeric, ref_id, created_at)`. Shared by every AI feature.
-- `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by `(info_hash, show_id, metadata_updated_at, hint)`.
+- `ai_usage(id, feature classifier|recs|ask, model, input_tokens, output_tokens, cache_read_tokens, web_searches, cost_usd numeric, ref_id, created_at)`. Shared by every AI feature, one row per API call. `input_tokens` counts the prompt tokens not read from the cache (cache writes included); `cost_usd` prices each kind at its rate. The classifier's `ref_id` is the job.
+- `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by a hash of `(info_hash, show_id, metadata_updated_at, hint, scope)` plus the model and its prompt version, for 30 days.
 
 **`005_trakt.sql` (B5)**
 - `trakt_auth(id=1, username, access_token_enc, refresh_token_enc, expires_at, created_at, updated_at)`.
@@ -333,7 +333,7 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 **State machine.** `queued → fetching_metadata → classifying → [resolving] → needs_review ⇄ ready → applied`. Any open state can end in `failed` or `cancelled`.
 - *Working* means `queued…resolving`, *open* means working plus `needs_review` and `ready`, and *closed* means `applied`, `failed` or `cancelled`.
 - `fetching_metadata` loads the torrent's file list. Meanwhile it refreshes the show's metadata when it was never synced or is over 24 h old, and reads TMDB's alternative titles (the classifier's aliases) and season-like episode groups (its alternative orderings). When a video then stays unmatched (perhaps an episode that just aired), it refreshes once more and reclassifies, unless a refresh was tried in this job or ran within the last hour.
-- `resolving` runs the AI resolver on the unsure files. It's skipped when nothing needs asking or AI is unavailable: no key, `classifier_enabled` off, or the show's `classifier_mode` is `rules_only`.
+- `resolving` runs the AI resolver on the unsure main videos (every main video with `classifier_mode` `ai_always`; never extras, samples or subtitles). It's skipped when nothing needs asking or AI is unavailable: no key, `classifier_enabled` off, the show's `classifier_mode` is `rules_only`, or it's a movie job. The AI never overrides a `high` rules answer: when it answers one differently (another episode that exists, or an extra, at medium or high confidence), the proposal keeps its targets (and suggestion, so Undo restores them) but drops to `medium`, so it lands in `needs_review` (pending) and auto-apply waits; its reason names the AI's pick ("AI suggests S00E03: …"). A run gets 90 s per wave of requests (up to 60 files a request, four at a time), at most 15 minutes, so a big pack can finish; when some requests fail, the answers of the others are kept and `ai_error` says the rest are unchanged (the job isn't auto-applied).
 - After classification, every PATCH (during `resolving`, when the run ends) and every AI run, the status is recomputed: `needs_review` while a proposal that *maps* is `pending` or a conflict exists, otherwise `ready`. A proposal maps when it has targets, or when it's a movie candidate.
 - **Auto-apply** (the `auto_apply_high_confidence` setting, on by default) sends a freshly classified job straight to `applied` when all of these hold:
   - it isn't a dry run;
@@ -435,9 +435,9 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - episodes for a file that isn't a video (fonts, images, info files; a subtitle may take one).
 
 **Re-check (reclassify)**
-- **Scope.** `scope: "unresolved"` re-checks the pending proposals the user hasn't decided; `"all"` re-checks every proposal the user hasn't decided. AI writes use `WHERE NOT user_decided` (plus `decision = 'pending'` for `unresolved`), so the user's decisions always survive.
-- **What changes.** Starting a re-check clears `ai_error` and every `updated`/`hinted`. The status goes to `resolving`, then gets recomputed. Each changed proposal gets new `targets` and `suggested_targets`, `confidence`, `reason`, `source: ai` and `updated: true` (plus `hinted`). Its decision and group stay the same.
-- **When the AI run fails,** the job sets `ai_error` and leaves every proposal as it was.
+- **Scope.** A re-check asks about episode proposals (videos) the user hasn't decided: `scope: "unresolved"` the pending ones (unmatched included) and those in a conflict; `"all"` every one. Extras and subtitles keep the rules' reading. AI writes skip `user_decided` proposals (decided meanwhile too), so the user's decisions always survive. `progress.ai_files` is the scope's size; an empty scope settles at once without asking.
+- **What changes.** Starting a re-check clears `ai_error` and every `updated`/`hinted`, and its `hint` replaces the job's text hint (season and episode stay). The status goes to `resolving`, then gets recomputed. Each changed proposal gets new `targets` and `suggested_targets`, `confidence`, `reason`, `source: ai` and `updated: true` (plus `hinted`). Its kind and group stay the same, and an accepted proposal never loses its target. A `high` rules answer is never overridden (the rules run again on the stored file list to tell which answers are theirs, so one an earlier re-check flagged stays protected): the AI's disagreement keeps its targets, drops it to `medium` and names the AI's pick in its reason, as in `resolving`. Decisions stay too, except that a disputed proposal still on its group's default `accepted` (the user hasn't decided it) goes back to `pending`, so the job can't settle `ready` with a dispute. When a later re-check's AI agrees with a flagged rules answer, the flag is lifted: the rules' `high` and reason come back, and the decision stays `pending` for the user. An earlier AI answer may be replaced.
+- **When the AI run fails** (or this month's budget is spent), the job sets `ai_error` and leaves every proposal as it was; when only some of its requests fail, the others' answers are kept. Usage is recorded either way.
 
 **Apply**
 - **One transaction,** guarded by `UPDATE … WHERE status = 'ready'`:
@@ -556,7 +556,7 @@ Related endpoints:
     jackett: { configured, reachable, latency_ms?, error? },
     tmdb: { configured, reachable, latency_ms?, error? },
     trakt: { configured, connected },             // connected is always false until B5
-    ai: { configured, mtd_cost_usd },             // mtd_cost_usd is null until B2
+    ai: { configured, mtd_cost_usd },             // mtd_cost_usd: every AI feature's spend this month (ai_usage); null when it can't be read
     opensubtitles: { configured }
   }
   ```
@@ -714,9 +714,9 @@ Related endpoints:
   - Put the stable system prompt first so prompt caching works.
 - **Validation.**
   - Every AI mapping must point at an existing episode row.
-  - The AI never overrides a `high` rules result.
+  - The AI never overrides a `high` rules result; when it disagrees with one, the proposal goes to review with the AI's pick in its reason (`identify.FlagDisagreements`).
   - AI-only mappings go to `needs_review` unless they're `high` confidence and the setting allows auto-apply.
-- **Caching and cost.** Cache results in `ai_cache` by `(info_hash, show_id, metadata_updated_at, hint)`. Record usage in `ai_usage`. If `ANTHROPIC_API_KEY` is missing, degrade quietly to rules-only.
+- **Caching and cost.** Cache complete results in `ai_cache` by `(info_hash, show_id, metadata_updated_at, hint, scope)`, plus the model and prompt version; a cached answer is served even with the budget spent. Record usage in `ai_usage`. Skip AI calls once `monthly_budget_usd` is spent. If `ANTHROPIC_API_KEY` is missing, degrade quietly to rules-only. Answers are mapped to files by their number in the request (`n`), the file name checking it.
 - **`cmd/classifier-eval`.** Runs at least 20 golden torrent file lists:
   - One Piece batch, Frieren (including the scene "S02" split), Doctor Who with specials, Bluey.
   - Law & Order: SVU, Trailer Park Boys.

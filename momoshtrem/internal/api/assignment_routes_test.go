@@ -23,7 +23,13 @@ type fakeJobs struct {
 	id       int64
 	req      service.AssignRequest
 	statuses []library.JobStatus
+	recheck  service.ReclassifyRequest
 	called   string
+}
+
+func (f *fakeJobs) Reclassify(_ context.Context, id int64, req service.ReclassifyRequest) error {
+	f.called, f.id, f.recheck = "reclassify", id, req
+	return f.err
 }
 
 func (f *fakeJobs) Assign(_ context.Context, media library.JobMediaType, id int64, req service.AssignRequest) (int64, bool, error) {
@@ -141,6 +147,18 @@ func TestAssignmentRoutes(t *testing.T) {
 		{"discard", "POST", "/api/assignment-jobs/5/discard", "", nil, true, 200, "", "discard"},
 		{"discard an applied job", "POST", "/api/assignment-jobs/5/discard", "", conflictErr(service.CodeJobClosed), true, 409, service.CodeJobClosed, "discard"},
 		{"discard an unknown job", "POST", "/api/assignment-jobs/5/discard", "", library.ErrJobNotFound, true, 404, CodeNotFound, "discard"},
+		{"reclassify", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "unresolved"}`, nil, true, 202, "", "reclassify"},
+		{"reclassify everything with a hint", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all", "hint": "absolute"}`, nil, true, 202, "", "reclassify"},
+		{"reclassify with a null hint", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all", "hint": null}`, nil, true, 202, "", "reclassify"},
+		{"reclassify without a scope", "POST", "/api/assignment-jobs/5/reclassify", `{"hint": "x"}`, nil, true, 400, CodeBadRequest, ""},
+		{"reclassify an unknown scope", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "some"}`, nil, true, 400, CodeBadRequest, ""},
+		{"reclassify with a broken body", "POST", "/api/assignment-jobs/5/reclassify", `{"scope":`, nil, true, 400, CodeBadRequest, ""},
+		{"reclassify with a number for a hint", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all", "hint": 3}`, nil, true, 400, CodeBadRequest, ""},
+		{"reclassify with a long hint", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all"}`, fmt.Errorf("%w: long", service.ErrInvalidHint), true, 400, CodeBadRequest, "reclassify"},
+		{"reclassify without AI", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all"}`, service.ErrAIUnavailable, true, 503, CodeUnavailable, "reclassify"},
+		{"reclassify a working job", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all"}`, conflictErr(service.CodeJobWorking), true, 409, service.CodeJobWorking, "reclassify"},
+		{"reclassify a closed job", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all"}`, conflictErr(service.CodeJobClosed), true, 409, service.CodeJobClosed, "reclassify"},
+		{"reclassify an unknown job", "POST", "/api/assignment-jobs/5/reclassify", `{"scope": "all"}`, library.ErrJobNotFound, true, 404, CodeNotFound, "reclassify"},
 		{"the client went away", "GET", "/api/assignment-jobs/5", "", context.Canceled, true, StatusClientClosedRequest, CodeClientClosed, "detail"},
 		{"a database error", "GET", "/api/assignment-jobs/5", "", errors.New("conn reset by 10.0.0.3"), true, 500, CodeInternalError, "detail"},
 	}
@@ -209,6 +227,12 @@ func TestAssignmentRoutes_Bodies(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil || detail.Job.ID != 5 || detail.Proposals == nil {
 		t.Errorf("apply = %s", rec.Body)
 	}
+
+	rec = doBody(t, s, "POST", "/api/assignment-jobs/6/reclassify", `{"scope": "all", "hint": "these are OVAs"}`)
+	if rec.Code != http.StatusAccepted || strings.TrimSpace(rec.Body.String()) != `{"job_id":6}` ||
+		jobs.id != 6 || jobs.recheck != (service.ReclassifyRequest{Scope: service.RecheckAll, Hint: "these are OVAs"}) {
+		t.Errorf("reclassify = %d %s, request %+v", rec.Code, rec.Body, jobs.recheck)
+	}
 }
 
 // Without a job service every assignment route answers 503.
@@ -218,6 +242,7 @@ func TestAssignmentRoutes_NotConfigured(t *testing.T) {
 		{"POST", "/api/shows/7/assign-torrent"}, {"POST", "/api/movies/7/assign-torrent"},
 		{"GET", "/api/assignment-jobs"}, {"GET", "/api/assignment-jobs/1"},
 		{"POST", "/api/assignment-jobs/1/apply"}, {"POST", "/api/assignment-jobs/1/discard"},
+		{"POST", "/api/assignment-jobs/1/reclassify"},
 	} {
 		rec := doBody(t, s, r[0], r[1], `{"magnet_uri": "m"}`)
 		if rec.Code != http.StatusServiceUnavailable || decodeError(t, rec).Code != CodeUnavailable {

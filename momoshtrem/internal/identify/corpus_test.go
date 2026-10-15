@@ -2,94 +2,33 @@ package identify
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
-	"gopkg.in/yaml.v3"
+	"github.com/shapedtime/momoshtrem/internal/identify/corpus"
 )
 
 // The corpus (testdata/corpus/*.yaml) is the classifier's spec; its schema
-// is described at the top of anime.yaml.
-
-type corpusCase struct {
-	ID           string       `yaml:"id"`
-	Show         string       `yaml:"show"`
-	Torrent      string       `yaml:"torrent"`
-	Golden       bool         `yaml:"golden"`
-	Tags         []string     `yaml:"tags"`
-	Now          string       `yaml:"now"`
-	Hint         *corpusHint  `yaml:"hint"`
-	DropSpecials bool         `yaml:"drop_specials"`
-	Files        []corpusFile `yaml:"files"`
-
-	source string // corpus file, for messages
-}
-
-type corpusHint struct {
-	Season  *int `yaml:"season"`
-	Episode *int `yaml:"episode"`
-}
-
-type corpusFile struct {
-	Path      string       `yaml:"path"`
-	Size      string       `yaml:"size"`
-	Ambiguous bool         `yaml:"ambiguous"`
-	Expect    corpusExpect `yaml:"expect"`
-}
-
-type corpusExpect struct {
-	Kind       string    `yaml:"kind"`
-	Eps        []string  `yaml:"eps"`
-	Extra      string    `yaml:"extra"`
-	MinConf    string    `yaml:"min_conf"`
-	MaxConf    string    `yaml:"max_conf"`
-	Acceptable []*string `yaml:"acceptable"`
-}
+// is described at the top of anime.yaml. Package corpus loads it.
 
 // corpusNow is "today" for cases without their own.
-var corpusNow = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+var corpusNow = corpus.DefaultNow
 
-func loadCorpus(t testing.TB) []corpusCase {
+func loadCorpus(t testing.TB) []corpus.Case {
 	t.Helper()
-	paths, err := filepath.Glob("testdata/corpus/*.yaml")
-	if err != nil || len(paths) == 0 {
-		t.Fatalf("no corpus files: %v", err)
-	}
-	var cases []corpusCase
-	ids := map[string]bool{}
-	for _, p := range paths {
-		data, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var cs []corpusCase
-		if err := yaml.Unmarshal(data, &cs); err != nil {
-			t.Fatalf("%s: %v", p, err)
-		}
-		for i := range cs {
-			if ids[cs[i].ID] {
-				t.Fatalf("%s: duplicate case %q", p, cs[i].ID)
-			}
-			ids[cs[i].ID] = true
-			cs[i].source = filepath.Base(p)
-		}
-		cases = append(cases, cs...)
+	cases, err := corpus.LoadCases("testdata")
+	if err != nil {
+		t.Fatal(err)
 	}
 	return cases
 }
 
-// input builds the classifier's input for a case. Files of a multi-file
-// case sit in a folder named after the torrent, as in a real torrent.
-func (c corpusCase) input(t testing.TB) Input { return c.inputWith(t, false) }
+// caseInput builds the classifier's input for a case.
+func caseInput(t testing.TB, c corpus.Case) Input { return caseInputWith(t, c, false) }
 
-// inputWith builds the input, without the show's aliases when noAliases.
-func (c corpusCase) inputWith(t testing.TB, noAliases bool) Input {
+// caseInputWith builds the input, without the show's aliases when
+// noAliases. cmd/classifier-eval builds it the same way.
+func caseInputWith(t testing.TB, c corpus.Case, noAliases bool) Input {
 	t.Helper()
 	cat := show(t, c.Show)
 	if c.DropSpecials {
@@ -98,103 +37,50 @@ func (c corpusCase) inputWith(t testing.TB, noAliases bool) Input {
 	if noAliases {
 		cat = withoutAliases(cat)
 	}
-	in := Input{TorrentName: c.Torrent, Show: cat, Now: corpusNow}
-	if c.Now != "" {
-		now, err := time.Parse("2006-01-02", c.Now)
-		if err != nil {
-			t.Fatalf("%s: now: %v", c.ID, err)
-		}
-		in.Now = now
+	now, err := c.NowTime()
+	if err != nil {
+		t.Fatal(err)
 	}
+	name, err := c.TorrentName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := Input{TorrentName: name, Show: cat, Now: now}
 	if c.Hint != nil {
 		in.Hint = &Hint{Season: c.Hint.Season, Episode: c.Hint.Episode}
 	}
-	if in.TorrentName == "" {
-		if len(c.Files) != 1 {
-			t.Fatalf("%s: a multi-file case needs a torrent name", c.ID)
-		}
-		in.TorrentName = c.Files[0].Path
-	}
-	for _, f := range c.Files {
-		path := f.Path
-		if len(c.Files) > 1 {
-			path = c.Torrent + "/" + f.Path
-		}
-		size, err := parseSize(f.Size, ClassOf(f.Path))
+	for i, f := range c.Files {
+		size, err := corpus.ParseSize(f.Size)
 		if err != nil {
 			t.Fatalf("%s: %s: %v", c.ID, f.Path, err)
 		}
-		in.Files = append(in.Files, TorrentFile{Path: path, Size: size})
+		if size == 0 {
+			size = typicalSize(ClassOf(f.Path))
+		}
+		in.Files = append(in.Files, TorrentFile{Path: c.FilePath(i), Size: size})
 	}
 	return in
 }
 
-// parseSize reads "1.2GB", "350MB", "40KB"; empty gives a typical size for
-// the file's class.
-func parseSize(s string, class FileClass) (int64, error) {
-	if s == "" {
-		switch class {
-		case ClassVideo:
-			return 1200 << 20, nil
-		case ClassSubtitle:
-			return 40 << 10, nil
-		}
-		return 200 << 10, nil
+// typicalSize is the size of a corpus file that gives none.
+func typicalSize(class FileClass) int64 {
+	switch class {
+	case ClassVideo:
+		return 1200 << 20
+	case ClassSubtitle:
+		return 40 << 10
 	}
-	units := []struct {
-		suffix string
-		mult   float64
-	}{{"GB", 1 << 30}, {"MB", 1 << 20}, {"KB", 1 << 10}}
-	for _, u := range units {
-		if strings.HasSuffix(s, u.suffix) {
-			n, err := strconv.ParseFloat(strings.TrimSuffix(s, u.suffix), 64)
-			return int64(n * u.mult), err
-		}
-	}
-	return strconv.ParseInt(s, 10, 64)
-}
-
-// expectedKind is the kind a file's expectation implies.
-func (e corpusExpect) expectedKind() Kind {
-	switch {
-	case e.Kind != "":
-		return Kind(e.Kind)
-	case e.Extra == string(ExtraSample):
-		return KindSample
-	case e.Extra != "":
-		return KindExtra
-	case len(e.Eps) > 0:
-		for _, ep := range e.Eps {
-			if !strings.HasPrefix(ep, "S00") {
-				return KindEpisode
-			}
-		}
-		return KindSpecial
-	}
-	return KindUnknown
+	return 200 << 10
 }
 
 // targetLabel writes a proposal's targets like the corpus does:
 // "S01E01+S01E02", or "null" for none.
 func targetLabel(targets []Target) string {
-	if len(targets) == 0 {
-		return "null"
-	}
 	labels := make([]string, len(targets))
 	for i, t := range targets {
-		labels[i] = fmt.Sprintf("S%02dE%02d", t.Season, t.Episode)
+		labels[i] = corpus.Label(t.Season, t.Episode)
 	}
-	sort.Strings(labels)
-	return strings.Join(labels, "+")
-}
-
-func expectLabel(eps []string) string {
-	if len(eps) == 0 {
-		return "null"
-	}
-	labels := append([]string(nil), eps...)
-	sort.Strings(labels)
-	return strings.Join(labels, "+")
+	return corpus.JoinLabels(labels)
 }
 
 // corpusReport is the outcome of running the whole corpus.
@@ -213,7 +99,7 @@ func runCorpus(t *testing.T, noAliases bool) corpusReport {
 		if c.Golden {
 			r.golden++
 		}
-		res := Classify(c.inputWith(t, noAliases))
+		res := Classify(caseInputWith(t, c, noAliases))
 		if len(res.Proposals) != len(c.Files) {
 			t.Fatalf("%s: %d proposals for %d files", c.ID, len(res.Proposals), len(c.Files))
 		}
@@ -221,27 +107,17 @@ func runCorpus(t *testing.T, noAliases bool) corpusReport {
 			p := res.Proposals[i]
 			r.files++
 			r.byConf[p.Confidence]++
-			got := targetLabel(p.Targets)
+			got := corpus.Got{Kind: string(p.Kind), Extra: string(p.ExtraType), Targets: targetLabel(p.Targets)}
 			where := fmt.Sprintf("%s: %s", c.ID, f.Path)
-			detail := fmt.Sprintf("%s\n      got %s %s [%s] %q", where, p.Kind, got, p.Confidence, p.Reason)
+			detail := fmt.Sprintf("%s\n      got %s %s [%s] %q", where, p.Kind, got.Targets, p.Confidence, p.Reason)
 
 			if n := utf8.RuneCountInString(p.Reason); n > MaxReasonRunes {
 				r.longReasons = append(r.longReasons, fmt.Sprintf("%s (%d runes)", where, n))
 			}
 			if f.Ambiguous {
 				r.ambiguous++
-				ok := false
-				for _, a := range f.Expect.Acceptable {
-					want := "null"
-					if a != nil {
-						want = *a
-					}
-					if want == got {
-						ok = true
-					}
-				}
-				if !ok {
-					r.ambiguousBad = append(r.ambiguousBad, detail+"\n      acceptable: "+acceptableLabel(f.Expect.Acceptable))
+				if !f.Correct(got) {
+					r.ambiguousBad = append(r.ambiguousBad, detail+"\n      acceptable: "+f.AcceptableLabel())
 					if p.Confidence == ConfidenceHigh {
 						r.wrongHigh = append(r.wrongHigh, detail)
 					}
@@ -253,19 +129,13 @@ func runCorpus(t *testing.T, noAliases bool) corpusReport {
 			}
 
 			r.unambiguous++
-			wantKind := f.Expect.expectedKind()
-			want := expectLabel(f.Expect.Eps)
-			exact := p.Kind == wantKind && got == want && (f.Expect.Extra == "" || string(p.ExtraType) == f.Expect.Extra)
+			exact := f.Correct(got)
 			if exact {
 				r.exact++
 			} else {
-				wantDesc := fmt.Sprintf("%s %s", wantKind, want)
-				if f.Expect.Extra != "" {
-					wantDesc += " (" + f.Expect.Extra + ")"
-				}
-				r.misses = append(r.misses, detail+"\n      want "+wantDesc)
+				r.misses = append(r.misses, detail+"\n      want "+f.WantLabel())
 				if p.Confidence == ConfidenceHigh {
-					r.wrongHigh = append(r.wrongHigh, detail+"\n      want "+wantDesc)
+					r.wrongHigh = append(r.wrongHigh, detail+"\n      want "+f.WantLabel())
 				}
 			}
 			if f.Expect.MaxConf != "" && p.Confidence.Rank() > Confidence(f.Expect.MaxConf).Rank() {
@@ -277,17 +147,6 @@ func runCorpus(t *testing.T, noAliases bool) corpusReport {
 		}
 	}
 	return r
-}
-
-func acceptableLabel(as []*string) string {
-	parts := make([]string, len(as))
-	for i, a := range as {
-		parts[i] = "null"
-		if a != nil {
-			parts[i] = *a
-		}
-	}
-	return strings.Join(parts, ", ")
 }
 
 func (r corpusReport) accuracy() float64 {

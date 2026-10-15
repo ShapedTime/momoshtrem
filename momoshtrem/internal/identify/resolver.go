@@ -2,6 +2,7 @@ package identify
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -26,6 +27,19 @@ type ResolveInput struct {
 	Scope []string
 	// Hint is the user's hint: "absolute numbering", "these are the OVAs".
 	Hint string
+
+	// InfoHash, ShowID and MetadataUpdatedAt key the resolver's cache,
+	// with Hint and Scope; without an InfoHash and a ShowID nothing is
+	// cached.
+	InfoHash          string
+	ShowID            int64
+	MetadataUpdatedAt time.Time
+	// JobID is the assignment job the call is for: usage is recorded
+	// against it. Zero when there's no job (the eval).
+	JobID int64
+	// Model is the model to ask (the classifier_model setting); empty means
+	// the resolver's default.
+	Model string
 }
 
 // ResolveOutput is the resolver's answer and what it cost.
@@ -46,13 +60,28 @@ type AIFile struct {
 	Reason         string     `json:"reason"`
 }
 
-// Usage is what a Resolve call cost.
+// Usage is what a Resolve call cost. The prompt is InputTokens (uncached)
+// plus CacheWriteTokens plus CacheReadTokens; OutputTokens include thinking.
 type Usage struct {
-	Model           string
-	InputTokens     int
-	OutputTokens    int
-	CacheReadTokens int
-	CostUSD         float64
+	Model            string
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	CostUSD          float64
+}
+
+// Add sums two usages; the model is the first non-empty one.
+func (u Usage) Add(o Usage) Usage {
+	if u.Model == "" {
+		u.Model = o.Model
+	}
+	u.InputTokens += o.InputTokens
+	u.OutputTokens += o.OutputTokens
+	u.CacheReadTokens += o.CacheReadTokens
+	u.CacheWriteTokens += o.CacheWriteTokens
+	u.CostUSD += o.CostUSD
+	return u
 }
 
 // NoopResolver answers nothing: the rules' proposals stand.
@@ -73,7 +102,8 @@ func (NoopResolver) Resolve(context.Context, ResolveInput) (ResolveOutput, error
 //   - its target isn't an episode in the catalog;
 //   - its target is an episode a high-confidence rules proposal has;
 //   - it's for a subtitle (subtitles follow their video) or says
-//     "unknown" (no answer).
+//     "unknown" (no answer);
+//   - it maps a file that isn't a video (a font, an .nfo) to an episode.
 //
 // Accepted answers keep the resolver's confidence, with the source "ai".
 // Subtitles linked to a changed video follow it.
@@ -126,6 +156,9 @@ func MergeAI(rules []Proposal, ai []AIFile, cat *ShowCatalog) []Proposal {
 			out[i] = p
 			changed[r.Path] = true
 		case KindEpisode, KindSpecial:
+			if ClassOf(r.Path) != ClassVideo {
+				continue
+			}
 			eps := ix.resolveAI(a)
 			if eps == nil {
 				continue
@@ -167,6 +200,149 @@ func MergeAI(rules []Proposal, ai []AIFile, cat *ShowCatalog) []Proposal {
 		out[i] = p
 	}
 	return out
+}
+
+// Dispute is a high-confidence rules answer the AI disagrees with.
+type Dispute struct {
+	Path string
+	// Rules are the rules' targets, which the proposal keeps.
+	Rules []Target
+	// AI is the AI's answer: its targets (none for an extra or a sample),
+	// kind and confidence.
+	AI           []Target
+	AIKind       Kind
+	AIConfidence Confidence
+}
+
+// FlagDisagreements is for classifier_mode ai_always, where the AI also
+// sees the files the rules matched with high confidence. MergeAI never
+// overrides those; FlagDisagreements finds the ones the AI answers
+// differently, at medium or high confidence (another episode that exists,
+// or an extra or a sample), and sends them to review instead: each keeps
+// its targets and source, drops to medium confidence (so auto-apply waits
+// for the user), and its reason names the AI's alternative ("AI suggests
+// S00E03: a recap special"). Subtitles linked to a flagged video drop with
+// it. Agreement, a low-confidence or "unknown" answer, or a target that
+// doesn't exist changes nothing.
+//
+// Run it on MergeAI's output with the same answers. It returns the
+// proposals and the disputes; merged is not modified.
+func FlagDisagreements(merged []Proposal, ai []AIFile, cat *ShowCatalog) ([]Proposal, []Dispute) {
+	out := make([]Proposal, len(merged))
+	index := make(map[string]int, len(merged))
+	for i, p := range merged {
+		out[i] = p
+		index[p.Path] = i
+	}
+	ix := newIndex(cat, time.Time{})
+
+	var disputes []Dispute
+	flagged := map[string]bool{}
+	seen := map[string]bool{}
+	for _, a := range ai {
+		i, ok := index[a.Path]
+		if !ok || seen[a.Path] {
+			continue
+		}
+		seen[a.Path] = true
+		p := out[i]
+		if p.Source != SourceRules || p.Confidence != ConfidenceHigh || ClassOf(p.Path) != ClassVideo ||
+			(p.Kind != KindEpisode && p.Kind != KindSpecial) {
+			continue
+		}
+		if a.Confidence != ConfidenceHigh && a.Confidence != ConfidenceMedium {
+			continue
+		}
+		var alt []Target
+		var suggestion string
+		switch a.Kind {
+		case KindExtra:
+			suggestion = "an extra"
+		case KindSample:
+			suggestion = "a sample clip"
+		case KindEpisode, KindSpecial:
+			eps := ix.resolveAI(a)
+			if eps == nil {
+				continue
+			}
+			alt = targetsOf(eps)
+			if sameTargets(alt, p.Targets) {
+				continue
+			}
+			labels := make([]string, len(alt))
+			for k, t := range alt {
+				labels[k] = fmt.Sprintf("S%02dE%02d", t.Season, t.Episode)
+			}
+			suggestion = strings.Join(labels, "+")
+		default:
+			continue
+		}
+		reason := "AI suggests " + suggestion
+		if why := aiReason(a.Reason); why != "" {
+			reason += ": " + why
+		}
+		disputes = append(disputes, Dispute{Path: p.Path, Rules: append([]Target(nil), p.Targets...),
+			AI: alt, AIKind: a.Kind, AIConfidence: a.Confidence})
+		p.Targets = append([]Target(nil), p.Targets...)
+		p.Confidence, p.Reason = ConfidenceMedium, clipReason(reason)
+		out[i] = p
+		flagged[p.Path] = true
+	}
+
+	for i, p := range out {
+		if p.Kind == KindSubtitle && flagged[p.LinkedVideo] && p.Confidence == ConfidenceHigh {
+			out[i].Confidence = ConfidenceMedium
+		}
+	}
+	return out, disputes
+}
+
+// Agreements lists the files whose high-confidence rules answer the AI
+// confirms: it names the same episodes, at medium or high confidence. It's
+// FlagDisagreements' other half: a re-check uses it to lift a flag an
+// earlier run set, once the AI agrees with the rules.
+func Agreements(rules []Proposal, ai []AIFile, cat *ShowCatalog) map[string]bool {
+	byPath := make(map[string]Proposal, len(rules))
+	for _, p := range rules {
+		byPath[p.Path] = p
+	}
+	ix := newIndex(cat, time.Time{})
+	out := map[string]bool{}
+	seen := map[string]bool{}
+	for _, a := range ai {
+		p, ok := byPath[a.Path]
+		if !ok || seen[a.Path] {
+			continue
+		}
+		seen[a.Path] = true
+		if p.Source != SourceRules || p.Confidence != ConfidenceHigh || ClassOf(p.Path) != ClassVideo ||
+			(p.Kind != KindEpisode && p.Kind != KindSpecial) ||
+			(a.Kind != KindEpisode && a.Kind != KindSpecial) ||
+			(a.Confidence != ConfidenceHigh && a.Confidence != ConfidenceMedium) {
+			continue
+		}
+		if eps := ix.resolveAI(a); eps != nil && sameTargets(targetsOf(eps), p.Targets) {
+			out[p.Path] = true
+		}
+	}
+	return out
+}
+
+// sameTargets reports whether two target lists name the same episodes.
+func sameTargets(a, b []Target) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ids := make(map[int64]bool, len(a))
+	for _, t := range a {
+		ids[t.EpisodeID] = true
+	}
+	for _, t := range b {
+		if !ids[t.EpisodeID] {
+			return false
+		}
+	}
+	return true
 }
 
 // aiReason trims an AI reason. The UI labels AI reasons from the source, so

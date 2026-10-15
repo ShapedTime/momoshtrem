@@ -61,6 +61,7 @@ cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx p
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 cd momoshtrem && go vet ./... && go test ./...
 docker compose run --rm momoshtrem backfill-metadata [--dry-run]   # fill TMDB metadata for titles added before #4 (never renames WebDAV paths)
+cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-v]   # episode-mapping eval on the golden corpus: calls Claude, costs cents; -dry-run is free
 
 # Deploy (from the Mac): the newest green main commit, or a given one, to a VM over SSH
 ops/deploy/deploy.sh -n momoshtrem-v2            # dry run: print the plan, change nothing
@@ -138,6 +139,7 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/metadata/` - TMDB sync into the library (specials, absolute numbering, anime detection) and `backfill-metadata`
 - `internal/tmdb/` - TMDB client with retries, rate limit and the `tmdb_cache` cache
 - `internal/artwork/` - Backdrop dominant colour for the hero glow
+- `internal/identify/` - Episode mapping rules (`Classify`, `MergeAI`); `ai/` asks Claude Haiku about the files the rules can't place; `corpus/` loads the corpus in `testdata/`
 - `internal/subtitle/` - Subtitles: OpenSubtitles search ranked by release match, downloads, torrent subtitles
 - `internal/vfs/library_fs.go` - Virtual filesystem
 - `internal/torrent/service.go` - Torrent service interface
