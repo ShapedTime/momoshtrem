@@ -264,13 +264,16 @@ export interface ShowEpisodesSeason {
   episodes: ShowEpisode[];
 }
 
-/** PUT /episodes/{id}/assignment and PUT /movies/{id}/assignment (204; `match_source` manual). */
+/**
+ * PUT /episodes/{id}/assignment and PUT /movies/{id}/assignment (204; `match_source` manual; only that item changes).
+ * 404 for an unknown item, torrent or file; 422 for a file that isn't a video; 504 when no peers sent the file list in time.
+ */
 export interface ManualAssignment {
   info_hash: string;
   file_path: string;
 }
 
-/** GET /torrents/{hash}/files */
+/** GET /torrents/{hash}/files: `{items}` in the torrent's order; `mapped_to` from the active assignments. 404 unknown torrent, 504 no file list in time. */
 export interface TorrentFileEntry {
   path: string;
   size: number;

@@ -293,8 +293,9 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - **Review rules** (B2, #5). They read the item's open, non-dry-run mapping jobs that are past classification (`resolving`, `needs_review` or `ready`; §6 "Assignment").
   - `needs_review` (title and `LibraryItem`) counts those jobs' files that are pending and map (have targets, or are movie candidates) or are in a conflict. `/library?status=needs_review` is `needs_review > 0`.
   - `review_job_id` is the newest of those jobs, or null. It stays set while a `ready` job waits for Apply, even at `needs_review = 0`.
-  - An episode is `needs_review` when one of those files targets it and it has no file: a file (`ready`, `downloading`, `watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` there or in `EpisodeRange.missing`.
+  - An episode is `needs_review` when one of those files targets it and it has no file, aired or not: a file (`ready`, `downloading`, `watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` or `upcoming` there, or in `EpisodeRange.missing`.
   - The frontier is about files: an aired episode under review is still part of it.
+  - Cost: one more query for a title page or a season; `/library` reads it in its one query.
 - `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
 - `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item.
@@ -304,7 +305,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
                 episodes_total, episodes_ready, episodes_watched,   // shows; null for movies
                 needs_review, size_bytes, added_at, last_watched_at }
   ```
-  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above (0 until B2); `last_watched_at` is null until B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading). `status=watching` and `status=needs_review` stay empty until B5 and B2; until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
+  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above; `last_watched_at` is null until B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`. `status=watching` stays empty until B5; until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
 - `GET /shows/{id}/episode-groups`: `{items: [{id, name, type, group_count, episode_count}]}`, TMDB episode groups for the ordering picker.
 - Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata: no cast, crew, overview or similar titles); `503 unavailable` without a TMDB key, library titles included.
@@ -356,8 +357,8 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 | `POST /assignment-jobs/{id}/apply` | `200 AssignmentJobDetail` (`applied`) | `409` with `dry_run`, `job_closed`, `job_working`, `conflicting_proposals` or `pending_proposals`, checked in that order |
 | `POST /assignment-jobs/{id}/discard` | `200 AssignmentJobDetail` (`cancelled`; again for a cancelled job) | `409 job_closed` once applied or failed |
 | `GET /shows/{id}/episodes` | `{items: [{season_number, name, episodes: [{id, episode_number, absolute_number, name, air_date, has_file}]}]}` | `404` |
-| `PUT /episodes/{id}/assignment`, `PUT /movies/{id}/assignment` with `{info_hash, file_path}` | `204`; a manual override (`match_source: manual`) | `404` |
-| `GET /torrents/{hash}/files` | `{items: [{path, size, mapped_to}]}`; `mapped_to` is `{episodes: [ProposalTarget]}`, `{movie_id}` or null | `404` (unknown torrent) |
+| `PUT /episodes/{id}/assignment`, `PUT /movies/{id}/assignment` with `{info_hash, file_path}` | `204`; a manual override (`match_source: manual`) | `400 bad_request` (no `info_hash` or `file_path`), `404` (unknown episode or movie, unknown torrent, or no such file in it), `422 validation_error` (not a video file), `503 unavailable` (the file list must be fetched and there's no torrent client), `504 timeout` (no peers sent the file list in time) |
+| `GET /torrents/{hash}/files` | `{items: [{path, size, mapped_to}]}` in the torrent's order; `mapped_to` is `{episodes: [ProposalTarget]}`, `{movie_id}` or null | `404` (unknown torrent), `503 unavailable`, `504 timeout` (as for the override) |
 
 `?wait=true` (legacy, both assign routes, until H2) waits until the job stops working, applies it, and answers `201` with the legacy response plus `job_id`. The job ends `applied`.
 - Shows: every proposal with targets is applied, at any confidence, except conflicting ones. Those are left out (the legacy response reports them as unmatched) and their proposals stay `pending`.
@@ -420,7 +421,10 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - The `suggested_targets` ids restore the suggestion, with its `confidence`, `source` and `reason`.
   - Any other ids make a manual pick: `source: manual`, `confidence: null`, `reason` "You picked this episode".
 - **`user_decided`** turns true when the user changes a proposal. It turns false again once the proposal is back on its suggestion with its group's default decision, so Undo is just another PATCH.
-- **Neither moves the group.** The answer is the whole detail, with the status, counts and conflicts recomputed. PATCH works during `resolving`.
+- **Movie jobs.** Accepting a candidate ignores the job's other candidates; when one request accepts several, the first wins.
+- **Extras.** An extra the user includes and gives an episode (`episode_ids` plus `accepted`) keeps its kind and group; Apply writes it as that episode's file.
+- **Neither moves the group.** The answer is the whole detail, with the status, counts and conflicts recomputed. PATCH works during `resolving`; the status is then left to the end of the AI run, which recomputes it.
+- **Items apply in order** (an id may come twice: the later change builds on the earlier one), all in one transaction.
 - **`409 job_working`** before there are proposals (`queued…classifying`).
 - **`400 bad_request`** for a malformed body: no `items`, an item without `id`, with neither field, with an unknown `decision`, or with an empty `episode_ids`.
 - **`422 validation_error`** for a well-formed change that can't apply:
@@ -443,11 +447,15 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - episode ids are re-validated;
   - then the VFS tree is rebuilt (`InvalidateTree`).
 - **Unmatched and ignored files** are left out. They never block.
-- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry per season folder, `Show - S01E01-E02 - FirstName.ext` (first and last episode, the first one's name); the subtitle sidecars of all its episodes follow that name, and the catalog's `webdav_path` too. Legacy rows keep their per-episode paths. Unassigning one episode of such a file rebuilds the tree, which renames the rest.
+- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry per season folder and run of consecutive episodes, `Show - S01E01-E02 - FirstName.ext` (first and last episode, the first one's name); a file mapped to E07 and E09 is two entries, `S01E07` and `S01E09`, never `S01E07-E09`; the subtitle sidecars of all its episodes follow that name, and the catalog's `webdav_path` too. Legacy rows keep their per-episode paths. Unassigning one episode of such a file rebuilds the tree, which renames the rest.
 
 **Discard** cancels the job. It removes the torrent when no active assignment or other open job uses it.
 
-**`GET /shows/{id}/episodes`** feeds the episode picker. It lists every season in number order, so Specials (season 0) come first. Specials are listed whenever season 0 rows exist, even with `include_specials` off. `has_file` means the episode has an active assignment.
+**`GET /shows/{id}/episodes`** feeds the episode picker. It lists every season in number order, so Specials (season 0) come first. Specials are listed whenever season 0 rows exist, even with `include_specials` off. `has_file` means the episode has an active assignment. A season's `name` is TMDB's, else "Specials" or "Season N". One query.
+
+**Manual overrides** (`PUT /episodes/{id}/assignment`, `PUT /movies/{id}/assignment`) make one file of a torrent the item's file, outside any job. They write through Apply's writer (the title's lock, the upsert, the item's other active rows deactivated) with `match_source: manual` and no `confidence`, then rebuild the VFS tree. Unlike Apply they're not authoritative for the torrent: its other rows on the title stay. A pair the item had before is reactivated. The answer is `204`; refetch the title.
+
+**A torrent's file list** (overrides and `GET /torrents/{hash}/files`) comes from the newest job that stored it as proposals, else from the loaded torrent, else the torrent is added again with a magnet an assignment or a job has, waiting at most 30 s (`504` past that; the add carries on, so asking again later finds it loaded). A torrent added only to list its files is dropped again when nothing uses it. The hash may be hex in either case, or base32. `mapped_to` comes from the active assignments: `{movie_id}` for a movie's file, else its episodes in order.
 
 ### Search (B4)
 
