@@ -458,6 +458,78 @@ func TestJobTx_WriteAssignmentsConcurrent(t *testing.T) {
 	}
 }
 
+// Deleting a title while one of its jobs applies: the apply holds the
+// job's row, the DELETE locks the title's row and cascades to the job's.
+// Locking the title's row in the apply inverted that order (SQLSTATE
+// 40P01); the title lock is advisory, so the DELETE just waits for the
+// apply to commit, then succeeds and takes the job with it.
+func TestJobTx_DeleteTitleDuringApply(t *testing.T) {
+	db := openSchemaDB(t)
+	ctx := context.Background()
+	repo := NewAssignmentJobRepository(db)
+
+	for _, itemType := range []ItemType{ItemTypeEpisode, ItemTypeMovie} {
+		t.Run(string(itemType), func(t *testing.T) {
+			hash := strings.Repeat("3", 40)
+			var job *AssignmentJob
+			var write AssignmentWrite
+			var deleteSQL string
+			var titleID int64
+			if itemType == ItemTypeEpisode {
+				show, eps := jobShow(t, db, 1)
+				job, titleID, deleteSQL = newShowJob(show, hash), show.ID, `DELETE FROM shows WHERE id = $1`
+				write = AssignmentWrite{ItemType: ItemTypeEpisode, InfoHash: hash, MagnetURI: job.MagnetURI, ShowID: show.ID,
+					Rows: []TorrentAssignment{{ItemID: eps[1], FilePath: "E01.mkv", FileSize: 1}}}
+			} else {
+				movie := seedMovie(t, db, "Doomed", 2020)
+				job = &AssignmentJob{MediaType: JobMovie, TMDBID: movie.TMDBID, MovieID: &movie.ID,
+					InfoHash: hash, MagnetURI: "magnet:?xt=urn:btih:" + hash, TorrentName: hash}
+				titleID, deleteSQL = movie.ID, `DELETE FROM movies WHERE id = $1`
+				write = AssignmentWrite{ItemType: ItemTypeMovie, InfoHash: hash, MagnetURI: job.MagnetURI, MovieID: movie.ID,
+					Rows: []TorrentAssignment{{ItemID: movie.ID, FilePath: "Film.mkv", FileSize: 1}}}
+			}
+			if _, err := repo.Create(ctx, job); err != nil {
+				t.Fatal(err)
+			}
+
+			holding := make(chan struct{})
+			deleted := make(chan error, 1)
+			var deletedAt, committedAt time.Time
+			go func() {
+				<-holding
+				dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				_, err := db.ExecContext(dctx, deleteSQL, titleID)
+				deletedAt = time.Now()
+				deleted <- err
+			}()
+			err := repo.Locked(ctx, job.ID, func(tx *JobTx) error {
+				close(holding)
+				// Let the DELETE lock the title's row and block on the job's.
+				time.Sleep(300 * time.Millisecond)
+				if err := tx.WriteAssignments(write); err != nil {
+					return err
+				}
+				_, err := tx.MarkApplied([]JobStatus{JobQueued})
+				return err
+			})
+			committedAt = time.Now()
+			if err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			if err := <-deleted; err != nil {
+				t.Fatalf("delete: %v", err)
+			}
+			if deletedAt.Before(committedAt.Add(-50 * time.Millisecond)) {
+				t.Errorf("the delete finished %v before the apply committed; it should wait", committedAt.Sub(deletedAt))
+			}
+			if _, err := repo.Get(ctx, job.ID); !errors.Is(err, ErrJobNotFound) {
+				t.Errorf("the job outlived its title: %v", err)
+			}
+		})
+	}
+}
+
 func TestJobRepository_FailCancelTorrentInUse(t *testing.T) {
 	db := openSchemaDB(t)
 	ctx := context.Background()

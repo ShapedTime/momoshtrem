@@ -659,35 +659,43 @@ type AssignmentWrite struct {
 // WriteAssignments applies w: the torrent's rows the job no longer maps
 // are deactivated, each item's other active rows too, and every row is
 // upserted active (a file the item had before is reactivated). It locks
-// the title first, so writes to one title never interleave. Four queries.
+// the title first, so writes to one title never interleave. Five queries.
 func (t *JobTx) WriteAssignments(w AssignmentWrite) error {
 	return writeAssignments(t.ctx, t.tx, w)
 }
 
-// lockTitle locks the title w writes to until tx ends. Under READ
-// COMMITTED two writers can't see each other's uncommitted rows, so two
-// applies mapping one episode to different torrents would otherwise both
-// leave a row active. FOR NO KEY UPDATE still lets jobs reference the
-// title meanwhile.
+// lockTitle serializes writes to the title w writes to until tx ends, and
+// checks the title still exists. Under READ COMMITTED two writers can't
+// see each other's uncommitted rows, so two applies mapping one episode
+// to different torrents would otherwise both leave a row active.
+//
+// It's an advisory lock keyed on the title ("assign:show:42"), not a lock
+// on the show's row: Apply holds the job's row, and deleting the show
+// locks the show's row before cascading to the job's, so a row lock here
+// would invert that order and deadlock. A DELETE never takes the advisory
+// lock; it just waits for the job's row until the apply commits.
 func lockTitle(ctx context.Context, tx *sql.Tx, w AssignmentWrite) error {
-	var query string
+	var table, key string
 	var id int64
 	var missing error
 	switch w.ItemType {
 	case ItemTypeEpisode:
-		query, id, missing = `SELECT 1 FROM shows WHERE id = $1 FOR NO KEY UPDATE`, w.ShowID, ErrShowNotFound
+		table, key, id, missing = "shows", "show", w.ShowID, ErrShowNotFound
 	case ItemTypeMovie:
-		query, id, missing = `SELECT 1 FROM movies WHERE id = $1 FOR NO KEY UPDATE`, w.MovieID, ErrMovieNotFound
+		table, key, id, missing = "movies", "movie", w.MovieID, ErrMovieNotFound
 	default:
 		return fmt.Errorf("unknown item type %q", w.ItemType)
 	}
-	var one int
-	err := tx.QueryRowContext(ctx, query, id).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return missing
-	}
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("assign:%s:%d", key, id)); err != nil {
 		return fmt.Errorf("failed to lock the title: %w", err)
+	}
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+table+` WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return fmt.Errorf("failed to check the title: %w", err)
+	}
+	if !exists {
+		return missing
 	}
 	return nil
 }
