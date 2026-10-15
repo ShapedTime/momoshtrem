@@ -366,6 +366,15 @@ const (
 	GroupTV              = 7
 )
 
+// AlternativeTitle is one entry of GET /tv/{id}/alternative_titles: the
+// show's name in another country or script ("Sousou no Frieren", type
+// "Romaji").
+type AlternativeTitle struct {
+	Country string `json:"iso_3166_1"`
+	Title   string `json:"title"`
+	Type    string `json:"type"`
+}
+
 // EpisodeGroupSummary is one entry of GET /tv/{id}/episode_groups.
 type EpisodeGroupSummary struct {
 	ID           string   `json:"id"`

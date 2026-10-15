@@ -7,12 +7,10 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
-	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // Movie request/response types
@@ -66,16 +64,13 @@ type EpisodeResponse struct {
 	Assignment    *AssignmentResponse `json:"assignment,omitempty"`
 }
 
-// Assignment request types - auto-detection API
-type AssignTorrentRequest struct {
-	MagnetURI string `json:"magnet_uri" binding:"required"`
-}
-
-// Movie assignment response
+// MovieAssignmentResponse is the legacy movie assign's answer
+// (?wait=true), with the job that made it.
 type MovieAssignmentResponse struct {
 	Success    bool                `json:"success"`
 	Assignment *AssignmentResponse `json:"assignment,omitempty"`
 	Error      string              `json:"error,omitempty"`
+	JobID      int64               `json:"job_id"`
 }
 
 // Refresh response
@@ -86,13 +81,15 @@ type RefreshShowResponse struct {
 	SeasonErrors  []string     `json:"season_errors,omitempty"`
 }
 
-// Show assignment response
+// ShowAssignmentResponse is the legacy show assign's answer (?wait=true),
+// with the job that made it.
 type ShowAssignmentResponse struct {
 	Success   bool                          `json:"success"`
 	Summary   service.AssignmentSummary     `json:"summary"`
 	Matched   []service.MatchedAssignment   `json:"matched"`
 	Unmatched []service.UnmatchedAssignment `json:"unmatched,omitempty"`
 	Error     string                        `json:"error,omitempty"`
+	JobID     int64                         `json:"job_id"`
 }
 
 // parseID parses and validates an ID parameter
@@ -254,96 +251,6 @@ func (s *Server) deleteMovie(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
-}
-
-func (s *Server) assignMovieTorrent(c *gin.Context) {
-	id, ok := parseID(c, "id")
-	if !ok {
-		return
-	}
-
-	var req AssignTorrentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		errorResponse(c, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Verify movie exists
-	movie, err := s.movieRepo.GetByID(id)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if movie == nil {
-		errorResponse(c, http.StatusNotFound, "Movie not found")
-		return
-	}
-
-	// Extract info hash from magnet URI
-	infoHash := torrent.ExtractInfoHash(req.MagnetURI)
-	if infoHash == "" {
-		errorResponse(c, http.StatusBadRequest, "Invalid magnet URI")
-		return
-	}
-
-	// Check if torrent service is available
-	if s.torrentService == nil {
-		errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available - Stage 2 required")
-		return
-	}
-
-	// Add torrent and get file list
-	torrentInfo, err := s.torrentService.AddTorrent(req.MagnetURI)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Failed to add torrent: "+err.Error())
-		return
-	}
-
-	// Rank the videos as the film; the legacy path takes the best one.
-	candidates := identify.RankMovieFiles(torrentInfo.Files, identify.MovieInfo{
-		Title: movie.Title, Year: movie.Year, RuntimeMin: movie.Runtime,
-	})
-	if len(candidates) == 0 {
-		errorResponse(c, http.StatusBadRequest, "No video files found in torrent")
-		return
-	}
-	best := candidates[0]
-	if len(candidates) > 1 {
-		slog.Info("Movie torrent has several candidate videos, using the best",
-			"movie_id", id,
-			"selected", best.Path,
-			"confidence", best.Confidence,
-			"reason", best.Reason,
-			"candidates", len(candidates),
-		)
-	}
-	quality := identify.ParseQuality(best.Path)
-
-	assignment := &library.TorrentAssignment{
-		ItemType:   library.ItemTypeMovie,
-		ItemID:     id,
-		InfoHash:   infoHash,
-		MagnetURI:  req.MagnetURI,
-		FilePath:   best.Path,
-		FileSize:   best.Size,
-		Resolution: quality.Resolution,
-		Source:     quality.Source,
-	}
-
-	if err := s.assignmentRepo.Create(assignment); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Update VFS tree immediately
-	if s.treeUpdater != nil {
-		s.treeUpdater.AddMovieToTree(movie, assignment)
-	}
-
-	c.JSON(http.StatusCreated, MovieAssignmentResponse{
-		Success:    true,
-		Assignment: toAssignmentResponse(assignment),
-	})
 }
 
 func (s *Server) unassignMovieTorrent(c *gin.Context) {
@@ -525,43 +432,6 @@ func (s *Server) deleteShow(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// Show assignment handler - auto-detects episodes from torrent
-
-func (s *Server) assignShowTorrent(c *gin.Context) {
-	id, ok := parseID(c, "id")
-	if !ok {
-		return
-	}
-
-	var req AssignTorrentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		errorResponse(c, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	result, err := s.showAssignmentService.AssignTorrent(c.Request.Context(), id, req.MagnetURI)
-	if err != nil {
-		switch {
-		case errors.Is(err, library.ErrShowNotFound):
-			errorResponse(c, http.StatusNotFound, "Show not found")
-		case errors.Is(err, library.ErrInvalidMagnet):
-			errorResponse(c, http.StatusBadRequest, "Invalid magnet URI")
-		case errors.Is(err, library.ErrTorrentServiceUnavailable):
-			errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available - Stage 2 required")
-		default:
-			errorResponse(c, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-
-	c.JSON(http.StatusCreated, ShowAssignmentResponse{
-		Success:   true,
-		Summary:   result.Summary,
-		Matched:   result.Matched,
-		Unmatched: result.Unmatched,
-	})
-}
-
 // Episode handlers
 
 func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
@@ -577,9 +447,13 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	}
 
 	// Invalidate cached file handles before deactivating assignment
+	grouped := false
 	if s.treeUpdater != nil {
 		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, id); err == nil && assignment != nil {
 			s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
+			// A job's row may share a grouped entry ("S01E01-E02") with
+			// other episodes of the file: they get renamed.
+			grouped = assignment.MatchSource != ""
 		}
 	}
 
@@ -589,7 +463,11 @@ func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	}
 
 	// Update VFS tree immediately
-	if ctx != nil && s.treeUpdater != nil {
+	switch {
+	case s.treeUpdater == nil:
+	case grouped:
+		s.treeUpdater.InvalidateTree()
+	case ctx != nil:
 		s.treeUpdater.RemoveEpisodeFromTree(ctx.ShowTitle, ctx.ShowYear, ctx.SeasonNumber, ctx.EpisodeNumber)
 	}
 

@@ -8,7 +8,6 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
-	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -31,9 +30,6 @@ type Server struct {
 	readerTracker *streaming.ReaderTracker // Optional: tracks active readers for debug endpoint
 
 	opts Options
-
-	// Business logic services
-	showAssignmentService *service.ShowAssignmentService
 }
 
 // Options holds settings that must be known before routes are registered:
@@ -60,6 +56,9 @@ type Options struct {
 	// Catalog serves the title pages, show settings and GET /library. Nil
 	// makes those routes return 503.
 	Catalog Catalog
+	// Assignments runs the assignment jobs: assigning torrents, review and
+	// apply. Nil makes those routes return 503.
+	Assignments AssignmentJobs
 }
 
 // NewServer creates a new API server
@@ -84,18 +83,6 @@ func NewServer(
 	}
 	s.subtitleItems = &libraryItemResolver{movies: movieRepo, shows: showRepo, assignments: assignmentRepo}
 
-	// Build assignment service with optional dependencies
-	var assignmentOpts []service.AssignmentServiceOption
-	if treeUpdater != nil {
-		assignmentOpts = append(assignmentOpts, service.WithTreeUpdater(treeUpdater))
-	}
-	s.showAssignmentService = service.NewShowAssignmentService(
-		showRepo,
-		assignmentRepo,
-		torrentService,
-		assignmentOpts...,
-	)
-
 	s.setupMiddleware()
 	s.setupRoutes()
 
@@ -105,10 +92,6 @@ func NewServer(
 // SetSubtitleService configures subtitle support
 func (s *Server) SetSubtitleService(svc *subtitle.Service) {
 	s.subtitleService = svc
-	// Configure subtitle creator on assignment service
-	if s.showAssignmentService != nil {
-		s.showAssignmentService.SetSubtitleCreator(svc)
-	}
 	slog.Info("Subtitle service configured")
 }
 
@@ -173,8 +156,7 @@ func (s *Server) setupRoutes() {
 	api.POST("/movies", s.createMovie)
 	api.GET("/movies/:id", s.getMovie)
 	api.DELETE("/movies/:id", s.deleteMovie)
-	api.POST("/movies/:id/refresh", s.refreshMovie)              // Re-fetch metadata from TMDB
-	api.POST("/movies/:id/assign-torrent", s.assignMovieTorrent) // Auto-detect movie file
+	api.POST("/movies/:id/refresh", s.refreshMovie) // Re-fetch metadata from TMDB
 	api.DELETE("/movies/:id/assign", s.unassignMovieTorrent)
 
 	// Shows
@@ -182,8 +164,7 @@ func (s *Server) setupRoutes() {
 	api.POST("/shows", s.createShow)
 	api.GET("/shows/:id", s.getShow)
 	api.DELETE("/shows/:id", s.deleteShow)
-	api.POST("/shows/:id/assign-torrent", s.assignShowTorrent) // Auto-detect episodes
-	api.POST("/shows/:id/refresh", s.refreshShow)              // Re-fetch seasons/episodes from TMDB
+	api.POST("/shows/:id/refresh", s.refreshShow) // Re-fetch seasons/episodes from TMDB
 	api.GET("/shows/recently-aired", s.getRecentlyAiredEpisodes)
 	api.POST("/shows/sync-air-dates", s.triggerAirDateSync)
 
@@ -204,8 +185,9 @@ func (s *Server) setupRoutes() {
 	// Status
 	api.GET("/status", s.getStatus)
 
-	s.registerTitleRoutes(api)   // Title pages, seasons, show settings and episode groups
-	s.registerLibraryRoutes(api) // GET /library
+	s.registerTitleRoutes(api)      // Title pages, seasons, show settings and episode groups
+	s.registerLibraryRoutes(api)    // GET /library
+	s.registerAssignmentRoutes(api) // Assign torrents (jobs), review and apply
 }
 
 // Handler returns the HTTP handler

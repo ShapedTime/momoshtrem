@@ -308,6 +308,27 @@ func TestCached_EpisodeGroups(t *testing.T) {
 	}
 }
 
+func TestCached_ShowAlternativeTitles(t *testing.T) {
+	u := newUpstream(t)
+	u.set(http.StatusOK, `{"id": 5, "results": [{"iso_3166_1": "JP", "title": "Shingeki no Kyojin", "type": "Romaji"}]}`)
+	cache := newMemCache()
+	c, now := newTestCached(u, cache)
+
+	for i := 0; i < 2; i++ {
+		titles, err := c.ShowAlternativeTitles(context.Background(), 5)
+		if err != nil || len(titles) != 1 || titles[0].Title != "Shingeki no Kyojin" {
+			t.Fatalf("ShowAlternativeTitles = (%v, %v)", titles, err)
+		}
+	}
+	if u.calls.Load() != 1 {
+		t.Errorf("requests = %d, want 1", u.calls.Load())
+	}
+	e, ok := cache.entry("tmdb:v1:en-US:tv/5/alternative_titles")
+	if !ok || !e.expiresAt.Equal(now.Add(DetailsTTL)) {
+		t.Errorf("cache entry = %+v, %v", e, ok)
+	}
+}
+
 func TestCached_CacheReadErrorFallsThrough(t *testing.T) {
 	u := newUpstream(t)
 	cache := newMemCache()

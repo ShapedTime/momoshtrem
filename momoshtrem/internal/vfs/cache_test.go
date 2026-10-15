@@ -109,24 +109,26 @@ func TestReadDir_ListsTorrentSubtitles(t *testing.T) {
 	}
 }
 
-// A v1 cache has no subtitles: it's ignored, so the tree is rebuilt from
-// the database.
-func TestCache_IgnoresV1(t *testing.T) {
-	dir := t.TempDir()
-	var buf bytes.Buffer
-	v1 := treeCache{Version: 1, Movies: []cachedMovie{{FolderName: "Old (2000)", FileName: "Old (2000).mkv"}}}
-	if err := gob.NewEncoder(&buf).Encode(v1); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, cacheFile), buf.Bytes(), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// An older cache (v1 has no subtitles, v2 no grouped multi-episode files)
+// is ignored, so the tree is rebuilt from the database.
+func TestCache_IgnoresOlderVersions(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		dir := t.TempDir()
+		var buf bytes.Buffer
+		old := treeCache{Version: version, Movies: []cachedMovie{{FolderName: "Old (2000)", FileName: "Old (2000).mkv"}}}
+		if err := gob.NewEncoder(&buf).Encode(old); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, cacheFile), buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-	fs := &LibraryFS{cacheDir: dir}
-	if err := fs.loadTreeFromCache(); err == nil {
-		t.Fatal("a v1 cache loaded")
-	}
-	if fs.tree != nil {
-		t.Error("tree set from a v1 cache")
+		fs := &LibraryFS{cacheDir: dir}
+		if err := fs.loadTreeFromCache(); err == nil {
+			t.Fatalf("a v%d cache loaded", version)
+		}
+		if fs.tree != nil {
+			t.Errorf("tree set from a v%d cache", version)
+		}
 	}
 }

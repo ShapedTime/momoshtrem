@@ -21,10 +21,12 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/artwork"
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/config"
+	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
+	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/status"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -345,24 +347,6 @@ func main() {
 		WebDAVPublicURL: webdavPublicURL,
 	})
 
-	// Initialize servers with torrent service and tree updater
-	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
-	apiServer.SetReaderTracker(readerTracker)
-
-	// Initialize air date sync service
-	var airDateSync *airdate.SyncService
-	if cfg.AirDateSync.Enabled && cfg.TMDB.APIKey != "" {
-		airDateSync = airdate.NewSyncService(cfg.AirDateSync, showRepo, syncMetaRepo, cachedTMDB)
-		airDateSync.Start()
-		apiServer.SetAirDateSyncService(airDateSync)
-		slog.Info("Air date sync service initialized",
-			"interval_hours", cfg.AirDateSync.SyncIntervalHours,
-			"lookback_days", cfg.AirDateSync.LookbackDays,
-		)
-	} else {
-		slog.Warn("Air date sync service disabled (requires TMDB API key)")
-	}
-
 	// Initialize subtitle repository (always, for VFS to show existing subtitles)
 	subtitleRepo := subtitle.NewRepository(db.DB)
 	libraryFS.SetSubtitleRepository(subtitleRepo)
@@ -381,7 +365,45 @@ func main() {
 	} else {
 		slog.Warn("OpenSubtitles API key not configured, subtitle download unavailable")
 	}
-	apiServer.SetSubtitleService(subtitle.NewService(osFetcher, subtitleRepo, cfg.Subtitles.DownloadPath))
+	subtitleService := subtitle.NewService(osFetcher, subtitleRepo, cfg.Subtitles.DownloadPath)
+
+	// Assignment jobs: assigning a torrent queues a job; workers fetch its
+	// file list, classify the files and apply them (or wait for review).
+	// The AI resolver comes with #5's slice 5; until then rules only.
+	jobService := service.NewJobService(service.JobDeps{
+		Jobs:        library.NewAssignmentJobRepository(db),
+		Shows:       showRepo,
+		Movies:      movieRepo,
+		Assignments: assignmentRepo,
+		Settings:    settingsRepo,
+		Torrents:    torrentService,
+		Tree:        libraryFS,
+		Subtitles:   subtitleService,
+		Metadata:    syncer,
+		TMDB:        cachedTMDB,
+		Resolver:    identify.NoopResolver{},
+	})
+	apiOpts.Assignments = jobService
+
+	// Initialize servers with torrent service and tree updater
+	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
+	apiServer.SetReaderTracker(readerTracker)
+	apiServer.SetSubtitleService(subtitleService)
+	jobService.Start()
+
+	// Initialize air date sync service
+	var airDateSync *airdate.SyncService
+	if cfg.AirDateSync.Enabled && cfg.TMDB.APIKey != "" {
+		airDateSync = airdate.NewSyncService(cfg.AirDateSync, showRepo, syncMetaRepo, cachedTMDB)
+		airDateSync.Start()
+		apiServer.SetAirDateSyncService(airDateSync)
+		slog.Info("Air date sync service initialized",
+			"interval_hours", cfg.AirDateSync.SyncIntervalHours,
+			"lookback_days", cfg.AirDateSync.LookbackDays,
+		)
+	} else {
+		slog.Warn("Air date sync service disabled (requires TMDB API key)")
+	}
 
 	// Validate WebDAV auth config and create server
 	webdav.ValidateConfig(cfg.Server.WebDAVAuth)
@@ -462,6 +484,10 @@ func main() {
 	if airDateSync != nil {
 		airDateSync.Stop()
 	}
+
+	// Stop the assignment workers before the torrent service they use; a
+	// job in flight resumes on the next start.
+	jobService.Close()
 
 	// Close torrent service
 	if err := torrentService.Close(); err != nil {

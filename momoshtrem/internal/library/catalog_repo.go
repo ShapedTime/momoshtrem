@@ -25,7 +25,8 @@ func NewCatalogRepository(db *DB) *CatalogRepository {
 // itemType is a SQL literal; itemID the outer column.
 func activeAssignmentLateral(itemType, itemID string) string {
 	return `LEFT JOIN LATERAL (
-			SELECT t.id, t.info_hash, t.magnet_uri, t.file_path, t.file_size, t.resolution, t.source, t.created_at
+			SELECT t.id, t.info_hash, t.magnet_uri, t.file_path, t.file_size, t.resolution, t.source,
+			       t.confidence, t.match_source, t.created_at
 			FROM torrent_assignments t
 			WHERE t.item_type = '` + itemType + `' AND t.item_id = ` + itemID + ` AND t.is_active
 			ORDER BY t.created_at DESC, t.id DESC
@@ -37,9 +38,9 @@ func activeAssignmentLateral(itemType, itemID string) string {
 // finish after Scan: it returns the assignment, or nil when there is none.
 func assignmentDest(itemType ItemType) (dest []any, finish func(itemID int64) *TorrentAssignment) {
 	var id, size sql.NullInt64
-	var hash, magnet, path, resolution, source sql.NullString
+	var hash, magnet, path, resolution, source, confidence, matchSource sql.NullString
 	var created sql.NullTime
-	dest = []any{&id, &hash, &magnet, &path, &size, &resolution, &source, &created}
+	dest = []any{&id, &hash, &magnet, &path, &size, &resolution, &source, &confidence, &matchSource, &created}
 	return dest, func(itemID int64) *TorrentAssignment {
 		if !id.Valid {
 			return nil
@@ -47,12 +48,15 @@ func assignmentDest(itemType ItemType) (dest []any, finish func(itemID int64) *T
 		return &TorrentAssignment{
 			ID: id.Int64, ItemType: itemType, ItemID: itemID,
 			InfoHash: hash.String, MagnetURI: magnet.String, FilePath: path.String, FileSize: size.Int64,
-			Resolution: resolution.String, Source: source.String, IsActive: true, CreatedAt: created.Time,
+			Resolution: resolution.String, Source: source.String,
+			Confidence: confidence.String, MatchSource: matchSource.String,
+			IsActive: true, CreatedAt: created.Time,
 		}
 	}
 }
 
-const assignmentColumns = `ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size, ta.resolution, ta.source, ta.created_at`
+const assignmentColumns = `ta.id, ta.info_hash, ta.magnet_uri, ta.file_path, ta.file_size, ta.resolution, ta.source,
+	ta.confidence, ta.match_source, ta.created_at`
 
 // MovieByTMDBID returns the movie with that TMDB ID and its active
 // assignment (Movie.Assignment, nil when none), or nil when the movie isn't

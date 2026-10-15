@@ -441,3 +441,22 @@ func TestClient_EpisodeGroups(t *testing.T) {
 		t.Errorf("missing group: error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestClient_ShowAlternativeTitles(t *testing.T) {
+	srv := newFixtureServer(t, map[string]string{
+		"/tv/209867/alternative_titles": "tv_209867_alternative_titles",
+	})
+	c := NewClient(testKey, WithBaseURL(srv.URL))
+
+	titles, err := c.ShowAlternativeTitles(context.Background(), 209867)
+	if err != nil {
+		t.Fatalf("ShowAlternativeTitles: %v", err)
+	}
+	want := AlternativeTitle{Country: "JP", Title: "Sousou no Frieren", Type: "Romaji"}
+	if len(titles) != 3 || titles[0] != want {
+		t.Errorf("titles = %+v", titles)
+	}
+	if _, err := c.ShowAlternativeTitles(context.Background(), 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown show: error = %v, want ErrNotFound", err)
+	}
+}

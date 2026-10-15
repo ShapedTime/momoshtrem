@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -37,6 +38,79 @@ func SeasonDir(showTitle string, showYear, season int) string {
 func EpisodeFilePath(showTitle string, showYear, season, episode int, name, sourcePath string) string {
 	return SeasonDir(showTitle, showYear, season) + "/" +
 		makeEpisodeFileName(showTitle, season, episode, name, getVideoExt(sourcePath))
+}
+
+// SeasonEpisode is an assigned episode of a season folder, for naming its
+// video.
+type SeasonEpisode struct {
+	Number   int
+	Name     string
+	InfoHash string
+	FilePath string // the file inside the torrent
+	// Grouped is set for rows written by assignment jobs (match_source
+	// set): episodes that share a file become one entry. Older rows keep
+	// one entry per episode, so their paths never change.
+	Grouped bool
+}
+
+// SeasonEntry is one video in a season folder and the episodes it plays.
+type SeasonEntry struct {
+	FileName string
+	Episodes []int // indexes into SeasonEntries' input, in episode order
+}
+
+// SeasonEntries names a season folder's videos. Grouped episodes that
+// share a file (info hash and path) are one entry, "Title - S01E01-E02 -
+// FirstName.ext"; every other episode is its own "Title - S01E05 -
+// Name.ext", exactly as EpisodeFilePath names it. Entries come in episode
+// order.
+func SeasonEntries(showTitle string, season int, eps []SeasonEpisode) []SeasonEntry {
+	order := make([]int, len(eps))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return eps[order[a]].Number < eps[order[b]].Number })
+
+	type fileKey struct{ hash, path string }
+	group := map[fileKey]int{} // file → its entry
+	var entries []SeasonEntry
+	for _, i := range order {
+		ep := eps[i]
+		key := fileKey{ep.InfoHash, ep.FilePath}
+		if at, ok := group[key]; ok && ep.Grouped {
+			entries[at].Episodes = append(entries[at].Episodes, i)
+			continue
+		}
+		if ep.Grouped {
+			group[key] = len(entries)
+		}
+		entries = append(entries, SeasonEntry{Episodes: []int{i}})
+	}
+	for n := range entries {
+		e := &entries[n]
+		first := eps[e.Episodes[0]]
+		ext := getVideoExt(first.FilePath)
+		if len(e.Episodes) == 1 {
+			e.FileName = makeEpisodeFileName(showTitle, season, first.Number, first.Name, ext)
+		} else {
+			last := eps[e.Episodes[len(e.Episodes)-1]]
+			e.FileName = makeMultiEpisodeFileName(showTitle, season, first.Number, last.Number, first.Name, ext)
+		}
+	}
+	return entries
+}
+
+// SeasonEpisodePaths returns the WebDAV path of each episode in eps, as
+// SeasonEntries names them: episodes grouped into one entry share its path.
+func SeasonEpisodePaths(showTitle string, showYear, season int, eps []SeasonEpisode) []string {
+	dir := SeasonDir(showTitle, showYear, season)
+	paths := make([]string, len(eps))
+	for _, e := range SeasonEntries(showTitle, season, eps) {
+		for _, i := range e.Episodes {
+			paths[i] = dir + "/" + e.FileName
+		}
+	}
+	return paths
 }
 
 // PublicURL joins the public WebDAV address (WEBDAV_PUBLIC_URL) and a VFS

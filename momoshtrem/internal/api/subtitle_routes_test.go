@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/subtitle/subtitletest"
@@ -37,13 +36,13 @@ func (f fakeItems) ResolveSubtitleItem(_ context.Context, item subtitle.Item) (*
 // countingTree records InvalidateTree calls.
 type countingTree struct{ invalidated int }
 
-func (c *countingTree) AddMovieToTree(*library.Movie, *library.TorrentAssignment) {}
-func (c *countingTree) RemoveMovieFromTree(string, int)                           {}
-func (c *countingTree) AddEpisodesToTree([]vfs.EpisodeWithContext)                {}
-func (c *countingTree) RemoveEpisodeFromTree(string, int, int, int)               {}
-func (c *countingTree) RemoveShowFromTree(string, int)                            {}
-func (c *countingTree) InvalidateTree()                                           { c.invalidated++ }
-func (c *countingTree) InvalidateFileHandles(string)                              {}
+func (c *countingTree) RemoveMovieFromTree(string, int)             {}
+func (c *countingTree) RemoveEpisodeFromTree(string, int, int, int) {}
+func (c *countingTree) RemoveShowFromTree(string, int)              {}
+func (c *countingTree) InvalidateTree()                             { c.invalidated++ }
+func (c *countingTree) InvalidateFileHandles(string)                {}
+
+var _ vfs.TreeUpdater = (*countingTree)(nil)
 
 type subtitleFixture struct {
 	server  *Server

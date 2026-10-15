@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	// cacheVersion 2 stores subtitle files; a v1 cache has none, so it's
-	// ignored and the tree rebuilt from the database.
-	cacheVersion = 2
+	// cacheVersion 3 names a file a job mapped to several episodes once
+	// ("S01E01-E02"); v2 added subtitle files. An older cache is ignored
+	// and the tree rebuilt from the database.
+	cacheVersion = 3
 	cacheFile    = "vfs_tree.gob"
 )
 

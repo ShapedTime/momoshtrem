@@ -168,6 +168,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 
 **`002_app_settings.sql` (G2)**
 - `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults.
+  - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`) and `auto_apply_high_confidence` (true). `library.SettingsRepository.AISettings` reads it; #9 serves the endpoints.
 
 **`003_metadata.sql` (B1)**
 - `movies`: add `imdb_id`, `poster_path`, `backdrop_path`, `runtime`, `genres jsonb`, `metadata_updated_at`.
@@ -187,9 +188,10 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `torrent_assignments`: add `confidence` (`high|medium|low`; NULL for manual and legacy rows) and `match_source` (`rules|ai|manual`; NULL for legacy rows). The VFS groups a multi-episode file into one entry only for rows that have a `match_source` (§6 "Assignment").
 - `assignment_jobs`:
   - The item: `media_type` (`movie|tv`) and `tmdb_id`, plus nullable `show_id` and `movie_id` FKs with `ON DELETE CASCADE`. Both are NULL for a dry run on a title that isn't in the library (#6 Inspect).
-  - The torrent: `info_hash`, `magnet_uri`, `torrent_name`, `indexer`, plus `size_bytes`, `file_count` and `video_count`, written when the file list arrives (`torrent.*` comes from them before proposals exist).
+  - The torrent: `info_hash`, `magnet_uri`, `torrent_name` (the magnet's `dn`, else the hash, until the file list arrives), `indexer`, `release_group`, plus `size_bytes`, `file_count` and `video_count`, written when the file list arrives (`torrent.*` comes from them before proposals exist).
+  - `file_path`: movies, the file the assign request picked up front.
   - `status` (CHECK `queued|fetching_metadata|classifying|resolving|needs_review|ready|applied|failed|cancelled`; flow in §6), `dry_run bool`.
-  - `hint jsonb` (`{season, episode, text}`), `suggested_hints jsonb`, `ai_files int`, `error`, `ai_error`.
+  - `hint jsonb` (`{season, episode, text}`), `suggested_hints jsonb`, `ai_files int`, `error` (for the user), `error_code` (for code; §6 "Failure"), `ai_error`.
   - `created_at`, `updated_at`, `applied_at`.
   - Indexes: the worker's claim on working statuses; `show_id`, `movie_id`. A partial unique index on `(media_type, tmdb_id, info_hash)` for open, non-dry-run jobs, so one torrent has one open job per title.
 - `assignment_proposals`, one row per file (subtitles too):
@@ -199,7 +201,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - What the classifier or AI last suggested, which Undo restores: `suggested_episode_ids bigint[]`, `suggested_confidence`, `suggested_source`, `suggested_reason`.
   - `confidence` (`high|medium|low`, NULL), `source` (`rules|ai|manual`), `reason` (≤ 120 characters).
   - `decision` (`pending|accepted|ignored`), `user_decided bool`, `updated bool`, `hinted bool`.
-  - `superseded_by` (FK to the proposal that replaces it, its v2) and `linked_proposal_id` (a subtitle's video).
+  - `superseded_by` (FK to the proposal that replaces it, its v2) and `linked_proposal_id` (a subtitle's video), both `ON DELETE SET NULL` and indexed (deleting a big job's proposals otherwise scans the table once per row).
 - `ai_usage(id, feature classifier|recs|ask, model, input_tokens, output_tokens, cache_read_tokens, web_searches, cost_usd numeric, ref_id, created_at)`. Shared by every AI feature.
 - `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by `(info_hash, show_id, metadata_updated_at, hint)`.
 
@@ -329,21 +331,23 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 
 **State machine.** `queued → fetching_metadata → classifying → [resolving] → needs_review ⇄ ready → applied`. Any open state can end in `failed` or `cancelled`.
 - *Working* means `queued…resolving`, *open* means working plus `needs_review` and `ready`, and *closed* means `applied`, `failed` or `cancelled`.
-- `fetching_metadata` loads the torrent's file list. It also refreshes the show's metadata when it's over 24 h old or a file numbers past the last known episode.
+- `fetching_metadata` loads the torrent's file list. Meanwhile it refreshes the show's metadata when it was never synced or is over 24 h old, and reads TMDB's alternative titles (the classifier's aliases) and season-like episode groups (its alternative orderings). When a video then stays unmatched (perhaps an episode that just aired), it refreshes once more and reclassifies, unless a refresh was tried in this job or ran within the last hour.
 - `resolving` runs the AI resolver on the unsure files. It's skipped when nothing needs asking or AI is unavailable: no key, `classifier_enabled` off, or the show's `classifier_mode` is `rules_only`.
 - After classification, every PATCH (during `resolving`, when the run ends) and every AI run, the status is recomputed: `needs_review` while a proposal that *maps* is `pending` or a conflict exists, otherwise `ready`. A proposal maps when it has targets, or when it's a movie candidate.
 - **Auto-apply** (the `auto_apply_high_confidence` setting, on by default) sends a freshly classified job straight to `applied` when all of these hold:
   - it isn't a dry run;
   - it has no conflict;
+  - something maps and isn't ignored (a torrent of openings and endings alone waits for the user);
   - nothing that maps is pending, and everything that maps is `high`;
   - no video is unmatched.
-- **Restart.** Jobs before `resolving` start again from `queued`. An interrupted `resolving` goes to `needs_review` with `ai_error`. Apply and re-check never need the torrent loaded: the file list is stored as proposals.
+- **Restart.** Jobs before `resolving` start again from `queued`. An interrupted `resolving` gets `ai_error` and its status recomputed (`needs_review`, or `ready` when nothing is pending), keeping the rules' proposals; it isn't auto-applied. Apply and re-check never need the torrent loaded: the file list is stored as proposals.
+- **Failure.** A failed job has `error` for the user; the database also keeps why for code (`error_code`: `metadata_timeout`, `no_videos`, `no_torrents`, `title_gone`, `invalid_magnet`, `torrent_error`, `internal`).
 
 **Endpoints**
 
 | Endpoint | Answer | Errors |
 |---|---|---|
-| `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?, text?}, indexer?}` | `202 {job_id}`, or `200 {job_id}` of the open job for the same show and info hash (the new hint is ignored) | `400 bad_request` (no BitTorrent info hash), `404` |
+| `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?, text?}, indexer?}` | `202 {job_id}`, or `200 {job_id}` of the open job for the same show and info hash (the new hint is ignored) | `400 bad_request` (no `magnet_uri`, no BitTorrent info hash, or an invalid hint: a negative season, an episode below 1, text over 500 characters), `404` |
 | `POST /movies/{id}/assign-torrent` with `{magnet_uri, file_path?, indexer?}` | As for shows. `file_path` picks the file up front: it's accepted, the other candidates are ignored, and the job applies once classified | As for shows |
 | `GET /assignment-jobs/{id}` | `200 AssignmentJobDetail` | `404` |
 | `GET /assignment-jobs?status=` | `{items: [AssignmentJob]}`, newest first, no dry runs. `status` is `open` (the default) or a comma-separated list of statuses | `400 bad_request` (unknown status) |
@@ -358,6 +362,8 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 `?wait=true` (legacy, both assign routes, until H2) waits until the job stops working, applies it, and answers `201` with the legacy response plus `job_id`. The job ends `applied`.
 - Shows: every proposal with targets is applied, at any confidence, except conflicting ones. Those are left out (the legacy response reports them as unmatched) and their proposals stay `pending`.
 - Movies: only the top-ranked candidate is applied.
+- The wait and the apply outlive the request (bounded at 10 min), so a client that gives up early still gets the job applied.
+- When the job fails: `400 bad_request` for a torrent without a video (or a film), `503 unavailable` without a torrent client, `504 timeout` when no peers sent the file list in time, `404` when the title left the library, `500` otherwise; `409 job_closed` when it was discarded.
 
 ```
 AssignmentJobDetail { job: AssignmentJob, proposals: [Proposal] }   // proposals: [] until classified (queued…classifying)
@@ -403,7 +409,7 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
 - **Movie jobs.** Candidates are `kind: movie` with no targets, ranked: one plausible file is `matched`, several are `needs_review`. The user picks one by accepting it, which ignores the others. Candidates never conflict.
 - **`confidence`** is null with no target and for a manual pick.
 - **`reason`** is at most 120 characters and never starts with "AI:": the UI labels AI reasons from `source`.
-- **Conflicts:** two or more non-ignored proposals whose targets share an episode. They block Apply.
+- **Conflicts:** two or more non-ignored proposals whose targets share an episode. They block Apply. Subtitles never conflict: one that no video claims can be accepted onto an episode a video also maps to.
 - **`replaces`.** An episode that already has a file from elsewhere isn't a conflict. The proposal gets a `replaces` note for its first target instead, computed when read; it never blocks.
 - **`superseded_by`** points from a v1 file to its v2 in the same torrent; the v1 sits in `extras` as `superseded`.
 - **`updated`/`hinted`:** the latest re-check changed this proposal (and had a hint). Both reset when the next re-check starts.
@@ -437,7 +443,7 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
   - episode ids are re-validated;
   - then the VFS tree is rebuilt (`InvalidateTree`).
 - **Unmatched and ignored files** are left out. They never block.
-- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry, `Show - S01E01-E02 - FirstName.ext`; subtitle sidecars follow that name. Legacy rows keep their per-episode paths.
+- **VFS.** Rows that share `(info_hash, file_path)` and have a `match_source` become one entry per season folder, `Show - S01E01-E02 - FirstName.ext` (first and last episode, the first one's name); the subtitle sidecars of all its episodes follow that name, and the catalog's `webdav_path` too. Legacy rows keep their per-episode paths. Unassigning one episode of such a file rebuilds the tree, which renames the rest.
 
 **Discard** cancels the job. It removes the torrent when no active assignment or other open job uses it.
 

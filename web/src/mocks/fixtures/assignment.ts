@@ -153,11 +153,11 @@ export const maps = (p: Proposal) => p.kind === 'movie' || p.targets.length > 0;
 
 const ids = (targets: ProposalTarget[]) => targets.map((t) => t.episode_id).join(',');
 
-/** Non-ignored proposals whose targets share an episode. Movie candidates never conflict. */
+/** Non-ignored proposals whose targets share an episode. Movie candidates and subtitles never conflict. */
 export function conflictIds(proposals: Proposal[]): Set<number> {
   const byEpisode = new Map<number, number[]>();
   for (const p of proposals) {
-    if (p.decision === 'ignored' || p.kind === 'movie') continue;
+    if (p.decision === 'ignored' || p.kind === 'movie' || p.kind === 'subtitle') continue;
     for (const t of new Set(p.targets.map((target) => target.episode_id))) byEpisode.set(t, [...(byEpisode.get(t) ?? []), p.id]);
   }
   return new Set([...byEpisode.values()].filter((list) => list.length > 1).flat());
@@ -187,11 +187,12 @@ export function settledStatus(proposals: Proposal[]): 'needs_review' | 'ready' {
   return counts.pending > 0 || counts.conflicts > 0 ? 'needs_review' : 'ready';
 }
 
-/** Auto-apply: no conflict, nothing pending or unmatched, everything that maps is high. */
+/** Auto-apply: something to apply, no conflict, nothing pending or unmatched, everything that maps is high. */
 export function autoApplies(job: MockJob): boolean {
   const counts = jobCounts(job.proposals);
   return (
     !job.dry_run &&
+    counts.to_apply > 0 &&
     counts.conflicts === 0 &&
     counts.pending === 0 &&
     counts.unmatched === 0 &&

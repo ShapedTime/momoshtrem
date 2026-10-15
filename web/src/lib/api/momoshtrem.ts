@@ -189,7 +189,7 @@ class MomoshtremClient {
 
     return this.request<MovieAssignmentResponse>(
       'POST',
-      `/api/movies/${id}/assign-torrent`,
+      `/api/movies/${id}/assign-torrent?wait=true`, // legacy synchronous assign (#5): waits for the job and applies it
       { magnet_uri: magnetUri },
       'assign torrent to movie'
     );
@@ -261,7 +261,7 @@ class MomoshtremClient {
 
     return this.request<ShowAssignmentResponse>(
       'POST',
-      `/api/shows/${id}/assign-torrent`,
+      `/api/shows/${id}/assign-torrent?wait=true`, // legacy synchronous assign (#5): waits for the job and applies it
       { magnet_uri: magnetUri },
       'assign torrent to show'
     );

@@ -43,6 +43,17 @@ func makeEpisodeFileName(showTitle string, seasonNum, epNum int, epName, ext str
 		" - " + library.SanitizeFilename(epName) + ext
 }
 
+// makeMultiEpisodeFileName names a file that plays several episodes, after
+// the first: "Show - S01E01-E02 - First Name.ext".
+func makeMultiEpisodeFileName(showTitle string, seasonNum, firstEp, lastEp int, firstName, ext string) string {
+	if firstName == "" {
+		firstName = "Episode " + common.Itoa(firstEp)
+	}
+	return library.SanitizeFilename(showTitle) + " - S" +
+		common.PadZero(seasonNum, 2) + "E" + common.PadZero(firstEp, 2) + "-E" + common.PadZero(lastEp, 2) +
+		" - " + library.SanitizeFilename(firstName) + ext
+}
+
 // makeEpisodePrefix creates the prefix for matching episodes: "Show - S01E05"
 func makeEpisodePrefix(showTitle string, seasonNum, epNum int) string {
 	return library.SanitizeFilename(showTitle) + " - S" +
@@ -465,7 +476,7 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 		tree.pathMap[filePath] = videoFile
 
 		subDirs = append(subDirs, subtitleDir{movieDir, folderPath, folderName,
-			subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, movie.Assignment.InfoHash})
+			subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}, movie.Assignment.InfoHash, nil})
 	}
 
 	// Add TV shows with assigned episodes
@@ -491,32 +502,58 @@ func (fs *LibraryFS) buildTreeFromDB() *DirectoryTree {
 			showDir.children[seasonFolderName] = seasonDir
 			tree.pathMap[seasonPath] = seasonDir
 
-			for _, episode := range season.Episodes {
-				if episode.Assignment == nil {
-					continue
-				}
-
-				// Episode file: Show - S01E05 - Name.ext
-				ext := getVideoExt(episode.Assignment.FilePath)
-				filePath := EpisodeFilePath(show.Title, show.Year, season.SeasonNumber, episode.EpisodeNumber, episode.Name, episode.Assignment.FilePath)
-				fileName := path.Base(filePath)
-
-				videoFile := NewPlaceholderFile(fileName, episode.Assignment.FileSize, episode.Assignment)
-				seasonDir.children[fileName] = videoFile
-				tree.pathMap[filePath] = videoFile
-
-				subDirs = append(subDirs, subtitleDir{seasonDir, seasonPath, strings.TrimSuffix(fileName, ext),
-					subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: episode.ID}, episode.Assignment.InfoHash})
-			}
+			subDirs = append(subDirs, addSeasonEntries(tree, seasonDir, seasonPath, show.Title, season)...)
 		}
 	}
 
 	subs := fs.loadSubtitles(subDirs)
 	for _, d := range subDirs {
-		addSubtitleFiles(tree, d, subs[d.item])
+		addSubtitleFiles(tree, d, d.subtitles(subs))
 	}
 
 	return tree
+}
+
+// addSeasonEntries puts a season's assigned episodes in its folder, named
+// by SeasonEntries: "Show - S01E05 - Name.ext", or one "Show - S01E01-E02 -
+// Name.ext" for episodes a job mapped to the same file. It returns where
+// each video's subtitles go: a grouped entry gets every one of its
+// episodes' subtitles, named after it.
+func addSeasonEntries(tree *DirectoryTree, seasonDir *VirtualDir, seasonPath, showTitle string, season library.Season) []subtitleDir {
+	var assigned []library.Episode
+	var eps []SeasonEpisode
+	for _, ep := range season.Episodes {
+		if ep.Assignment == nil {
+			continue
+		}
+		assigned = append(assigned, ep)
+		eps = append(eps, SeasonEpisode{
+			Number: ep.EpisodeNumber, Name: ep.Name,
+			InfoHash: ep.Assignment.InfoHash, FilePath: ep.Assignment.FilePath,
+			Grouped: ep.Assignment.MatchSource != "",
+		})
+	}
+
+	var dirs []subtitleDir
+	for _, entry := range SeasonEntries(showTitle, season.SeasonNumber, eps) {
+		first := assigned[entry.Episodes[0]]
+		filePath := seasonPath + "/" + entry.FileName
+		videoFile := NewPlaceholderFile(entry.FileName, first.Assignment.FileSize, first.Assignment)
+		seasonDir.children[entry.FileName] = videoFile
+		tree.pathMap[filePath] = videoFile
+
+		d := subtitleDir{
+			dir: seasonDir, dirPath: seasonPath,
+			base:     strings.TrimSuffix(entry.FileName, getVideoExt(first.Assignment.FilePath)),
+			item:     subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: first.ID},
+			infoHash: first.Assignment.InfoHash,
+		}
+		for _, i := range entry.Episodes[1:] {
+			d.more = append(d.more, subtitle.Item{Type: subtitle.ItemTypeEpisode, ID: assigned[i].ID})
+		}
+		dirs = append(dirs, d)
+	}
+	return dirs
 }
 
 // InvalidateFileHandles is a no-op retained for the TreeUpdater interface.
@@ -556,74 +593,6 @@ func (fs *LibraryFS) InvalidateTree() {
 	fs.tree = nil
 	fs.mu.Unlock()
 	fs.rebuildTree()
-}
-
-// AddMovieToTree adds a movie with its assignment to the VFS tree.
-// If the tree hasn't been built yet, rebuild from DB (which already contains
-// the assignment) instead of no-opping.
-func (fs *LibraryFS) AddMovieToTree(movie *library.Movie, assignment *library.TorrentAssignment) {
-	if fs.ensureTreeForMutation() {
-		return
-	}
-
-	// Re-adding the folder drops its files, downloaded subtitles included.
-	subItem := subtitle.Item{Type: subtitle.ItemTypeMovie, ID: movie.ID}
-	subs := fs.loadSubtitles([]subtitleDir{{item: subItem}})
-
-	fs.mu.Lock()
-
-	if fs.tree == nil {
-		fs.mu.Unlock()
-		return
-	}
-
-	// Build paths
-	folderPath := MovieDir(movie.Title, movie.Year)
-	folderName := path.Base(folderPath)
-
-	moviesDir, ok := fs.tree.pathMap[MoviesPath].(*VirtualDir)
-	if !ok {
-		fs.mu.Unlock()
-		slog.Error("Movies directory not found in tree")
-		return
-	}
-
-	// Check if movie folder already exists (re-assignment case)
-	if existing, exists := fs.tree.pathMap[folderPath]; exists {
-		// Update existing folder with new file
-		if dir, ok := existing.(*VirtualDir); ok {
-			// Remove old file if any
-			for name := range dir.children {
-				delete(fs.tree.pathMap, folderPath+"/"+name)
-			}
-			dir.children = make(map[string]Entry)
-		}
-	} else {
-		// Create new movie folder
-		movieDir := NewVirtualDir(folderName)
-		moviesDir.children[folderName] = movieDir
-		fs.tree.pathMap[folderPath] = movieDir
-	}
-
-	// Add video file
-	movieDir, ok := fs.tree.pathMap[folderPath].(*VirtualDir)
-	if !ok {
-		fs.mu.Unlock()
-		slog.Error("Movie directory not found after creation", "path", folderPath)
-		return
-	}
-	filePath := MovieFilePath(movie.Title, movie.Year, assignment.FilePath)
-	fileName := path.Base(filePath)
-
-	videoFile := NewPlaceholderFile(fileName, assignment.FileSize, assignment)
-	movieDir.children[fileName] = videoFile
-	fs.tree.pathMap[filePath] = videoFile
-	addSubtitleFiles(fs.tree, subtitleDir{movieDir, folderPath, folderName, subItem, assignment.InfoHash}, subs[subItem])
-
-	fs.mu.Unlock()
-
-	slog.Debug("Added movie to VFS tree", "path", filePath)
-	fs.saveTreeToCache()
 }
 
 // RemoveMovieFromTree removes a movie folder and its contents from the VFS tree.
@@ -668,79 +637,6 @@ func (fs *LibraryFS) RemoveMovieFromTree(title string, year int) {
 	fs.mu.Unlock()
 
 	slog.Debug("Removed movie from VFS tree", "path", folderPath)
-	fs.saveTreeToCache()
-}
-
-// AddEpisodesToTree adds episodes to the VFS tree, creating show/season folders as needed.
-// If the tree hasn't been built yet, rebuild from DB (which already contains
-// the assignments) instead of no-opping.
-func (fs *LibraryFS) AddEpisodesToTree(episodes []EpisodeWithContext) {
-	if len(episodes) == 0 {
-		return
-	}
-	if fs.ensureTreeForMutation() {
-		return
-	}
-
-	fs.mu.Lock()
-
-	if fs.tree == nil {
-		fs.mu.Unlock()
-		return
-	}
-
-	tvDir, ok := fs.tree.pathMap[TVShowsPath].(*VirtualDir)
-	if !ok {
-		fs.mu.Unlock()
-		slog.Error("TV Shows directory not found in tree")
-		return
-	}
-
-	for _, ep := range episodes {
-		// Get or create show folder
-		showPath := ShowDir(ep.ShowTitle, ep.ShowYear)
-		showFolderName := path.Base(showPath)
-
-		showDirEntry, exists := fs.tree.pathMap[showPath]
-		if !exists {
-			showDirEntry = NewVirtualDir(showFolderName)
-			tvDir.children[showFolderName] = showDirEntry
-			fs.tree.pathMap[showPath] = showDirEntry
-		}
-		showDir, ok := showDirEntry.(*VirtualDir)
-		if !ok {
-			slog.Error("Show directory type assertion failed", "path", showPath)
-			continue
-		}
-
-		// Get or create season folder
-		seasonPath := SeasonDir(ep.ShowTitle, ep.ShowYear, ep.SeasonNumber)
-		seasonFolderName := path.Base(seasonPath)
-
-		seasonDirEntry, exists := fs.tree.pathMap[seasonPath]
-		if !exists {
-			seasonDirEntry = NewVirtualDir(seasonFolderName)
-			showDir.children[seasonFolderName] = seasonDirEntry
-			fs.tree.pathMap[seasonPath] = seasonDirEntry
-		}
-		seasonDir, ok := seasonDirEntry.(*VirtualDir)
-		if !ok {
-			slog.Error("Season directory type assertion failed", "path", seasonPath)
-			continue
-		}
-
-		// Add episode file
-		filePath := EpisodeFilePath(ep.ShowTitle, ep.ShowYear, ep.SeasonNumber, ep.Episode.EpisodeNumber, ep.Episode.Name, ep.Assignment.FilePath)
-		fileName := path.Base(filePath)
-
-		videoFile := NewPlaceholderFile(fileName, ep.Assignment.FileSize, ep.Assignment)
-		seasonDir.children[fileName] = videoFile
-		fs.tree.pathMap[filePath] = videoFile
-
-		slog.Debug("Added episode to VFS tree", "path", filePath)
-	}
-
-	fs.mu.Unlock()
 	fs.saveTreeToCache()
 }
 
