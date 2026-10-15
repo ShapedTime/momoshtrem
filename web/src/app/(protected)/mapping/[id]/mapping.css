@@ -59,8 +59,8 @@
   .map-ai-copy strong { font-weight: var(--w-semibold); }
   .map-ai-copy .t-small { overflow-wrap: anywhere; }
   .map-ai-btn { flex-shrink: 0; }
-  .map-ai-more { display: none; }
-  @media (min-width: 640px) { .map-ai-more { display: inline; } }
+  /* " with AI" is only hidden from sight below 640 px: the button's name stays "Re-check with AI" */
+  @media (max-width: 639px) { .map-ai-more { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; } }
   @media (max-width: 400px) { .map-ai-avatar { display: none; } }
   .map-ai-body { display: flex; flex-direction: column; gap: var(--sp-3); padding-top: var(--sp-1); }
   .map-ai-body[hidden] { display: none; }

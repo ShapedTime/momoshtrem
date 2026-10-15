@@ -27,13 +27,18 @@ export function assignHint(context: TorrentSearchContext): AssignHint | undefine
 
 const isAbort = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
+/** How long the search waits on a movie's job before handing over to its page (which shows the progress). */
+export const MOVIE_WAIT_MS = 40_000;
+
 /**
  * Adding a torrent from the legacy search (until #6) starts a mapping job
  * (PLAN §6 "Assignment"), after adding the title to the library when it
  * isn't there yet.
  * - A show's job is reviewed at /mapping/{id}: the search closes and goes there.
  * - A movie's job is waited for here. One plausible file applies on its own
- *   (the success toast, and the title refreshes); otherwise the review picks one.
+ *   (the success toast, and the title refreshes); otherwise the review picks
+ *   one. A slow job (40 s) or a failed read goes to /mapping/{id} too, whose
+ *   progress view keeps polling.
  */
 export function useAssignTorrent(
   context: TorrentSearchContext,
@@ -63,7 +68,14 @@ export function useAssignTorrent(
         return { kind: 'review', jobId };
       }
       const { job_id: jobId } = await assignmentApi.assignMovie(libraryId, { magnet_uri: magnetUri, ...(indexer && { indexer }) });
-      const detail = await waitForJob(queryClient, jobId, waiting.current?.signal);
+      let detail: AssignmentJobDetail;
+      try {
+        detail = await waitForJob(queryClient, jobId, { signal: waiting.current?.signal, timeoutMs: MOVIE_WAIT_MS });
+      } catch (error) {
+        if (isAbort(error)) throw error;
+        // Slow (no peers yet) or the read failed: the job exists, and its page keeps polling it
+        return { kind: 'review', jobId };
+      }
       if (detail.job.status === 'applied') return { kind: 'applied', addedToLibrary };
       if (detail.job.status === 'failed' || detail.job.status === 'cancelled') return { kind: 'failed', detail };
       return { kind: 'review', jobId };

@@ -203,7 +203,8 @@ export function ReviewScreen({ detail }: { detail: AssignmentJobDetail }) {
       <MappingHeader job={job} summary={<MappingSummary counts={counts} />} more={<MappingMoreMenu onDiscard={() => void actions.discard()} />} />
       <div className={cx('map-layout page', desktop && !movie && 'has-pane')}>
         <div className="map-main">
-          {job.ai_available && <RecheckPanel detail={detail} />}
+          {/* Shown while job.ai_available; it stays to explain a 503 when AI went away */}
+          <RecheckPanel detail={detail} />
           <div className="map-groups">
             {groups.map(({ group, proposals: rows }) => (
               <ProposalGroup

@@ -1,5 +1,6 @@
 import type { AssignmentJobDetail, Proposal } from '@/lib/api/contract';
 import { defaultScope, doneMessage, recheckCounts, updatedCount, workingDetail, workingTitle } from '@/lib/mapping/recheck';
+import { canHaveEpisodes, fileClass } from '@/lib/mapping/files';
 import { assignHint } from '@/hooks/useAssignTorrent';
 import { jobDetail, seedJobs } from '@/mocks/fixtures/assignment';
 import { findTitle } from '@/mocks/fixtures/catalog';
@@ -14,11 +15,16 @@ function seeded(id: number): AssignmentJobDetail {
 describe('re-check scopes', () => {
   const { proposals } = seeded(101);
 
-  it('unresolved: pending and not decided by you; all: everything you haven’t decided', () => {
-    expect(recheckCounts(proposals)).toEqual({ unresolved: 3, all: 16 });
+  it('as the backend asks: episode files you haven’t decided; unresolved ones are pending or in a conflict', () => {
+    // 13 episode files (the extras keep the rules' reading), 3 pending
+    expect(recheckCounts(proposals)).toEqual({ unresolved: 3, all: 13 });
     const [first, ...rest] = proposals;
     const decided: Proposal[] = [{ ...first, decision: 'accepted', user_decided: true }, ...rest];
-    expect(recheckCounts(decided)).toEqual({ unresolved: 2, all: 15 });
+    expect(recheckCounts(decided)).toEqual({ unresolved: 2, all: 12 });
+    // A matched file that collides with another is unresolved too
+    const matched = proposals.filter((p) => p.group === 'matched');
+    const clash: Proposal[] = proposals.map((p) => (p.id === matched[1].id ? { ...p, targets: matched[0].targets } : p));
+    expect(recheckCounts(clash)).toEqual({ unresolved: 5, all: 13 });
   });
 
   it('opens on the unresolved files, unless there are none', () => {
@@ -45,6 +51,25 @@ describe('re-check words', () => {
     expect(doneMessage(1)?.lead).toBe('Updated 1 suggestion, marked ');
     expect(doneMessage(3)).toEqual({ lead: 'Updated 3 suggestions, marked ', tail: ' below. Accept the ones that look right.' });
     expect(doneMessage(0)).toBeNull();
+  });
+});
+
+describe('file classes', () => {
+  it('sorts files by extension as the backend does', () => {
+    expect(fileClass('Show/Show.S01E01.1080p.mkv')).toBe('video');
+    expect(fileClass('Show.S01E01.en.ASS')).toBe('subtitle');
+    expect(fileClass('Fonts/OpenSans-Semibold.ttf')).toBe('font');
+    expect(fileClass('Show.2009.Specials.nfo')).toBe('info');
+    expect(fileClass('poster.jpg')).toBe('image');
+    expect(fileClass('Show.part.r01')).toBe('archive');
+    expect(fileClass('README')).toBe('other');
+  });
+
+  it('only videos and subtitles can have episodes (Include)', () => {
+    expect(canHaveEpisodes('NCOP2 (1080p).mkv')).toBe(true);
+    expect(canHaveEpisodes('Show.S00E01.srt')).toBe(true);
+    expect(canHaveEpisodes('Fonts/OpenSans-Semibold.ttf')).toBe(false);
+    expect(canHaveEpisodes('Show.nfo')).toBe(false);
   });
 });
 

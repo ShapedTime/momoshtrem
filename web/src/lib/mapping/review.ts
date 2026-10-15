@@ -311,15 +311,20 @@ export function restoredDecision(p: Proposal): ProposalDecision {
   return 'accepted';
 }
 
+/** Where a group starts (PLAN §6): matched and specials accepted, extras ignored, the rest pending. */
+export const groupDefault = (group: ProposalGroup): ProposalDecision =>
+  group === 'matched' || group === 'specials' ? 'accepted' : group === 'extras' ? 'ignored' : 'pending';
+
 /**
  * Undo a movie pick: using a file ignored the other candidates, so every
- * candidate goes back to its group's default (pending in Needs review) and
- * you choose again. One you had ignored yourself comes back too.
+ * candidate goes back to its group's default (matched accepted, Needs review
+ * pending, extras ignored) and you choose again. Back on its default, a
+ * candidate is no longer `user_decided`, so nothing blocks Apply that didn't before.
  */
 export function movieUndo(proposals: Proposal[]): ProposalChange[] {
   return proposals.flatMap((p): ProposalChange[] => {
     if (p.kind !== 'movie') return [];
-    const decision: ProposalDecision = p.group === 'needs_review' ? 'pending' : 'accepted';
+    const decision = groupDefault(p.group);
     return p.decision === decision ? [] : [{ id: p.id, decision }];
   });
 }

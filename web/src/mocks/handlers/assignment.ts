@@ -70,6 +70,17 @@ const touch = (job: MockJob) => {
 const libraryRow = (mediaType: MediaType, libraryId: number | null) =>
   libraryId === null ? undefined : findByLibraryId(mockLibrary(), mediaType, libraryId);
 
+/** The backend's `ai_error` messages (service/assignment_worker.go); the first AI run can set them too. */
+export const AI_ERRORS = {
+  timeout: "The AI didn't answer in time, so nothing changed.",
+  failed: 'The AI check failed, so nothing changed.',
+  interrupted: 'The AI check was interrupted by a restart, so nothing changed.',
+  budget: "This month's AI budget is spent, so nothing changed.",
+} as const;
+
+/** The longest re-check hint the backend takes (400 above it). */
+const HINT_MAX = 500;
+
 /** As the backend: the AI resolver maps episodes, so movie jobs never have it. */
 function aiAvailable(mediaType: MediaType, libraryId: number | null): boolean {
   if (mediaType === 'movie') return false;
@@ -177,7 +188,7 @@ function tick(job: MockJob): void {
   if (walk.kind === 'classify') classified(job);
   else {
     // `ai-error`: the run fails and changes nothing
-    if (scenario() === 'ai-error') job.ai_error = 'The AI didn’t answer in time.';
+    if (scenario() === 'ai-error') job.ai_error = AI_ERRORS.timeout;
     else finishRecheck(job, walk.scope ?? 'unresolved');
     job.status = settledStatus(job.proposals);
   }
@@ -332,24 +343,32 @@ export const assignmentHandlers = [
   }),
   http.post('*/api/assignment-jobs/:id/reclassify', async ({ params, request }) => {
     await latency();
+    // As the backend: the body is checked first (400), then the job (404, 409, 503)
+    const body = await jsonBody(request);
+    if (!isReclassify(body)) return apiError(400, 'bad_request', 'Send {scope: "unresolved" | "all", hint?}.');
+    const text = body.hint?.trim() ?? '';
+    if ([...text].length > HINT_MAX) return apiError(400, 'bad_request', `Keep the hint under ${HINT_MAX} characters.`);
     const job = findJob(params.id);
     if (!job) return noJob();
     if (CLOSED.includes(job.status)) return closed(job);
-    if (WORKING.includes(job.status)) return apiError(409, 'job_working', 'Noir is still on it.');
+    if (WORKING.includes(job.status)) return working();
     if (!aiAvailable(job.media_type, job.library_id)) return apiError(503, 'unavailable', 'AI isn’t available for this job.');
-    const body = await jsonBody(request);
-    if (!isReclassify(body)) return apiError(400, 'bad_request', 'Send {scope: "unresolved" | "all", hint?}.');
     // The re-check's hint replaces the text one; season and episode stay
     const hint: AssignHint = { ...job.hint };
     delete hint.text;
-    if (body.hint) hint.text = body.hint;
+    if (text) hint.text = text;
     job.hint = Object.keys(hint).length ? hint : null;
     job.ai_error = null;
     job.proposals = job.proposals.map((p) => ({ ...p, updated: false, hinted: false }));
     const conflicts = conflictIds(job.proposals);
     job.ai_files = job.proposals.filter((p) => inScope(p, body.scope, conflicts)).length;
-    job.status = 'resolving';
-    job.walk = { kind: 'recheck', steps: ['resolving', 'resolving'], started: Date.now(), polls: 0, scope: body.scope };
+    if (job.ai_files === 0) {
+      // Nothing to ask about: settled at once, no `resolving`
+      job.status = settledStatus(job.proposals);
+    } else {
+      job.status = 'resolving';
+      job.walk = { kind: 'recheck', steps: ['resolving', 'resolving'], started: Date.now(), polls: 0, scope: body.scope };
+    }
     touch(job);
     syncReviews();
     return accepted({ job_id: job.id });

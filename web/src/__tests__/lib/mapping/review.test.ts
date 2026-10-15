@@ -11,6 +11,7 @@ import {
   firstBlocker,
   firstPending,
   footState,
+  groupDefault,
   groupProposals,
   ignoredLabel,
   movieUndo,
@@ -243,6 +244,25 @@ describe('decisions', () => {
       { id: 3, decision: 'pending' },
     ]);
     expect(movieUndo(cuts)).toEqual([]);
+  });
+
+  it('a movie Undo puts each candidate back on its own group’s default: matched accepted, extras ignored', () => {
+    const base: Proposal = { ...named(frieren, '35v2'), kind: 'movie', targets: [], suggested_targets: [] };
+    const used: Proposal[] = [
+      { ...base, id: 1, group: 'matched', decision: 'ignored' },
+      { ...base, id: 2, group: 'extras', decision: 'accepted' },
+    ];
+    expect(movieUndo(used)).toEqual([
+      { id: 1, decision: 'accepted' },
+      { id: 2, decision: 'ignored' },
+    ]);
+    expect(['matched', 'specials', 'needs_review', 'unmatched', 'extras'].map((group) => groupDefault(group as Proposal['group']))).toEqual([
+      'accepted',
+      'accepted',
+      'pending',
+      'pending',
+      'ignored',
+    ]);
   });
 
   it('a movie job’s foot asks for one pick', () => {

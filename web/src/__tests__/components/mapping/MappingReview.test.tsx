@@ -114,6 +114,16 @@ describe('MappingReview', () => {
     expect(calls.some((call) => call.url.endsWith('/apply'))).toBe(false);
   });
 
+  it('offers Include only on extras that can have an episode (videos, subtitles)', async () => {
+    stubBackend(seeded(101));
+    renderPage(101);
+    expect(await screen.findByRole('button', { name: 'Include NCOP2' })).toBeInTheDocument();
+    const font = screen.getByText(/OpenSans-Semibold/).closest('li');
+    if (!font) throw new Error('No font row');
+    expect(within(font).queryByRole('button')).not.toBeInTheDocument();
+    expect(font).toHaveTextContent(/Font\s*· not in Infuse/);
+  });
+
   it('a missing job is the not-found view', async () => {
     stubBackend(seeded(101));
     renderPage(999);

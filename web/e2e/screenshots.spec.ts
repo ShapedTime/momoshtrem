@@ -237,7 +237,7 @@ test.describe('mapping review', () => {
   test('recheck: open', async ({ page }, testInfo) => {
     await signIn(page, '/mapping/101');
     const panel = page.getByRole('region', { name: 'Re-check with AI' });
-    await panel.getByRole('button', { name: phone(testInfo) ? 'Re-check' : 'Re-check with AI', exact: true }).click();
+    await panel.getByRole('button', { name: 'Re-check with AI' }).click();
     await panel.getByRole('button', { name: '28.5 is a recap' }).click();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.waitForTimeout(400);
@@ -249,10 +249,10 @@ test.describe('mapping review', () => {
     await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'job-hold:resolving'));
     await signIn(page, '/mapping/101');
     const panel = page.getByRole('region', { name: 'Re-check with AI' });
-    await panel.getByRole('button', { name: phone(testInfo) ? 'Re-check' : 'Re-check with AI', exact: true }).click();
+    await panel.getByRole('button', { name: 'Re-check with AI' }).click();
     await panel.getByRole('button', { name: '28.5 is a recap' }).click();
     await panel.locator('.map-ai-run').getByRole('button', { name: 'Re-check' }).click();
-    await panel.getByText('Re-checking 3 files with your hint…').waitFor();
+    await panel.getByText('Re-checking 3 files with your hint…', { exact: true }).waitFor();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.waitForTimeout(400);
     await shoot(page, testInfo, 'mapping/recheck', { fullPage: true });

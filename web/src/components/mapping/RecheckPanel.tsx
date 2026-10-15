@@ -8,6 +8,7 @@ import { DESKTOP_QUERY } from '@/hooks/useMediaQuery';
 import { useRecheck } from '@/hooks/useMappingJob';
 import { type AssignmentJobDetail, isJobWorking, type Proposal } from '@/lib/api/contract';
 import {
+  AI_ERROR_LEAD,
   AI_UNAVAILABLE,
   defaultScope,
   doneMessage,
@@ -30,7 +31,8 @@ import { cx } from '@/lib/utils/cx';
  * a render, so "not working" before it was seen working means nothing.
  */
 interface Run {
-  files: number | null;
+  /** What was asked, shown until the job itself says (it's resolving). */
+  files: number;
   hint: string;
   phase: 'starting' | 'started' | 'working';
 }
@@ -38,15 +40,18 @@ interface Run {
 /**
  * "Re-check with AI" above the groups (HANDOFF §5.5): a hint, example chips
  * and which files, then Noir works while the groups stay usable, and the
- * rows it changed say Updated. Only rendered while `job.ai_available`.
+ * rows it changed say Updated. Shown while `job.ai_available`, and kept to
+ * explain a 503 when AI went away. Screen readers hear every state through
+ * one live region that stays put.
  */
 export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
   const { job, proposals } = detail;
-  const { start, starting, finished } = useRecheck(job.id);
+  const { start, finished } = useRecheck(job.id);
   const counts = useMemo(() => recheckCounts(proposals), [proposals]);
   const bodyId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const noticeRef = useRef<HTMLParagraphElement>(null);
   const [open, setOpen] = useState(false);
   const [hint, setHint] = useState('');
   const [scope, setScope] = useState<RecheckScope>(() => defaultScope(counts));
@@ -62,30 +67,43 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
     setOpen(false);
   };
   // A re-check started elsewhere (another tab) shows here too
-  if (run === null && working) setRun({ files: job.progress.ai_files, hint: job.hint?.text ?? '', phase: 'working' });
+  if (run === null && working) setRun({ files: job.progress.ai_files ?? 0, hint: job.hint?.text ?? '', phase: 'working' });
   if (run?.phase === 'started' && working) setRun({ ...run, phase: 'working' });
   if (run?.phase === 'working' && !working) finish(proposals);
   useEffect(() => {
     if (result) void finished();
   }, [result, finished]);
+  // A 503 or a failed start: the button you pressed may be gone, so focus moves to why
+  useEffect(() => {
+    if (notice) noticeRef.current?.focus({ preventScroll: true });
+  }, [notice]);
+
+  if (!job.ai_available && !notice) return null;
+  const unavailable = !job.ai_available;
 
   const toggle = () => {
     const next = !open;
     setOpen(next);
     setResult(null);
-    // Desktop only: on a phone the keyboard would cover the chips
-    if (next && window.matchMedia(DESKTOP_QUERY).matches) window.requestAnimationFrame(() => inputRef.current?.focus());
+    // Desktop only: on a phone the keyboard would cover the chips. Only if focus hasn't moved on meanwhile.
+    if (next && window.matchMedia(DESKTOP_QUERY).matches) {
+      const from = document.activeElement;
+      window.requestAnimationFrame(() => {
+        if (document.activeElement === from || document.activeElement === document.body) inputRef.current?.focus();
+      });
+    }
   };
 
   const recheck = async () => {
-    if (starting || run !== null || counts[scope] === 0) return;
+    const files = counts[scope];
+    if (run !== null || files === 0) return;
     const text = hint.trim();
     // The button goes away while Noir works: keep focus on the panel
     if (panelRef.current?.contains(document.activeElement)) panelRef.current.focus({ preventScroll: true });
     setNotice(null);
     setResult(null);
-    setRun({ files: counts[scope], hint: text, phase: 'starting' });
-    const outcome = await start(text ? { scope, hint: text } : { scope });
+    setRun({ files, hint: text, phase: 'starting' });
+    const outcome = await start(text ? { scope, hint: text } : { scope }, files);
     if (outcome.kind === 'started') {
       // Already done by the time it was read again (a quick run): show the result now
       if (outcome.detail && !isJobWorking(outcome.detail.job.status)) finish(outcome.detail.proposals);
@@ -106,25 +124,37 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
     void recheck();
   };
 
+  // While the job works it says what it's doing (its count and hint), whoever started it
+  const runFiles = working ? job.progress.ai_files : (run?.files ?? null);
+  const runHint = working ? (job.hint?.text ?? '') : (run?.hint ?? '');
   const aiError = run === null ? job.ai_error : null;
   const done = result && !aiError ? doneMessage(result.changed) : null;
+  const announcement =
+    run ? `${workingTitle(runFiles, runHint !== '')} ${workingDetail(runHint)}`
+    : notice ? notice.text
+    : aiError ? `${AI_ERROR_LEAD} ${aiError}`
+    : result ? (done ? `${done.lead}Updated${done.tail}` : NOTHING_CHANGED)
+    : '';
 
   return (
     <section
       ref={panelRef}
       tabIndex={-1}
       aria-label="Re-check with AI"
-      className={cx('map-ai panel', (open || run) && 'is-open', run && 'is-working')}
+      className={cx('map-ai panel', (open || run) && !unavailable && 'is-open', run && 'is-working')}
     >
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
       {run ? (
-        <div className="map-ai-working" role="status">
+        <div className="map-ai-working">
           <div className="map-ai-top">
             <span className="map-ai-eyes">
               <CatEyes width={40} />
             </span>
             <div className="map-ai-copy">
-              <strong>{workingTitle(run.files ?? job.progress.ai_files, run.hint !== '')}</strong>
-              <span className="t-small text-fg-3">{workingDetail(run.hint)}</span>
+              <strong>{workingTitle(runFiles, runHint !== '')}</strong>
+              <span className="t-small text-fg-3">{workingDetail(runHint)}</span>
             </div>
           </div>
           <Steps inline steps={[...WORKING_STEPS]} />
@@ -137,15 +167,17 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
               <strong>Not quite right?</strong>
               <span className="t-small text-fg-2">Noir can take another look. A hint helps with odd numbering.</span>
             </div>
-            <Button variant="secondary" size="sm" className="map-ai-btn" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
-              <Sparkle size={16} aria-hidden="true" />
-              <span>
-                Re-check<span className="map-ai-more"> with AI</span>
-              </span>
-            </Button>
+            {!unavailable && (
+              <Button variant="secondary" size="sm" className="map-ai-btn" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+                <Sparkle size={16} aria-hidden="true" />
+                <span>
+                  Re-check<span className="map-ai-more"> with AI</span>
+                </span>
+              </Button>
+            )}
           </div>
           {result && !aiError && (
-            <p className="map-ai-done" role="status">
+            <p className="map-ai-done">
               <CheckCheck size={16} aria-hidden="true" />
               <span>
                 {done ? (
@@ -161,56 +193,59 @@ export function RecheckPanel({ detail }: { detail: AssignmentJobDetail }) {
             </p>
           )}
           {aiError && (
-            <p className="map-ai-note is-warning" role="status">
+            <p className="map-ai-note is-warning">
               <TriangleAlert size={16} aria-hidden="true" />
               <span>
-                <b>The re-check didn’t finish.</b> Your suggestions are unchanged. {aiError}
+                <b>{AI_ERROR_LEAD}</b> {aiError}
               </span>
             </p>
           )}
-          <div className="map-ai-body" id={bodyId} hidden={!open}>
-            <Input
-              ref={inputRef}
-              label="Hint for Noir (optional)"
-              placeholder="e.g. these are absolute numbers"
-              value={hint}
-              onChange={(event) => setHint(event.target.value)}
-              onKeyDown={onHintKey}
-              autoComplete="off"
-              enterKeyHint="go"
-              maxLength={HINT_MAX}
-            />
-            {job.suggested_hints.length > 0 && (
-              <div className="fchips" role="group" aria-label="Example hints">
-                {job.suggested_hints.map((suggestion) => (
-                  <FilterChip key={suggestion} pressed={hint.trim() === suggestion} onPressedChange={(pressed) => setHint(pressed ? suggestion : '')}>
-                    {suggestion}
-                  </FilterChip>
-                ))}
-              </div>
-            )}
-            <div className="map-ai-run">
-              <SegmentedControl
-                aria-label="Which files to re-check"
-                value={scope}
-                onChange={setScope}
-                options={[
-                  { value: 'unresolved', label: `Unresolved · ${counts.unresolved}` },
-                  { value: 'all', label: `All files · ${counts.all}` },
-                ]}
+          {notice && (
+            <p ref={noticeRef} tabIndex={-1} className={cx('map-ai-note', notice.tone === 'warning' && 'is-warning')}>
+              {notice.tone === 'warning' ? <TriangleAlert size={16} aria-hidden="true" /> : <Info size={16} aria-hidden="true" />}
+              <span>{notice.text}</span>
+            </p>
+          )}
+          {!unavailable && (
+            <div className="map-ai-body" id={bodyId} hidden={!open}>
+              <Input
+                ref={inputRef}
+                label="Hint for Noir (optional)"
+                placeholder="e.g. these are absolute numbers"
+                value={hint}
+                onChange={(event) => setHint(event.target.value)}
+                onKeyDown={onHintKey}
+                autoComplete="off"
+                enterKeyHint="go"
+                maxLength={HINT_MAX}
               />
-              <Button variant="secondary" className="map-ai-go" loading={starting} disabled={counts[scope] === 0} onClick={() => void recheck()}>
-                <Sparkle size={17} aria-hidden="true" />
-                Re-check
-              </Button>
+              {job.suggested_hints.length > 0 && (
+                <div className="fchips" role="group" aria-label="Example hints">
+                  {job.suggested_hints.map((suggestion) => (
+                    <FilterChip key={suggestion} pressed={hint.trim() === suggestion} onPressedChange={(pressed) => setHint(pressed ? suggestion : '')}>
+                      {suggestion}
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
+              <div className="map-ai-run">
+                <SegmentedControl
+                  aria-label="Which files to re-check"
+                  value={scope}
+                  onChange={setScope}
+                  options={[
+                    { value: 'unresolved', label: `Unresolved · ${counts.unresolved}` },
+                    { value: 'all', label: `All files · ${counts.all}` },
+                  ]}
+                />
+                {/* An empty scope has nothing to ask about (the backend settles it at once) */}
+                <Button variant="secondary" className="map-ai-go" disabled={counts[scope] === 0} onClick={() => void recheck()}>
+                  <Sparkle size={17} aria-hidden="true" />
+                  Re-check
+                </Button>
+              </div>
             </div>
-            {notice && (
-              <p className={cx('map-ai-note', notice.tone === 'warning' && 'is-warning')} role="status">
-                {notice.tone === 'warning' ? <TriangleAlert size={16} aria-hidden="true" /> : <Info size={16} aria-hidden="true" />}
-                <span>{notice.text}</span>
-              </p>
-            )}
-          </div>
+          )}
         </>
       )}
     </section>

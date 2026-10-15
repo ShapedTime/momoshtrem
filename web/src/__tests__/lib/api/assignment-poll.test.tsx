@@ -136,6 +136,40 @@ describe('a poll never overwrites a newer PATCH answer', () => {
     await waitFor(() => expect(result.current.query.data?.job.updated_at).toBe(T1));
   });
 
+  it('a poll answered while the PATCH is still on its way keeps the decision you just made', async () => {
+    const { before, patched, change, gets, patch, client, wrapper } = setup();
+    const { result } = renderHook(
+      () => ({ query: useQuery(assignmentJobQuery(101)), actions: useMappingActions(before.job) }),
+      { wrapper }
+    );
+    await waitFor(() => expect(result.current.query.data).toBeDefined());
+    const key = assignmentKeys.job(101);
+    const decision = () => client.getQueryData<AssignmentJobDetail>(key)?.proposals.find((p) => p.id === change[0].id)?.decision;
+
+    let changing: Promise<unknown> = Promise.resolve();
+    act(() => {
+      changing = result.current.actions.change(change);
+    });
+    expect(decision()).toBe('accepted');
+    // A poll reads the job before the PATCH lands (same updated_at, so only the pending write tells them apart)
+    act(() => {
+      void client.refetchQueries({ queryKey: key, exact: true });
+    });
+    await waitFor(() => expect(gets).toHaveLength(1));
+    await act(async () => {
+      gets[0].resolve(answer(200, before));
+    });
+    await waitFor(() => expect(client.getQueryState(key)?.fetchStatus).toBe('idle'));
+    expect(decision()).toBe('accepted');
+
+    await act(async () => {
+      patch.resolve(answer(200, patched));
+      await changing;
+    });
+    expect(client.getQueryData<AssignmentJobDetail>(key)?.job.updated_at).toBe(T1);
+    expect(decision()).toBe('accepted');
+  });
+
   it('a poll read before the PATCH but answered after it is ignored; a newer one lands', async () => {
     const { before, patched, client } = setup();
     const key = assignmentKeys.job(101);

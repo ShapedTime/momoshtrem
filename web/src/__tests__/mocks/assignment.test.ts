@@ -188,6 +188,14 @@ describe('a new job', () => {
       ['needs_review', [], 'pending'],
     ]);
     await expect(assignmentApi.patchProposals(job_id, { items: [{ id: cuts[0].id, episode_ids: [1] }] })).rejects.toMatchObject({ status: 422 });
+    // Two accepted in one batch: the first wins
+    const both = await assignmentApi.patchProposals(job_id, {
+      items: [
+        { id: cuts[1].id, decision: 'accepted' },
+        { id: cuts[0].id, decision: 'accepted' },
+      ],
+    });
+    expect(both.proposals.filter((p) => p.kind === 'movie').map((p) => p.decision)).toEqual(['ignored', 'accepted']);
     const picked = await assignmentApi.patchProposals(job_id, { items: [{ id: cuts[1].id, decision: 'accepted' }] });
     expect(picked.proposals.filter((p) => p.kind === 'movie').map((p) => p.decision)).toEqual(['ignored', 'accepted']);
     expect(picked.job.status).toBe('ready');
@@ -362,6 +370,32 @@ describe('reviewing', () => {
     expect(named(done, '28.5').reason).not.toBe(named(before, '28.5').reason);
   });
 
+  it('re-check scopes are the backend’s: undecided episode files, pending or in a conflict for unresolved', async () => {
+    // Frieren: 13 episode files (extras keep the rules' reading); the hint is trimmed
+    await assignmentApi.reclassify(101, { scope: 'all', hint: '  these are absolute numbers  ' });
+    expect((await assignmentApi.job(101)).job).toMatchObject({ status: 'resolving', progress: { ai_files: 13 }, hint: { text: 'these are absolute numbers' } });
+    // Doctor Who: the Easter special, the two Waters of Mars files and the unmatched video; not the .nfo
+    await assignmentApi.reclassify(103, { scope: 'unresolved' });
+    expect((await assignmentApi.job(103)).job.progress.ai_files).toBe(4);
+  });
+
+  it('a re-check with nothing in scope settles at once, without resolving', async () => {
+    const detail = await assignmentApi.job(102);
+    const pending = detail.proposals.filter((p) => p.decision === 'pending');
+    await assignmentApi.patchProposals(102, { items: pending.map((p) => ({ id: p.id, decision: 'accepted' as const })) });
+    expect(await assignmentApi.reclassify(102, { scope: 'unresolved' })).toEqual({ job_id: 102 });
+    expect((await assignmentApi.job(102)).job).toMatchObject({ status: 'ready', progress: { ai_files: 0 } });
+  });
+
+  it('reclassify checks the body first: 400 even on a closed job, then 409', async () => {
+    await assignmentApi.discard(101);
+    const bad = await fetch('/api/assignment-jobs/101/reclassify', { method: 'POST', body: JSON.stringify({ scope: 'some' }) });
+    expect(bad.status).toBe(400);
+    const long = await fetch('/api/assignment-jobs/101/reclassify', { method: 'POST', body: JSON.stringify({ scope: 'all', hint: 'x'.repeat(501) }) });
+    expect(long.status).toBe(400);
+    await expect(assignmentApi.reclassify(101, { scope: 'all' })).rejects.toMatchObject({ status: 409, code: 'job_closed' });
+  });
+
   it('a re-check can move a target, and Undo then goes back to the AI’s new suggestion', async () => {
     const before = named(await assignmentApi.job(103), 'Easter.Special');
     expect(before).toMatchObject({ targets: [{ season: 0, episode: 1 }], confidence: 'low', replaces: expect.objectContaining({ file_path: expect.stringContaining('S00E01') }) });
@@ -440,7 +474,8 @@ describe('scenarios', () => {
     await assignmentApi.reclassify(101, { scope: 'all', hint: '28.5 is a recap' });
     expect(await statuses(101, 2)).toEqual(['resolving', 'needs_review']);
     const after = await assignmentApi.job(101);
-    expect(after.job.ai_error).toBe('The AI didn’t answer in time.');
+    // The backend's own words
+    expect(after.job.ai_error).toBe("The AI didn't answer in time, so nothing changed.");
     expect(after.proposals).toEqual(before.proposals);
     setMockScenario(null);
     await assignmentApi.reclassify(101, { scope: 'unresolved' });

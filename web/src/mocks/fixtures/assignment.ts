@@ -677,10 +677,12 @@ export function patchProposals(job: MockJob, items: ProposalChange[]): string | 
     if (p.decision === 'accepted' && !maps(p)) return `Proposal ${item.id}: pick an episode before accepting it.`;
     next.set(p.id, p);
   }
-  // A movie job maps one file: accepting a candidate ignores the others
+  // A movie job maps one file: the first candidate accepted here wins, and the others are ignored
   const acceptedMovie = [...next.values()].find((p) => p.kind === 'movie' && p.decision === 'accepted');
   job.proposals = job.proposals.map((p) => {
-    const changed = next.get(p.id) ?? (acceptedMovie && p.kind === 'movie' && p.id !== acceptedMovie.id ? { ...p, decision: 'ignored' as const } : p);
+    const sent = next.get(p.id);
+    const stepsAside = acceptedMovie && p.kind === 'movie' && p.id !== acceptedMovie.id && (sent || p.decision !== 'ignored');
+    const changed = stepsAside ? { ...(sent ?? p), decision: 'ignored' as const } : (sent ?? p);
     const back = ids(changed.targets) === ids(changed.suggested_targets) && changed.decision === defaultDecision(changed.group);
     return changed === p ? p : { ...changed, user_decided: !back };
   });

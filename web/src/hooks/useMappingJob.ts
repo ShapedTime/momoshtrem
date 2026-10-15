@@ -172,24 +172,28 @@ export type RecheckStart =
  */
 export function useRecheck(jobId: number) {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
+  const { mutateAsync } = useMutation({
     scope: jobMutationScope(jobId),
     mutationFn: (body: ReclassifyRequest) => assignmentApi.reclassify(jobId, body),
   });
-  const { mutateAsync } = mutation;
 
   const start = useCallback(
-    async (body: ReclassifyRequest): Promise<RecheckStart> => {
+    async (body: ReclassifyRequest, files: number): Promise<RecheckStart> => {
+      const queryKey = assignmentKeys.job(jobId);
       let failure: RecheckStart | null = null;
       try {
         await mutateAsync(body);
+        // Accepted: the job is resolving now, as the server just made it. Polling starts even if the
+        // refetch below fails, and a settled copy can't end the run before it began.
+        queryClient.setQueryData<AssignmentJobDetail>(queryKey, (detail) => detail && startedRecheck(detail, body, files));
       } catch (error) {
         if (isApiError(error) && error.status === 503) failure = { kind: 'unavailable' };
-        else if (!(isApiError(error) && error.status === 409 && error.code === 'job_working'))
-          failure = { kind: 'failed', message: error instanceof Error ? error.message : 'Something went wrong.' };
+        else if (isApiError(error) && error.status === 409 && error.code === 'job_working')
+          // One is already running (another tab): wait for that one, with its own hint and count
+          queryClient.setQueryData<AssignmentJobDetail>(queryKey, (detail) => detail && { ...detail, job: { ...detail.job, status: 'resolving' } });
+        else failure = { kind: 'failed', message: error instanceof Error ? error.message : 'Something went wrong.' };
       }
-      // Polling restarts while it works; after a 503 the job says whether AI is still there
-      const queryKey = assignmentKeys.job(jobId);
+      // After a 503 the job says whether AI is still there
       await queryClient.invalidateQueries({ queryKey });
       void queryClient.invalidateQueries({ queryKey: assignmentKeys.lists });
       return failure ?? { kind: 'started', detail: queryClient.getQueryData<AssignmentJobDetail>(queryKey) };
@@ -203,5 +207,21 @@ export function useRecheck(jobId: number) {
     [queryClient]
   );
 
-  return { start, starting: mutation.isPending, finished };
+  return { start, finished };
+}
+
+/** What a 202 did on the server (PLAN §6 "Re-check"): resolving, ai_error and the Updated marks cleared, the hint replaced. */
+function startedRecheck(detail: AssignmentJobDetail, body: ReclassifyRequest, files: number): AssignmentJobDetail {
+  const { season, episode } = detail.job.hint ?? {};
+  const hint = { ...(season !== undefined && { season }), ...(episode !== undefined && { episode }), ...(body.hint && { text: body.hint }) };
+  return {
+    job: {
+      ...detail.job,
+      status: 'resolving',
+      ai_error: null,
+      hint: Object.keys(hint).length ? hint : null,
+      progress: { ...detail.job.progress, ai_files: files },
+    },
+    proposals: detail.proposals.map((p) => (p.updated || p.hinted ? { ...p, updated: false, hinted: false } : p)),
+  };
 }

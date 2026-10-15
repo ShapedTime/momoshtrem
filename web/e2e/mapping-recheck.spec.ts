@@ -28,8 +28,8 @@ async function expectAccessibleAndContained(page: Page) {
 
 const isPhone = (testInfo: TestInfo) => testInfo.project.name === 'mobile';
 const panel = (page: Page) => page.getByRole('region', { name: 'Re-check with AI' });
-/** "Re-check with AI", just "Re-check" below 640 px. */
-const toggle = (page: Page, testInfo: TestInfo) => panel(page).getByRole('button', { name: isPhone(testInfo) ? 'Re-check' : 'Re-check with AI', exact: true }).first();
+/** Its name stays "Re-check with AI"; below 640 px only "Re-check" shows. */
+const toggle = (page: Page) => panel(page).getByRole('button', { name: 'Re-check with AI' });
 const runButton = (page: Page) => panel(page).locator('.map-ai-run').getByRole('button', { name: 'Re-check' });
 const row = (page: Page, file: string) => page.locator('.mrow').filter({ hasText: file });
 
@@ -39,10 +39,10 @@ test.describe('re-check with AI', () => {
     await signIn(page, '/mapping/101');
     await expect(panel(page)).toContainText('Not quite right?');
     await expect(panel(page)).toContainText('Noir can take another look. A hint helps with odd numbering.');
-    await expect(toggle(page, testInfo)).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
 
-    await toggle(page, testInfo).click();
-    await expect(toggle(page, testInfo)).toHaveAttribute('aria-expanded', 'true');
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true');
     const hint = panel(page).getByLabel('Hint for Noir (optional)');
     await expect(hint).toHaveAttribute('placeholder', 'e.g. these are absolute numbers');
     // Desktop puts the cursor in the hint; a phone keeps its keyboard down
@@ -51,7 +51,8 @@ test.describe('re-check with AI', () => {
     const chips = panel(page).getByRole('group', { name: 'Example hints' }).getByRole('button');
     await expect(chips).toHaveText(['these are absolute numbers', '28.5 is a recap', 'v2 replaces v1']);
     const scopes = panel(page).getByRole('group', { name: 'Which files to re-check' }).getByRole('button');
-    await expect(scopes).toHaveText(['Unresolved · 3', 'All files · 16']);
+    // As the backend picks them: undecided episode files, pending or in a conflict for unresolved
+    await expect(scopes).toHaveText(['Unresolved · 3', 'All files · 13']);
     await expect(scopes.first()).toHaveAttribute('aria-pressed', 'true');
     await expectAccessibleAndContained(page);
 
@@ -60,10 +61,11 @@ test.describe('re-check with AI', () => {
     await expect(chips.nth(1)).toHaveAttribute('aria-pressed', 'true');
     await runButton(page).click();
 
-    const working = panel(page).getByRole('status');
-    await expect(working).toContainText('Re-checking 3 files with your hint…');
-    await expect(working).toContainText('“28.5 is a recap”');
-    await expect(working.getByRole('listitem')).toHaveText([/Read file names/, /Comparing with TMDB air dates/, /Updating suggestions/]);
+    // Screen readers hear it through the panel's one live region; the eyes and steps show it
+    const live = panel(page).getByRole('status');
+    await expect(live).toHaveText('Re-checking 3 files with your hint… “28.5 is a recap”');
+    await expect(panel(page).getByText('Re-checking 3 files with your hint…', { exact: true })).toBeVisible();
+    await expect(panel(page).getByRole('listitem')).toHaveText([/Read file names/, /Comparing with TMDB air dates/, /Updating suggestions/]);
     await expectAccessibleAndContained(page);
 
     // The groups stay usable: a file you decide now is yours, and the re-check leaves it alone
@@ -72,8 +74,9 @@ test.describe('re-check with AI', () => {
 
     // Lift the hold: the run ends on the next poll
     await page.evaluate(() => window.localStorage.removeItem('msw:scenario'));
-    await expect(panel(page).getByRole('status')).toHaveText('Updated 2 suggestions, marked Updated below. Accept the ones that look right.');
-    await expect(toggle(page, testInfo)).toHaveAttribute('aria-expanded', 'false');
+    await expect(live).toHaveText('Updated 2 suggestions, marked Updated below. Accept the ones that look right.');
+    await expect(panel(page).locator('.map-ai-done')).toBeVisible();
+    await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false');
     const recap = row(page, 'Frieren - 28.5');
     await expect(recap.getByText('Updated', { exact: true })).toBeVisible();
     await expect(recap).toContainText('AI, with your hint: 28.5 is the recap “The Journey So Far” that aired Mar 15 → S00E03');
@@ -92,14 +95,15 @@ test.describe('re-check with AI', () => {
     await expectAccessibleAndContained(page);
   });
 
-  test('ai-error: the run fails, nothing changes, and the panel says so', async ({ page }, testInfo) => {
+  test('ai-error: the run fails, nothing changes, and the panel says so', async ({ page }) => {
     await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'ai-error'));
     await signIn(page, '/mapping/101');
-    await toggle(page, testInfo).click();
+    await toggle(page).click();
     await runButton(page).click();
-    await expect(panel(page).getByRole('status')).toContainText('Re-checking 3 files…');
-    await expect(panel(page).getByRole('status')).toContainText('Comparing names, air dates and runtimes');
-    await expect(panel(page).getByRole('status')).toHaveText('The re-check didn’t finish. Your suggestions are unchanged. The AI didn’t answer in time.');
+    const live = panel(page).getByRole('status');
+    await expect(live).toHaveText('Re-checking 3 files… Comparing names, air dates and runtimes');
+    await expect(live).toHaveText("Noir couldn’t finish. The AI didn't answer in time, so nothing changed.");
+    await expect(panel(page).locator('.map-ai-note')).toHaveText("Noir couldn’t finish. The AI didn't answer in time, so nothing changed.");
     await expect(page.getByText('Updated', { exact: true })).toHaveCount(0);
     await expect(row(page, 'Frieren - 28.5')).toContainText('Low');
     await expectAccessibleAndContained(page);

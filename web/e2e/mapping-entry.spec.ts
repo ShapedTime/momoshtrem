@@ -72,6 +72,16 @@ test.describe('mapping entry points', () => {
     await expect(page.locator('.map-foot-msg')).toHaveText('Pick the file to use');
     await expectAccessibleAndContained(page);
 
+    // Leave it for later: the movie page leads back to the open review
+    const reviewUrl = page.url();
+    await page.getByRole('link', { name: 'Cancel' }).click();
+    await expect(page).toHaveURL(/\/movie\/1054867$/);
+    const banner = page.locator('.banner').filter({ hasText: 'Pick the file to use' });
+    await expect(banner).toContainText('More than one file in the torrent could be the movie.');
+    await expectAccessibleAndContained(page);
+    await banner.getByRole('link', { name: 'Review mapping' }).click();
+    await expect(page).toHaveURL(reviewUrl);
+
     await page.getByRole('button', { name: `Use this file: ${release}.mkv` }).click();
     await expect(page.getByRole('button', { name: `Using this file: ${release}.mkv. Tap to undo` })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('.mrow').filter({ hasText: `${release}.Extended.Cut.mkv` })).toContainText(/Not used\s*· not in Infuse/);

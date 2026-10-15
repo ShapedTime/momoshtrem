@@ -94,11 +94,23 @@ export function keepNewerDetail(previous: unknown, next: unknown): unknown {
   return replaceEqualDeep(previous, next);
 }
 
-/** Polls every 1.5 s while the job is working, initial run or re-check (paused when the tab is hidden). */
+/** A write to this job (PATCH, re-check, apply, discard) is on its way or waiting its turn. */
+const writing = (client: QueryClient, jobId: number) =>
+  client.isMutating({ predicate: (mutation) => mutation.options.scope?.id === jobMutationScope(jobId).id }) > 0;
+
+/**
+ * Polls every 1.5 s while the job is working, initial run or re-check (paused when the tab is hidden).
+ * A read that lands while a write is on its way may predate it, and would undo the decision just shown:
+ * keep the cached detail then (the write's answer replaces it).
+ */
 export const assignmentJobQuery = (jobId: number) =>
   queryOptions({
     queryKey: assignmentKeys.job(jobId),
-    queryFn: () => assignmentApi.job(jobId),
+    queryFn: async ({ client }) => {
+      const detail = await assignmentApi.job(jobId);
+      const cached = client.getQueryData<AssignmentJobDetail>(assignmentKeys.job(jobId));
+      return cached && writing(client, jobId) ? cached : detail;
+    },
     refetchInterval: (query) => (query.state.data && isJobWorking(query.state.data.job.status) ? JOB_POLL_MS : false),
     structuralSharing: keepNewerDetail,
   });
@@ -106,18 +118,25 @@ export const assignmentJobQuery = (jobId: number) =>
 /**
  * Resolves with the job once it stops working, polling it as the review page
  * does (`refetchInterval`, paused in hidden tabs). Rejects when reading it
- * fails or `signal` aborts (an AbortError).
+ * fails, after `timeoutMs` (a TimeoutError), or when `signal` aborts (an AbortError).
  */
-export function waitForJob(queryClient: QueryClient, jobId: number, signal?: AbortSignal): Promise<AssignmentJobDetail> {
+export function waitForJob(
+  queryClient: QueryClient,
+  jobId: number,
+  { signal, timeoutMs }: { signal?: AbortSignal; timeoutMs?: number } = {}
+): Promise<AssignmentJobDetail> {
   return new Promise((resolve, reject) => {
     const observer = new QueryObserver(queryClient, assignmentJobQuery(jobId));
     let unsubscribe = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const done = (settle: () => void) => {
       unsubscribe();
+      clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       settle();
     };
     const onAbort = () => done(() => reject(new DOMException('Stopped waiting for the job', 'AbortError')));
+    if (timeoutMs !== undefined) timer = setTimeout(() => done(() => reject(new DOMException('The job is still working', 'TimeoutError'))), timeoutMs);
     const check = (result: QueryObserverResult<AssignmentJobDetail>) => {
       if (result.data && !isJobWorking(result.data.job.status)) done(() => resolve(result.data));
       else if (result.isError) done(() => reject(result.error));

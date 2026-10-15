@@ -1,5 +1,6 @@
 import type { Proposal, ReclassifyRequest } from '@/lib/api/contract';
 import { plural } from '@/lib/title/format';
+import { conflictMap } from './review';
 
 /**
  * "Re-check with AI" (PLAN §6 "Re-check", F4; #5): which files a re-check
@@ -12,16 +13,18 @@ export type RecheckScope = ReclassifyRequest['scope'];
 export const HINT_MAX = 500;
 
 /**
- * Files each scope sends: `unresolved` is the pending proposals the user
- * hasn't decided, `all` every proposal the user hasn't decided.
+ * Files each scope sends, as the backend picks them: episode files the user
+ * hasn't decided (extras and subtitles keep the rules' reading). `unresolved`
+ * is the pending ones (unmatched included) and those in a conflict; `all` is every one.
  */
 export function recheckCounts(proposals: Proposal[]): Record<RecheckScope, number> {
+  const conflicts = conflictMap(proposals);
   let unresolved = 0;
   let all = 0;
   for (const p of proposals) {
-    if (p.user_decided) continue;
+    if (p.user_decided || p.kind !== 'episode') continue;
     all++;
-    if (p.decision === 'pending') unresolved++;
+    if (p.decision === 'pending' || conflicts.has(p.id)) unresolved++;
   }
   return { unresolved, all };
 }
@@ -56,6 +59,9 @@ export function doneMessage(changed: number): { lead: string; tail: string } | n
 
 /** When nothing changed: the suggestions stand. */
 export const NOTHING_CHANGED = 'Noir looked again and kept every suggestion. Pick the episodes yourself where they’re wrong.';
+
+/** The lead before the job's `ai_error`, which says what happened ("…, so nothing changed."). The first run can set it too. */
+export const AI_ERROR_LEAD = 'Noir couldn’t finish.';
 
 /** 503: AI isn't available for this job (no key, turned off, or rules only). */
 export const AI_UNAVAILABLE = 'AI isn’t available right now, so Noir can’t take another look. You can still pick the episodes yourself.';

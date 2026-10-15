@@ -19,6 +19,7 @@ import { DetailsAside } from './DetailsAside';
 import { LegacySearchHost } from './LegacySearchHost';
 import { MoreLikeThis } from './MoreLikeThis';
 import { PrimaryPanel } from './PrimaryPanel';
+import { NeedsReviewBanner } from './show';
 import { SubtitlesPanel } from './SubtitlesPanel';
 import { TitleHero } from './TitleHero';
 import { TitleMoreMenu } from './TitleMoreMenu';
@@ -54,6 +55,8 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
       />
       <div className="page detail-body">
         <div className="page-sections">
+          {/* A torrent with several plausible files waits for a pick (#5) */}
+          {library.in_library && <NeedsReviewBanner movie count={library.needs_review} jobId={library.review_job_id} />}
           {/* Once it's ready, what Infuse plays from comes first (HANDOFF §5.3) */}
           {ready && library.torrent && <CurrentTorrentPanel torrent={library.torrent} onReplace={findTorrent} />}
           {ready && <SubtitlesPanel {...subtitles} />}
