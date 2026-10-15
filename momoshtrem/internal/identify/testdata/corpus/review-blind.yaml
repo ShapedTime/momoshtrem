@@ -1,0 +1,65 @@
+# From the PR #52 re-review (blind files): Blu-ray streams, disc folders,
+# titles with diacritics, and site prefixes with any TLD.
+# Schema: see anime.yaml.
+
+# A zero-padded stream number is never an episode.
+- id: review-bluray-stream-numbers
+  show: chernobyl
+  torrent: Chernobyl.S01.BLURAY-GRP
+  tags: [review, bluray, stream-number]
+  files:
+    - {path: 00001.m2ts, size: 25GB, expect: {kind: unknown}}
+    - {path: 00002.m2ts, size: 25GB, expect: {kind: unknown}}
+
+# A Blu-ray structure's streams and playlists aren't episode files.
+- id: review-bluray-structure
+  show: seven-worlds-one-planet
+  torrent: Seven.Worlds.One.Planet.2019.COMPLETE.UHD.BLURAY-GRP
+  tags: [review, bluray, structure]
+  files:
+    - {path: BDMV/STREAM/00001.m2ts, size: 30GB, expect: {extra: other}}
+    - {path: BDMV/STREAM/00002.m2ts, size: 30GB, expect: {extra: other}}
+    - {path: BDMV/PLAYLIST/00000.mpls, expect: {extra: other}}
+
+# "Disc N" folders name no show.
+- id: review-disc-folders-season
+  show: breaking-bad
+  torrent: Breaking.Bad.Complete.Series.DVDRip.XviD-GRP
+  tags: [review, disc-folder]
+  files:
+    - {path: Season 01/Disc 1/01 - Pilot.avi, size: 350MB, expect: {eps: [S01E01], min_conf: high}}
+    - {path: Season 01/Disc 2/05 - Gray Matter.avi, size: 350MB, expect: {eps: [S01E05], min_conf: high}}
+
+- id: review-disc-folders-scene
+  show: breaking-bad
+  torrent: Breaking.Bad.S02.DVDRip.XviD-GRP
+  tags: [review, disc-folder]
+  files:
+    - {path: Disc 1/S02E01.mkv, expect: {eps: [S02E01], min_conf: high}}
+    - {path: Disc 2/S02E05.mkv, expect: {eps: [S02E05], min_conf: high}}
+
+# Release names drop the title's diacritics.
+- id: review-diacritics-shogun
+  show: shogun
+  tags: [review, diacritics]
+  files:
+    - {path: Shogun.2024.S01E01.Anjin.1080p.DSNP.WEB-DL.DDP5.1.H.264-GRP.mkv, expect: {eps: [S01E01], min_conf: high}}
+
+- id: review-diacritics-elite
+  show: elite
+  tags: [review, diacritics]
+  files:
+    - {path: Elite.S02E03.1080p.NF.WEB-DL.DDP5.1.x264-GRP.mkv, expect: {eps: [S02E03], min_conf: high}}
+
+# Site prefixes with any TLD.
+- id: review-site-prefix-cm
+  show: elite
+  tags: [review, site-prefix]
+  files:
+    - {path: www.Cpasbien.cm - Elite.S02E04.1080p.NF.WEB-DL.mkv, expect: {eps: [S02E04], min_conf: high}}
+
+- id: review-site-prefix-pl
+  show: shogun
+  tags: [review, site-prefix]
+  files:
+    - {path: www.Torrent9.pl - Shogun.2024.S01E02.1080p.WEB.H264-GRP.mkv, expect: {eps: [S01E02], min_conf: high}}

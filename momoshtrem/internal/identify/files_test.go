@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/shapedtime/momoshtrem/internal/identify/token"
 )
 
 func TestClassOf(t *testing.T) {
@@ -69,6 +71,35 @@ func TestParseQuality(t *testing.T) {
 	for path, want := range tests {
 		if got := ParseQuality(path); got != want {
 			t.Errorf("ParseQuality(%q) = %+v, want %+v", path, got, want)
+		}
+	}
+}
+
+func TestNormWordsFoldsDiacritics(t *testing.T) {
+	tests := map[string]string{
+		"Shōgun": "shogun", "Élite": "elite", "Pokémon: The Series": "pokemon the series",
+		"Straße": "strasse", "Ærø": "aero", "Shogun": "shogun", "葬送のフリーレン": "葬送のフリーレン",
+	}
+	for in, want := range tests {
+		if got := strings.Join(normWords(in), " "); got != want {
+			t.Errorf("normWords(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestStripLead(t *testing.T) {
+	tests := map[string]string{
+		"www.Cpasbien.cm - Elite.S02E04":        "elite",
+		"www.Torrent9.pl - Shogun.2024.S01E02":  "shogun",
+		"www.UIndex.org    -    The.Interview":  "the",
+		"www.Site.co.uk - Show.S01E01":          "show",
+		"[ www.Torrenting.com ] - Trailer Park": "trailer",
+		"[SubsPlease] Frieren - 05":             "frieren",
+		"Show.S01E01":                           "show",
+	}
+	for in, want := range tests {
+		if toks := stripLead(token.Tokenize(in)); len(toks) == 0 || toks[0].Norm != want {
+			t.Errorf("stripLead(%q) starts with %v, want %q", in, toks, want)
 		}
 	}
 }

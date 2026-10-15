@@ -21,21 +21,20 @@ var siteTLDs = map[string]bool{
 }
 
 // stripLead drops what comes before a release's own name: [Group] tags, a
-// site prefix ("www.UIndex.org -", "[ www.Torrenting.com ] -") and dashes.
+// site prefix ("www.UIndex.org -", "www.Torrent9.pl -", "[ www.Torrenting.com
+// ] -") and dashes.
 func stripLead(toks []token.Token) []token.Token {
 	for len(toks) > 0 {
 		switch t := toks[0]; {
 		case t.Kind == token.Group || t.Kind == token.Dash:
 			toks = toks[1:]
-		case t.Norm == "www" && len(toks) > 2:
-			j := 1
-			for j < len(toks) && j <= 4 && !siteTLDs[toks[j].Norm] {
-				j++
+		case t.Norm == "www" && len(toks) > 3:
+			// www.<site>.<tld>, whatever the TLD, plus a second-level
+			// one ("co.uk").
+			toks = toks[3:]
+			if len(toks) > 1 && siteTLDs[toks[0].Norm] && toks[1].Kind == token.Dash {
+				toks = toks[1:]
 			}
-			if j >= len(toks) || j > 4 {
-				return toks
-			}
-			toks = toks[j+1:]
 		default:
 			return toks
 		}
@@ -254,6 +253,21 @@ var genericFolderWords = map[string]bool{
 	"sub": true, "sample": true, "samples": true, "fonts": true, "nc": true, "ova": true, "ovas": true,
 	"oad": true, "oads": true, "batch": true, "pack": true, "week": true, "of": true, "multi": true,
 	"quality": true, "and": true, "boxset": true, "box": true, "set": true, "remastered": true,
+	"disc": true, "disk": true, "dvd": true, "cd": true, "vol": true, "volume": true, "book": true,
+}
+
+// genericFolderWord reports a folder word that names no show: "Disc 1",
+// "Complete Series", "Specials".
+func genericFolderWord(w string) bool {
+	if genericFolderWords[w] {
+		return true
+	}
+	for _, r := range w {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return w != ""
 }
 
 // titleNote says why a file's title part isn't this show's, or "" when it
@@ -308,7 +322,7 @@ func (ix *catalogIndex) folderTitleNote(seg string) (note string, present bool) 
 	}
 	if k == 0 {
 		for _, w := range words {
-			if !genericFolderWords[w] {
+			if !genericFolderWord(w) {
 				return fmt.Sprintf("folder %q isn't this show's", clipRunes(seg, 40)), true
 			}
 		}
@@ -318,7 +332,7 @@ func (ix *catalogIndex) folderTitleNote(seg string) (note string, present bool) 
 		return "", false
 	}
 	for _, w := range words[k:] {
-		if !genericFolderWords[w] && !ix.countryTags[w] {
+		if !genericFolderWord(w) && !ix.countryTags[w] {
 			return fmt.Sprintf("folder %q isn't this show's", clipRunes(seg, 40)), true
 		}
 	}

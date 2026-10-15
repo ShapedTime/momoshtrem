@@ -1,0 +1,7 @@
+title: Seven Worlds, One Planet
+year: 2019
+countries: [GB]
+seasons:
+  - n: 1
+    runs: [{count: 7, first_air: 2019-10-27}]
+    names: {1: "Antarctica", 2: "Asia"}

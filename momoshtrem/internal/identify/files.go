@@ -113,6 +113,9 @@ var markerDirs = map[string]ExtraType{
 	"ncop": ExtraOpening, "nced": ExtraEnding, "creditless": ExtraOther, "menus": ExtraOther,
 	"menu": ExtraOther, "scans": ExtraImage, "fonts": ExtraFont, "attachments": ExtraFont,
 	"cd": ExtraOther, "artwork": ExtraImage,
+	// Blu-ray and DVD structures: streams there aren't episode files.
+	"bdmv": ExtraOther, "stream": ExtraOther, "clipinf": ExtraOther, "playlist": ExtraOther,
+	"certificate": ExtraOther, "video ts": ExtraOther, "audio ts": ExtraOther,
 }
 
 // specialDirs are folders that hold specials (season 0).

@@ -274,9 +274,49 @@ func daysBetween(a, b string) int {
 // "&" reads as "and" and apostrophes vanish ("Journey's" → "journeys"), so
 // "Law & Order: SVU" and "Law.and.Order.SVU" give the same words.
 func normWords(s string) []string {
-	s = strings.ToLower(s)
+	s = foldDiacritics(strings.ToLower(s))
 	s = strings.NewReplacer("&", " and ", "'", "", "’", "", "`", "").Replace(s)
 	return strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
+// latinFolds maps lowercase Latin letters with diacritics to plain ones,
+// so "Shōgun" and "Élite" match "Shogun" and "Elite" in release names.
+var latinFolds = func() map[rune]string {
+	m := map[rune]string{'ß': "ss", 'æ': "ae", 'œ': "oe", 'ø': "o", 'đ': "d", 'ł': "l", 'ħ': "h", 'ı': "i", 'þ': "th"}
+	for base, letters := range map[string]string{
+		"a": "àáâãäåāăą", "c": "çćĉċč", "d": "ď", "e": "èéêëēĕėęě", "g": "ĝğġģ", "h": "ĥ",
+		"i": "ìíîïĩīĭį", "j": "ĵ", "k": "ķ", "l": "ĺļľŀ", "n": "ñńņň", "o": "òóôõöōŏő",
+		"r": "ŕŗř", "s": "śŝşšș", "t": "ţťț", "u": "ùúûüũūŭůűų", "w": "ŵ", "y": "ýÿŷ", "z": "źżž",
+	} {
+		for _, r := range letters {
+			m[r] = base
+		}
+	}
+	return m
+}()
+
+// foldDiacritics replaces the diacritics latinFolds knows in a lowercase
+// string. ASCII strings come back as they are.
+func foldDiacritics(s string) string {
+	ascii := true
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if f, ok := latinFolds[r]; ok {
+			b.WriteString(f)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // nameWords are an episode name's words for comparing names: normWords

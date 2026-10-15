@@ -324,7 +324,7 @@ func (fi *fileInfo) noMarker(ix *catalogIndex, from int) {
 func (fi *fileInfo) numberIndex(from int) int {
 	body := fi.body
 	isNum := func(t token.Token) bool {
-		return (t.Kind == token.Num && t.N > 0 && !t.Half || t.Kind == token.Range) && !t.Bracket
+		return (t.Kind == token.Num && t.N > 0 && !t.Half && !streamNumber(t.Text) || t.Kind == token.Range) && !t.Bracket
 	}
 	for i := max(from, 1); i < len(body); i++ {
 		if body[i-1].Kind == token.Dash && isNum(body[i]) {
@@ -455,6 +455,12 @@ func titleWordsFrom(body []token.Token, i int) []string {
 		parts = append(parts, t.Text)
 	}
 	return nameWords(strings.Join(parts, " "))
+}
+
+// streamNumber reports a zero-padded number of five digits or more: a disc
+// stream ("00001.m2ts"), never an episode.
+func streamNumber(text string) bool {
+	return len(text) >= 5 && text[0] == '0'
 }
 
 func nonZero(eps []int) []int {
