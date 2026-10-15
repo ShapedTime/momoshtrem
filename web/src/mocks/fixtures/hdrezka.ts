@@ -18,7 +18,7 @@ import { buildSeason, findByLibraryId, type MockLibrary } from './titles';
  *
  * | Title | Search finds |
  * |---|---|
- * | One Battle After Another | an exact match (six voice-overs: one premium, ads, CAMRip, director's cut) and a weak one |
+ * | One Battle After Another | an exact match (six voice-overs: one premium, ads, CAMRip, and HDrezka Studio in two cuts, the second a director's cut) and a weak one |
  * | Interstellar | an exact match and a likely one (a documentary) |
  * | Dune: Part Two | an exact match, Dune (2021) as likely and Dune (1984) as weak |
  * | Severance, Frieren | an exact series match each, with seasons and episodes |
@@ -77,7 +77,8 @@ const TITLES: TitleSeed[] = [
       translator(56, 'Дубляж', { premium: true }),
       translator(35, 'TVShows', { ads: true }),
       translator(405, 'Red Head Sound', { camrip: true }),
-      translator(376, 'Jaskier', { director: true }),
+      // The same translator id again: its director's cut (#67)
+      translator(111, 'HDrezka Studio', { director: true }),
     ],
   }),
   movie({
@@ -244,6 +245,21 @@ export function seedTranslators(seed: TitleSeed, everyPremium: boolean): HDRezka
   return everyPremium ? premiumOnly(seed.translators) : seed.translators;
 }
 
+/**
+ * The translator a request means: the entry with its id and flags, or, with
+ * no flags sent, the first entry with the id (PLAN §6 "Translator cuts").
+ */
+export function findCut(
+  translators: HDRezkaTranslator[],
+  id: number | null,
+  flags: { camrip?: boolean; ads?: boolean; director?: boolean }
+): HDRezkaTranslator | undefined {
+  const sent = flags.camrip !== undefined || flags.ads !== undefined || flags.director !== undefined;
+  return translators.find(
+    (t) => t.id === id && (!sent || (t.camrip === Boolean(flags.camrip) && t.ads === Boolean(flags.ads) && t.director === Boolean(flags.director)))
+  );
+}
+
 const postId = (path: string) => Number(/\/(\d+)-/.exec(path)?.[1] ?? 0);
 
 /** HDRezka's episodes, each with the library episode of the same number when the show is the library's. */
@@ -276,21 +292,14 @@ function seasons(seed: TitleSeed, library: MockLibrary, showId: number | null): 
   });
 }
 
-/**
- * GET /hdrezka/titles: the requested translator, else the one a movie
- * already streams from this title, else the page's default.
- */
+/** GET /hdrezka/titles: for the requested translator, else the page's default. */
 export function buildHDRezkaTitle(
   seed: TitleSeed,
   library: MockLibrary,
-  options: { translatorId: number | null; showId: number | null; movieId: number | null; everyPremium: boolean }
+  options: { translatorId: number | null; showId: number | null; everyPremium: boolean }
 ): HDRezkaTitle {
   const translators = seedTranslators(seed, options.everyPremium);
-  const movieRow = options.movieId !== null ? findByLibraryId(library, 'movie', options.movieId)?.row : undefined;
-  const current =
-    movieRow?.stream && titlePath(movieRow.stream.url) === seed.path ? translators.find((t) => t.name === movieRow.stream?.translator) : undefined;
-  const chosen =
-    translators.find((t) => t.id === options.translatorId) ?? current ?? translators.find((t) => t.default) ?? translators[0];
+  const chosen = translators.find((t) => t.id === options.translatorId) ?? translators.find((t) => t.default) ?? translators[0];
   return {
     url: HDREZKA_URL + seed.path,
     path: seed.path,
@@ -319,7 +328,8 @@ const GB_PER_HOUR: Array<[label: string, resolution: number, rate: number]> = [
  * subtitles; the dubs have none.
  */
 export function buildStreams(seed: TitleSeed, translator: HDRezkaTranslator): HDRezkaStreams {
-  const hours = seed.runtime / 60;
+  // A director's cut runs longer
+  const hours = (seed.runtime + (translator.director ? 24 : 0)) / 60;
   const qualities: HDRezkaQuality[] = GB_PER_HOUR.map(([label, resolution, rate]) => {
     const available = !(translator.camrip && resolution > 720);
     return { label, resolution, premium: false, available, size_bytes: available ? Math.round(rate * hours * 1e9) : null };

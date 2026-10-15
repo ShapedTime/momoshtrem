@@ -127,8 +127,19 @@ export interface HDRezkaTitle {
   seasons: HDRezkaSeason[];
 }
 
-/** GET /hdrezka/streams?url=&translator_id=[&season=&episode=] */
-export interface HDRezkaStreamsParams {
+/**
+ * Which cut of a translator: one id can come several times with different
+ * flags (a CAMRip and a later dub, a director's cut). Optional on the
+ * requests that take it; left out, the server uses the first entry with the id.
+ */
+export interface TranslatorCut {
+  camrip?: boolean;
+  ads?: boolean;
+  director?: boolean;
+}
+
+/** GET /hdrezka/streams?url=&translator_id=[&camrip=&ads=&director=][&season=&episode=] */
+export interface HDRezkaStreamsParams extends TranslatorCut {
   url: string;
   translator_id: number;
   season?: number;
@@ -160,13 +171,16 @@ export interface HDRezkaStreams {
   subtitles: HDRezkaSubtitle[];
 }
 
-/** POST /movies/{id}/assign-hdrezka → 204 */
-export interface AssignMovieStreamRequest {
+/** What both assigns send: the title, the voice-over and the quality. */
+export interface StreamPick {
   url: string;
   translator_id: number;
   /** A quality's `label`. */
   quality: string;
 }
+
+/** POST /movies/{id}/assign-hdrezka → 204. The flags pick the translator's cut. */
+export interface AssignMovieStreamRequest extends StreamPick, TranslatorCut {}
 
 /** One episode in HDRezka's numbers, and the library episode it fills. */
 export interface StreamEpisodeTarget {
@@ -175,12 +189,19 @@ export interface StreamEpisodeTarget {
   episode: number;
 }
 
-/** POST /shows/{id}/assign-hdrezka: 1–30 items a request (the web sends chunks). */
-export interface AssignShowStreamRequest extends AssignMovieStreamRequest {
+/** POST /shows/{id}/assign-hdrezka: 1–30 items a request (the web sends chunks). Series have no cuts. */
+export interface AssignShowStreamRequest extends StreamPick {
   items: StreamEpisodeTarget[];
+}
+
+/** An episode that didn't get its stream, and why (`timeout`, `not_found`, …). */
+export interface StreamEpisodeFailure {
+  episode_id: number;
+  code: string;
+  message: string;
 }
 
 export interface AssignShowStreamResult {
   assigned: Array<{ episode_id: number; quality: string; size_bytes: number }>;
-  failed: Array<{ episode_id: number; code: string; message: string }>;
+  failed: StreamEpisodeFailure[];
 }

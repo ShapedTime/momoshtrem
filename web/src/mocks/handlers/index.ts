@@ -1,6 +1,6 @@
 import { setMockScenario } from '../scenario';
 import { assignmentHandlers, resetMockJobs } from './assignment';
-import { hdrezkaHandlers } from './hdrezka';
+import { hdrezkaHandlers, resetMockHDRezka } from './hdrezka';
 import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
 import { recommendationsHandlers } from './recommendations';
@@ -38,5 +38,6 @@ export function resetMockState(): void {
   resetMockSettings();
   resetMockJobs();
   resetMockSubtitles();
+  resetMockHDRezka();
   setMockScenario(null);
 }

@@ -15,7 +15,8 @@
  * - `hdrezka-blocked`: HDRezka answers with its anti-bot page (503 `hdrezka_blocked`).
  * - `hdrezka-down`: HDRezka doesn't answer (502 `hdrezka_unavailable`).
  * - `hdrezka-premium`: every voice-over needs Premium; assigning answers 409 `premium_only`.
- * - `hdrezka-partial`: assigning episodes fails for every third one (504 `timeout` per item).
+ * - `hdrezka-partial`: assigning episodes fails for every third one of a request (`timeout` per
+ *   item), once: retrying those gets them through.
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
