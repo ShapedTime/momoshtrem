@@ -45,7 +45,7 @@ The service refuses to start without a database URL, with a port outside 1–655
 | `HDREZKA_URL` | `hdrezka.url` | The HDRezka mirror, `http(s)://host[:port]` with no path. Default `https://rezka.ag`. |
 | `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | `opensubtitles.*` | Subtitle download. |
 | `ANTHROPIC_API_KEY` | `ai.anthropic_api_key` | AI classifier and recommendations; disabled when unset. |
-| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. |
+| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. The secret is optional: new Trakt apps have none. |
 | `SECRET_KEY` | `security.secret_key` | Encrypts Trakt tokens at rest. |
 | `METRICS_ENABLED`, `METRICS_PORT` | `metrics.*` | Prometheus endpoint. |
 | `TORRENT_LISTEN_PORT` | `torrent.listen_port` | BitTorrent port, TCP and uTP. Default `42069`; `0` picks a free port, so two instances can run side by side. |

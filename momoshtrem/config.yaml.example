@@ -24,7 +24,7 @@
 #   OPENSUBTITLES_PASSWORD    opensubtitles.password
 #   ANTHROPIC_API_KEY         ai.anthropic_api_key
 #   TRAKT_CLIENT_ID           trakt.client_id
-#   TRAKT_CLIENT_SECRET       trakt.client_secret
+#   TRAKT_CLIENT_SECRET       trakt.client_secret (optional; new Trakt apps have none)
 #   SECRET_KEY                security.secret_key
 #   METRICS_ENABLED           metrics.enabled (true/false)
 #   METRICS_PORT              metrics.port
@@ -109,7 +109,7 @@ jackett:
 # Trakt, read-only (optional)
 # trakt:
 #   client_id: ""
-#   client_secret: ""
+#   client_secret: ""   # optional: new Trakt apps get no secret
 
 # Encryption key for tokens at rest (needed once Trakt is connected)
 # security:

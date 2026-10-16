@@ -158,7 +158,7 @@ func parseTraktSettingsPatch(raw []byte) (library.TraktSettingsPatch, bool) {
 func traktErrorResponse(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, trakt.ErrNotConfigured):
-		errorResponse(c, http.StatusServiceUnavailable, "Trakt isn’t set up: set TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET and SECRET_KEY.")
+		errorResponse(c, http.StatusServiceUnavailable, "Trakt isn’t set up: set TRAKT_CLIENT_ID and SECRET_KEY.")
 	case errors.Is(err, trakt.ErrSyncUnavailable):
 		errorResponse(c, http.StatusServiceUnavailable, "Trakt sync isn’t available yet.")
 	case errors.Is(err, trakt.ErrConnected):
@@ -169,7 +169,7 @@ func traktErrorResponse(c *gin.Context, err error) {
 		slog.Warn("Trakt's device-code endpoint failed", "error", err)
 		msg := "Trakt didn’t answer. Try again in a minute."
 		if se := (*trakt.StatusError)(nil); errors.As(err, &se) && se.StatusCode < 500 && se.StatusCode != http.StatusTooManyRequests {
-			msg = fmt.Sprintf("Trakt refused momoshtrem’s app (HTTP %d): check TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET.", se.StatusCode)
+			msg = fmt.Sprintf("Trakt refused momoshtrem’s app (HTTP %d): check TRAKT_CLIENT_ID (and TRAKT_CLIENT_SECRET, if the app has one).", se.StatusCode)
 		}
 		errorCodeResponse(c, http.StatusBadGateway, CodeTraktUnavailable, msg)
 	case errors.Is(err, context.Canceled):

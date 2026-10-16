@@ -299,6 +299,32 @@ func TestClient_RefreshRotates(t *testing.T) {
 	}
 }
 
+// Trakt stopped issuing secrets to new apps: without one, the OAuth calls
+// send the client id alone, and work.
+func TestClient_WithoutSecret(t *testing.T) {
+	srv := trakttest.New(t)
+	c := NewClient(trakttest.ClientID, "", "1.2.3",
+		WithBaseURLs(srv.URL, srv.URL), WithClock(newFakeClock()), WithLimiters(nil, nil))
+	ctx := context.Background()
+
+	set, err := c.DeviceToken(ctx, trakttest.DeviceCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := c.RefreshToken(ctx, set.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RevokeToken(ctx, next.AccessToken); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range srv.Requests() {
+		if _, sent := r.Body["client_secret"]; sent || r.Body["client_id"] != trakttest.ClientID {
+			t.Errorf("%s %s body = %v, want the client id without a secret", r.Method, r.Path, r.Body)
+		}
+	}
+}
+
 func TestPaginate(t *testing.T) {
 	items := func(n int) []int {
 		out := make([]int, n)

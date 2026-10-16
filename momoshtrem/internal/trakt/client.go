@@ -80,8 +80,9 @@ func (realClock) Sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// Client talks to Trakt for one app (client id and secret). It is safe for
-// concurrent use.
+// Client talks to Trakt for one app: its client id, and its secret when it
+// has one (Trakt stopped issuing secrets to new apps; the device flow
+// doesn't need one). It is safe for concurrent use.
 type Client struct {
 	clientID     string
 	clientSecret string
@@ -163,7 +164,7 @@ func (c *Client) DeviceToken(ctx context.Context, deviceCode string) (*TokenSet,
 	var out TokenSet
 	_, err := c.send(ctx, request{
 		method: http.MethodPost, base: c.authURL, path: "/oauth/device/token", once: true,
-		body: map[string]string{"code": deviceCode, "client_id": c.clientID, "client_secret": c.clientSecret},
+		body: c.appBody(map[string]string{"code": deviceCode}),
 	}, &out)
 	if se := (*StatusError)(nil); errors.As(err, &se) {
 		switch se.StatusCode {
@@ -194,10 +195,9 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*TokenS
 	var out TokenSet
 	_, err := c.send(ctx, request{
 		method: http.MethodPost, base: c.authURL, path: "/oauth/token",
-		body: map[string]string{
-			"refresh_token": refreshToken, "client_id": c.clientID, "client_secret": c.clientSecret,
-			"redirect_uri": oobRedirectURI, "grant_type": "refresh_token",
-		},
+		body: c.appBody(map[string]string{
+			"refresh_token": refreshToken, "redirect_uri": oobRedirectURI, "grant_type": "refresh_token",
+		}),
 	}, &out)
 	if se := (*StatusError)(nil); errors.As(err, &se) && (se.StatusCode == http.StatusBadRequest || se.StatusCode == http.StatusUnauthorized) {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidGrant, se)
@@ -213,9 +213,19 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*TokenS
 func (c *Client) RevokeToken(ctx context.Context, token string) error {
 	_, err := c.send(ctx, request{
 		method: http.MethodPost, base: c.authURL, path: "/oauth/revoke",
-		body: map[string]string{"token": token, "client_id": c.clientID, "client_secret": c.clientSecret},
+		body: c.appBody(map[string]string{"token": token}),
 	}, nil)
 	return err
+}
+
+// appBody adds the app's credentials to an OAuth body: the client id, and
+// the secret only when there is one (Trakt calls it optional).
+func (c *Client) appBody(body map[string]string) map[string]string {
+	body["client_id"] = c.clientID
+	if c.clientSecret != "" {
+		body["client_secret"] = c.clientSecret
+	}
+	return body
 }
 
 // UserSettings reads the account the token belongs to (GET /users/settings).
