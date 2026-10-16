@@ -104,6 +104,15 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 	must(`INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (2, 1, 1, 'lighter', 'streaming')`)
 	must(`INSERT INTO ask_messages (thread_id, turn_id, position, role, content) VALUES (1, 1, 0, 'user', '[{"type": "text", "text": "hi"}]')`)
 
+	// Ask's history replays byte for byte: json keeps key order and
+	// whitespace, where jsonb would rewrite them
+	blocks := `[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}},  {"type":"thinking","thinking":"","signature":"c2ln"}]`
+	var replayed string
+	if err := db.QueryRow(`INSERT INTO ask_messages (thread_id, turn_id, position, role, content) VALUES (1, 1, 1, 'assistant', $1)
+		RETURNING content::text`, blocks).Scan(&replayed); err != nil || replayed != blocks {
+		t.Errorf("content = %s (%v), want it byte for byte", replayed, err)
+	}
+
 	rejected := []struct{ name, insert, constraint string }{
 		{"a second active run", `INSERT INTO rec_runs (id, kind, status, model) VALUES (10, 'manual', 'running', 'x')`, "rec_runs_one_active"},
 		{"an unknown run kind", `INSERT INTO rec_runs (kind, status, model) VALUES ('nightly', 'failed', 'x')`, "rec_runs_kind_check"},

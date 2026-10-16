@@ -139,14 +139,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS ask_turns_one_streaming ON ask_turns ((true))
 
 -- The raw API content blocks of a thread, append-only: a turn's messages
 -- are written in one transaction, and only when it ends done, so a
--- cancelled or failed turn never replays (no orphaned tool_use).
+-- cancelled or failed turn never replays (no orphaned tool_use). content
+-- is json, not jsonb: jsonb reorders keys and drops whitespace, and a
+-- replay must be byte-identical (preserved thinking and prompt caching
+-- compare the request prefix).
 CREATE TABLE IF NOT EXISTS ask_messages (
     id         BIGSERIAL PRIMARY KEY,
     thread_id  BIGINT NOT NULL REFERENCES ask_threads(id) ON DELETE CASCADE,
     turn_id    BIGINT NOT NULL REFERENCES ask_turns(id) ON DELETE CASCADE,
     position   INTEGER NOT NULL,
     role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-    content    JSONB NOT NULL,
+    content    JSON NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (thread_id, position)
 );
