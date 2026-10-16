@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { SheetProps } from '@/components/ui';
 import { HDRezkaSheet } from '@/components/hdrezka/HDRezkaSheet';
+import { TorrentSearchSheet } from '@/components/search/TorrentSearchSheet';
 import { InfuseSetupSheet } from '@/components/shell/InfuseSetupSheet';
 import { EpisodeSheet } from '@/components/title/show/EpisodeSheet';
 import { ShowSettingsSheet } from '@/components/title/show/ShowSettingsSheet';
@@ -58,6 +59,8 @@ export const SHEETS: Record<string, SheetDefinition> = {
   'show-settings': { params: ['tmdb'], Component: ShowSettingsSheet },
   // Find a source, HDRezka tab (#67): `movie`, or `show` with `season` (the page's tab, so it stays) and `se`
   hdrezka: { params: SOURCE_PARAMS, Component: HDRezkaSheet },
+  // Find a source, Torrents tab (#92), on the same params; nothing links here until TORRENT_SHEET_LIVE (#95)
+  torrent: { params: SOURCE_PARAMS, Component: TorrentSearchSheet },
 };
 
 /** The sheet registered as `name`. Own keys only, so `?sheet=toString` opens nothing. */
