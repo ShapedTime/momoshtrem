@@ -35,6 +35,20 @@ func (f *fakeActivity) Summary(context.Context) (*activity.Summary, error) {
 	return &activity.Summary{Counts: activity.Counts{Idle: 1}, Streaming: []activity.StreamingSession{}}, nil
 }
 
+// Detail answers an idle movie torrent that isn't loaded.
+func (f *fakeActivity) Detail(_ context.Context, hash string) (*activity.Detail, error) {
+	f.called, f.hash = "detail", hash
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &activity.Detail{
+		Item: activity.Item{InfoHash: hash, State: activity.StateIdle, Titles: []activity.Title{}, Streaming: []activity.StreamingSession{}},
+		Files: []activity.DetailFile{{Path: "Film/Film.mkv", SizeBytes: 900,
+			PlaysAs: []activity.PlaysAs{{MediaType: "movie", ItemID: 8, Label: "Movie"}}}},
+		Trackers: []activity.Tracker{},
+	}, nil
+}
+
 func (f *fakeActivity) Pause(_ context.Context, hash string) (*activity.Item, error) {
 	return f.set("pause", hash)
 }
@@ -108,8 +122,19 @@ func TestTorrentRoutes(t *testing.T) {
 		// /torrents/:hash routes still take a hash beside the static ones.
 		{name: "debug under summary is a hash", method: http.MethodGet, path: "/api/torrents/summary/debug",
 			wantStatus: http.StatusBadRequest, wantCode: CodeBadRequest},
-		{name: "legacy status needs the torrent service", method: http.MethodGet, path: "/api/torrents/" + hex,
-			wantStatus: http.StatusServiceUnavailable, wantCode: CodeUnavailable},
+
+		// The detail: never the legacy status, never a load.
+		{name: "detail", method: http.MethodGet, path: "/api/torrents/" + hex,
+			wantStatus: http.StatusOK, wantCall: "detail", wantHash: hex,
+			wantBody: `{"info_hash":"` + hex + `","state":"idle","loaded":false,"pieces":null,"files":[{"path":"Film/Film.mkv","progress":null,"plays_as":[{"label":"Movie"}],"ignored":null}],"trackers":[],"swarm":null}`},
+		{name: "detail, base32", method: http.MethodGet, path: "/api/torrents/3WBFL3G4PSSV7MF37AJSHWDQMLNR63I4",
+			wantStatus: http.StatusOK, wantCall: "detail", wantHash: hex},
+		{name: "detail, malformed hash", method: http.MethodGet, path: "/api/torrents/not-a-hash",
+			wantStatus: http.StatusBadRequest, wantCode: CodeBadRequest},
+		{name: "detail, unknown", method: http.MethodGet, path: "/api/torrents/" + hex, err: torrent.ErrTorrentNotFound,
+			wantStatus: http.StatusNotFound, wantCode: CodeNotFound, wantCall: "detail", wantHash: hex},
+		{name: "detail, database down", method: http.MethodGet, path: "/api/torrents/" + hex, err: errors.New("connection reset"),
+			wantStatus: http.StatusInternalServerError, wantCode: CodeInternalError, wantCall: "detail", wantHash: hex},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,6 +165,7 @@ func TestTorrentRoutes_Unconfigured(t *testing.T) {
 	for _, r := range []struct{ method, path string }{
 		{http.MethodGet, "/api/torrents"},
 		{http.MethodGet, "/api/torrents/summary"},
+		{http.MethodGet, "/api/torrents/" + hex},
 		{http.MethodPost, "/api/torrents/pause-all"},
 		{http.MethodPost, "/api/torrents/resume-all"},
 		{http.MethodPost, "/api/torrents/" + hex + "/pause"},

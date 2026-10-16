@@ -12,11 +12,13 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
-// Activity lists the torrents, sums them up, and pauses and resumes them
-// (PLAN §6 "Torrents and activity (B6)"). *activity.Service implements it.
+// Activity lists the torrents, sums them up, details one, and pauses and
+// resumes them (PLAN §6 "Torrents and activity (B6)"). *activity.Service
+// implements it.
 type Activity interface {
 	List(ctx context.Context) ([]activity.Item, error)
 	Summary(ctx context.Context) (*activity.Summary, error)
+	Detail(ctx context.Context, infoHash string) (*activity.Detail, error)
 	Pause(ctx context.Context, infoHash string) (*activity.Item, error)
 	Resume(ctx context.Context, infoHash string) (*activity.Item, error)
 	PauseAll(ctx context.Context) (int, error)
@@ -33,7 +35,7 @@ func (s *Server) registerTorrentRoutes(api *gin.RouterGroup) {
 	api.GET("/torrents/summary", s.torrentsSummary)
 	api.POST("/torrents/pause-all", s.pauseAllTorrents)
 	api.POST("/torrents/resume-all", s.resumeAllTorrents)
-	api.GET("/torrents/:hash", s.getTorrent) // legacy status; #99 replaces it with the detail
+	api.GET("/torrents/:hash", s.getTorrentDetail)
 	api.DELETE("/torrents/:hash", s.deleteTorrent)
 	api.POST("/torrents/:hash/pause", s.pauseTorrent)
 	api.POST("/torrents/:hash/resume", s.resumeTorrent)
@@ -165,54 +167,18 @@ func (s *Server) deleteTorrent(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// TorrentResponse is a loaded torrent's legacy status (GET
-// /torrents/:hash), until #99's detail replaces it.
-type TorrentResponse struct {
-	InfoHash      string  `json:"info_hash"`
-	Name          string  `json:"name"`
-	TotalSize     int64   `json:"total_size"`
-	Downloaded    int64   `json:"downloaded"`
-	Progress      float64 `json:"progress"`
-	Seeders       int     `json:"seeders"`
-	Leechers      int     `json:"leechers"`
-	DownloadSpeed int64   `json:"download_speed"`
-	UploadSpeed   int64   `json:"upload_speed"`
-	IsPaused      bool    `json:"is_paused"`
-}
-
-// getTorrent returns a loaded torrent's legacy status.
-// GET /api/torrents/:hash
-func (s *Server) getTorrent(c *gin.Context) {
-	if s.torrentService == nil {
-		errorResponse(c, http.StatusServiceUnavailable, "Torrent service not available")
-		return
-	}
-
+// getTorrentDetail returns a torrent's list item plus its detail: piece
+// map, files, trackers and totals. It never loads the torrent.
+// GET /api/torrents/:hash → 200 TorrentDetail
+func (s *Server) getTorrentDetail(c *gin.Context) {
 	hash, ok := parseInfoHash(c)
-	if !ok {
+	if !ok || !s.activityReady(c) {
 		return
 	}
-
-	status, err := s.torrentService.GetStatus(hash)
+	d, err := s.opts.Activity.Detail(c.Request.Context(), hash)
 	if err != nil {
-		if errors.Is(err, torrent.ErrTorrentNotFound) {
-			errorResponse(c, http.StatusNotFound, "Torrent not found")
-			return
-		}
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		activityErrorResponse(c, err)
 		return
 	}
-
-	c.JSON(http.StatusOK, TorrentResponse{
-		InfoHash:      status.InfoHash,
-		Name:          status.Name,
-		TotalSize:     status.TotalSize,
-		Downloaded:    status.Downloaded,
-		Progress:      status.Progress,
-		Seeders:       status.Seeders,
-		Leechers:      status.Leechers,
-		DownloadSpeed: status.DownloadSpeed,
-		UploadSpeed:   status.UploadSpeed,
-		IsPaused:      status.IsPaused,
-	})
+	c.JSON(http.StatusOK, d)
 }

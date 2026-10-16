@@ -115,10 +115,34 @@ func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, e
 			NeedsReview: c.NeedsReview},
 		Summary: LibrarySummary{Total: listing.Summary.Total, SizeBytes: listing.Summary.SizeBytes, Ready: listing.Summary.Ready},
 	}
+	streaming := s.streamingTitles(ctx, len(listing.Items))
 	for _, row := range listing.Items {
-		page.Items = append(page.Items, s.libraryItem(row, tv))
+		item := s.libraryItem(row, tv)
+		item.Streaming = streaming[titleKey{mediaType: row.MediaType, id: row.ID}]
+		page.Items = append(page.Items, item)
 	}
 	return page, nil
+}
+
+// titleKey is a library title: a movie or a show, by library id.
+type titleKey struct {
+	mediaType string // movie or tv
+	id        int64
+}
+
+// streamingTitles are the titles a streaming session plays now (a show
+// for any of its episodes), read from memory over the one query's rows.
+func (s *Service) streamingTitles(ctx context.Context, rows int) map[titleKey]bool {
+	out := map[titleKey]bool{}
+	if s.sessions == nil || rows == 0 {
+		return out
+	}
+	for _, ss := range s.sessions.Sessions(ctx) {
+		if ss.Item != nil {
+			out[titleKey{mediaType: ss.Item.MediaType, id: ss.Item.LibraryID}] = true
+		}
+	}
+	return out
 }
 
 // libraryItem is one row of GET /library: the title page's library state,

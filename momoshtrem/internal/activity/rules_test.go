@@ -17,10 +17,10 @@ func TestStateOf(t *testing.T) {
 		{"loaded, network off", Facts{Loaded: true}, StateIdle},
 		{"loaded, network on, partial", Facts{Loaded: true, Active: true}, StateDownloading},
 		{"loaded, network on, complete", Facts{Loaded: true, Active: true, Complete: true}, StateIdle},
-		{"a reader open", Facts{Loaded: true, Active: true, Readers: 1}, StateStreaming},
-		{"a reader on a complete torrent", Facts{Loaded: true, Complete: true, Readers: 2}, StateStreaming},
-		{"paused wins over a reader", Facts{Paused: true, Loaded: true, Active: true, Readers: 1}, StatePaused},
-		{"readers don't count while not loaded", Facts{Readers: 1}, StateIdle},
+		{"a session", Facts{Loaded: true, Active: true, Sessions: 1}, StateStreaming},
+		{"sessions on a complete torrent", Facts{Loaded: true, Complete: true, Sessions: 2}, StateStreaming},
+		{"paused wins over a session", Facts{Paused: true, Loaded: true, Active: true, Sessions: 1}, StatePaused},
+		{"sessions don't count while not loaded", Facts{Sessions: 1}, StateIdle},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

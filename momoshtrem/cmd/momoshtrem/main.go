@@ -31,6 +31,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/search"
 	"github.com/shapedtime/momoshtrem/internal/service"
+	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/status"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -262,12 +263,13 @@ func main() {
 	// peers, and its data can be deleted while it isn't loaded. The speed
 	// sampler reads its byte counters every 2 s.
 	speeds := torrent.NewSpeedSampler()
+	metainfoStore := torrent.NewMetainfoStore(filepath.Join(cfg.Torrent.MetadataFolder, "metainfo"))
 	torrentService := torrent.NewService(
 		torrentClient,
 		activityManager,
 		time.Duration(cfg.Torrent.AddTimeout)*time.Second,
 		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
-		torrent.WithMetainfoStore(torrent.NewMetainfoStore(filepath.Join(cfg.Torrent.MetadataFolder, "metainfo"))),
+		torrent.WithMetainfoStore(metainfoStore),
 		torrent.WithPieceStorage(pieceStorage),
 		torrent.WithSpeedSampler(speeds),
 	)
@@ -321,6 +323,11 @@ func main() {
 	)
 	libraryFS.SetReaderTracker(readerTracker)
 
+	// Streaming sessions: who plays what over WebDAV, from every video's
+	// reads (Activity, /library's streaming and /status's active_readers).
+	sessionRegistry := sessions.NewRegistry(sessions.WithItems(library.NewCatalogRepository(db)))
+	libraryFS.SetSessions(sessionRegistry)
+
 	// Initialize Prometheus metrics (optional)
 	var metricsServer *metrics.Server
 	var streamingMetrics *metrics.Metrics
@@ -361,7 +368,7 @@ func main() {
 			AuthEnabled: cfg.Server.WebDAVAuth.Enabled,
 			Username:    cfg.Server.WebDAVAuth.Username,
 		},
-		ActiveReaders:           readerTracker.Count,
+		ActiveReaders:           sessionRegistry.Count,
 		TraktConfigured:         cfg.Trakt.ClientID != "" && cfg.Trakt.ClientSecret != "",
 		AIConfigured:            cfg.AI.AnthropicAPIKey != "",
 		AICost:                  aiStore.MonthToDateCost,
@@ -453,6 +460,7 @@ func main() {
 		Store:           library.NewCatalogRepository(db),
 		TMDB:            cachedTMDB,
 		Torrents:        torrentService,
+		Sessions:        sessionRegistry,
 		Colors:          heroColors,
 		Settings:        syncer,
 		WebDAVPublicURL: webdavPublicURL,
@@ -493,6 +501,7 @@ func main() {
 	apiOpts.Assignments = jobService
 	apiOpts.Review = jobService
 	apiOpts.Inspect = jobService
+	apiOpts.Magnets = library.NewAssignmentJobRepository(db) // Re-run mapping by info_hash
 
 	// Removals: deleting torrents and titles and unassigning files, with
 	// their subtitles, jobs and the torrents nothing uses any more.
@@ -508,13 +517,15 @@ func main() {
 	})
 
 	// Activity: the torrents the library knows merged with the client's,
-	// the summary, and pauses kept in app_settings. The stored pauses apply
-	// before anything loads a torrent (the workers and WebDAV start below).
+	// their streaming sessions and detail, the summary, and pauses kept in
+	// app_settings. The stored pauses apply before anything loads a torrent
+	// (the workers and WebDAV start below).
 	activityService := activity.New(activity.Deps{
 		Torrents: torrentService,
-		Readers:  readerTracker,
+		Sessions: sessionRegistry,
 		Library:  library.NewAssignmentJobRepository(db),
 		Pauses:   settingsRepo,
+		Metainfo: metainfoStore,
 		Speeds:   speeds,
 		Cache:    pieceCache,
 		DiskPath: cfg.Torrent.MetadataFolder,

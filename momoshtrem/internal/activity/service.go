@@ -23,7 +23,7 @@ import (
 	"github.com/anacrolix/missinggo/v2/filecache"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
-	"github.com/shapedtime/momoshtrem/internal/streaming"
+	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -31,6 +31,8 @@ import (
 type Torrents interface {
 	ListTorrents() ([]torrent.TorrentStatus, error)
 	GetStatus(infoHash string) (*torrent.TorrentStatus, error)
+	// Detail is a loaded torrent's piece map, files and trackers.
+	Detail(infoHash string) (*torrent.Detail, error)
 	Pause(infoHash string) error
 	Resume(infoHash string) error
 	Pauses() map[string]time.Time
@@ -39,22 +41,35 @@ type Torrents interface {
 
 var _ Torrents = (torrent.Service)(nil)
 
-// Readers are the open readers of each torrent's files: a torrent with one
-// is streaming. *streaming.ReaderTracker implements it; #99's streaming
-// sessions replace it.
-type Readers interface {
-	GetReaders(infoHash string) []streaming.ReaderSnapshot
+// Sessions are the clients streaming over WebDAV, the most recently read
+// first: a loaded torrent with one is streaming. *sessions.Registry
+// implements it.
+type Sessions interface {
+	Sessions(ctx context.Context) []sessions.Session
 }
 
-var _ Readers = (*streaming.ReaderTracker)(nil)
+var _ Sessions = (*sessions.Registry)(nil)
 
 // Library is what the library knows about torrents.
 // *library.AssignmentJobRepository implements it.
 type Library interface {
 	KnownTorrents(ctx context.Context, infoHash string) ([]library.KnownTorrent, error)
+	// The detail's: a magnet, the active assignments and the newest job's
+	// file list.
+	TorrentMagnet(ctx context.Context, infoHash string) (string, error)
+	ActiveMappings(ctx context.Context, infoHash string) ([]library.FileMapping, error)
+	JobFiles(ctx context.Context, infoHash string) ([]library.JobFile, error)
 }
 
 var _ Library = (*library.AssignmentJobRepository)(nil)
+
+// Metainfo reads a torrent's stored metainfo without loading it.
+// *torrent.MetainfoStore implements it.
+type Metainfo interface {
+	Summary(infoHash string) (*torrent.StoredInfo, error)
+}
+
+var _ Metainfo = (*torrent.MetainfoStore)(nil)
 
 // PauseStore keeps the pauses across restarts. *library.SettingsRepository
 // implements it.
@@ -83,14 +98,15 @@ type Cache interface {
 
 var _ Cache = (*filecache.Cache)(nil)
 
-// Deps are a Service's dependencies. Readers, Speeds and Cache are
-// optional: without them nothing streams, speeds are 0 and the disk is
-// null.
+// Deps are a Service's dependencies. Sessions, Metainfo, Speeds and Cache
+// are optional: without them nothing streams, an unloaded torrent's detail
+// has only the job's file list, speeds are 0 and the disk is null.
 type Deps struct {
 	Torrents Torrents
-	Readers  Readers
+	Sessions Sessions
 	Library  Library
 	Pauses   PauseStore
+	Metainfo Metainfo
 	Speeds   Speeds
 	Cache    Cache
 	// DiskPath is the folder whose file system the summary reports: the
@@ -104,9 +120,10 @@ type Deps struct {
 // Service lists the torrents, sums them up, and pauses and resumes them.
 type Service struct {
 	torrents Torrents
-	readers  Readers
+	sessions Sessions
 	library  Library
 	pauses   PauseStore
+	metainfo Metainfo
 	speeds   Speeds
 	cache    Cache
 	diskPath string
@@ -117,21 +134,31 @@ type Service struct {
 	// writes serialises pauses and resumes, so the stored pauses and the
 	// client's always end up the same.
 	writes sync.Mutex
+
+	// stored caches what each torrent's stored metainfo says: an info dict
+	// never changes under its hash.
+	storedMu sync.Mutex
+	stored   map[string]*torrent.StoredInfo
 }
+
+// maxStored bounds the stored-metainfo cache; past it, it starts over.
+const maxStored = 1024
 
 // New creates a Service.
 func New(d Deps) *Service {
 	s := &Service{
 		torrents: d.Torrents,
-		readers:  d.Readers,
+		sessions: d.Sessions,
 		library:  d.Library,
 		pauses:   d.Pauses,
+		metainfo: d.Metainfo,
 		speeds:   d.Speeds,
 		cache:    d.Cache,
 		diskPath: d.DiskPath,
 		now:      d.Now,
 		statfs:   d.Statfs,
 		log:      slog.With("component", "activity"),
+		stored:   map[string]*torrent.StoredInfo{},
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -189,6 +216,10 @@ func (s *Service) RestorePauses(ctx context.Context) error {
 // streaming, then downloading, paused and idle; then the most recently
 // active first (not loaded last), then the newest.
 func (s *Service) List(ctx context.Context) ([]Item, error) {
+	return s.list(ctx, s.streams(ctx))
+}
+
+func (s *Service) list(ctx context.Context, live streams) ([]Item, error) {
 	known, err := s.library.KnownTorrents(ctx, "")
 	if err != nil {
 		return nil, err
@@ -206,27 +237,51 @@ func (s *Service) List(ctx context.Context) ([]Item, error) {
 	items := make([]Item, 0, len(known)+len(statuses))
 	for i := range known {
 		k := &known[i]
-		items = append(items, s.item(k.InfoHash, k, loaded[k.InfoHash], pauses))
+		items = append(items, s.item(k.InfoHash, k, loaded[k.InfoHash], pauses, live))
 		delete(loaded, k.InfoHash)
 	}
 	for hash, st := range loaded {
-		items = append(items, s.item(hash, nil, st, pauses))
+		items = append(items, s.item(hash, nil, st, pauses, live))
 	}
 	sortItems(items)
 	return items, nil
 }
 
+// streams are the streaming sessions now: all of them, and the torrents'
+// by hash, each the most recently read first.
+type streams struct {
+	all    []StreamingSession
+	byHash map[string][]StreamingSession
+}
+
+func (s *Service) streams(ctx context.Context) streams {
+	live := streams{all: []StreamingSession{}, byHash: map[string][]StreamingSession{}}
+	if s.sessions == nil {
+		return live
+	}
+	live.all = s.sessions.Sessions(ctx)
+	for _, ss := range live.all {
+		if ss.InfoHash != nil {
+			hash := torrent.NormalizeInfoHash(*ss.InfoHash)
+			live.byHash[hash] = append(live.byHash[hash], ss)
+		}
+	}
+	return live
+}
+
 // Summary returns the totals: speeds and their last minute, connected
-// peers, how many torrents are in each state, and the disk.
+// peers, how many torrents are in each state, the disk, and every
+// streaming session (HDRezka's too).
 func (s *Service) Summary(ctx context.Context) (*Summary, error) {
-	items, err := s.List(ctx)
+	live := s.streams(ctx)
+	items, err := s.list(ctx, live)
 	if err != nil {
 		return nil, err
 	}
 	sum := &Summary{
 		History:   History{DownloadBps: []int64{}, UploadBps: []int64{}},
 		Disk:      s.disk(),
-		Streaming: []StreamingSession{},
+		Streaming: live.all,
 	}
 	for _, it := range items {
 		if it.Peers != nil {
@@ -308,7 +363,7 @@ func (s *Service) setPaused(ctx context.Context, infoHash string, pause bool) (*
 	if err != nil {
 		return nil, err
 	}
-	item := s.item(hash, known, st, s.torrents.Pauses())
+	item := s.item(hash, known, st, s.torrents.Pauses(), s.streams(ctx))
 	return &item, nil
 }
 
@@ -379,24 +434,26 @@ func (s *Service) ResumeAll(ctx context.Context) (int, error) {
 	return len(hashes), nil
 }
 
-// item merges what the library (k, nil for a torrent nothing references)
-// and the client (st, nil while not loaded) know of a torrent.
-func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.TorrentStatus, pauses map[string]time.Time) Item {
+// item merges what the library (k, nil for a torrent nothing references),
+// the client (st, nil while not loaded) and the streaming sessions know of
+// a torrent. A torrent that isn't loaded falls back to its stored metainfo
+// for a name and size no job gives.
+func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.TorrentStatus, pauses map[string]time.Time, live streams) Item {
 	_, paused := pauses[hash]
 	it := Item{
 		InfoHash:  hash,
 		Loaded:    st != nil,
 		Titles:    []Title{},
-		Streaming: []StreamingSession{},
+		Streaming: live.byHash[hash],
 	}
-	facts := Facts{Paused: paused, Loaded: st != nil}
+	if it.Streaming == nil {
+		it.Streaming = []StreamingSession{}
+	}
+	facts := Facts{Paused: paused, Loaded: st != nil, Sessions: len(it.Streaming)}
 
 	if st != nil {
 		facts.Active = !st.IsPaused
 		facts.Complete = st.Complete
-		if s.readers != nil {
-			facts.Readers = len(s.readers.GetReaders(hash))
-		}
 		it.Complete = &st.Complete
 		it.Progress = &st.Progress
 		it.BytesCompleted = &st.Downloaded
@@ -422,22 +479,71 @@ func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.Torrent
 			it.Titles = append(it.Titles, title(t))
 		}
 	}
-	it.Name = name(hash, k, st)
+	var stored *torrent.StoredInfo
+	if st == nil && (it.SizeBytes == nil || jobName(hash, k) == "") {
+		stored = s.storedInfo(hash)
+	}
+	if it.SizeBytes == nil && stored != nil {
+		it.SizeBytes = &stored.TotalSize
+	}
+	it.Name = name(hash, k, st, stored)
 	it.State = StateOf(facts)
 	return it
 }
 
-// name is the info dict's name, else the newest job's, else the magnet's
-// dn, else the hash.
-func name(hash string, k *library.KnownTorrent, st *torrent.TorrentStatus) string {
+// storedInfo is the torrent's stored metainfo, read once and cached: nil
+// when there's none (or no store).
+func (s *Service) storedInfo(hash string) *torrent.StoredInfo {
+	if s.metainfo == nil {
+		return nil
+	}
+	s.storedMu.Lock()
+	si, ok := s.stored[hash]
+	s.storedMu.Unlock()
+	if ok {
+		return si
+	}
+	si, err := s.metainfo.Summary(hash)
+	if err != nil {
+		s.log.Warn("Can't read a torrent's stored metainfo", "info_hash", hash, "error", err)
+		return nil
+	}
+	if si == nil {
+		return nil // not cached: it's stored when its metadata arrives
+	}
+	s.storedMu.Lock()
+	if len(s.stored) >= maxStored {
+		clear(s.stored)
+	}
+	s.stored[hash] = si
+	s.storedMu.Unlock()
+	return si
+}
+
+// jobName is the newest job's torrent name, "" when there's none (or it's
+// only the hash).
+func jobName(hash string, k *library.KnownTorrent) string {
+	if k == nil || strings.EqualFold(k.JobName, hash) {
+		return ""
+	}
+	return k.JobName
+}
+
+// name is the info dict's name, else the newest job's, else the stored
+// metainfo's (a torrent that isn't loaded), else the magnet's dn, else the
+// hash.
+func name(hash string, k *library.KnownTorrent, st *torrent.TorrentStatus, stored *torrent.StoredInfo) string {
 	if st != nil && st.Name != "" {
 		return st.Name
 	}
+	if n := jobName(hash, k); n != "" {
+		return n
+	}
+	if stored != nil && stored.Name != "" {
+		return stored.Name
+	}
 	if k == nil {
 		return hash
-	}
-	if k.JobName != "" && !strings.EqualFold(k.JobName, hash) {
-		return k.JobName
 	}
 	if u, err := url.Parse(k.MagnetURI); err == nil {
 		if dn := strings.TrimSpace(u.Query().Get("dn")); dn != "" {

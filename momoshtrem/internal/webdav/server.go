@@ -17,6 +17,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/common"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
+	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
@@ -60,13 +61,15 @@ func (s *Server) SetMetrics(m *metrics.Metrics) {
 	s.metrics = m
 }
 
-// Handler returns the HTTP handler wrapped with authentication and metrics middleware.
+// Handler returns the HTTP handler wrapped with authentication and metrics
+// middleware. Each request carries its method, User-Agent and remote
+// address in its context, for the streaming sessions of the files it opens.
 func (s *Server) Handler() http.Handler {
 	var h http.Handler = s.handler
 	if s.metrics != nil {
 		h = s.metricsMiddleware(h)
 	}
-	return NewAuthMiddleware(h, s.authCfg)
+	return sessions.Middleware(NewAuthMiddleware(h, s.authCfg))
 }
 
 // metricsMiddleware wraps an http.Handler with WebDAV request metrics.
@@ -114,7 +117,7 @@ func (wfs *webdavFS) OpenFile(ctx context.Context, name string, flag int, perm o
 
 	name = common.CleanPath(name)
 
-	file, err := wfs.fs.Open(name)
+	file, err := wfs.fs.OpenContext(ctx, name)
 	if err != nil {
 		return nil, err
 	}

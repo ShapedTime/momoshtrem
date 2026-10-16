@@ -82,6 +82,10 @@ type Options struct {
 	// Search serves torrent search (GET /search/torrents and resolve). Nil
 	// (no Jackett) makes those routes return 503.
 	Search TorrentSearch
+	// Magnets finds a magnet for a torrent the library knows, so the
+	// assign routes take {info_hash} (Re-run mapping). Nil makes an assign
+	// by info_hash return 503.
+	Magnets TorrentMagnets
 }
 
 // NewServer creates a new API server

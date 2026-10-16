@@ -245,6 +245,51 @@ func (r *AssignmentJobRepository) StoredTorrent(ctx context.Context, infoHash st
 	return out, nil
 }
 
+// JobFile is one file of a torrent as a job stored it: its proposal's
+// path, size, kind, extra type and decision.
+type JobFile struct {
+	Path      string
+	Size      int64
+	Kind      ProposalKind
+	ExtraType string // extras only
+	Decision  Decision
+	// Linked is a subtitle that belongs to a video and follows its mapping.
+	Linked bool
+}
+
+// JobFiles returns the torrent's files, in the torrent's order (as
+// proposed), from the newest job that stored them, preferring one that
+// isn't a dry run: its decisions are what the user saw. nil when no job
+// has them. One query.
+func (r *AssignmentJobRepository) JobFiles(ctx context.Context, infoHash string) ([]JobFile, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		WITH job AS (
+			SELECT j.id FROM assignment_jobs j
+			WHERE j.info_hash = $1 AND EXISTS (SELECT 1 FROM assignment_proposals p WHERE p.job_id = j.id)
+			ORDER BY j.dry_run, j.id DESC LIMIT 1
+		)
+		SELECT p.file_path, p.file_size, p.kind, COALESCE(p.extra_type, ''), p.decision, p.linked_proposal_id IS NOT NULL
+		FROM job JOIN assignment_proposals p ON p.job_id = job.id
+		ORDER BY p.id
+	`, infoHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load the torrent's job files: %w", err)
+	}
+	defer rows.Close()
+	var out []JobFile
+	for rows.Next() {
+		var f JobFile
+		if err := rows.Scan(&f.Path, &f.Size, &f.Kind, &f.ExtraType, &f.Decision, &f.Linked); err != nil {
+			return nil, fmt.Errorf("failed to scan a job file: %w", err)
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read the torrent's job files: %w", err)
+	}
+	return out, nil
+}
+
 // TorrentMagnet returns a magnet for the torrent: an assignment's (active
 // first, newest first), else a job's (newest first). "" when neither knows
 // the torrent. One query.
