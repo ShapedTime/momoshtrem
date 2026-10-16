@@ -6,6 +6,7 @@ import { buildImageUrl } from '@/config/tmdb';
 import type { EpisodeOrdering, EpisodeSummary } from '@/lib/api/contract';
 import { episodeCode, episodeLabel } from '@/lib/title/episodes';
 import { formatShortDate } from '@/lib/title/format';
+import { keepRowPill } from '@/lib/title/keep';
 import { cx } from '@/lib/utils/cx';
 
 export interface EpisodeRowProps {
@@ -17,7 +18,7 @@ export interface EpisodeRowProps {
   reviewHref?: string | null;
   /** Missing: find a torrent for this episode. */
   onFind: (episode: EpisodeSummary) => void;
-  /** The episode sheet: with a file, how to play, subtitles, replace and remove; watched without one, find a torrent. */
+  /** The episode sheet: with a file, how to play, subtitles, Download & keep, replace and remove; watched without one, find a torrent. */
   onOpen: (episode: EpisodeSummary) => void;
   /** "With stills" density: a 16:9 still instead of the number (92 px rows). */
   rich?: boolean;
@@ -49,6 +50,8 @@ function Pill({ episode }: { episode: EpisodeSummary }) {
  */
 export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFind, onOpen, rich = false, flash = false, style, position, ref }: EpisodeRowProps) {
   const code = episodeCode(episode.season_number, episode.episode_number);
+  // What keeps it on disk (#206): "Kept", "Smart", or why the file isn't really held
+  const keepPill = keepRowPill(episode.keep);
   const sub = [
     episodeLabel(episode, ordering),
     episode.runtime ? `${episode.runtime} min` : null,
@@ -73,7 +76,7 @@ export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFi
     action = <span className="w-9 shrink-0" aria-hidden="true" />;
   } else {
     // Watched wins the state (B5), so a watched row may or may not have a file
-    const options = episode.webdav_path ? 'how to play, subtitles, replace, remove' : 'find a torrent';
+    const options = episode.webdav_path ? 'how to play, subtitles, keep, replace, remove' : 'find a torrent';
     action = (
       <IconButton size="sm" aria-label={`${code} options: ${options}`} onClick={() => onOpen(episode)}>
         <EllipsisVertical size={17} aria-hidden="true" />
@@ -110,6 +113,7 @@ export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFi
         <span className="sub">{sub.join(' · ')}</span>
       </div>
       <div className="end">
+        {keepPill && <StatusPill status={keepPill.status} label={keepPill.label} />}
         <Pill episode={episode} />
         {action}
       </div>

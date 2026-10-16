@@ -26,7 +26,7 @@ describe('EpisodeRow', () => {
     const { onOpen } = renderRow(watched);
     expect(screen.getByText('Watched')).toBeInTheDocument();
     expect(screen.getByRole('listitem')).toHaveClass('is-watched');
-    fireEvent.click(screen.getByRole('button', { name: 'S01E01 options: how to play, subtitles, replace, remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'S01E01 options: how to play, subtitles, keep, replace, remove' }));
     expect(onOpen).toHaveBeenCalledWith(watched);
   });
 

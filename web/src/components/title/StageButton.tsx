@@ -1,8 +1,16 @@
-import { Activity, type LucideIcon, MonitorPlay, Plus, Search, Tv } from 'lucide-react';
+import { Activity, HardDriveDownload, type LucideIcon, MonitorPlay, Pin, Plus, Search, Tv } from 'lucide-react';
 import { Button, ButtonLink } from '@/components/ui';
 import type { StageButton as StageButtonSpec, StageIcon, StageIntent } from '@/lib/title/stage-copy';
 
-export const STAGE_ICONS: Record<StageIcon, LucideIcon> = { plus: Plus, search: Search, activity: Activity, tv: Tv, stream: MonitorPlay };
+export const STAGE_ICONS: Record<StageIcon, LucideIcon> = {
+  plus: Plus,
+  search: Search,
+  activity: Activity,
+  tv: Tv,
+  stream: MonitorPlay,
+  keep: HardDriveDownload,
+  kept: Pin,
+};
 
 export type StageActionHandler = (intent: StageIntent) => void;
 

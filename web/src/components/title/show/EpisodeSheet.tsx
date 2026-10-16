@@ -1,19 +1,22 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { MonitorPlay, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { HardDriveDownload, MonitorPlay, Pin, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { ReplaceMenu } from '@/components/source/ReplaceMenu';
 import { Banner, Button, CopyField, FilePath, LoadingRegion, Sheet, Skeleton, SkeletonText, StatusPill } from '@/components/ui';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
 import { useRemoveEpisodeFile } from '@/hooks/useTitle';
-import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
+import type { EpisodeSummary, Keep, ShowTitle } from '@/lib/api/contract';
 import { seasonQuery, titleQuery } from '@/lib/api/endpoints';
 import type { SheetComponentProps } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { showSourceParams } from '@/lib/source/context';
 import { episodeCode, parseEpisodeCode } from '@/lib/title/episodes';
 import { formatDate } from '@/lib/title/format';
+import { keepOf } from '@/lib/title/keep';
+import { episodeKeepContext, heldByCopy, keepSheetParams } from '@/lib/title/keep-sheet';
+import { KeepStatus } from '../KeepStatus';
 import { SubtitlesPanel } from '../SubtitlesPanel';
 
 /** `?sheet=episode` params for one episode of a show. */
@@ -48,6 +51,15 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
   // Watched wins the state (B5): the file, when there is one, still plays
   const watched = episode.state === 'watched';
   const facts = [episode.runtime ? `${episode.runtime} min` : null, episode.air_date ? formatDate(episode.air_date) : null].filter(Boolean);
+  // Download & keep (#206), over this sheet in history too; with a file, or once something keeps it
+  const kept = keepOf(episode.keep);
+  const keepSection = (hasFile(episode) || kept) && (
+    <EpisodeKeep
+      episode={episode}
+      name={`${show.title} · ${code}`}
+      onOpen={() => sheets.open('keep', keepSheetParams(episodeKeepContext(show.tmdb_id, episode)))}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -73,6 +85,7 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
               </p>
             )}
           </section>
+          {keepSection}
           <SubtitlesPanel {...subtitles} />
           <div className="flex flex-wrap gap-2">
             {hdrezka ? (
@@ -111,7 +124,44 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
           </div>
         </div>
       )}
+      {/* Without a file, only a season or show keep (or a Keep made before it was found) shows here */}
+      {!hasFile(episode) && keepSection}
     </div>
+  );
+}
+
+/** What the episode's Keep button does: a new Keep, its own (a change, or a smart pick to keep), or its season's or show's. */
+function keepButtonLabel(keep: Keep | null, seasonNumber: number): string {
+  if (!keep) return 'Download & keep';
+  if (keep.scope === 'episode') return keep.reason === 'smart' ? 'Keep it' : 'Change duration';
+  if (keep.scope === 'show') return 'Change the show’s keep';
+  return seasonNumber === 0 ? 'Change the Specials keep' : `Change season ${seasonNumber}’s keep`;
+}
+
+/**
+ * Keep on disk (#206): what holds the episode ("Kept until watched · by Nov 16",
+ * "On disk"), and the button for its Keep sheet: Download & keep, Change
+ * duration, Keep it (a smart pick), or the season's or show's keep that holds it.
+ */
+function EpisodeKeep({ episode, name, onOpen }: { episode: EpisodeSummary; name: string; onOpen: () => void }) {
+  const keep = keepOf(episode.keep);
+  return (
+    <section className="flex min-w-0 flex-col gap-2" aria-labelledby="episode-keep-h">
+      <h3 className="font-semibold" id="episode-keep-h">
+        {keep ? 'Kept on disk' : 'Download & keep'}
+      </h3>
+      {keep ? (
+        <KeepStatus keep={keep} name={name} />
+      ) : (
+        <p className="t-small text-fg-2">It streams on demand. Keep it to download it in the background and hold it on disk.</p>
+      )}
+      {keep && keep.scope !== 'episode' && <p className="t-small text-fg-2">{heldByCopy(keep, episode.season_number)}</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={onOpen} aria-haspopup="dialog">
+          {keep ? <Pin size={15} aria-hidden="true" /> : <HardDriveDownload size={15} aria-hidden="true" />} {keepButtonLabel(keep, episode.season_number)}
+        </Button>
+      </div>
+    </section>
   );
 }
 

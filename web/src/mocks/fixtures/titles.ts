@@ -417,22 +417,19 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
 
 const keepFor = (hold: LiveHold | undefined) => (hold ? keepOf(hold.download) : null);
 
-/** A torrent assigned this session: loaded, nothing fetched yet. */
-const JUST_ADDED: DownloadProgress = { pct: 0, speed_bps: 0, eta_seconds: null, seeders: 12 };
-
 function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEntry | undefined): TitleLibraryState {
   if (!row) return notInLibrary();
   // A stream replaces the torrent, and is never downloading: it plays from the CDN
   const stream = row.stream ?? null;
   const torrent = stream ? null : (row.assigned ?? (row.files ? (movie.torrent ?? null) : null));
-  // #77: downloading only while a download wants the file (a torrent assigned this session still starts out downloading)
+  // #77: downloading only while a download wants the file; a file nothing keeps streams on demand, so it's ready
+  // as soon as it's assigned (one assigned this session too). The seed's progress is its own torrent's.
   const hold = scopeHold('movie', entry.tmdb_id);
   const wanted = torrent !== null && wantsBytes(hold?.admitted);
-  const download = row.assigned
-    ? JUST_ADDED
-    : wanted
-      ? (movie.download ?? { pct: keepFor(hold)?.pct ?? 0, speed_bps: 0, eta_seconds: null, seeders: torrent.seeders ?? 0 })
-      : null;
+  const seeded: DownloadProgress | undefined = row.assigned ? undefined : movie.download;
+  const download: DownloadProgress | null = wanted
+    ? (seeded ?? { pct: keepFor(hold)?.pct ?? 0, speed_bps: 0, eta_seconds: null, seeders: torrent.seeders ?? 0 })
+    : null;
   const path = stream ? moviePath(entry, 'stream.mp4') : torrent ? moviePath(entry, torrent.file_name) : null;
   return {
     ...notInLibrary(),
