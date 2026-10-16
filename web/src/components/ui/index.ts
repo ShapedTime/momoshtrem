@@ -4,6 +4,7 @@ export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 export { Input, SearchInput, Select, Textarea, Kbd } from './Input';
 export { Switch, Chip, FilterChip, SegmentedControl, Tabs } from './Controls';
 export type { ChipTone, SegmentOption, TabItem } from './Controls';
+export { Range } from './Range';
 export { StatusPill, Confidence, Progress, RingMeter, Steps } from './Status';
 export type { ConfidenceLevel, Step } from './Status';
 export { Media, PosterCard, PosterGrid } from './Media';

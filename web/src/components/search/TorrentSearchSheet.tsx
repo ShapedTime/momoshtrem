@@ -6,17 +6,23 @@ import { SourceSheet, useSourceTitle, useSwitchSource } from '@/components/sourc
 import { Button, copyText, IconButton, SearchInput, SegmentedControl, Sheet, Skeleton, Spinner, useToast } from '@/components/ui';
 import { useAssignTorrent } from '@/hooks/useAssignTorrent';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
-import { useReleaseMagnet, useReleaseSearch } from '@/hooks/useReleaseSearch';
+import { useInspect, useReleaseMagnet, useReleaseSearch } from '@/hooks/useReleaseSearch';
 import type { Release, SearchScope, Title } from '@/lib/api/contract';
-import { addLabel, alsoSearched, noResultsSuggestions, pagerText, resultsHeading, searchProblem, statusLine } from '@/lib/search/copy';
+import { addLabel, alsoSearched, noResultsSuggestions, pagerText, resultsHeading, scopeNoun, searchProblem, statusLine } from '@/lib/search/copy';
+import { type SearchFilters, toggleValue } from '@/lib/search/filters';
+import { inspectAddLabel } from '@/lib/search/inspect';
 import { defaultQuery, defaultScope, SCOPE_LABEL, scopeOptions, searchParams } from '@/lib/search/query';
 import { freshDraft, loadDraft, saveDraft, type SearchDraft } from '@/lib/search/session';
 import { bestRelease, packBanner, searchViewKind } from '@/lib/search/view';
 import type { SheetComponentProps } from '@/lib/sheets/registry';
 import { legacyScope, type SourceContext, sourceContext } from '@/lib/source/context';
 import { legacySearchContext } from '@/lib/title/legacy-search';
+import { FiltersSheet } from './FiltersSheet';
+import { InspectSheet } from './InspectSheet';
 import { ReleaseCard } from './ReleaseCard';
+import { SearchChips } from './SearchChips';
 import { FilteredEmpty, NoResults, PackBanner, PartialBanner, ReleaseSkeletons, SearchErrorBanner, SearchingState } from './SearchStates';
+import { SortSheet } from './SortSheet';
 
 /** Typing searches after this pause; Enter searches at once. */
 const TYPING_DEBOUNCE_MS = 700;
@@ -32,7 +38,7 @@ interface SearchHeadProps {
   scopes: SearchScope[];
   scope: SearchScope | null;
   onScope: (scope: SearchScope) => void;
-  /** Under the scope: #93's filter and sort chips. */
+  /** Under the scope: the filter and sort chips. */
   chips?: ReactNode;
 }
 
@@ -81,7 +87,8 @@ interface TorrentSearchProps {
  * The Torrents tab of the source sheet (HANDOFF §5.2): the query pre-filled
  * from the context (then the server's primary query), the scope, and results
  * to act on, polled while the search runs. Query, scope, sort and filters stay
- * per context for the session (`lib/search/session.ts`).
+ * per context for the session (`lib/search/session.ts`). Filters, Sort and
+ * Inspect open nested sheets over it (#93).
  */
 function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   const [restored] = useState(() => loadDraft(context.key) !== null);
@@ -90,6 +97,9 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   const [q, setQ] = useState(() => (draft.dirty ? draft.query.trim() : ''));
   const [addingId, setAddingId] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
+  /** The nested sheet on top, if any; the Filters sheet mounts afresh each time it opens, so its draft starts over. */
+  const [nested, setNested] = useState<'filters' | 'sort' | null>(null);
+  const [filtersOpened, setFiltersOpened] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const focusIndex = useRef<number | null>(null);
   const { toast } = useToast();
@@ -104,7 +114,8 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   };
 
   const scope = draft.scope ?? defaultScope(context);
-  const params = searchParams(context, { scope, sort: draft.sort, filters: draft.filters, q });
+  const paramsFor = (filters: SearchFilters) => searchParams(context, { scope, sort: draft.sort, filters, q });
+  const params = paramsFor(draft.filters);
   const { query, first, last, items, retry } = useReleaseSearch(params);
   const guess = defaultQuery(context, title, scope);
   const primary = first?.queries[0]?.q;
@@ -133,8 +144,10 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
 
   // Adding: resolve a magnet first when the release has none, then the mapping job (a show's review, or a movie's wait)
   const assignContext = useMemo(() => legacySearchContext(title, legacyScope(context)), [title, context]);
-  // Navigating to the review drops `?sheet`, which closes the sheet (Back from the review reopens it)
-  const { add, isAdding, isAdded } = useAssignTorrent(assignContext, { onLeave: () => {} });
+  const inspect = useInspect(context);
+  // Navigating to the review drops `?sheet`, which closes the sheet (Back from the review reopens it);
+  // a movie assigned from Inspect closes Inspect, back to its card saying Added
+  const { add, isAdding, isAdded } = useAssignTorrent(assignContext, { onLeave: () => {}, onApplied: inspect.close });
   const magnets = useReleaseMagnet();
   const onAdd = async (release: Release) => {
     setAddingId(release.id);
@@ -183,6 +196,11 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   const also = first ? alsoSearched(first.queries) : null;
   const label = addLabel(title);
 
+  const adding = (release: Release) => {
+    const magnet = magnets.knownMagnet(release);
+    return addingId === release.id || (magnet !== null && isAdding(magnet));
+  };
+
   const card = (release: Release, index: number) => {
     const magnet = magnets.knownMagnet(release);
     return (
@@ -193,11 +211,12 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
         release={release}
         best={release === best}
         addLabel={label}
-        adding={addingId === release.id || (magnet !== null && isAdding(magnet))}
+        adding={adding(release)}
         added={magnet !== null && isAdded(magnet)}
         copying={copyingId === release.id}
         onAdd={() => void onAdd(release)}
         onCopyMagnet={() => void onCopyMagnet(release)}
+        onInspect={() => inspect.open(release)}
       />
     );
   };
@@ -220,6 +239,19 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
           scopes={scopeOptions(context)}
           scope={scope}
           onScope={(next) => update({ scope: next })}
+          chips={
+            <SearchChips
+              facets={first?.facets}
+              filters={draft.filters}
+              sort={draft.sort}
+              onToggle={(key, value) => update({ filters: toggleValue(draft.filters, key, value) })}
+              onOpenFilters={() => {
+                setFiltersOpened((n) => n + 1);
+                setNested('filters');
+              }}
+              onOpenSort={() => setNested('sort')}
+            />
+          }
         />
       }
     >
@@ -235,7 +267,7 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
       {first?.complete && view !== 'searching' && view !== 'error' && (
         <PartialBanner indexers={first.indexers} retrying={retry.isPending} onRetry={onRetry} />
       )}
-      {first && (view === 'results' || view === 'filtered-empty') && (
+      {first && view === 'results' && (
         <div className="ts-status t-small text-fg-3">
           <p className="flex items-center gap-2">
             {statusLine(first)}
@@ -253,13 +285,22 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
         <NoResults
           q={shownQuery}
           indexers={first.indexers.length}
+          hidden={first.hidden}
           suggestions={noResultsSuggestions({ q: shownQuery, title, scope, episode: context.kind === 'show' ? context.episode : null, queries: first.queries })}
           onSearch={searchFor}
           onScope={(next) => update({ scope: next })}
           onTryHDRezka={hdrezka ? () => switchTo('hdrezka') : undefined}
         />
       )}
-      {view === 'filtered-empty' && first && <FilteredEmpty total={first.total_unfiltered} onClear={() => update({ filters: {} })} />}
+      {view === 'filtered-empty' && first && (
+        <FilteredEmpty
+          total={first.total_unfiltered}
+          hidden={first.hidden}
+          filters={draft.filters}
+          noun={scopeNoun(scope)}
+          onChange={(filters) => update({ filters })}
+        />
+      )}
       {view === 'results' && first && (
         <>
           {missing && (
@@ -283,6 +324,44 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
           </div>
         </>
       )}
+      {/* Nested over the search: inside its tree, so a phone's drawer stacks on it */}
+      <FiltersSheet
+        key={filtersOpened}
+        open={nested === 'filters'}
+        onOpenChange={(open) => !open && setNested(null)}
+        mediaType={title.media_type}
+        filters={draft.filters}
+        paramsFor={paramsFor}
+        current={first}
+        onApply={(filters) => {
+          update({ filters });
+          setNested(null);
+        }}
+      />
+      <SortSheet
+        open={nested === 'sort'}
+        onOpenChange={(open) => !open && setNested(null)}
+        sort={draft.sort}
+        onPick={(sort) => {
+          update({ sort });
+          setNested(null);
+        }}
+      />
+      <InspectSheet
+        open={inspect.isOpen}
+        onOpenChange={(open) => !open && inspect.close()}
+        release={inspect.release}
+        starting={inspect.start.isPending}
+        startError={inspect.start.error}
+        detail={inspect.job?.data}
+        readError={inspect.job?.error ?? null}
+        onRetry={inspect.retry}
+        addLabel={inspectAddLabel(title)}
+        adding={inspect.release !== null && adding(inspect.release)}
+        onAdd={() => {
+          if (inspect.release) void onAdd(inspect.release);
+        }}
+      />
     </SourceSheet>
   );
 }

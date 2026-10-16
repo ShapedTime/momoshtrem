@@ -65,6 +65,9 @@
 
   /* Actions: one row on phone, Add at its natural width and the magnet pushed right;
      a 132 px column on desktop, the magnet with its word */
+  /* A seedless release looks weaker without fading its red "0 seeders" below AA (as .is-weak):
+     sorting by size or date brings these to the top */
+  .ts-release.is-dim { opacity: 1; background: transparent; border-style: dashed; }
   .ts-release .actions { flex-wrap: wrap; }
   .ts-release .actions .btn { flex: 0 0 auto; }
   .ts-magnet { color: var(--text-2); }
@@ -76,4 +79,40 @@
     .ts-magnet { width: auto; align-self: stretch; padding: 0 12px; }
     .ts-magnet .lbl { display: inline; font-weight: var(--w-medium); }
   }
+
+  /* ---- Filters, sort and Inspect (#93) --------------------------------------
+     Ported from design-cinematic/css/screens/torrent.css. Below 640 px the head
+     keeps Filters, Sort (its icon) and the resolutions; codec and DV join wider */
+  .ts-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .ts-chips .fchip svg { color: var(--text-2); }
+  @media (max-width: 639px) {
+    .ts-chips .ts-wide { display: none; }
+    .ts-sort { padding: 0 10px; }
+    .ts-sort-label { display: none; }
+  }
+
+  /* The Filters sheet's groups */
+  .ts-fgroup { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ts-fgroup > legend { padding: 0; margin-bottom: var(--sp-3); }
+
+  /* Sort: radio cards as pressed buttons */
+  .ts-sort-card { width: 100%; align-items: center; text-align: left; }
+  .ts-sort-card[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); }
+  .ts-sort-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .ts-radio { width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; border: 2px solid var(--line-3); background: var(--surface-2); }
+  .ts-sort-card[aria-pressed="true"] .ts-radio { border-color: var(--accent); background: radial-gradient(circle closest-side, var(--accent) 0 5px, transparent 6px), var(--surface-2); }
+
+  /* Inspect: a stable height on phone, so the rows arriving don't move it */
+  @media (max-width: 1023px) { .ts-inspect { height: 86%; } }
+  .insp-list { display: flex; flex-direction: column; gap: 2px; }
+  .insp-list li { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-3); border-radius: var(--r-md); background: var(--surface-1); min-width: 0; }
+  .insp-list .insp-to { display: flex; align-items: center; gap: 6px; font-size: var(--t-small); color: var(--text-2); flex-wrap: wrap; min-width: 0; }
+  .insp-list .insp-to b { color: var(--st-ready); font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
+  .insp-list .insp-to.review { align-items: flex-start; flex-wrap: nowrap; color: var(--st-review); }
+  .insp-list .insp-to.review svg { margin-top: 2px; }
+  .insp-list .insp-to.review b { color: inherit; }
+  /* Ignored files look quieter without fading the text (it keeps AA contrast) */
+  .insp-list li.is-ignored { background: transparent; border: 1px dashed var(--line-2); }
+  .insp-list li.is-ignored .insp-to { color: var(--text-3); }
+  .insp-list li.insp-more { background: none; padding-block: var(--sp-2); font-size: var(--t-small); color: var(--text-3); }
 }

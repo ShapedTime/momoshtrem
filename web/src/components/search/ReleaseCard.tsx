@@ -1,5 +1,5 @@
-import { type ReactNode, type Ref, useId } from 'react';
-import { ArrowDown, ArrowUp, Check, Clock, HardDrive, Info, Magnet, Plus, Server, Sparkle, TriangleAlert } from 'lucide-react';
+import { type Ref, useId } from 'react';
+import { ArrowDown, ArrowUp, Check, Clock, HardDrive, Info, Magnet, Plus, ScanSearch, Server, Sparkle, TriangleAlert } from 'lucide-react';
 import { Button, Chip, ReleaseName } from '@/components/ui';
 import type { Release } from '@/lib/api/contract';
 import { prefersGroup, releaseChips, releaseFacts } from '@/lib/search/release';
@@ -19,8 +19,8 @@ interface ReleaseCardProps {
   copying: boolean;
   onAdd: () => void;
   onCopyMagnet: () => void;
-  /** Between Add and the magnet: #93's Inspect. */
-  inspect?: ReactNode;
+  /** Inspect (#93), between Add and the magnet: a dry run of the mapping in a nested sheet. */
+  onInspect?: () => void;
   /** Its place in the list (`data-index`): Load more focuses the first new card. */
   index?: number;
   ref?: Ref<HTMLElement>;
@@ -32,7 +32,7 @@ interface ReleaseCardProps {
  * one row on phone, Add at its natural width and the magnet pushed right, and
  * in a 132 px column on desktop.
  */
-export function ReleaseCard({ release, best, addLabel, adding, added, copying, onAdd, onCopyMagnet, inspect, index, ref }: ReleaseCardProps) {
+export function ReleaseCard({ release, best, addLabel, adding, added, copying, onAdd, onCopyMagnet, onInspect, index, ref }: ReleaseCardProps) {
   const nameId = useId();
   const chips = releaseChips(release, { preferredGroup: prefersGroup(release) });
   const facts = releaseFacts(release);
@@ -121,7 +121,11 @@ export function ReleaseCard({ release, best, addLabel, adding, added, copying, o
             <Plus size={18} aria-hidden="true" /> Add
           </Button>
         )}
-        {inspect}
+        {onInspect && (
+          <Button variant="secondary" onClick={onInspect} aria-haspopup="dialog" aria-describedby={nameId}>
+            <ScanSearch size={18} aria-hidden="true" /> Inspect
+          </Button>
+        )}
         <span className="spacer" />
         <Button
           variant="ghost"

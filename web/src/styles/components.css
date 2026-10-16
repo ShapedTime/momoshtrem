@@ -120,6 +120,19 @@
   .range-fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 4px; }
   .range-thumb { position: absolute; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: var(--text-1); box-shadow: 0 2px 8px rgb(0 0 0 / 0.5), 0 0 0 4px rgb(242 179 61 / 0.25); }
   .range-values { display: flex; justify-content: space-between; font-size: var(--t-small); color: var(--text-2); font-variant-numeric: tabular-nums; }
+  /* <Range>: two native inputs over the track. Each thumb is a 44 px hit area drawing the 24 px
+     knob and its amber halo; only the thumbs take the pointer. The inputs overhang the track by
+     half a thumb, so a thumb's centre sits on its value */
+  .range:has(.range-input) .range-track { margin: 20px 22px; }
+  .range-input { position: absolute; top: 50%; left: -22px; width: calc(100% + 44px); height: 44px; margin: -22px 0 0; appearance: none; background: none; pointer-events: none; outline: none; }
+  .range-input.is-top { z-index: 1; }
+  .range-input::-webkit-slider-runnable-track { height: 44px; background: none; }
+  .range-input::-moz-range-track { height: 44px; background: none; }
+  .range-input::-webkit-slider-thumb { appearance: none; width: 44px; height: 44px; border: 0; border-radius: 50%; pointer-events: auto; cursor: grab; background: radial-gradient(circle closest-side, var(--text-1) 0 11px, rgb(242 179 61 / 0.25) 12px 15px, transparent 16px); }
+  .range-input::-moz-range-thumb { width: 44px; height: 44px; border: 0; border-radius: 50%; pointer-events: auto; cursor: grab; background: radial-gradient(circle closest-side, var(--text-1) 0 11px, rgb(242 179 61 / 0.25) 12px 15px, transparent 16px); }
+  .range-input:focus-visible::-webkit-slider-thumb { background: radial-gradient(circle closest-side, var(--text-1) 0 11px, var(--bg) 12px 13px, var(--accent) 14px 16px, transparent 17px); }
+  .range-input:focus-visible::-moz-range-thumb { background: radial-gradient(circle closest-side, var(--text-1) 0 11px, var(--bg) 12px 13px, var(--accent) 14px 16px, transparent 17px); }
+  .range-input:active::-webkit-slider-thumb { cursor: grabbing; }
 
   /* ---- Chips --------------------------------------------------------------- */
   /* Attribute chip: static, small, for parsed release attributes */
@@ -381,6 +394,7 @@
   .sheet-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 44px; }
   .sheet-kicker { display: block; font-size: var(--t-small); line-height: 1.4; font-weight: var(--w-regular); letter-spacing: 0; color: var(--text-3); }
   .sheet-body { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-4); min-height: 0; }
+  .sheet-body[tabindex]:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
   .sheet-foot { flex-shrink: 0; display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-1); background: var(--glass-bg-strong); backdrop-filter: blur(var(--blur-md)); }
   @media (min-width: 640px) {
     /* Centred without transform: Vaul owns `transform` while dragging */
