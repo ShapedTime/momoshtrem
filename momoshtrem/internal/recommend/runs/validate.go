@@ -3,7 +3,6 @@ package runs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -56,31 +55,15 @@ type validator struct {
 
 // check validates titles in order; comingSoon badges a show's next
 // episode. Only the run's context ending or a database error is an error.
+// TMDB and the name come first: a remembered id that happens to be
+// watched would otherwise drop as "watched", and the model would think the
+// title it named is.
 func (v *validator) check(ctx context.Context, titles []proposed, comingSoon bool) ([]verdict, error) {
 	out := make([]verdict, len(titles))
-	refs := make([]library.TitleRef, len(titles))
 	for i, t := range titles {
-		out[i].Ref, refs[i] = t.Ref, t.Ref
+		out[i].Ref = t.Ref
 		if !validRef(t.Ref) {
 			out[i].Dropped = "media_type must be movie or tv, with a TMDB id (a positive whole number)"
-		}
-	}
-	var lookup []library.TitleRef
-	for i, r := range refs {
-		if out[i].Dropped == "" {
-			lookup = append(lookup, r)
-		}
-	}
-	states, err := v.states(ctx, lookup)
-	if err != nil {
-		return nil, err
-	}
-	for i := range out {
-		if out[i].Dropped != "" {
-			continue
-		}
-		if why := candidates.Exclusion(states[refs[i]]); why != "" {
-			out[i].Dropped = "can't be picked: " + why
 		}
 	}
 
@@ -108,6 +91,25 @@ func (v *validator) check(ctx context.Context, titles []proposed, comingSoon boo
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	var lookup []library.TitleRef
+	for i := range out {
+		if out[i].Dropped == "" {
+			lookup = append(lookup, out[i].Ref)
+		}
+	}
+	states, err := v.states(ctx, lookup)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].Dropped != "" {
+			continue
+		}
+		if why := candidates.Exclusion(states[out[i].Ref]); why != "" {
+			out[i].Meta, out[i].Dropped = recommend.ItemMeta{}, "can't be picked: "+why
+		}
 	}
 	return out, nil
 }
@@ -137,7 +139,7 @@ func (v *validator) resolve(ctx context.Context, t proposed, comingSoon bool, to
 			return recommend.ItemMeta{}, tmdbDrop(err, what)
 		}
 		if !recommend.SameTitle(t.Title, d.Title, d.OriginalTitle) || !recommend.SameYear(t.Year, d.Year()) {
-			return recommend.ItemMeta{}, mismatch(t, d.Title, d.Year())
+			return recommend.ItemMeta{}, recommend.Mismatch(t.Title, t.Year, d.Title, d.Year())
 		}
 		return movieMeta(d, today), ""
 	}
@@ -146,7 +148,7 @@ func (v *validator) resolve(ctx context.Context, t proposed, comingSoon bool, to
 		return recommend.ItemMeta{}, tmdbDrop(err, what)
 	}
 	if !recommend.SameTitle(t.Title, d.Name, d.OriginalName) || !recommend.SameYear(t.Year, d.Year()) {
-		return recommend.ItemMeta{}, mismatch(t, d.Name, d.Year())
+		return recommend.ItemMeta{}, recommend.Mismatch(t.Title, t.Year, d.Name, d.Year())
 	}
 	return showMeta(d, comingSoon, today), ""
 }
@@ -156,17 +158,6 @@ func tmdbDrop(err error, what string) string {
 		return "TMDB has no " + what + ": look the title up with tmdb_search"
 	}
 	return "TMDB didn't answer for " + what + "; pick another title or submit it again later"
-}
-
-func mismatch(given proposed, actual string, year int) string {
-	name, want := actual, given.Title
-	if year > 0 {
-		name = fmt.Sprintf("%s (%d)", actual, year)
-	}
-	if given.Year > 0 {
-		want = fmt.Sprintf("%s (%d)", given.Title, given.Year)
-	}
-	return fmt.Sprintf("that tmdb_id is “%s” on TMDB, not “%s”: look the title up with tmdb_search", name, want)
 }
 
 func validRef(r library.TitleRef) bool {

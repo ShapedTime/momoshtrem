@@ -13,6 +13,17 @@ func TestSameYear(t *testing.T) {
 	}
 }
 
+// Both agents drop a mismatched id with this wording: what the id is, what
+// the model called it, and to look it up; a year only when known.
+func TestMismatch(t *testing.T) {
+	if got := Mismatch("Upload", 2020, "The Mandalorian", 2019); got != "that tmdb_id is “The Mandalorian (2019)” on TMDB, not “Upload (2020)”: look the title up with tmdb_search" {
+		t.Errorf("Mismatch = %q", got)
+	}
+	if got := Mismatch("Dark", 0, "Dark Matter", 0); got != "that tmdb_id is “Dark Matter” on TMDB, not “Dark”: look the title up with tmdb_search" {
+		t.Errorf("Mismatch without years = %q", got)
+	}
+}
+
 func TestSameTitle(t *testing.T) {
 	for _, tt := range []struct {
 		given string

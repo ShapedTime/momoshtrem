@@ -198,10 +198,9 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 			drop(p.ref.MediaType, p.ref.TMDBID, dropFull)
 			continue
 		}
-		if why := l.excluded(p.ref); why != "" {
-			drop(p.ref.MediaType, p.ref.TMDBID, why)
-			continue
-		}
+		// The name first: a remembered id that happens to be watched would
+		// otherwise drop as "watched", and the model would think the title
+		// it named is.
 		meta, names, err := metaOf(ctx, t.s.d.TMDB, p.ref, today)
 		switch {
 		case ctx.Err() != nil:
@@ -216,7 +215,11 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 		}
 		if year := deref(meta.Year); !recommend.SameTitle(p.title, names...) || !recommend.SameYear(p.year, year) {
 			// An id remembered for another title: its card would show that one
-			drop(p.ref.MediaType, p.ref.TMDBID, mismatch(p.title, p.year, meta.Title, year))
+			drop(p.ref.MediaType, p.ref.TMDBID, recommend.Mismatch(p.title, p.year, meta.Title, year))
+			continue
+		}
+		if why := l.excluded(p.ref); why != "" {
+			drop(p.ref.MediaType, p.ref.TMDBID, why)
 			continue
 		}
 		item := viewItem{MediaType: p.ref.MediaType, TMDBID: p.ref.TMDBID, MatchTag: p.matchTag, Reason: p.reason, Meta: meta}
@@ -239,19 +242,6 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 		res.Next = "Dropped picks weren't shown. Call show_picks again with replacements and an empty intro if you like, then end your turn with a short closing line."
 	}
 	return tools.Encode(res)
-}
-
-// mismatch is why a pick whose id names another title was dropped, worded
-// as R2's (runs/validate.go), so the model looks the title up.
-func mismatch(given string, givenYear int, actual string, year int) string {
-	name, want := actual, given
-	if year > 0 {
-		name = fmt.Sprintf("%s (%d)", actual, year)
-	}
-	if givenYear > 0 {
-		want = fmt.Sprintf("%s (%d)", given, givenYear)
-	}
-	return fmt.Sprintf("that tmdb_id is “%s” on TMDB, not “%s”: look the title up with tmdb_search", name, want)
 }
 
 func deref(n *int) int {

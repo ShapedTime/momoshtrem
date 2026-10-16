@@ -172,12 +172,14 @@ func TestAsk_ShowPicksChecks(t *testing.T) {
 // names, as R2's shelves do: #160's live run showed The Mandalorian's card
 // with Upload's reason when the model sent an id from memory. A mismatch
 // is dropped with what the id is, and a resubmission with the right id
-// shows.
+// shows. The name comes before the title's state: a remembered id that
+// happens to be watched drops as the title it is, not as "watched".
 func TestAsk_ShowPicksChecksTheID(t *testing.T) {
 	h := newHarness(t, newMemStore(),
 		fake.Response{Blocks: []fake.Block{toolUse("toolu_1", "show_picks", picksInput("Two.", []string{"Lighter"},
 			namedPick("tv", 1001, "Upload", 2020, "Afterlife satire", "The Good Place's warmth."),
 			namedPick("tv", 1002, "Party Down", 2015, "Ensemble", "A remake, by its year."),
+			namedPick("movie", 2003, "Palm Springs", 2020, "Time loop", "Remembered, and the id is a watched film."),
 			namedPick("movie", 2002, "the menu", 0, "Dark comedy", "Loosely named, year unsure."),
 		))}},
 		fake.Response{Blocks: []fake.Block{toolUse("toolu_2", "show_picks", picksInput("", nil,
@@ -185,6 +187,7 @@ func TestAsk_ShowPicksChecksTheID(t *testing.T) {
 		))}},
 		fake.Response{Blocks: []fake.Block{fake.Text("Enjoy.")}},
 	)
+	h.titles.set(library.TitleState{TitleRef: library.TitleRef{MediaType: "movie", TMDBID: 2003}, Plays: 1, Started: true})
 	events := h.open(`{"message":"something like Severance but lighter"}`).all()
 
 	var shown []string
@@ -221,7 +224,8 @@ func TestAsk_ShowPicksChecksTheID(t *testing.T) {
 	}
 	if why[1001] != "that tmdb_id is “Mythic Quest (2020)” on TMDB, not “Upload (2020)”: look the title up with tmdb_search" ||
 		why[1002] != "that tmdb_id is “Party Down (2009)” on TMDB, not “Party Down (2015)”: look the title up with tmdb_search" ||
-		len(answer.Dropped) != 2 {
+		why[2003] != "that tmdb_id is “Watched Film (2020)” on TMDB, not “Palm Springs (2020)”: look the title up with tmdb_search" ||
+		len(answer.Dropped) != 3 {
 		t.Errorf("show_picks answered %s", result.Content[0].Content)
 	}
 }

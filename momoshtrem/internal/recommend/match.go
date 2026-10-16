@@ -1,6 +1,7 @@
 package recommend
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -45,6 +46,21 @@ func SameYear(given, actual int) bool {
 		return true
 	}
 	return given-actual <= 1 && actual-given <= 1
+}
+
+// Mismatch is why a pick whose id names another title was dropped, for
+// the tool result: what the id is on TMDB, what the model called it, and
+// to look it up. given and actual are titles, with their years when known
+// (0 leaves the year out).
+func Mismatch(given string, givenYear int, actual string, year int) string {
+	name, want := actual, given
+	if year > 0 {
+		name = fmt.Sprintf("%s (%d)", actual, year)
+	}
+	if givenYear > 0 {
+		want = fmt.Sprintf("%s (%d)", given, givenYear)
+	}
+	return fmt.Sprintf("that tmdb_id is “%s” on TMDB, not “%s”: look the title up with tmdb_search", name, want)
 }
 
 // containsWords reports whether s holds sub as whole words; very short

@@ -151,10 +151,11 @@ func TestAsk_BusyInTheStore(t *testing.T) {
 	})
 }
 
-// A thread started on a prompt this build doesn't have can't go on.
+// A thread started on a prompt this build doesn't have (ask-v1, retired in
+// #160) can't go on.
 func TestAsk_UnknownPromptVersion(t *testing.T) {
 	store := newMemStore()
-	th, tu, _ := store.StartTurn(context.Background(), library.NewAskTurn{Title: "Old", Model: recommend.ModelOpus, PromptVersion: "ask-v0", Message: "old"})
+	th, tu, _ := store.StartTurn(context.Background(), library.NewAskTurn{Title: "Old", Model: recommend.ModelOpus, PromptVersion: "ask-v1", Message: "old"})
 	_, _ = store.EndTurn(context.Background(), library.AskTurnEnd{TurnID: tu.ID, Status: library.AskTurnDone, View: []byte(`{}`)})
 	h := newHarness(t, store)
 	if e := h.refused(`{"thread_id":` + itoa(th.ID) + `,"message":"more"}`); e.code != "thread_full" {

@@ -222,6 +222,26 @@ func TestSubmitYear(t *testing.T) {
 	}
 }
 
+// The name is checked before the title's state: a remembered id that
+// happens to be watched drops as the title it really is, not as "watched",
+// which would tell the model the title it named is watched.
+func TestSubmitNameBeforeState(t *testing.T) {
+	b, _ := newTestBoard(&fakeTitles{watched: map[int]bool{1001: true}})
+	in := shelfOf("names", "other", 1002, 6)
+	wrong := item(1001, "Remembered as Silo.")
+	wrong["title"] = "Silo"
+	in["items"] = append(in["items"].([]map[string]any), wrong)
+	res, msg := runTool(t, b.tools()[0], in)
+	if msg != "" || res["titles"] != 6.0 {
+		t.Fatalf("result = %v %s", res, msg)
+	}
+	d := res["dropped"].([]any)
+	if len(d) != 1 || d[0].(map[string]any)["tmdb_id"] != 1001.0 ||
+		d[0].(map[string]any)["why"] != "that tmdb_id is “Movie 1001 (2024)” on TMDB, not “Silo (2024)”: look the title up with tmdb_search" {
+		t.Errorf("dropped = %v", d)
+	}
+}
+
 func TestClipAndSlug(t *testing.T) {
 	if got := clip("short", 10); got != "short" {
 		t.Errorf("clip = %q", got)
