@@ -2,6 +2,8 @@ import { http, HttpResponse } from 'msw';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 import type { TrendingResults } from '@/types/tmdb';
 import { CATALOG } from '../fixtures/catalog';
+import { scenario } from '../scenario';
+import { apiError } from './util';
 
 /** Just enough of the legacy web routes for the old pages to render in mock mode. */
 const trending: TrendingResults = {
@@ -28,7 +30,9 @@ const trending: TrendingResults = {
 };
 
 export const legacyHandlers = [
-  http.get('*/api/tmdb/trending', () => HttpResponse.json(trending)),
+  http.get('*/api/tmdb/trending', () =>
+    scenario() === 'for-you-no-hero' ? apiError(502, 'tmdb_unavailable', 'TMDB didn’t answer. Try again in a moment.') : HttpResponse.json(trending)
+  ),
   http.get('*/api/library/movies', () => HttpResponse.json<{ movies: LibraryMovie[] }>({ movies: [] })),
   http.get('*/api/library/shows', () => HttpResponse.json<{ shows: LibraryShow[] }>({ shows: [] })),
 ];

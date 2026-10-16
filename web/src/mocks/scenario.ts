@@ -53,6 +53,7 @@
  * - `trakt-pending`: off, and a device code from Connect is never approved, so the code and waiting
  *   screens hold (until Cancel or the code expires).
  * - `trakt-loading`: GET /integrations/trakt never answers (For You's loading state).
+ * - `for-you-no-hero`: every /me read and /api/tmdb/trending fail, so For You has nothing to pick a hero from.
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -95,7 +96,8 @@ export type MockScenario =
   | 'up-next-empty'
   | 'me-error'
   | 'trakt-pending'
-  | 'trakt-loading';
+  | 'trakt-loading'
+  | 'for-you-no-hero';
 
 let override: MockScenario | null = null;
 

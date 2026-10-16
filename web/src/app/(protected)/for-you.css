@@ -32,8 +32,10 @@
   .why-line { color: var(--text-1); opacity: 0.86; }
 
   /* ---- Body: rails under the hero ----------------------------------------- */
-  .home-body { padding-top: var(--sp-2); }
-  @media (min-width: 1024px) { .home-body { margin-top: calc(var(--sp-6) * -1); position: relative; } }
+  /* Under the hero the body tucks into its fade; without one (no picks) it starts below the top bar */
+  .home-body { padding-top: var(--sp-8); }
+  .home-hero + .home-body { padding-top: var(--sp-2); }
+  @media (min-width: 1024px) { .home-hero + .home-body { margin-top: calc(var(--sp-6) * -1); position: relative; } }
   .rail-note { padding: var(--sp-4) var(--sp-5); border-radius: var(--r-lg); background: var(--surface-1); border: 1px solid var(--line-1); color: var(--text-2); }
 
   /* ---- Without Trakt: "Make this page yours" ------------------------------ */
