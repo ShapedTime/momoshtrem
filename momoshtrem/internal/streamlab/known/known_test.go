@@ -65,11 +65,16 @@ func TestJudge(t *testing.T) {
 		{"#195 on 2 of 4 reps", "play-ok", reps("fail:#195", "pass", "fail:#195", "pass"), prod, report.Fail, "#195"},
 		{"#195 on every rep", "play-ok", reps("fail:#195", "fail:#195", "fail:#195", "fail:#195", "fail:#195"), prod, report.Fail, "#195"},
 		{"#195 on the only rep", "play-ok", reps("fail:#195"), prod, report.Fail, "#195"},
-		{"#195 on the only rep of 1 in 14", "play-ok", reps("fail:#195"), runOf(1, 14), report.XFail, "#195"},
+		{"#195 on the only rep, rare in the run", "play-ok", reps("fail:#195"), runOf(1, 14), report.Fail, "#195"},
+		{"#195 once in 3 (confirmed)", "play-ok", reps("fail:#195", "pass", "pass"), runOf(1, 16), report.XFail, "#195"},
+		{"#195 again on a confirmation", "play-ok", reps("fail:#195", "fail:#195", "pass"), runOf(2, 16), report.Fail, "#195"},
+		{"#195 once in 2", "play-ok", reps("fail:#195", "pass"), runOf(1, 28), report.XFail, "#195"},
 		{"#195 on the only rep of 4 in 14", "play-ok", reps("fail:#195"), runOf(4, 14), report.Fail, "#195"},
 		{"#195 on every rep of the run", "play-ok", reps("fail:#195"), runOf(14, 14), report.Fail, "#195"},
 		{"#195 on every rep of a scenario, rare in the run", "play-ok", reps("fail:#195", "fail:#195"), runOf(2, 28), report.Fail, "#195"},
 		{"#195 on 1 of 4, rare in the run", "play-ok", reps("pass", "fail:#195", "pass", "pass"), runOf(1, 56), report.XFail, "#195"},
+		{"#195 in 3 scenarios of 14, once each (confirmed)", "play-ok", reps("fail:#195", "pass", "pass"), runOf(3, 42), report.XFail, "#195"},
+		{"#195 in many scenarios", "play-ok", reps("fail:#195", "pass", "pass"), runOf(12, 42), report.Fail, "#195"},
 		{"#195 absent isn't a fix", "play-ok", reps("pass", "pass"), known.Env{}, report.Pass, ""},
 	}
 	for _, tt := range tests {
@@ -82,6 +87,22 @@ func TestJudge(t *testing.T) {
 				t.Errorf("a %s verdict says nothing", v.Status)
 			}
 		})
+	}
+}
+
+func TestFired(t *testing.T) {
+	o := func(status, id string) known.Outcome { return known.Outcome{Status: report.Status(status), Known: id} }
+	if id, ok := known.Fired(map[string]known.Outcome{"play-ok": o("fail", "#195")}); !ok || id != "#195" {
+		t.Errorf("Fired = %q, %v", id, ok)
+	}
+	for _, rep := range []map[string]known.Outcome{
+		{"play-ok": o("pass", "")},
+		{"play-ok": o("fail", "")},
+		{"abort-lag": o("fail", "F12")}, // deterministic
+	} {
+		if id, ok := known.Fired(rep); ok {
+			t.Errorf("Fired(%v) = %q", rep, id)
+		}
 	}
 }
 

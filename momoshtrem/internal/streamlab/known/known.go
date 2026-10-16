@@ -8,14 +8,16 @@
 // at a wanted piece with the seeder connected, measured when the read
 // broke; an F12 lag ends within the read timeout). It also explains them
 // only at the rate it's known for. An intermittent issue (#195 hits about
-// 1-4% of reads) that fires on every repetition, or on more than MaxRate
-// of them, is a fail: a regression that breaks every read must not hide
-// behind it. The rate is counted over a scenario's repetitions and over
-// the whole run's (Tally): a gate run of one repetition per scenario
-// tolerates one stray stall, not a stall in every scenario. Deterministic
-// suspects (F2, F12, ...) reproduce on every repetition by nature; their
-// entries say so (MaxRate Always) and rely on their signature to stay
-// narrow.
+// 1-4% of reads) that fires on every repetition, or on two or more and
+// more than MaxRate of them, is a fail: a regression that breaks every
+// read must not hide behind it. The rate is counted over a scenario's
+// repetitions and over the whole run's (Tally). One firing among several
+// repetitions can't tell a regression from the known rate, so the runner
+// confirms it: a scenario with fewer than ConfirmBelow measured
+// repetitions where one fired gets ConfirmReps more, and a regression
+// fires again. Deterministic suspects (F2, F12, ...) reproduce on every
+// repetition by nature; their entries say so (MaxRate Always) and rely on
+// their signature to stay narrow.
 package known
 
 import (
@@ -29,6 +31,14 @@ import (
 // DefaultMaxRate is the share of repetitions an intermittent issue may
 // fire on and stay an expected failure.
 const DefaultMaxRate = 0.25
+
+// Confirmation repetitions: when an intermittent issue fires in a
+// scenario with fewer than ConfirmBelow measured repetitions, the runner
+// runs ConfirmReps more and judges over them all.
+const (
+	ConfirmBelow = 2
+	ConfirmReps  = 2
+)
 
 // Always is the MaxRate of a deterministic issue: it fires on every
 // repetition while it exists.
@@ -55,10 +65,29 @@ type Tally struct {
 	Fired, Reps int
 }
 
-// over reports whether the tally is past rate: every repetition, or more
-// than rate of them.
+// over reports whether the tally is past rate: every repetition, or two
+// or more and more than rate of them.
+//
+// A single firing is over only when it's the only repetition: among
+// several, one stray firing is the known rate's to explain.
 func (t Tally) over(rate float64) bool {
-	return t.Reps > 0 && (t.Fired == t.Reps || float64(t.Fired)/float64(t.Reps) > rate)
+	return t.Reps > 0 && (t.Fired == t.Reps || (t.Fired >= 2 && float64(t.Fired)/float64(t.Reps) > rate))
+}
+
+// Fired reports whether an intermittent issue's signature is in the
+// repetition's checks (by check ID), and which issue's.
+func Fired(rep map[string]Outcome) (string, bool) {
+	for _, is := range Issues {
+		if !is.Intermittent() {
+			continue
+		}
+		for _, c := range is.Checks {
+			if o, ok := rep[c]; ok && o.Status == report.Fail && o.Known == is.ID {
+				return is.ID, true
+			}
+		}
+	}
+	return "", false
 }
 
 // TallyRun counts each intermittent issue over a run: reps are every
@@ -209,9 +238,10 @@ var Issues = []Issue{
 		Ref:    "#195",
 		Checks: []string{"play-ok"},
 		Doc: "anacrolix v1.60.0's connection writer can miss a wakeup; with one useful peer a read then waits until the " +
-			"keep-alive (60 s), past the lab's read timeout. Its signature: every failed read of the repetition timed out " +
-			"at a wanted, incomplete piece with the seeder connected (swarm.Stalled), on at most two pieces. It hits about " +
-			"1-4% of reads, so firing on every repetition, or on more than 25% of them, is a fail.",
+			"keep-alive (60 s), past the lab's read timeout. Its signature: every broken body of the repetition was silent " +
+			"for half the read timeout or more and broke at a wanted, incomplete piece with the seeder connected " +
+			"(swarm.Stalled), on at most two pieces. It hits about 1-4% of reads: one firing is confirmed with more " +
+			"repetitions, and firing on every repetition, or on two or more and over 25% of them, is a fail.",
 	},
 }
 
@@ -258,9 +288,9 @@ type Verdict struct {
 //   - fail when a failure carries no signature, or one of an issue that
 //     doesn't explain this check or can't happen in env, or of a
 //     deterministic issue the scenario doesn't guard;
-//   - fail when an intermittent issue fired on every repetition, or on
-//     more than its MaxRate of them: over the scenario's repetitions when
-//     it had two or more, and over the run's (env.Run) always;
+//   - fail when an intermittent issue fired on every repetition, or on two
+//     or more and more than its MaxRate of them: over the scenario's
+//     repetitions, and over the run's (env.Run);
 //   - xfail when known issues explain every failure;
 //   - xpass when it passed every time though a deterministic issue the
 //     scenario guards, and that can happen here, was expected to fail it;
@@ -322,7 +352,7 @@ func Judge(check string, reps []Outcome, env Env) Verdict {
 			}
 			why := ""
 			switch {
-			case n >= 2 && here.over(is.Rate()):
+			case here.over(is.Rate()):
 				why = fmt.Sprintf("its signature on %d of this scenario's %d reps", k, n)
 			case run.over(is.Rate()):
 				why = fmt.Sprintf("its signature on %d of the run's %d reps", run.Fired, run.Reps)

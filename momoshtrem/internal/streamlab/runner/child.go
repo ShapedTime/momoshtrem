@@ -38,6 +38,11 @@ func (s Sets) Set(v string) error {
 	return nil
 }
 
+// ParentPipeEnv, set to 1, tells a child that its stdin is a pipe its
+// parent holds open: EOF means the parent died, and the child quits with
+// a goroutine dump rather than run on as an orphan.
+const ParentPipeEnv = "STREAMLAB_PARENT_PIPE"
+
 // RunChild runs one repetition in this process, as the runner asks with
 // ChildCommand: it writes rep.json to --out and returns the exit code.
 // Logs go to stderr, which the runner keeps as child.log.
@@ -54,6 +59,9 @@ func RunChild(args []string, stderr io.Writer) int {
 		return ChildToolError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: logLevel()})))
+	if os.Getenv(ParentPipeEnv) == "1" {
+		go watchParent()
+	}
 
 	sc, ok := scenario.Lookup(*name)
 	if !ok || *out == "" {
@@ -74,8 +82,8 @@ func RunChild(args []string, stderr io.Writer) int {
 		code = ChildToolError
 		fmt.Fprintf(stderr, "%s: %v\n", ChildCommand, err)
 	}
-	env := report.CollectEnv()
-	r.Env = &env
+	env, tool := report.CollectEnv(), report.ToolInfo(".")
+	r.Env, r.Tool = &env, &tool
 	if err := report.WriteJSON(filepath.Join(*out, "rep.json"), r); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", ChildCommand, err)
 		return ChildToolError

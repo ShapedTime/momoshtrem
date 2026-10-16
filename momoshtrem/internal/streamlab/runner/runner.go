@@ -95,25 +95,31 @@ func (r *Result) Errored() bool {
 }
 
 // Run runs the scenarios. The error is a tool error that stopped the run
-// (bad options, a folder it can't write); a scenario the tool couldn't
-// run is an error verdict in the result.
+// (bad options, a folder it can't write, an interrupt); a scenario the
+// tool couldn't run is an error verdict in the result.
 func Run(ctx context.Context, opts Options) (*Result, error) {
-	if len(opts.Scenarios) == 0 {
+	switch {
+	case len(opts.Scenarios) == 0:
 		return nil, errors.New("no scenario to run")
-	}
-	if opts.Reps < 1 {
+	case opts.Reps < 1:
 		return nil, errors.New("reps must be at least 1")
+	case opts.Warmup < 0:
+		return nil, errors.New("warmup can't be negative")
+	case opts.Timeout < 0:
+		return nil, errors.New("the hard timeout must be positive (0: the scenario's)")
+	case opts.GOMAXPROCS < 0:
+		return nil, errors.New("gomaxprocs can't be negative")
 	}
 	if err := checkSets(opts.Scenarios, opts.Sets); err != nil {
 		return nil, err
 	}
 	params := make([]scenario.Params, len(opts.Scenarios))
-	for i, sc := range opts.Scenarios {
+	for si, sc := range opts.Scenarios {
 		p, err := sc.Resolve(setsFor(sc, opts.Sets))
 		if err != nil {
 			return nil, err
 		}
-		params[i] = p
+		params[si] = p
 	}
 	exe := opts.Exe
 	if exe == "" {
@@ -123,7 +129,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}
 	started := time.Now()
-	runID := started.Format("20060102-150405")
+	runID := fmt.Sprintf("%s-%d", started.Format("20060102-150405"), os.Getpid())
 	dir := opts.Out
 	if dir == "" {
 		dir = filepath.Join(Dir(), "runs", runID)
@@ -137,6 +143,8 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		os.Symlink(runID, latest) // a convenience: ignore a failure
 	}
 
+	// The parent's view of the build and the machine; each report takes
+	// its children's, which ran the scenario (S8's ab runs two binaries).
 	tool := report.ToolInfo(".")
 	env := report.CollectEnv()
 	env.GOMAXPROCS = cmp.Or(opts.GOMAXPROCS, env.GOMAXPROCS)
@@ -149,23 +157,47 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// intermittent issue's rate counts over the whole run, so once all
 	// have run, the reports are judged again with the run's tally.
 	var done []scenarioRun
-	for i, sc := range opts.Scenarios {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	for si, sc := range opts.Scenarios {
 		scDir := filepath.Join(dir, sc.Name)
 		if err := os.MkdirAll(scDir, 0o755); err != nil {
 			return nil, err
 		}
 		sets := setsFor(sc, opts.Sets)
 		timeout := cmp.Or(opts.Timeout, sc.HardTimeout())
-		sr := scenarioRun{sc: sc, p: params[i], dir: scDir, run: run}
+		sr := scenarioRun{sc: sc, p: params[si], dir: scDir, run: run}
 		sr.run.TimeoutS = timeout.Seconds()
 		scStart := time.Now()
-		for i := 1 - opts.Warmup; i <= opts.Reps; i++ {
-			rep := runRep(ctx, exe, sc, i, opts.Warmup > 0 && i <= 0, sets, opts, scDir, timeout)
+		next := func(n int, warmup, confirm bool) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			rep := runRep(ctx, exe, sc, n, warmup, sets, opts, scDir, timeout)
+			if err := ctx.Err(); err != nil {
+				return err // interrupted: the repetition was killed
+			}
+			rep.Confirm = confirm
 			sr.reps = append(sr.reps, rep)
 			progress(opts.Progress, sc.Name, rep)
+			return nil
+		}
+		for n := 1 - opts.Warmup; n <= opts.Reps; n++ {
+			if err := next(n, n <= 0, false); err != nil {
+				return nil, err
+			}
+		}
+		// An intermittent issue that fired in too few repetitions to tell
+		// from its known rate: confirm it with more (known.ConfirmReps).
+		if id, ok := needsConfirmation(sr.reps); ok {
+			if opts.Progress != nil {
+				fmt.Fprintf(opts.Progress, "%-18s %s fired in under %d measured reps: %d confirmation reps\n",
+					sc.Name, id, known.ConfirmBelow, known.ConfirmReps)
+			}
+			for c := 1; c <= known.ConfirmReps; c++ {
+				if err := next(opts.Reps+c, false, true); err != nil {
+					return nil, err
+				}
+			}
+			sr.run.Confirmations = known.ConfirmReps
 		}
 		sr.run.WallS = time.Since(scStart).Seconds()
 		kenv := known.Env{MIMEResolvesMKV: resolvesMKV, Guards: sc.Guards}
@@ -194,12 +226,30 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			}
 		}
 	}
+	if len(res.Reports) > 0 {
+		res.Index.Tool, res.Index.Env = res.Reports[0].Tool, res.Reports[0].Env
+	}
 	run.WallS = time.Since(started).Seconds()
 	res.Index.Run = run
 	if err := res.Index.Write(dir); err != nil {
 		return nil, fmt.Errorf("writing the run's index: %w", err)
 	}
 	return res, nil
+}
+
+// needsConfirmation reports whether an intermittent issue fired in a
+// scenario with fewer than known.ConfirmBelow measured repetitions, and
+// which.
+func needsConfirmation(reps []report.Rep) (string, bool) {
+	measured := 0
+	fired := ""
+	for _, m := range outcomes([]scenarioRun{{reps: reps}}) {
+		measured++
+		if id, ok := known.Fired(m); ok && fired == "" {
+			fired = id
+		}
+	}
+	return fired, fired != "" && measured < known.ConfirmBelow
 }
 
 // scenarioRun is one scenario's repetitions in a run.
@@ -291,11 +341,24 @@ func runRep(ctx context.Context, exe string, sc *scenario.Scenario, i int, warmu
 	}
 	defer logFile.Close()
 
+	// The child's temp files (the stack's folder) go in a folder of its
+	// own, removed whatever becomes of the child.
+	tmp, err := os.MkdirTemp("", "streamlab-rep-*")
+	if err != nil {
+		return failed(report.RepError, "creating a temp folder: %v", err)
+	}
+	defer removeAll(tmp)
+
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout, cmd.Stderr = logFile, logFile
-	cmd.Env = append(os.Environ(), "GOTRACEBACK=all")
+	cmd.Env = append(os.Environ(), "GOTRACEBACK=all", "TMPDIR="+tmp, ParentPipeEnv+"=1")
 	if opts.GOMAXPROCS > 0 {
 		cmd.Env = append(cmd.Env, "GOMAXPROCS="+strconv.Itoa(opts.GOMAXPROCS))
+	}
+	// The child's stdin stays open as long as this process lives: when it
+	// dies, the child sees EOF and quits with a goroutine dump.
+	if _, err := cmd.StdinPipe(); err != nil {
+		return failed(report.RepError, "the child's stdin: %v", err)
 	}
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
@@ -404,8 +467,11 @@ func progress(w io.Writer, name string, rep report.Rep) {
 		return
 	}
 	label := fmt.Sprintf("rep %d", rep.Rep)
-	if rep.Warmup {
+	switch {
+	case rep.Warmup:
 		label = "warm-up"
+	case rep.Confirm:
+		label = fmt.Sprintf("confirm %d", rep.Rep)
 	}
 	var bad []string
 	for _, c := range rep.Checks {
@@ -417,7 +483,7 @@ func progress(w io.Writer, name string, rep report.Rep) {
 			bad = append(bad, s)
 		}
 	}
-	line := fmt.Sprintf("%-18s %-8s %-7s %5.1f s", name, label, rep.Status, rep.WallMS/1000)
+	line := fmt.Sprintf("%-18s %-9s %-7s %5.1f s", name, label, rep.Status, rep.WallMS/1000)
 	if len(bad) > 0 {
 		line += "  failing: " + strings.Join(bad, ", ")
 	}
@@ -441,19 +507,29 @@ func build(sr scenarioRun, tool report.Tool, env report.Env, kenv known.Env, con
 		Findings: []string{},
 	}
 	var measured []report.Rep
+	childEnv := false
 	for _, rep := range reps {
 		for _, a := range rep.Artifacts {
 			r.Artifacts = append(r.Artifacts, a)
 		}
 		if rep.Warmup {
+			// A warm-up's numbers are dropped, its correctness isn't: one
+			// that hung or crashed fails the scenario.
+			if rep.Status == report.RepTimeout || rep.Status == report.RepCrash {
+				r.Verdict = report.VerdictFail
+			}
 			continue
 		}
 		measured = append(measured, rep)
 		if rep.Config.Fingerprint != "" {
 			r.Config.Fingerprint = rep.Config.Fingerprint
 		}
-		if rep.Env != nil {
-			r.Env.GOMAXPROCS = rep.Env.GOMAXPROCS
+		// The children ran the scenario: their build and machine.
+		if rep.Env != nil && !childEnv {
+			r.Env, childEnv = *rep.Env, true
+		}
+		if rep.Tool != nil && r.Tool == tool {
+			r.Tool = *rep.Tool
 		}
 		switch rep.Status {
 		case report.RepTimeout, report.RepCrash:

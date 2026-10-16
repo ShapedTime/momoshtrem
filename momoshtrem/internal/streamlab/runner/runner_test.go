@@ -1,10 +1,13 @@
 package runner_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -37,17 +40,19 @@ func fakeChild(mode string, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 3
 	}
-	switch mode {
-	case "hang":
+	switch {
+	case mode == "hang", mode == "hang-warmup" && *rep <= 0:
 		select {} // the runner's SIGQUIT dumps this
-	case "crash":
+	case mode == "crash":
 		panic("fake child crashed")
-	case "tool":
+	case mode == "tool":
 		report.WriteJSON(filepath.Join(*out, "rep.json"), report.Rep{Rep: *rep, Status: report.RepError, Error: "no seeder"})
 		return runner.ChildToolError
 	}
 	r := report.Rep{
 		Rep: *rep, Status: report.RepOK, Config: report.Config{Fingerprint: "fp"},
+		Env:     &report.Env{GOMAXPROCS: runtime.GOMAXPROCS(0)},
+		Notes:   []string{"tmpdir=" + os.Getenv("TMPDIR"), "pipe=" + os.Getenv(runner.ParentPipeEnv)},
 		Metrics: map[string]float64{"etag_changes": float64(*rep)},
 		Checks: []report.RepCheck{
 			{ID: "script", Status: report.Pass},
@@ -58,8 +63,13 @@ func fakeChild(mode string, args []string) int {
 			{ID: "etag-stable", Status: report.Fail, Known: "F2", Evidence: "three ETags"},
 		},
 	}
-	// stall:<scenario>: that scenario's playback hits the known stall.
-	if victim, ok := strings.CutPrefix(mode, "stall:"); ok && victim == *name {
+	// stall:<scenario>: that scenario's playback hits the known stall on
+	// every rep; stall1:<scenario>, on its first only.
+	victim, every := strings.CutPrefix(mode, "stall:")
+	if !every {
+		victim, _ = strings.CutPrefix(mode, "stall1:")
+	}
+	if victim == *name && (every || *rep == 1) {
 		r.Checks[3] = report.RepCheck{ID: "play-ok", Status: report.Fail, Known: "#195", Evidence: "a known stall"}
 	}
 	report.WriteJSON(filepath.Join(*out, "rep.json"), r)
@@ -67,6 +77,15 @@ func fakeChild(mode string, args []string) int {
 }
 
 func run(t *testing.T, mode string, opts runner.Options, names ...string) *runner.Result {
+	t.Helper()
+	res, err := runCtx(t.Context(), t, mode, opts, names...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func runCtx(ctx context.Context, t *testing.T, mode string, opts runner.Options, names ...string) (*runner.Result, error) {
 	t.Helper()
 	t.Setenv(fakeEnv, mode)
 	exe, err := os.Executable()
@@ -88,11 +107,7 @@ func run(t *testing.T, mode string, opts runner.Options, names ...string) *runne
 	if opts.Reps == 0 {
 		opts.Reps = 1
 	}
-	res, err := runner.Run(t.Context(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return res
+	return runner.Run(ctx, opts)
 }
 
 // A known issue on every rep of a deterministic suspect is an xfail; the
@@ -120,6 +135,19 @@ func TestRunReports(t *testing.T) {
 	}
 	if r.Run.GOMAXPROCS != 2 || r.Config.Fingerprint != "fp" || r.Scenario.Params["seed"] != "1" {
 		t.Errorf("run %+v, config %+v, params %v", r.Run, r.Config, r.Scenario.Params)
+	}
+	// The child's view: GOMAXPROCS as it ran, its own temp folder (gone
+	// now), and the pipe to its parent.
+	if r.Env.GOMAXPROCS != 2 {
+		t.Errorf("the child ran with GOMAXPROCS %d, want 2", r.Env.GOMAXPROCS)
+	}
+	notes := strings.Join(r.Reps[1].Notes, " ")
+	tmp, _ := strings.CutPrefix(r.Reps[1].Notes[0], "tmpdir=")
+	if !strings.Contains(notes, "pipe=1") || !strings.Contains(filepath.Base(tmp), "streamlab-rep-") {
+		t.Errorf("child env: %s", notes)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("the child's temp folder %s is still there: %v", tmp, err)
 	}
 	for _, f := range []string{"etag-stability/report.json", "etag-stability/report.md", "etag-stability/rep-1/rep.json",
 		"etag-stability/warmup-1/child.log", "index.json", "index.md"} {
@@ -165,20 +193,85 @@ func TestRunToolError(t *testing.T) {
 	}
 }
 
-// #195 in one scenario of five is a stray stall: an xfail. In one of two,
-// it's half the run: a fail.
-func TestRunTally(t *testing.T) {
+// #195 on a scenario's only rep gets two confirmation reps. A stray stall
+// doesn't come back: an xfail. A regression does: a fail.
+func TestRunConfirms(t *testing.T) {
 	five := []string{"etag-stability", "scrub", "cold-start", "steady-play", "seek-fwd"}
-	res := run(t, "stall:scrub", runner.Options{}, five...)
+	res := run(t, "stall1:scrub", runner.Options{}, five...)
 	if res.Failed() {
-		t.Errorf("one stall in five scenarios failed the run")
+		t.Errorf("a stall that didn't come back failed the run")
 	}
-	if c := playOK(res, "scrub"); c.Status != report.XFail || c.Known != "#195" || !strings.Contains(c.Evidence, "1 of the run's 5") {
+	scrub := report.Report{}
+	for _, r := range res.Reports {
+		if r.Scenario.Name == "scrub" {
+			scrub = *r
+		}
+	}
+	if len(scrub.Reps) != 3 || scrub.Run.Confirmations != 2 || !scrub.Reps[1].Confirm || !scrub.Reps[2].Confirm {
+		t.Fatalf("scrub's reps = %+v, run %+v", scrub.Reps, scrub.Run)
+	}
+	if c := playOK(res, "scrub"); c.Status != report.XFail || c.Known != "#195" || !strings.Contains(c.Evidence, "1 of the run's 7") {
 		t.Errorf("scrub's play-ok = %+v", c)
 	}
-	res = run(t, "stall:scrub", runner.Options{}, "etag-stability", "scrub")
+	for _, r := range res.Reports {
+		if r.Scenario.Name != "scrub" && len(r.Reps) != 1 {
+			t.Errorf("%s got %d reps, want 1: only a firing scenario is confirmed", r.Scenario.Name, len(r.Reps))
+		}
+	}
+
+	res = run(t, "stall:scrub", runner.Options{}, five...)
 	if c := playOK(res, "scrub"); !res.Failed() || c.Status != report.Fail || c.Known != "#195" {
-		t.Errorf("one stall in two scenarios: verdict %s, play-ok %+v", res.Index.Verdict, c)
+		t.Errorf("a stall on every confirmation: verdict %s, play-ok %+v", res.Index.Verdict, c)
+	}
+
+	// Two measured reps are enough to judge: no confirmation.
+	res = run(t, "stall1:scrub", runner.Options{Reps: 2}, "etag-stability", "scrub")
+	if c := playOK(res, "scrub"); res.Failed() || c.Status != report.XFail || len(res.Reports[1].Reps) != 2 {
+		t.Errorf("one stall in two reps: verdict %s, play-ok %+v", res.Index.Verdict, c)
+	}
+}
+
+// A warm-up that hangs fails the scenario: warm-ups drop timings, not
+// correctness.
+func TestRunWarmupHang(t *testing.T) {
+	res := run(t, "hang-warmup", runner.Options{Warmup: 1, Timeout: 2 * time.Second})
+	r := res.Reports[0]
+	if !res.Failed() || r.Reps[0].Status != report.RepTimeout || r.Reps[1].Status != report.RepOK {
+		t.Errorf("verdict %s, reps %+v", res.Index.Verdict, r.Reps)
+	}
+	if res.Index.Scenarios[0].Error == "" {
+		t.Error("the index doesn't show the warm-up's hang")
+	}
+}
+
+// Ctrl-C stops the run: the child is killed, Run returns the context's
+// error.
+func TestRunInterrupt(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(time.Second, cancel)
+	start := time.Now()
+	_, err := runCtx(ctx, t, "hang", runner.Options{Timeout: time.Minute}, "etag-stability", "scrub")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Run = %v, want context.Canceled", err)
+	}
+	if took := time.Since(start); took > 30*time.Second {
+		t.Errorf("the interrupt took %v", took)
+	}
+}
+
+func TestRunRefusesBadOptions(t *testing.T) {
+	sc, _ := scenario.Lookup("etag-stability")
+	for _, opts := range []runner.Options{
+		{Reps: 1, Warmup: -1},
+		{Reps: 1, Timeout: -time.Second},
+		{Reps: 0},
+		{Reps: 1, GOMAXPROCS: -2},
+	} {
+		opts.Scenarios = []*scenario.Scenario{sc}
+		opts.Out = t.TempDir()
+		if _, err := runner.Run(t.Context(), opts); err == nil {
+			t.Errorf("Run(%+v) accepted", opts)
+		}
 	}
 }
 

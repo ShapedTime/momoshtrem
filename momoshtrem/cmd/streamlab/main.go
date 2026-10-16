@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/streamlab/known"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/runner"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/scenario"
 )
@@ -93,7 +94,7 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", "", "a YAML config laid over the defaults (prod.yaml, say)")
 	out := fs.String("out", "", "the run's folder (default .streamlab/runs/<id> at the repo root)")
 	gomaxprocs := fs.Int("gomaxprocs", 0, "pin the repetitions' GOMAXPROCS (0: the default)")
-	timeout := fs.Duration("timeout", 0, "each repetition's hard timeout (0: the scenario's)")
+	timeout := fs.Duration("timeout", 0, "each repetition's hard timeout, positive (0: the scenario's)")
 	sets := runner.Sets{}
 	fs.Var(sets, "set", "override a scenario param, k=v (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -137,11 +138,12 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "\n%s in %s: %s\n", strings.ToUpper(string(res.Index.Verdict)), time.Since(start).Round(time.Second),
 		filepath.Join(res.Dir, "index.md"))
-	switch {
-	case res.Errored():
-		return exitTool
-	case res.Failed():
+	// The exit code follows the verdict printed above.
+	switch res.Index.Verdict {
+	case report.VerdictFail:
 		return exitFail
+	case report.VerdictError:
+		return exitTool
 	}
 	return exitPass
 }
@@ -208,7 +210,8 @@ func explainCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if is, ok := known.Lookup(name); ok {
 		found = true
-		rate := fmt.Sprintf("intermittent: an xfail on at most %.0f%% of reps, never all", is.Rate()*100)
+		rate := fmt.Sprintf("intermittent: an xfail on at most %.0f%% of reps and never all; a firing in a scenario with under %d reps "+
+			"gets %d confirmation reps, and a second firing over the rate fails", is.Rate()*100, known.ConfirmBelow, known.ConfirmReps)
 		if !is.Intermittent() {
 			rate = "deterministic: fires on every rep while it exists"
 		}
@@ -259,15 +262,26 @@ func kindNote(kind string) string {
 	return "Timing metrics depend on the machine: they get a verdict only from an interleaved A/B on one machine (PLAN D5)."
 }
 
+// firstSentence is a doc's first sentence, cut at a word boundary to
+// about 100 characters, and before a parenthesis it would cut through.
 func firstSentence(doc string) string {
 	p, _, _ := strings.Cut(strings.TrimSpace(doc), "\n\n")
+	p = strings.Join(strings.Fields(p), " ")
 	if i := strings.Index(p, ". "); i >= 0 {
 		p = p[:i+1]
 	}
-	if i := strings.Index(p, ": "); i >= 0 && len(p) > 90 {
-		p = p[:i] + "."
+	const limit = 100
+	if len(p) <= limit {
+		return p
 	}
-	return p
+	cut := strings.LastIndex(p[:limit], " ")
+	if cut <= 0 {
+		cut = limit
+	}
+	if strings.Count(p[:cut], "(") > strings.Count(p[:cut], ")") {
+		cut = strings.LastIndex(p[:cut], " (")
+	}
+	return strings.TrimRight(p[:cut], ",;: ") + " …"
 }
 
 // wrap folds text at 100 columns.

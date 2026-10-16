@@ -106,29 +106,32 @@ func loadAvg() []float64 {
 	return out
 }
 
-// ToolInfo is the tool's name, version and the tree's git state, read
-// from the build when it was stamped (go build) and from git in dir
-// otherwise (go run stamps nothing).
+// ToolInfo is the tool's name, version and the tree's git state: from git
+// in dir, else from the build's stamp. git comes first because go build
+// stamps the wrong tree for a git worktree nested in its main checkout (it
+// looks for a .git folder, and a worktree has a .git file), and go run
+// stamps nothing.
 func ToolInfo(dir string) Tool {
 	t := Tool{Name: "streamlab", Version: "dev"}
+	t.Git.Commit = git(dir, "rev-parse", "HEAD")
+	if t.Git.Commit != "" {
+		t.Git.Dirty = git(dir, "status", "--porcelain") != ""
+		t.Git.Branch = git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		if v := bi.Main.Version; v != "" && v != "(devel)" {
 			t.Version = v
 		}
 		for _, s := range bi.Settings {
-			switch s.Key {
-			case "vcs.revision":
+			switch {
+			case t.Git.Commit != "":
+			case s.Key == "vcs.revision":
 				t.Git.Commit = s.Value
-			case "vcs.modified":
+			case s.Key == "vcs.modified":
 				t.Git.Dirty = s.Value == "true"
 			}
 		}
 	}
-	if t.Git.Commit == "" {
-		t.Git.Commit = git(dir, "rev-parse", "HEAD")
-		t.Git.Dirty = git(dir, "status", "--porcelain") != ""
-	}
-	t.Git.Branch = git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	return t
 }
 

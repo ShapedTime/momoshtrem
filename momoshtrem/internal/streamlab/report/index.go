@@ -59,9 +59,15 @@ func NewIndexEntry(r *Report, wallS float64, key []string, reportPath string) In
 		}
 	}
 	for _, rep := range r.Reps {
-		if rep.Error != "" && rep.Status != RepOK {
-			e.Error = rep.Error
+		if rep.Error == "" || rep.Status == RepOK {
+			continue
 		}
+		// A warm-up's tool error doesn't change the verdict; its hang or
+		// crash does.
+		if rep.Warmup && rep.Status != RepTimeout && rep.Status != RepCrash {
+			continue
+		}
+		e.Error = rep.Error
 	}
 	return e
 }

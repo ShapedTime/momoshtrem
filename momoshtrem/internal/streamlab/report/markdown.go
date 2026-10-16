@@ -12,12 +12,18 @@ import (
 func (r *Report) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# streamlab: %s: %s\n\n", r.Scenario.Name, strings.ToUpper(string(r.Verdict)))
+	fmt.Fprintf(&b, "**Why:** %s\n\n", r.why())
 	if doc := firstParagraph(r.Scenario.Doc); doc != "" {
 		fmt.Fprintf(&b, "%s\n\n", doc)
 	}
 	fmt.Fprintf(&b, "- **Guards:** %s\n", orDash(strings.Join(r.Scenario.Guards, ", ")))
-	fmt.Fprintf(&b, "- **Run:** %s, %d reps (+%d warm-up discarded), %.1f s, seed %d, config %s\n",
-		r.Run.ID, r.Run.Reps, r.Run.Warmup, r.Run.WallS, r.Scenario.Seed, r.Config.Fingerprint)
+	confirm := ""
+	if r.Run.Confirmations > 0 {
+		confirm = fmt.Sprintf(" +%d confirmation", r.Run.Confirmations)
+	}
+	fmt.Fprintf(&b, "- **Run:** %s, %d reps%s (+%d warm-up discarded), %.1f s, seed %d, read_timeout %s, config %s%s\n",
+		r.Run.ID, r.Run.Reps, confirm, r.Run.Warmup, r.Run.WallS, r.Scenario.Seed, orDash(r.Scenario.Params["read_timeout"]),
+		orDash(r.Config.Fingerprint), configPath(r.Config.Path))
 	fmt.Fprintf(&b, "- **Tool:** %s %s, commit %s%s\n", r.Tool.Name, r.Tool.Version, orDash(short(r.Tool.Git.Commit)), dirty(r.Tool.Git.Dirty))
 	fmt.Fprintf(&b, "- **Env:** %s\n", r.Env.Line())
 	b.WriteString("\n## Checks\n\n| Check | Status | Known | Reps | Evidence |\n|---|---|---|---|---|\n")
@@ -49,8 +55,11 @@ func (r *Report) Markdown() string {
 	b.WriteString("\n## Repetitions\n\n| Rep | Status | Wall | Notes |\n|---|---|---|---|\n")
 	for _, rep := range r.Reps {
 		name := fmt.Sprint(rep.Rep)
-		if rep.Warmup {
+		switch {
+		case rep.Warmup:
 			name += " (warm-up)"
+		case rep.Confirm:
+			name += " (confirmation)"
 		}
 		notes := strings.Join(rep.Notes, "; ")
 		if rep.Error != "" {
@@ -113,6 +122,79 @@ func (r *Report) Markdown() string {
 		}
 	}
 	return b.String()
+}
+
+// why is the verdict's reason on one line: the failing checks, the
+// repetitions that broke and their dumps, the expected failures.
+func (r *Report) why() string {
+	var fail, xfail, xpass []string
+	for _, c := range r.Checks {
+		s := c.ID
+		if c.Known != "" {
+			s += " (" + c.Known + ")"
+		}
+		switch c.Status {
+		case Fail:
+			fail = append(fail, s)
+		case XFail:
+			xfail = append(xfail, s)
+		case XPass:
+			xpass = append(xpass, s)
+		}
+	}
+	var broken []string
+	for _, rep := range r.Reps {
+		if rep.Status == RepOK {
+			continue
+		}
+		name := fmt.Sprintf("rep %d", rep.Rep)
+		if rep.Warmup {
+			name = "the warm-up"
+		}
+		s := fmt.Sprintf("%s %s", name, rep.Status)
+		var dumps []string
+		for k, v := range rep.Artifacts {
+			if k == "goroutines" || strings.HasPrefix(k, "failure-") {
+				dumps = append(dumps, v)
+			}
+		}
+		slices.Sort(dumps)
+		if len(dumps) == 0 {
+			dumps = append(dumps, rep.Artifacts["log"])
+		}
+		broken = append(broken, s+" ("+strings.Join(dumps, ", ")+")")
+	}
+	var parts []string
+	if len(fail) > 0 {
+		parts = append(parts, "failing: "+strings.Join(fail, ", "))
+	}
+	if len(broken) > 0 {
+		parts = append(parts, "broken: "+strings.Join(broken, "; "))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "every check passed or is a known issue")
+	}
+	if len(xfail) > 0 {
+		parts = append(parts, "expected failures: "+strings.Join(xfail, ", "))
+	}
+	if len(xpass) > 0 {
+		parts = append(parts, "passing though known to fail (fixed?): "+strings.Join(xpass, ", "))
+	}
+	for _, rep := range r.Reps {
+		for k, v := range rep.Artifacts {
+			if rep.Status == RepOK && strings.HasPrefix(k, "failure-") {
+				parts = append(parts, "status at a timed-out read: "+v)
+			}
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+func configPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	return " from " + p
 }
 
 // lastGood is the last measured repetition that ran to the end.

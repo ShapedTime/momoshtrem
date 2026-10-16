@@ -47,7 +47,7 @@ func sample() *report.Report {
 		Tool:     report.Tool{Name: "streamlab", Version: "dev", Git: report.Git{Commit: "0123456789abcdef", Dirty: true}},
 		Env:      report.Env{Go: "go1.26", OS: "darwin", Arch: "arm64", NumCPU: 10, GOMAXPROCS: 4, MIME: map[string]string{".mkv": "", ".mp4": "video/mp4"}},
 		Config:   report.Config{Fingerprint: "abcd"},
-		Scenario: report.Scenario{Name: "scrub", Tier: "gate", Doc: "Scrubs.\n\nMore.", Guards: []string{"F12"}, Params: map[string]string{"seeks": "10"}, Seed: 1},
+		Scenario: report.Scenario{Name: "scrub", Tier: "gate", Doc: "Scrubs.\n\nMore.", Guards: []string{"F12"}, Params: map[string]string{"seeks": "10", "read_timeout": "10s"}, Seed: 1},
 		Run:      report.Run{ID: "20261017-000000", Reps: 2, Warmup: 1, Started: time.Unix(0, 0).UTC()},
 		Verdict:  report.VerdictPass,
 		Metrics:  map[string]report.Metric{def.Name: report.NewMetric(def, []float64{1000, 1234.5})},
@@ -105,7 +105,8 @@ func TestReportEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# streamlab: scrub: PASS", "| abort-lag | xfail | F12 |", "reps \\| a pipe", "handler_lag_after_abort",
+	for _, want := range []string{"# streamlab: scrub: PASS", "**Why:** every check passed or is a known issue; expected failures: abort-lag (F12)",
+		"read_timeout 10s, config abcd", "| abort-lag | xfail | F12 |", "reps \\| a pipe", "handler_lag_after_abort",
 		".mkv unresolved", "### infuse: /Movies/Film (2020)/Film.mkv", "`seeks` = `10`"} {
 		if !strings.Contains(string(md), want) {
 			t.Errorf("report.md lacks %q:\n%s", want, md)
@@ -139,6 +140,35 @@ func TestIndex(t *testing.T) {
 	md := ix.Markdown()
 	if !strings.Contains(md, "[scrub](scrub/report.md)") || !strings.Contains(md, "abort-lag=xfail:F12") {
 		t.Errorf("index.md:\n%s", md)
+	}
+}
+
+// The Why line names the failing checks, the broken repetitions and
+// their dumps, then the expected failures.
+func TestWhy(t *testing.T) {
+	r := sample()
+	r.Verdict = report.VerdictFail
+	r.Config.Fingerprint = ""
+	r.Checks = append(r.Checks, report.Check{ID: "play-ok", Status: report.Fail, Known: "#195"})
+	r.Reps = append(r.Reps, report.Rep{Rep: 0, Warmup: true, Status: report.RepTimeout,
+		Artifacts: map[string]string{"goroutines": "warmup-1/goroutines.txt", "log": "warmup-1/child.log"}})
+	md := r.Markdown()
+	want := "**Why:** failing: play-ok (#195); broken: the warm-up timeout (warmup-1/goroutines.txt); expected failures: abort-lag (F12)"
+	if !strings.Contains(md, want) || !strings.Contains(md, "config -") {
+		t.Errorf("report.md lacks %q or an empty config's dash:\n%s", want, md)
+	}
+}
+
+// A warm-up's tool error doesn't show in the index; its hang does.
+func TestIndexErrors(t *testing.T) {
+	r := sample()
+	r.Reps = append(r.Reps, report.Rep{Rep: 0, Warmup: true, Status: report.RepError, Error: "no seeder"})
+	if e := report.NewIndexEntry(r, 1, nil, "x"); e.Error != "" {
+		t.Errorf("a warm-up's tool error shows: %q", e.Error)
+	}
+	r.Reps = append(r.Reps, report.Rep{Rep: 0, Warmup: true, Status: report.RepTimeout, Error: "hung"})
+	if e := report.NewIndexEntry(r, 1, nil, "x"); e.Error != "hung" {
+		t.Errorf("a warm-up's hang doesn't show: %q", e.Error)
 	}
 }
 

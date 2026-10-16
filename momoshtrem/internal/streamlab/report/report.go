@@ -200,6 +200,9 @@ type Run struct {
 	Started    time.Time `json:"started"`
 	WallS      float64   `json:"wall_s"`
 	Command    []string  `json:"command,omitempty"`
+	// Confirmations are the repetitions added because an intermittent
+	// known issue fired in too few to judge (known.ConfirmReps).
+	Confirmations int `json:"confirmations,omitempty"`
 }
 
 // RepStatus is how a repetition's process ended.
@@ -218,15 +221,19 @@ const (
 
 // Rep is one repetition, in its own process (PLAN D4).
 type Rep struct {
-	Rep    int       `json:"rep"`
-	Warmup bool      `json:"warmup,omitempty"`
-	Status RepStatus `json:"status"`
-	Error  string    `json:"error,omitempty"`
+	Rep    int  `json:"rep"`
+	Warmup bool `json:"warmup,omitempty"`
+	// Confirm marks a confirmation repetition (Run.Confirmations).
+	Confirm bool      `json:"confirm,omitempty"`
+	Status  RepStatus `json:"status"`
+	Error   string    `json:"error,omitempty"`
 	// Started and WallMS are the scenario's own: stack up to teardown.
 	Started time.Time `json:"started"`
 	WallMS  float64   `json:"wall_ms"`
-	// Env is the child process's: GOMAXPROCS as it ran.
+	// Env and Tool are the child process's: the build and the machine
+	// that ran the scenario, GOMAXPROCS as it ran.
 	Env       *Env               `json:"env,omitempty"`
+	Tool      *Tool              `json:"tool,omitempty"`
 	Config    Config             `json:"config"`
 	Params    map[string]string  `json:"params,omitempty"`
 	Seed      uint64             `json:"seed"`
