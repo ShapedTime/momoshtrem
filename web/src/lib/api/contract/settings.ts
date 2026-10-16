@@ -72,9 +72,9 @@ export interface DownloadWindow {
 }
 
 export interface StorageKeptSettings {
-  /** Null: 50% of the limit. */
+  /** Null: 50% of the limit. An explicit cap is at most the limit less the reserve (else 422). */
   max_bytes: number | null;
-  /** The cap applied: kept + smart leave the streaming reserve free, and smart shrinks first. */
+  /** The cap applied: a default (null) cap shrinks, smart first, so kept + smart leave the streaming reserve free. */
   effective_max_bytes: number;
   /** With `default_days: 30`, the defaults: "until watched, at most 30 days". */
   default_until_watched: boolean;
@@ -86,7 +86,7 @@ export interface StorageSmartSettings {
   enabled: boolean;
   /** 1–5; 2 by default. */
   episodes_ahead: number;
-  /** Null: 15% of the limit. */
+  /** Null: 15% of the limit. An explicit cap is at most the limit less the reserve and `kept.effective_max_bytes` (else 422, never shrunk). */
   max_bytes: number | null;
   effective_max_bytes: number;
 }
@@ -96,13 +96,20 @@ export interface StorageBackgroundSettings {
   enabled: boolean;
   /** While anything streams, downloads of the other torrents wait, until a minute after the last stream ends. */
   pause_while_streaming: boolean;
-  /** At most 4; empty: any time. */
+  /** At most 4; empty: any time (null is 422). */
   windows: DownloadWindow[];
 }
 
-/** GET/PUT /settings/storage: app_settings key `storage`, plus what the server measures. */
+/**
+ * GET/PUT /settings/storage: app_settings key `storage`, plus what the server measures. A disk that
+ * can't be read is 500 `internal_error`; without the storage governor both answer 503 `unavailable`.
+ */
 export interface StorageSettings {
-  /** The stored limit; null: auto. */
+  /**
+   * The stored limit. Null is either not set (config.yaml's or auto then: `source` says which) or auto.
+   * config.yaml gives way only once a PUT has sent `limit_bytes`, so send it only when the limit control
+   * changes ("Use auto" is `limit_bytes: null`), never by echoing GET back.
+   */
   limit_bytes: number | null;
   source: StorageLimitSource;
   /** 75% of the disk's total. */
@@ -127,7 +134,7 @@ export interface StorageSettings {
   disk: { total_bytes: number; free_bytes: number };
   /** On disk now, from the piece cache; cache = filled − pinned. */
   usage: { kept_bytes: number; smart_bytes: number; cache_bytes: number };
-  /** The wanted size of every kept download, on disk or not; a shared file counts once. */
+  /** The wanted size of every kept download's admitted files, on disk or not; a shared file counts once. */
   committed_kept_bytes: number;
   kept: StorageKeptSettings;
   smart: StorageSmartSettings;
@@ -136,8 +143,11 @@ export interface StorageSettings {
 
 /**
  * PUT /settings/storage is partial: fields left out keep their value, nested objects merge and
- * `windows` is replaced whole. A bad value is 422 naming it (`kept.max_bytes`); a change that would
- * leave the kept cap below what's kept is 409 `limit_below_committed`. Answers every setting.
+ * `windows` is replaced whole. A bad value is 422 naming a field the PUT sent: types first, then the
+ * ranges that depend on the disk, checked on the stored settings with the patch applied. A change that
+ * lowers the kept cap below what kept downloads commit (and below the cap before) is 409
+ * `limit_below_committed`; a raise that's still short, or a PUT that doesn't touch the limit or the
+ * caps, saves. Answers every setting.
  */
 export interface StorageSettingsPatch {
   limit_bytes?: number | null;

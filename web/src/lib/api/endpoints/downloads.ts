@@ -14,9 +14,12 @@ import type {
 /**
  * Downloads (PLAN §6 "Downloads (#77)"): Keep a movie, show, season or episode
  * on disk, and the smart picks. Every /api/downloads* path goes through the
- * session-checked proxy to the backend. A Keep changes the title's `keep` and
- * stage and the torrents' `wanted` and `holds`, so invalidate `titleKeys.all`,
- * `libraryKeys.all` and `torrentKeys.all` with `downloadKeys.all`.
+ * session-checked proxy to the backend. A Keep, a duration change or Stop
+ * keeping changes the title's `keep` and stage, the torrents' `wanted` and
+ * `holds`, and the storage usage, so invalidate `titleKeys.all`,
+ * `libraryKeys.all`, `torrentKeys.all` and `settingsKeys.storage` with
+ * `downloadKeys.all`. A storage PUT invalidates `downloadKeys.all` (caps and
+ * waits move).
  */
 export const downloadKeys = {
   all: ['downloads'] as const,
@@ -30,7 +33,12 @@ const downloadPath = (id: number) => `/api/downloads/${id}`;
 export const downloadsApi = {
   list: () => apiJson<DownloadList>('/api/downloads'),
   /** What a Keep would need against the space left, before it's made (the Keep sheet). 400 for a bad target, 404 when not in the library. */
-  estimate: (target: DownloadTarget) => apiJson<DownloadEstimate>(`/api/downloads/estimate${toQuery(target)}`),
+  estimate: (target: DownloadTarget) => {
+    // Only the target: a DownloadCreate passed here carries its duration too
+    const { scope, id } = target;
+    const season_number = target.scope === 'season' ? target.season_number : undefined;
+    return apiJson<DownloadEstimate>(`/api/downloads/estimate${toQuery({ scope, id, season_number })}`);
+  },
   /**
    * A Keep: 201 a new download, 200 one already kept (unchanged) or a smart pick turned kept.
    * 409 `storage_full` (`isStorageFullError`), 422 `not_downloadable` (HDRezka) or `validation_error`
@@ -43,8 +51,8 @@ export const downloadsApi = {
   remove: (id: number) => apiJson<void>(downloadPath(id), { method: 'DELETE' }),
 };
 
-/** States that won't move on their own: nothing to poll for. */
-const SETTLED: ReadonlySet<DownloadState> = new Set(['done', 'no_file', 'unavailable']);
+/** States that won't move on their own: nothing to poll for (a pause lifts by a resume or a setting). */
+const SETTLED: ReadonlySet<DownloadState> = new Set(['done', 'no_file', 'unavailable', 'paused']);
 
 /** Polls every 5 s while a download is still moving, never in a hidden tab. */
 export const downloadsQuery = () =>

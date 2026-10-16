@@ -76,7 +76,7 @@ All are additive or pure refactors.
 | H2 | `torrent.ClientConfigFor(cfg, cc) *atorrent.ClientConfig`. `NewClient` delegates to it, and a parity test covers it. | #173 |
 | H3 | `ActivityManager.SetCheckInterval(d)`, set before `Start`. It is a fixed 30 s today. | #173 |
 | H4 | A `build func() *DirectoryTree` field on `LibraryFS`: `buildTreeFromDB` by default, a static builder from `NewStaticFS`. `rebuildTree` calls `fs.build()`. This lets the lab invalidate the tree, which F4 and F5 need. | #183 |
-| H5 | `InitStorage` returns the vendored `*piececache.Cache` (`internal/torrent/piececache`, missinggo's filecache with pins) instead of missinggo's `filecache`, with the same signature, so the lab's `InitStorage(dir, cfg.Torrent.GlobalCacheSize)` still compiles. Without pins it creates the same files and makes the same evictions as upstream; a differential test proves it. With pins, pinned pieces sit outside the LRU and a streaming reserve is never pinned. | #201 (#77 P3) |
+| H5 | `InitStorage` returns the vendored `*piececache.Cache` (`internal/torrent/piececache`, missinggo's filecache with pins) instead of missinggo's `filecache`. It takes the same parameters, so the lab's `InitStorage(dir, cfg.Torrent.GlobalCacheSize)` still compiles. Without pins it creates the same files and makes the same evictions as upstream; a differential test proves it. With pins, pinned pieces sit outside the LRU and a streaming reserve is never pinned. | #201 (#77 P3) |
 
 The leecher finds the seeder through the real `service.add()` path: the magnet carries `x.pe=<seeder addr>`, which anacrolix maps to `PeerAddrs` (`spec.go:42`).
 

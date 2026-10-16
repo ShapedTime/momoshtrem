@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { AddTitleResult, ClassifierMode, EpisodeGroup, EpisodeOrdering, ShowSettingsPatch } from '@/lib/api/contract';
 import { findTitle } from '../fixtures/catalog';
-import { onMovieFile, onTitleRemoved } from '../fixtures/downloads';
+import { onEpisodeFile, onMovieFile, onTitleRemoved } from '../fixtures/downloads';
 import {
   addToLibrary,
   buildSeason,
@@ -124,6 +124,7 @@ export const titlesHandlers = [
     row.unassigned.add(id);
     row.filed.delete(id);
     row.streamed.delete(id);
+    onEpisodeFile(id, null); // its downloads lose the file (#77)
     return noContent();
   }),
   http.patch('*/api/shows/:id', async ({ params, request }) => {

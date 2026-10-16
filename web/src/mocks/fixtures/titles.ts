@@ -24,7 +24,18 @@ import type {
 } from '@/lib/api/contract';
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
 import { type CatalogEntry, findTitle, iso } from './catalog';
-import { episodeHold, episodeKeep, keepOf, mockDownloads, onMovieFile, scopeDownload, wantsBytes } from './downloads';
+import {
+  episodeHold,
+  episodeKeep,
+  episodeWanted,
+  keepOf,
+  type LiveHold,
+  mockHolds,
+  onEpisodeFile,
+  onMovieFile,
+  scopeHold,
+  wantsBytes,
+} from './downloads';
 import {
   absoluteNumbers,
   type EpisodeKey,
@@ -256,7 +267,7 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
   const includeSpecials = row?.settings.include_specials ?? true;
   const absolute = absoluteNumbers(show);
   const plays = traktImported('history');
-  const downloads = row ? mockDownloads() : [];
+  const holds = row ? mockHolds() : [];
   return show.seasons
     .map((season) => {
       const episodes = season.episodes.map((seed): EpisodeSummary => {
@@ -265,10 +276,11 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
         // A play wins the state (PLAN §6); pct, the path, source and stream still describe the file
         const stream = (found === 'ready' && row?.streamed.get(id)) || null;
         // #77: a file is downloading only while a download wants it (an HDRezka one never is)
-        const hold = episodeHold(downloads, entry.tmdb_id, season.n, seed.n);
-        const file: FileState = found === 'ready' && !stream && wantsBytes(hold) ? 'downloading' : found;
+        const hold = episodeHold(holds, entry.tmdb_id, season.n, seed.n);
+        const facts = { season: season.n, episode: seed.n, has_file: found === 'ready', hdrezka: stream !== null, pct: seed.pct ?? null };
+        const file: FileState = found === 'ready' && episodeWanted(hold, facts) ? 'downloading' : found;
         const filed = file === 'ready' || file === 'downloading';
-        const keep = episodeKeep(hold, { has_file: filed, hdrezka: stream !== null, pct: seed.pct ?? null });
+        const keep = episodeKeep(hold, facts);
         return {
           id,
           season_number: season.n,
@@ -397,11 +409,11 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
     missing,
     torrent: null,
     stream: null,
-    keep: keepFor(scopeDownload('tv', entry.tmdb_id)),
+    keep: keepFor(scopeHold('tv', entry.tmdb_id)),
   };
 }
 
-const keepFor = (download: ReturnType<typeof scopeDownload>) => (download ? keepOf(download) : null);
+const keepFor = (hold: LiveHold | undefined) => (hold ? keepOf(hold.download) : null);
 
 /** A torrent assigned this session: loaded, nothing fetched yet. */
 const JUST_ADDED: DownloadProgress = { pct: 0, speed_bps: 0, eta_seconds: null, seeders: 12 };
@@ -412,8 +424,8 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
   const stream = row.stream ?? null;
   const torrent = stream ? null : (row.assigned ?? (row.files ? (movie.torrent ?? null) : null));
   // #77: downloading only while a download wants the file (a torrent assigned this session still starts out downloading)
-  const hold = scopeDownload('movie', entry.tmdb_id);
-  const wanted = torrent !== null && wantsBytes(hold);
+  const hold = scopeHold('movie', entry.tmdb_id);
+  const wanted = torrent !== null && wantsBytes(hold?.admitted);
   const download = row.assigned
     ? JUST_ADDED
     : wanted
@@ -472,6 +484,7 @@ export function assignEpisodeStream(row: MockLibraryEntry, episodeId: number, st
   row.streamed.set(episodeId, stream);
   row.filed.delete(episodeId);
   row.unassigned.delete(episodeId);
+  onEpisodeFile(episodeId, 'stream');
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
@@ -597,7 +610,7 @@ export function buildSeason(tmdbId: number, seasonNumber: number, library: MockL
       name: season.seed.name,
       episodes: season.episodes,
       ranges: ranges(season),
-      keep: row ? keepFor(scopeDownload('tv', tmdbId, seasonNumber)) : null,
+      keep: row ? keepFor(scopeHold('tv', tmdbId, seasonNumber)) : null,
     }
   );
 }

@@ -14,12 +14,13 @@ import type { DownloadReason, DownloadScope, DownloadState } from './downloads';
 
 /**
  * The first rule that matches: paused; streaming (loaded, a streaming session); downloading (loaded,
- * network on, and a download still wants bytes of it or `download_bps > 0`); idle.
+ * network on, and `wanted.state` is `downloading` or `download_bps > 0`: a queued or waiting torrent
+ * isn't); idle.
  */
 export type TorrentState = 'streaming' | 'downloading' | 'paused' | 'idle';
 
-/** The download manager's state for one torrent: `Download.state` without the ones about files. */
-export type TorrentWantedState = Exclude<DownloadState, 'no_file' | 'unavailable'>;
+/** The download manager's state for one torrent: `Download.state` without the ones about a download's files. */
+export type TorrentWantedState = Exclude<DownloadState, 'no_file' | 'unavailable' | 'storage_full'>;
 
 /** What downloads want of a torrent (#77). */
 export interface TorrentWanted {

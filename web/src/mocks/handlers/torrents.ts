@@ -25,8 +25,17 @@ export function resetMockTorrents(): void {
 /** This page's torrents as they stand (handlers/downloads.ts matches Keeps to them). */
 export const mockTorrents = (): readonly TorrentListItem[] => torrents;
 
-/** A torrent as the API answers it: with what the page's downloads want of it. */
-const answer = (t: TorrentListItem): TorrentListItem => ({ ...t, ...mockTorrentShare(t) });
+/**
+ * A torrent as the API answers it: with what the page's downloads want of it. A loaded
+ * torrent downloads while its downloads do (`wanted.state`), or while bytes still arrive
+ * with nothing wanting them; one whose downloads wait or are done fetches nothing.
+ */
+function answer(t: TorrentListItem): TorrentListItem {
+  const share = mockTorrentShare(t);
+  if (!t.loaded || !share.wanted || t.state === 'paused' || t.state === 'streaming') return { ...t, ...share };
+  const fetching = share.wanted.state === 'downloading';
+  return { ...t, ...share, download_bps: fetching ? t.download_bps : 0, state: fetching ? 'downloading' : 'idle' };
+}
 
 const hex = /^[0-9a-f]{40}$/i;
 
@@ -71,7 +80,10 @@ export const torrentsHandlers = [
   }),
   http.post('*/api/torrents/pause-all', async () => {
     await latency();
-    const targets = torrents.filter((t) => t.state === 'streaming' || t.state === 'downloading');
+    const targets = torrents.filter((t) => {
+      const { state } = answer(t);
+      return state === 'streaming' || state === 'downloading';
+    });
     targets.forEach(pause);
     return HttpResponse.json<TorrentsPauseCount>({ count: targets.length });
   }),

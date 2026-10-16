@@ -27,6 +27,7 @@ import {
   WORKING,
 } from '../fixtures/assignment';
 import { findTitle } from '../fixtures/catalog';
+import { onEpisodeFile } from '../fixtures/downloads';
 import { TORRENTS } from '../fixtures/torrents';
 import { assignMovieRelease, episodeFile, findByLibraryId, libraryKey, showEpisodes } from '../fixtures/titles';
 import { HOLD_STEPS, heldStep, scenario } from '../scenario';
@@ -130,6 +131,8 @@ function applyJob(job: MockJob): void {
         row.unassigned.delete(target.episode_id);
         // One active source per item: the torrent replaces an HDRezka stream
         row.streamed.delete(target.episode_id);
+        // A kept show or season takes the file while the kept cap has room (#77)
+        onEpisodeFile(target.episode_id, { bytes: Math.round(p.file_size / p.targets.length) });
       }
     }
   } else if (found) {

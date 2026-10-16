@@ -4,9 +4,13 @@ import type { MediaType, Timestamp } from './common';
  * Downloads (PLAN §6 "Downloads (#77)"): a Keep (`kept`) or a smart pick
  * (`smart`) fetches a movie's, show's, season's or episode's torrent files in
  * the background and pins them on disk while it lasts. A show or season also
- * covers episodes assigned later. Releasing one (DELETE, expiry, watched)
- * unpins the data: it stays as ordinary cache and plays until it's evicted.
- * Sizes are bytes; what's on disk comes from the piece cache.
+ * covers episodes assigned later, while the kept cap has room. Releasing one
+ * (DELETE, expiry, watched) unpins the data: it stays as ordinary cache and
+ * plays until it's evicted; the row stays too, out of every read. Sizes are
+ * bytes; what's on disk comes from the piece cache.
+ *
+ * Invalidate `settingsKeys.storage` after a Keep or Stop keeping (the usage and
+ * what's committed move), and `downloadKeys.all` after a storage PUT.
  */
 
 export type DownloadReason = 'kept' | 'smart';
@@ -16,10 +20,11 @@ export type DownloadScope = 'movie' | 'show' | 'season' | 'episode';
 
 /**
  * The first that matches: `unavailable` (nothing it covers can be downloaded: HDRezka only, or pure v2);
- * `no_file` (nothing assigned yet); `done` (all on disk); `paused` (the user paused its torrent, or
- * background downloads are off); `disk_full`; `waiting_for_window` (outside every download window);
- * `waiting_for_stream` (something else streams); `stalled` (no progress for 10 min, retried with backoff);
- * `downloading` (in one of the 2 slots); `queued`.
+ * `no_file` (nothing assigned yet); `done` (every file it covers is on disk); `paused` (the user paused its
+ * torrent, or background downloads are off); `disk_full`; `storage_full` (episodes assigned later didn't fit
+ * the kept cap: `files.over_cap`); `waiting_for_window` (outside every download window); `waiting_for_stream`
+ * (something else streams); `stalled` (no progress for 10 min, retried with backoff); `downloading` (in one
+ * of the 2 slots); `queued`.
  */
 export type DownloadState =
   | 'queued'
@@ -29,6 +34,7 @@ export type DownloadState =
   | 'paused'
   | 'stalled'
   | 'disk_full'
+  | 'storage_full'
   | 'done'
   | 'no_file'
   | 'unavailable';
@@ -58,7 +64,7 @@ export interface Download {
   scope: DownloadScope;
   item: DownloadItem;
   state: DownloadState;
-  /** Over its torrent files (a file several episodes share counts once). */
+  /** Over its admitted torrent files (a file several episodes share counts once; files over the cap aren't wanted). */
   wanted_bytes: number;
   /** On disk, from the piece cache. */
   done_bytes: number;
@@ -68,9 +74,16 @@ export interface Download {
   eta_seconds: number | null;
   /** `waiting_for_window`: the next window's start; `stalled`: the next retry. */
   resumes_at: Timestamp | null;
-  /** The assigned files it covers, those on disk, and those that can't be downloaded (HDRezka, pure v2). */
-  files: { total: number; done: number; unavailable: number };
-  /** Released once what it covers is watched (a Trakt play or a local session at 90%, after `created_at`). */
+  /**
+   * The assigned files it covers; those on disk; those that can't be downloaded (HDRezka, pure v2); and those
+   * assigned later that the kept cap couldn't take (admitted in episode order; not pinned or fetched).
+   */
+  files: { total: number; done: number; unavailable: number; over_cap: number };
+  /**
+   * Watched files are released one by one (a Trakt play or a `local_watches` row after `created_at`). A movie
+   * or episode download then ends; a season one once it's all watched and finished airing; a show one once the
+   * show has ended and it's all watched. Smart picks: always true, 14 days at most.
+   */
   until_watched: boolean;
   /** Null: no maximum. */
   expires_at: Timestamp | null;
@@ -128,7 +141,7 @@ export interface DownloadEstimate {
   downloadable: boolean;
 }
 
-/** PATCH /downloads/{id}: kept downloads only (a smart pick is 422: Keep it first). */
+/** PATCH /downloads/{id}: kept downloads only (a smart pick is 422: Keep it first; a body that isn't an object, 400). */
 export type DownloadPatch = DownloadDuration;
 
 /** The extra fields of POST /downloads' `409 storage_full`. */
@@ -142,7 +155,9 @@ export interface StorageFullDetails {
 /**
  * The download that holds a title, a season or an episode (PLAN §6 "Titles and library"). On an
  * episode it's the narrowest kept one (its own, its season's, its show's), else a smart pick, and
- * `state` and `pct` describe the episode's file: `done` and 100 once it's on disk.
+ * `state` and `pct` are the episode's own file's: its torrent's `TorrentWanted.state` (`done` and 100
+ * once it's on disk), `no_file` without a file, `unavailable` from HDRezka, `storage_full` over the
+ * cap. An episode an until-watched show or season keep has released (watched) has none.
  */
 export interface Keep {
   download_id: number;

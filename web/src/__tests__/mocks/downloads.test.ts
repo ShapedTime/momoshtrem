@@ -3,6 +3,7 @@ import { server } from '@/mocks/node';
 import { resetMockState } from '@/mocks/handlers';
 import { isApiError } from '@/lib/api/client';
 import {
+  assignmentApi,
   downloadsApi,
   hdrezkaApi,
   isLimitBelowCommittedError,
@@ -14,7 +15,7 @@ import {
 } from '@/lib/api/endpoints';
 import type { Download, DownloadList, EpisodeSummary } from '@/lib/api/contract';
 import { setMockScenario } from '@/mocks/scenario';
-import { DOWNLOAD_HASHES } from '@/mocks/fixtures/downloads';
+import { DOWNLOAD_HASHES, mockDownloadRows, setMockDownloadsClock } from '@/mocks/fixtures/downloads';
 import { episodeId } from '@/mocks/fixtures/titles';
 import { FULL_KEPT_MAX_BYTES } from '@/mocks/fixtures/settings';
 import { TORRENTS } from '@/mocks/fixtures/torrents';
@@ -165,9 +166,15 @@ describe('POST /downloads', () => {
     expect((await downloadsApi.list()).usage.committed_kept_bytes).toBe(86_400_000_000);
   });
 
-  it('turns a smart pick kept: 200, the same row', async () => {
+  it('turns a smart pick kept: 200, the same row, created anew with the duration asked for', async () => {
+    const smart = (await downloadsApi.list()).items.find((d) => d.id === 6);
+    expect(smart).toMatchObject({ reason: 'smart', until_watched: true });
+    expect(Date.parse(smart?.expires_at ?? '') - Date.parse(smart?.created_at ?? '')).toBe(14 * 86_400_000); // a smart pick: 14 days at most
+
+    const before = Date.now();
     const turned = await downloadsApi.create({ scope: 'episode', id: episodeId(209867, 1, 27), until_watched: false, expires_at: null });
     expect(turned).toMatchObject({ id: 6, reason: 'kept', smart_source: null, until_watched: false, expires_at: null, state: 'done' });
+    expect(Date.parse(turned.created_at)).toBeGreaterThanOrEqual(before - 1000);
     expect((await episode(209867, 1, 27)).keep).toMatchObject({ download_id: 6, reason: 'kept' });
   });
 
@@ -250,15 +257,21 @@ describe('PATCH and DELETE /downloads/{id}', () => {
     await expect(downloadsApi.update(6, { until_watched: false })).rejects.toMatchObject({ status: 422, code: 'validation_error' });
     await expect(downloadsApi.update(5, { expires_at: 'tomorrow' })).rejects.toMatchObject({ status: 422, field: 'expires_at' });
     await expect(downloadsApi.update(99, { until_watched: true })).rejects.toMatchObject({ status: 404 });
+    const res = await fetch('/api/downloads/5', { method: 'PATCH', body: '"later"', headers: { 'Content-Type': 'application/json' } });
+    expect(res.status).toBe(400);
   });
 
-  it('stops keeping: the file streams on demand again, and nothing holds the torrent', async () => {
+  it('stops keeping: a soft release; the file streams on demand again, and nothing holds the torrent', async () => {
     await downloadsApi.remove(5);
     expect(byTitle(await downloadsApi.list(), 'Interstellar')).toEqual([]);
+    expect(mockDownloadRows().find((d) => d.download.id === 5)).toMatchObject({ release_reason: 'deleted', released_at: expect.any(String) });
     expect((await titlesApi.get('movie', 157336)).library).toMatchObject({ availability_stage: 'ready', download: null, keep: null });
     expect(await torrent(DOWNLOAD_HASHES.interstellar)).toMatchObject({ wanted: null, holds: [] });
     expect((await downloadsApi.list()).usage.committed_kept_bytes).toBe(86_400_000_000 - 63_100_000_000);
     await expect(downloadsApi.remove(5)).rejects.toMatchObject({ status: 404 });
+    await expect(downloadsApi.update(5, { until_watched: true })).rejects.toMatchObject({ status: 404 });
+    // Only active rows are unique per target: keeping it again is a new download
+    expect(await downloadsApi.create({ scope: 'movie', id: 2 })).toMatchObject({ id: 8, state: 'queued' });
   });
 });
 
@@ -281,9 +294,34 @@ describe('what other mocks change', () => {
     expect(byTitle(await downloadsApi.list(), 'Interstellar')).toEqual([]);
   });
 
-  it('unassigning a kept movie leaves it with no file', async () => {
+  it('unassigning a kept movie or episode leaves it with no file', async () => {
     await titlesApi.unassignMovie(2);
     expect(only(await downloadsApi.list(), 'Interstellar')).toMatchObject({ state: 'no_file', wanted_bytes: 0, done_bytes: 0 });
+    await titlesApi.unassignEpisode(episodeId(247767, 1, 10));
+    expect(only(await downloadsApi.list(), 'The Studio')).toMatchObject({ state: 'no_file', wanted_bytes: 0, files: { total: 0 } });
+    expect(await episode(247767, 1, 10)).toMatchObject({ pct: null, keep: { state: 'no_file' } });
+  });
+
+  it('episodes a mapping job assigns to a kept season past the kept cap make it storage_full', async () => {
+    const season = await downloadsApi.create({ scope: 'season', id: 1, season_number: 1 });
+    expect(season).toMatchObject({ state: 'queued', wanted_bytes: 28 * 24 * 40_000_000, files: { total: 28, over_cap: 0 } });
+    // Leave the kept cap no room past what's committed now (not a lowering below it: no 409)
+    const { committed_kept_bytes } = await settingsApi.storage();
+    await settingsApi.putStorage({ kept: { max_bytes: committed_kept_bytes } });
+
+    // Job 101 maps Frieren's #29–#38
+    const { proposals } = await assignmentApi.job(101);
+    const pending = proposals.filter((p) => p.decision === 'pending' && p.targets.length > 0);
+    await assignmentApi.patchProposals(101, { items: pending.map((p) => ({ id: p.id, decision: 'accepted' as const })) });
+    await assignmentApi.apply(101);
+
+    const full = (await downloadsApi.list()).items.find((d) => d.id === season.id);
+    expect(full).toMatchObject({ state: 'storage_full', wanted_bytes: season.wanted_bytes });
+    expect(full?.files.over_cap).toBeGreaterThan(0);
+    expect((await downloadsApi.list()).usage.committed_kept_bytes).toBe(committed_kept_bytes); // over the cap commits nothing
+    // Over the cap: not pinned, not fetched
+    expect(await episode(209867, 1, 29)).toMatchObject({ state: 'ready', pct: null, keep: { download_id: season.id, state: 'storage_full', pct: 0 } });
+    expect(await episode(209867, 1, 1)).toMatchObject({ keep: { state: 'queued' } });
   });
 
   it('downloads-empty: a fresh install, with nothing kept and nothing downloading', async () => {
@@ -339,35 +377,60 @@ describe('GET/PUT /settings/storage', () => {
     expect((await downloadsApi.list()).items.some((d) => d.reason === 'smart')).toBe(false);
   });
 
-  it('answers 422 naming the first bad field', async () => {
+  it('answers 422 naming a field sent: types first, then the ranges that depend on the disk', async () => {
+    await settingsApi.putStorage({ kept: { max_bytes: 300_000_000_000 } });
     const cases: Array<[Record<string, unknown>, string]> = [
-      [{ limit_bytes: 1_000 }, 'limit_bytes'],
-      [{ limit_bytes: 2_000_000_000_000 }, 'limit_bytes'],
+      // The first pass: types and allowed values, whatever the disk says
+      [{ limit_bytes: -1 }, 'limit_bytes'],
       [{ kept: 'half' }, 'kept'],
-      [{ kept: { max_bytes: 740_000_000_000 } }, 'kept.max_bytes'],
       [{ kept: { default_until_watched: 1 } }, 'kept.default_until_watched'],
       [{ kept: { default_days: 14 } }, 'kept.default_days'],
       [{ smart: { episodes_ahead: 6 } }, 'smart.episodes_ahead'],
       [{ smart: { max_bytes: -1 } }, 'smart.max_bytes'],
       [{ background: { pause_while_streaming: 'on' } }, 'background.pause_while_streaming'],
+      [{ background: { windows: null } }, 'background.windows'],
       [{ background: { windows: [{ start: '25:00', end: '06:00' }] } }, 'background.windows'],
       [{ background: { windows: [{ start: '01:00', end: '01:00' }] } }, 'background.windows'],
       [{ background: { windows: Array.from({ length: 5 }, () => ({ start: '01:00', end: '02:00' })) } }, 'background.windows'],
-      [{ limit_bytes: 1, kept: { default_days: 14 } }, 'limit_bytes'],
+      // A range is checked only once every type passed
+      [{ limit_bytes: 1, kept: { default_days: 14 } }, 'kept.default_days'],
+      // The second pass, on the stored settings with the patch applied
+      [{ limit_bytes: 1_000 }, 'limit_bytes'],
+      [{ limit_bytes: 2_000_000_000_000 }, 'limit_bytes'],
+      [{ kept: { max_bytes: 740_000_000_000 } }, 'kept.max_bytes'],
+      // An explicit smart cap is at most the limit less the reserve and the kept cap: 422, never shrunk
+      [{ smart: { max_bytes: 500_000_000_000 } }, 'smart.max_bytes'],
+      // The stored kept cap (300 GB) no longer fits a smaller limit: the limit sent squeezed it
+      [{ limit_bytes: 200_000_000_000 }, 'limit_bytes'],
     ];
     for (const [body, field] of cases) {
       const error = await failure(settingsApi.putStorage(body as never));
-      expect(isApiError(error) && [error.status, error.code, error.field]).toEqual([422, 'validation_error', field]);
+      expect(isApiError(error) && [body, error.status, error.code, error.field]).toEqual([body, 422, 'validation_error', field]);
     }
-    expect((await settingsApi.storage()).kept.default_days).toBe(30); // nothing was written
+    expect(await settingsApi.storage()).toMatchObject({ limit_bytes: null, kept: { default_days: 30, max_bytes: 300_000_000_000 } }); // nothing written
   });
 
-  it('answers 409 limit_below_committed when the kept cap would drop below what’s kept', async () => {
+  it('answers 409 limit_below_committed only for a change that lowers the kept cap below what’s kept', async () => {
     const error = await failure(settingsApi.putStorage({ kept: { max_bytes: 50_000_000_000 } }));
     expect(isLimitBelowCommittedError(error)).toBe(true);
     expect(isLimitBelowCommittedError(error) && error.details.committed_kept_bytes).toBe(86_400_000_000);
     await expect(settingsApi.putStorage({ limit_bytes: 100_000_000_000 })).rejects.toMatchObject({ status: 409, code: 'limit_below_committed' });
     expect((await settingsApi.storage()).limit_bytes).toBeNull();
+  });
+
+  it('storage-config: config.yaml’s limit until a PUT sends one; unrelated PUTs and raises still short save', async () => {
+    setMockScenario('storage-config');
+    const config = 53_760 * 1024 ** 2;
+    const before = await settingsApi.storage();
+    expect(before).toMatchObject({ limit_bytes: null, source: 'config', config_bytes: config, limit_effective_bytes: config });
+    // Half of 52.5 GB is less than the seeded downloads commit
+    expect(before.kept.effective_max_bytes).toBeLessThan(before.committed_kept_bytes);
+
+    expect(await settingsApi.putStorage({ smart: { episodes_ahead: 3 } })).toMatchObject({ source: 'config', smart: { episodes_ahead: 3 } });
+    expect((await settingsApi.putStorage({ kept: { max_bytes: 30_000_000_000 } })).kept.effective_max_bytes).toBe(30_000_000_000); // a raise, still short
+    await expect(settingsApi.putStorage({ kept: { max_bytes: 20_000_000_000 } })).rejects.toMatchObject({ status: 409 }); // a lowering
+    // "Use auto": limit_bytes null, sent
+    expect(await settingsApi.putStorage({ limit_bytes: null })).toMatchObject({ limit_bytes: null, source: 'auto', limit_effective_bytes: 750_000_000_000 });
   });
 
   it('holds background downloads: off, outside every window, or while something streams', async () => {
@@ -378,17 +441,24 @@ describe('GET/PUT /settings/storage', () => {
     expect(only(list, 'Bluey').state).toBe('done'); // done stays done
     expect((await torrent(DOWNLOAD_HASHES.interstellar))?.wanted?.state).toBe('paused');
 
-    const hour = new Date().getHours();
-    const at = (h: number) => `${String(h % 24).padStart(2, '0')}:00`;
-    await settingsApi.putStorage({ background: { enabled: true, windows: [{ start: at(hour + 2), end: at(hour + 3) }] } });
+    // 12:30 local, on the fixtures' day
+    setMockDownloadsClock(new Date(2026, 9, 14, 12, 30));
+    await settingsApi.putStorage({ background: { enabled: true, windows: [{ start: '14:00', end: '15:00' }, { start: '23:00', end: '06:00' }] } });
     list = await downloadsApi.list();
-    expect(list.paused_reason).toBe('window');
-    expect(Date.parse(list.resumes_at ?? '')).toBeGreaterThan(Date.now());
-    expect(only(list, 'Interstellar')).toMatchObject({ state: 'waiting_for_window', resumes_at: list.resumes_at });
+    expect(list).toMatchObject({ paused_reason: 'window', resumes_at: new Date(2026, 9, 14, 14, 0).toISOString() });
+    expect(only(list, 'Interstellar')).toMatchObject({ state: 'waiting_for_window', resumes_at: list.resumes_at, download_bps: 0 });
     expect(only(list, 'The Studio').state).toBe('waiting_for_window'); // window before stalled
     expect((await titlesApi.get('movie', 157336)).library).toMatchObject({ availability_stage: 'downloading', keep: { state: 'waiting_for_window' } });
+    // A waiting torrent isn't downloading at 0 B/s
+    expect(await torrent(DOWNLOAD_HASHES.interstellar)).toMatchObject({ state: 'idle', download_bps: 0, wanted: { state: 'waiting_for_window' } });
+    expect((await torrentsApi.summary()).counts.downloading).toBe(1);
 
-    await settingsApi.putStorage({ background: { windows: [{ start: at(hour), end: at(hour + 1) }], pause_while_streaming: true } });
+    // Inside a window that crosses midnight
+    setMockDownloadsClock(new Date(2026, 9, 14, 2, 0));
+    expect((await downloadsApi.list()).paused_reason).toBeNull();
+    expect(await torrent(DOWNLOAD_HASHES.interstellar)).toMatchObject({ state: 'downloading', download_bps: 2_300_000 });
+
+    await settingsApi.putStorage({ background: { pause_while_streaming: true } });
     list = await downloadsApi.list();
     expect(list).toMatchObject({ paused_reason: 'streaming', resumes_at: null });
     expect(only(list, 'Interstellar')).toMatchObject({ state: 'waiting_for_stream', resumes_at: null });

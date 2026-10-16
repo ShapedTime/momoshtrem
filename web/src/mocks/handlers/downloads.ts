@@ -20,7 +20,8 @@ import {
   mockDownloadList,
   mockDownloadRecords,
   movieItem,
-  removeMockDownload,
+  EPISODE_BYTES_PER_MINUTE,
+  releaseMockDownload,
   showItem,
 } from '../fixtures/downloads';
 import { mockStorageDocument, storageCaps } from '../fixtures/settings';
@@ -32,7 +33,8 @@ import { apiError, isRecord, jsonBody, latency, noContent, notFound } from './ut
 /**
  * Downloads (PLAN §6 "Downloads (#77)"): GET lists the page's downloads, POST
  * keeps a library item (GET /downloads/estimate says what it would need first),
- * PATCH changes a kept one's duration, DELETE stops it.
+ * PATCH changes a kept one's duration, DELETE releases it (the row stays,
+ * `released_at` set, out of every read).
  * They change fixtures/downloads.ts, so titles (`keep`, what's downloading),
  * Activity (`wanted`, `holds`, the disk) and Settings › Storage follow.
  *
@@ -46,7 +48,6 @@ import { apiError, isRecord, jsonBody, latency, noContent, notFound } from './ut
  */
 
 const SCOPES: readonly DownloadScope[] = ['movie', 'show', 'season', 'episode'];
-const EPISODE_BYTES_PER_MINUTE = 40_000_000;
 const DAY = 86_400_000;
 
 const isId = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -80,7 +81,8 @@ function checkCreate(body: Record<string, unknown>): { field: string; message: s
 interface Plan {
   scope: DownloadScope;
   item: DownloadItem;
-  files: Download['files'];
+  /** A new Keep has nothing over the cap: only episodes assigned later can be. */
+  files: Omit<Download['files'], 'over_cap'>;
   wanted_bytes: number;
   torrents: MockDownloadTorrent[];
   state: DownloadState;
@@ -200,7 +202,10 @@ function duration(body: Record<string, unknown>, now: number): Pick<Download, 'u
   };
 }
 
-/** The kept download a Keep would make (or turn a smart pick into), before it has an id. */
+/**
+ * The kept download a Keep would make, before it has an id. A smart pick turned kept
+ * keeps its state and bytes, but starts over: `created_at` now, the duration asked for.
+ */
 function keptFrom(planned: Plan, existing: MockDownload | undefined, body: Record<string, unknown>, now: number): Omit<Download, 'id'> {
   return {
     reason: 'kept',
@@ -213,9 +218,9 @@ function keptFrom(planned: Plan, existing: MockDownload | undefined, body: Recor
     download_bps: 0,
     eta_seconds: null,
     resumes_at: null,
-    files: planned.files,
+    files: { ...planned.files, over_cap: 0 },
     ...duration(body, now),
-    created_at: existing?.download.created_at ?? new Date(now).toISOString(),
+    created_at: new Date(now).toISOString(),
   };
 }
 
@@ -248,7 +253,7 @@ export const downloadsHandlers = [
     const records = mockDownloadRecords();
     const existing = records.find((d) => sameTarget(planned.item, planned.scope, d.download));
     const fresh = keptFrom(planned, existing, target, Date.now());
-    const { needed, available } = room(records, existing, { download: { ...fresh, id: 0 }, torrents: existing?.torrents ?? planned.torrents });
+    const { needed, available } = room(records, existing, { download: { ...fresh, id: 0 }, torrents: existing?.torrents ?? planned.torrents, over_cap: [] });
     return HttpResponse.json<DownloadEstimate>({
       wanted_bytes: planned.wanted_bytes,
       needed_bytes: existing?.download.reason === 'kept' ? 0 : needed,
@@ -272,7 +277,7 @@ export const downloadsHandlers = [
 
     const fresh = keptFrom(planned, existing, body, Date.now());
     const torrents = existing?.torrents ?? planned.torrents;
-    const { needed, available } = room(records, existing, { download: { ...fresh, id: existing?.download.id ?? 0 }, torrents });
+    const { needed, available } = room(records, existing, { download: { ...fresh, id: existing?.download.id ?? 0 }, torrents, over_cap: [] });
     if (needed > available) {
       return apiError(409, 'storage_full', `Not enough space for kept downloads: this needs ${gb(needed)} and ${gb(available)} is left.`, {
         needed_bytes: needed,
@@ -281,8 +286,9 @@ export const downloadsHandlers = [
     }
 
     if (existing) {
-      // A smart pick turned kept: same row, now with a duration
-      Object.assign(existing.download, { reason: 'kept', smart_source: null, until_watched: fresh.until_watched, expires_at: fresh.expires_at });
+      // A smart pick turned kept: same row, created now, with the duration asked for
+      const { until_watched, expires_at, created_at } = fresh;
+      Object.assign(existing.download, { reason: 'kept', smart_source: null, until_watched, expires_at, created_at });
       return HttpResponse.json(liveDownload(existing), { status: 200 });
     }
     return HttpResponse.json(liveDownload(addMockDownload(fresh, torrents)), { status: 201 });
@@ -302,9 +308,6 @@ export const downloadsHandlers = [
   }),
   http.delete('*/api/downloads/:id', async ({ params }) => {
     await latency();
-    const record = findMockDownload(Number(params.id));
-    if (!record) return notFound('No such download');
-    removeMockDownload(record.download.id);
-    return noContent();
+    return releaseMockDownload(Number(params.id)) ? noContent() : notFound('No such download');
   }),
 ];

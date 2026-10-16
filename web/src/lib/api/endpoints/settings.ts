@@ -19,9 +19,11 @@ export const settingsApi = {
   aiUsage: () => apiJson<AiUsage>('/api/settings/ai/usage'),
   storage: () => apiJson<StorageSettings>('/api/settings/storage'),
   /**
-   * Partial: send only what changed (nested objects merge, `windows` is replaced whole). 422 names
+   * Partial: send only what changed (nested objects merge, `windows` is replaced whole), and
+   * `limit_bytes` only when the limit control changes: GET's null may mean config.yaml. 422 names
    * the field (`ApiError.field`: `limit_bytes`, `kept.max_bytes`, `background.windows`, …); 409
-   * `limit_below_committed` (`isLimitBelowCommittedError`). Answers every setting.
+   * `limit_below_committed` (`isLimitBelowCommittedError`). Answers every setting. Invalidate
+   * `downloadKeys.all` after it: caps and waits move.
    */
   putStorage: (patch: StorageSettingsPatch) => apiJson<StorageSettings>('/api/settings/storage', { method: 'PUT', json: patch }),
 };
