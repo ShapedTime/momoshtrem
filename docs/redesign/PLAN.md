@@ -169,7 +169,7 @@ momoshtrem reads these settings and the other secrets and service URLs (`DATABAS
 Migration numbers are reserved per task so parallel branches don't collide.
 
 **`002_app_settings.sql` (G2)**
-- `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults.
+- `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults, Trakt's settings, stored pauses (`torrents`) and the storage settings (`storage`, `010` below).
   - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`; §6 "Recommendations (R1–R3)"). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`; `claude-sonnet-5-5` and `claude-opus-5-5` are priced too) and `auto_apply_high_confidence` (true), and every AI feature `monthly_budget_usd` (15 when the document doesn't have it; an explicit `null` is no cap; once every AI feature's spend this month reaches it, AI calls are skipped). `library.SettingsRepository.AISettings` reads the classifier's share; #9 serves the endpoints (#154), and `PUT` writes with one jsonb `||` statement.
   - Key `quality_profile`: one document shaped like `GET/PUT /settings/quality-profile` (§6 "Search"; #6). A missing field takes its default.
 
@@ -279,6 +279,20 @@ New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendati
 - Like torrent subtitles, the writer drops them when the item's file changes.
 - Rollback: an older binary lists them as downloaded subtitles whatever the item's file, which is harmless.
 
+**`010_downloads.sql` (#77, P4 #202)**
+A new table only. Wire shapes: §6 "Downloads (#77)".
+- `downloads`, one row per Keep or smart pick:
+  - `id`, `reason` (CHECK `kept|smart`), `smart_source` (CHECK `up_next|streaming`; NULL unless smart);
+  - the target: `scope` (CHECK `movie|show|season|episode`) and `movie_id`, `show_id`, `season_id`, `episode_id`. These are FKs `ON DELETE CASCADE`, so removing a title removes its downloads. A CHECK per scope says the matching column is the only one set. The API names a season by its show and `season_number`; the row stores the `seasons` row;
+  - `until_watched bool`, `expires_at` (NULL: no maximum), `watched_at` (when a local session reached 90%; Trakt plays are read from `trakt_history`);
+  - `created_at`, `updated_at`;
+  - a partial unique index per target column (`WHERE movie_id IS NOT NULL`, …): one download per target, so a Keep on a smart pick turns that row kept. An index on `expires_at`.
+- What a download wants isn't stored. The manager resolves it on every tick from the active `kind = 'torrent'` assignments, so a show or season keep picks up episodes assigned later. Pins live in the piece cache and are rebuilt from this table at startup (`RestorePins`, before the first trim).
+- `app_settings` key `storage` (P2, #200; no migration) is one document shaped like `PUT /settings/storage`'s body: `{limit_bytes, kept: {max_bytes, default_until_watched, default_days}, smart: {enabled, episodes_ahead, max_bytes}, background: {enabled, pause_while_streaming, windows}}`.
+  - A missing field takes its default, and `limit_bytes` null is auto. Until the document is first written, `config.yaml`'s `global_cache_size` comes before auto, but only when the file sets it (§6 "Storage (#77)").
+  - `PUT` writes with one jsonb statement, nested objects merged (`library/settings_storage.go`, as `settings_ai.go`).
+- Rollback: an older binary ignores the table and the document, so pinned data becomes ordinary cache. It goes back to `global_cache_size`: 4 GiB once the VM's line is deleted (P2), and its first trim then evicts everything past that.
+
 ## 6. API contract (backend, under `/api`)
 
 **Conventions**
@@ -324,29 +338,42 @@ New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendati
     torrent: {info_hash, release_name, file_name, size_bytes, resolution, source, added_at,
               state: active|idle|not_loaded|paused, seeders} | null,  // movies; seeders null unless loaded;
                                              // paused (B6): the user paused it, loaded or not; it wins
-    stream: {…} | null                       // movies playing from HDRezka; see "HDRezka (#63)"
+    stream: {…} | null,                      // movies playing from HDRezka; see "HDRezka (#63)"
+    keep: Keep | null                        // #77: a movie's download; a show's show-scope download
   }
+  Keep { download_id, reason: kept|smart, scope: movie|show|season|episode,
+         state,                              // Download.state ("Downloads (#77)")
+         pct,                                // 0–100: what's on disk of what it wants (the piece cache's)
+         until_watched, expires_at }
   SimilarTitle { media_type, tmdb_id, title, year, poster_path,
                  library: {library_id, availability_stage, episodes_total, episodes_ready} | null }
   ```
-  `download.eta_seconds` is null (torrents fetch on demand). `download.speed_bps` is the torrent's smoothed download speed (B6, #98); for a show, the speeds of the torrents its downloading episodes are in, each torrent once. A paused torrent is never downloading.
+  `download` describes the files a download wants (#77) that aren't all on disk.
+  - `pct` is what's on disk of them, from the piece cache.
+  - `eta_seconds` is set while they download with a speed, and null otherwise.
+  - `speed_bps` is the torrent's smoothed download speed (B6, #98). For a show, it's the speeds of the torrents its downloading episodes are in, each torrent once.
+  - A paused torrent is never downloading.
 - `GET /titles/tv/{tmdb_id}/seasons/{n}`: one season at a time, so 1,000-episode shows stay light. `404 not_in_library` for a show that isn't in the library; `404 not_found` for an unknown season (or season 0 while specials are off).
   ```
-  { season_number, name, episodes: [EpisodeSummary], ranges: [EpisodeRange] }
+  { season_number, name, episodes: [EpisodeSummary], ranges: [EpisodeRange],
+    keep: Keep | null }                      // #77: the season-scope download
   EpisodeSummary { id, season_number, episode_number, absolute_number, name, overview, air_date, still_path,
                    runtime, episode_type: standard|mid_season|finale|null,
                    state: watched|ready|downloading|missing|upcoming|needs_review, pct,   // watched wins (B5)
                    webdav_path,              // only while the episode has a file
-                   source, stream }          // the file's source; see "HDRezka (#63)"
+                   source, stream,           // the file's source; see "HDRezka (#63)"
+                   keep: Keep | null }       // #77: what holds the episode (below)
   EpisodeRange { label, kind: arc|block, from, to, absolute_from, absolute_to, missing }   // from/to in-season
   ```
+  `EpisodeSummary.keep` is the download that holds the episode: its own, its season's, its show's, or a smart pick. Kept wins over smart, then the narrowest scope. Its `state` and `pct` describe the episode's file: `done` and 100 once it's on disk, otherwise the download's state and what's on disk of the file. The other fields are the download's.
   Ranges exist only for seasons over 20 episodes. They never overlap: every episode is in exactly one range, so it counts towards one `missing`. A regular season uses the story arcs of its TMDB story-arc group (type 5) when they share no episode and cover at least 80% of the season. Each arc becomes one range per run of consecutive episodes it lists, never its min–max span: an arc interrupted by other episodes gets `"Specials"`, then `"Specials (2)"`, and so on. Otherwise the season is split where air dates are more than 45 days apart, then cut into blocks of up to 10. Episodes no arc covers (arc groups lag behind airing shows) get blocks too. Specials (season 0) always get blocks and skip the air-date split, since they air years apart. Block labels are in-season numbers, e.g. `"21–28"`, or `"31"` for a single episode. Without TMDB the season still loads, with blocks.
 - **Availability rules.** The server computes `availability_stage`, so the client never infers it.
-  - Movie: `none` not in the library; `needs_torrent` no active assignment; `downloading` the torrent is loaded and active and the file isn't fully cached; `ready` otherwise.
+  - **A file is downloading** only while a download wants it (#77, "Downloads (#77)") and it isn't all on disk (the piece cache's), unless its torrent is paused. A file nothing keeps streams on demand, so it's `ready` as soon as it's assigned, whatever is cached.
+  - Movie: `none` not in the library; `needs_torrent` no active assignment; `downloading` its file is downloading; `ready` otherwise.
   - Show: `none` not in the library; `needs_torrent` nothing assigned, or the frontier is non-empty; `downloading` any assigned episode is downloading; `ready` otherwise.
   - The **frontier**: aired regular episodes after the last one with a file **or watched** (B5). Specials never count, nor do gaps before that episode. `missing` is its first run, within one season.
-  - Episode, first match: `watched` when Trakt has a play of it (B5); `ready` or `downloading` when assigned; `needs_review` as below; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown.
-  - An HDRezka file (#63) counts as assigned like a torrent's, and is never `downloading`: it streams from the CDN, so it's always `ready`. The stage keeps the name `needs_torrent`.
+  - Episode, first match: `watched` when Trakt has a play of it (B5); `ready` or `downloading` (its file is downloading) when assigned; `needs_review` as below; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown.
+  - An HDRezka file (#63) counts as assigned like a torrent's, and is never `downloading`: it streams from the CDN, so it's always `ready`. Downloads never want it (`unavailable`). The stage keeps the name `needs_torrent`.
   - `default_season`: `watch_state.next_episode`'s season when the title lists it, else the frontier's season, else the latest season with a file, else the first regular season.
 - **Review rules** (B2, #5). They read the item's open, non-dry-run mapping jobs that are past classification (`resolving`, `needs_review` or `ready`; §6 "Assignment").
   - `needs_review` (title and `LibraryItem`) counts those jobs' files that are pending and map (have targets, or are movie candidates) or are in a conflict. `/library?status=needs_review` is `needs_review > 0`.
@@ -365,6 +392,7 @@ New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendati
   - One transaction deletes the title (its seasons, episodes and jobs cascade) and deactivates its assignments, in one query for a whole show. The rows stay, inactive.
   - Every subtitle of the title goes, from every source: the rows in one query, the files, and each item's folders (`{download_path}/{movie|episode}/{id}/` and `{download_path}/hdrezka/{movie|episode}/{id}/`).
   - Each torrent the title used (its assignments, active or not, and its jobs) that `TorrentInUse` says nothing else uses is released: dropped from the client, with its data when `delete_data=true` (see "Torrents and activity (B6)").
+  - Its downloads go with it (`downloads` cascades, #77), and the download manager is woken to drop their pins.
   - The WebDAV tree is rebuilt.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
 - `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item; an unknown item is `404`.
@@ -384,7 +412,7 @@ New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendati
                 runtime, resolution,                 // movies (minutes; the assigned file's); null for shows
                 webdav_path, webdav_url,             // as TitleLibraryState: null until something is assigned
                 review_job_id,                       // as TitleLibraryState (review rules)
-                download: {pct, info_hash} | null,   // while a file is being fetched; shows: combined, one of the hashes
+                download: {pct, info_hash} | null,   // while a file is downloading (a download wants it, #77); shows: combined, one of the hashes
                 missing: MissingRun | null,          // shows: the first frontier run, as TitleLibraryState.missing
                 streaming }                          // a streaming session plays it (a show: any episode); an in-memory overlay (#99)
   ```
@@ -961,12 +989,18 @@ RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides
 - **Dropped from earlier drafts:** `in_library` on rec items (replaced by `library`, as on similar titles); `backdrop_dominant_color` on rec items (HANDOFF §6 lists one: the hero loads the title, which has it, as Up next does); the thread's `messages` (replaced by `turns`, the saved views).
 
 ### Torrents and activity (B6)
-Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#98, #99), `internal/sessions` (#99) and `service.RemovalService` (#96).
+Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#98, #99), `internal/sessions` (#99) and `service.RemovalService` (#96); `wanted` and `holds` come from `internal/downloads` (#77).
 
-- **Torrents stream on demand.** `AddTorrent` sets every piece to no priority; the prioritizer raises pieces only around open readers, and pieces live in the LRU file cache (`global_cache_size`, 4 GB by default), so progress can go down. A torrent loads on its first WebDAV open (or a mapping job), and nothing reloads at startup. So:
+- **Torrents still stream on demand, and downloads fetch the files they want in the background (#77).**
+  - `AddTorrent` sets every piece to no priority, and the prioritizer raises pieces only around open readers.
+  - A download ("Downloads (#77)") sets its wanted files to Normal priority. anacrolix takes the max of file, reader and piece priority, so the streaming windows still come first, and the prioritizer's piece-level resets can't cancel it.
+  - The download also pins its pieces in the piece cache (`internal/torrent/piececache`: missinggo's filecache with pins; its limit is "Storage (#77)"). Unpinned pieces are evicted LRU, so a torrent nothing keeps can still lose progress.
+  - A torrent loads on its first WebDAV open, a mapping job, or when the download manager takes it (at most 2 at a time). Nothing else reloads at startup.
+
+  So:
   - a torrent the library knows but the client hasn't loaded is `idle`, with `loaded: false` and `complete`, `progress`, `bytes_completed`, `peers`, `seeders` and `last_active_at` all null;
-  - there's no ETA anywhere;
-  - background downloading is #77's.
+  - an ETA exists only for wanted files (`wanted.eta_seconds`, a title's `download.eta_seconds`), while they download with a speed;
+  - what's on disk for a download (`wanted.done_bytes`, `Download.done_bytes`, `Keep.pct`) comes from the piece cache. anacrolix's completion is left out because the LRU can contradict it (streamlab F11). `progress` and `bytes_completed` stay anacrolix's.
 - **Hashes.** Responses carry 40-character lowercase hex. Every `/torrents/{hash}` route accepts hex in either case, or base32 (32 characters). Anything else is `400 bad_request`.
 - **Known torrents.** A torrent is known when the client has it loaded, or an active `kind = 'torrent'` assignment uses it, or an open job that isn't a dry run has it. `pause`, `resume` and `DELETE` answer `404` for anything else.
 - **`GET /torrents`** → `200 {items: TorrentListItem[]}`: every known torrent, and every loaded one nothing references (an Inspect dry run, a WebDAV listing) with `titles: []`. One query reads the library side (active torrent assignments and open non-dry-run jobs, with their titles), merged in memory with the client's loaded torrents.
@@ -974,7 +1008,8 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   TorrentState = streaming | downloading | paused | idle     // the first rule that matches:
     paused       the user paused it (loaded or not)
     streaming    loaded, with a streaming session on one of its files (below)
-    downloading  loaded, its network on (the activity manager hasn't idled it), and complete ≠ true
+    downloading  loaded, its network on (the activity manager hasn't idled it), and a download still wants bytes
+                 of it (wanted.done_bytes < wanted.bytes) or download_bps > 0 (#77)
     idle         anything else
   TorrentListItem {
     info_hash, name, state, loaded,
@@ -983,12 +1018,20 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
     download_bps, upload_bps,          // smoothed bytes per second; 0 when not loaded
     peers: number | null, seeders: number | null,   // connected; null when not loaded
     added_at,                          // earliest active assignment or open job; the load time for one nothing references
-    last_active_at: Timestamp | null,  // the last read, resume or load since the server started (the activity manager's, in memory); null when not loaded
+    last_active_at: Timestamp | null,  // the last read, resume, load or download-manager wake since the server started (in memory); null when not loaded
     titles: [TorrentTitle],            // by title, then year
     open_job: {id, status} | null,     // the newest open, non-dry-run job
-    streaming: [StreamingSession]      // its files' sessions, the most recently read first
+    streaming: [StreamingSession],     // its files' sessions, the most recently read first
+    wanted: TorrentWanted | null,      // #77: what downloads want of it; null when nothing does
+    holds: [TorrentHold]               // #77: the downloads that want it, kept first, then by id
   }
   TorrentTitle { media_type, tmdb_id, library_id, title, year, poster_path, scope }
+  TorrentWanted { bytes, done_bytes,   // its wanted files' total, and what's on disk of them (the piece cache's)
+                  eta_seconds | null,  // while it downloads with a speed
+                  state,               // the manager's state for this torrent: Download.state without no_file and unavailable
+                  resumes_at | null }  // as Download.resumes_at
+  TorrentHold { download_id, reason: kept|smart, scope: movie|show|season|episode,
+                title }                // the movie's or the show's title
   ```
   - **Order:** by state (streaming, downloading, paused, idle), then `last_active_at` newest first (nulls last), then `added_at` newest first.
   - **`name`:** the info dict's name when loaded, else the newest job's `torrent_name` (preferring a job that has seen the file list), else the stored metainfo's name (#99), else the magnet's `dn`, else the hash.
@@ -1000,9 +1043,11 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
     peers,                             // connected, over the loaded torrents
     history: {interval_seconds: 2, download_bps: number[], upload_bps: number[]},   // the last 60 s of totals, oldest first; fewer right after startup
     counts: {streaming, downloading, paused, idle},
-    disk: {total_bytes, free_bytes, torrents_bytes, cache_limit_bytes} | null,      // statfs(metadata_folder); the file cache's fill and capacity; null when unreadable
+    disk: {total_bytes, free_bytes, torrents_bytes, cache_limit_bytes,              // statfs(metadata_folder); null when unreadable
+           kept_bytes, smart_bytes} | null,
     streaming: [StreamingSession] }   // every session, HDRezka's too, the most recently read first: "Streaming now" reads streaming[0]
   ```
+  `torrents_bytes` is still the piece cache's fill: kept, smart and streaming cache together. `cache_limit_bytes` is the cap it applies now ("Storage (#77)" `effective_bytes`). `kept_bytes` and `smart_bytes` are what's pinned on disk for kept and smart downloads (#77), as `/settings/storage`'s `usage`.
 - **Streaming sessions** (#99, `internal/sessions`): who is streaming what over WebDAV, from every source.
   - **Requests.** A handler wrapper on the WebDAV server puts each request's method, User-Agent and remote address in its context. There are no proxy settings, so the address is the socket's host (no port: Infuse reads one file over several connections). `webdavFS.OpenFile` passes the context to `LibraryFS.OpenContext`; `Open(path)` is `OpenContext` without one.
   - **Reads.** A video a **GET** opens (a torrent's `TorrentFile` or an HDRezka `RemoteFile`) is wrapped so each read reports its offset and bytes. PROPFIND and HEAD opens (and opens outside a request) are never tracked, and a handle registers nothing until its first read, so listings cost nothing.
@@ -1029,7 +1074,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - **Where they show:** each torrent's sessions on its list item (and they make a loaded torrent `streaming`), every session in the summary, `LibraryItem.streaming` (a session's item is that movie or show; an overlay on the one query) and `/status`'s `webdav.active_readers` (their count).
 - **Speeds.** Every 2 s a sampler reads each loaded torrent's data bytes read and written (`BytesReadData`, `BytesWrittenData`) and smooths each torrent's rate with an EWMA (5 s time constant). A torrent that's dropped falls out; one added again starts over. It keeps the last 30 totals for `history`.
 - **`POST /torrents/{hash}/pause`** and **`/resume`** → `200 TorrentListItem`, idempotent; `400` for a malformed hash, `404` for an unknown one.
-  - **Pause is sticky.** It's stored, so it survives restarts. The torrent's network goes off and reads don't wake it (the activity manager ignores them, and the VFS's wait for peers returns at once). On a torrent that isn't loaded it applies when it loads.
+  - **Pause is sticky.** It's stored, so it survives restarts. The torrent's network goes off and reads don't wake it (the activity manager ignores them, and the VFS's wait for peers returns at once). On a torrent that isn't loaded it applies when it loads. The downloads that want it are `paused` (#77): the download manager sets their files back to no priority and never wakes it.
   - **Resume** clears it. A loaded torrent's network comes back on, and it counts as just accessed, so it stays on until `idle_timeout`. One that isn't loaded stays unloaded.
   - Pausing an already paused torrent keeps its first time; resuming one that isn't paused changes nothing.
 - **`POST /torrents/pause-all`** → `200 {count}`: pauses the streaming and downloading torrents only. **`POST /torrents/resume-all`** → `200 {count}`: resumes every paused torrent, loaded or not.
@@ -1058,6 +1103,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
 - **`DELETE /torrents/{hash}?delete_data=true|false`** → `204` (#96). `delete_data` defaults to `false`; any other value is `400 bad_request`.
   - It answers `404` only when nothing knows the hash: the torrent isn't loaded, no active torrent assignment uses it, and no open job has it (dry runs don't count).
   - One transaction cancels its open jobs (dry runs too), deactivates its active assignments, deletes its `source = 'torrent'` subtitles and clears its stored pause. The rows stay, inactive, so history is kept. The client's pause is cleared once it's dropped (#98).
+  - Downloads that wanted its files keep their rows (#77): with nothing else assigned they're `no_file` until something is. Its pins are dropped, and `delete_data=true` deletes pinned pieces too.
   - The torrent is dropped from the client. It first waits for an add of the torrent in flight, at most `add_timeout`, so the answer can come late. Readers still open on its files fail, and its stored metainfo is deleted.
   - With `delete_data=true`, every piece is marked not complete, which deletes its file from the cache. The pieces come from the live info dict, else the stored metainfo. Partial pieces are left to the cache's LRU.
   - When the torrent is neither loaded nor stored, the metainfo is fetched again from its newest magnet in the background, within `add_timeout`. Its data is then deleted, unless something uses the torrent again by then. Without peers, a log line says the data is left to the LRU.
@@ -1067,6 +1113,199 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - When metadata arrives, the metainfo is stored in `{metadata_folder}/metainfo/<hash>.torrent`. An add loads it first, with no wait for peers.
 - **Releasing** a torrent (discard, title delete, unassign) drops it when `TorrentInUse` finds no active assignment and no open job using it. A release that drops it also clears its pause, stored and in the client, so it isn't paused when it's assigned again (title deletes and unassigns, in `RemovalService`). Releases elsewhere (a job discard) leave the stored pause to startup: before the pauses are restored, those of torrents the library doesn't know (no active torrent assignment, no open non-dry-run job) are pruned.
 - **BitTorrent port:** `torrent.listen_port` (`TORRENT_LISTEN_PORT`), 42069 by default; 0 picks a free port, so two instances can run side by side.
+
+### Storage (#77)
+How much of the disk the piece cache may use, and how that space is split. Decisions: #77's decisions comment. Types: `web/src/lib/api/contract/settings.ts`. Served by `internal/storagecap` (P2, #200); `internal/downloads` (P4, #202) enforces the kept and smart caps. The web mock is stateful (`web/src/mocks/fixtures/settings.ts`; scenarios `downloads-*`). UI: Settings › Storage (P7, #205), with its copy under "Storage and downloads: UI copy" below.
+
+Every size is in bytes (int64) and every time is RFC 3339 in UTC.
+
+- **One limit.** The piece cache (`internal/torrent/piececache`) holds streaming pieces, kept downloads and smart downloads within one limit, `limit_effective_bytes`.
+  - Precedence: the stored setting once it's been written (`limit_bytes: null` is auto); then `config.yaml`'s `torrent.global_cache_size`, only when the file sets it; then auto, 75% of the data disk (`statfs(metadata_folder)`'s total), so the limit follows the disk when it grows. `source` says which applied.
+  - It's clamped to `[min_bytes, max_bytes]`: 4 GiB, and 90% of the disk.
+  - The code default stays at 4096 MiB, because the lab calls `InitStorage(dir, cfg.Torrent.GlobalCacheSize)`. Only the precedence above reads it.
+- **The floor.** The disk keeps `floor_free_bytes` (5 GiB) free.
+  - Every minute the cap applied to the cache is `effective_bytes = min(limit_effective_bytes, filled + free − floor)`, never below `min_bytes`.
+  - `floored` is true while the floor holds it below the limit.
+  - Changes (a PUT, or the floor moving) apply at runtime. The cache is trimmed in steps of at most 2 GiB.
+- **The split.** Inside the limit:
+  - kept downloads get `kept.effective_max_bytes`: `kept.max_bytes`, or 50% of the limit when that's null;
+  - smart downloads get `smart.effective_max_bytes`: `smart.max_bytes`, or 15% of the limit when null;
+  - the rest is the streaming cache.
+  - **The streaming reserve**, `reserve_bytes` = min(20 GiB, 25% of the limit), is never pinned: `kept.effective_max_bytes + smart.effective_max_bytes ≤ limit_effective_bytes − reserve_bytes`. When a lower limit (or an auto one) breaks that, the effective maxima shrink, smart first.
+  - Smart never evicts kept: a smart pick that doesn't fit is skipped. A Keep that doesn't fit is `409 storage_full` ("Downloads (#77)").
+```
+GET /settings/storage → 200 StorageSettings
+StorageSettings {
+  limit_bytes,                       // the stored limit; null: auto
+  source: setting|config|auto,       // where limit_effective_bytes comes from
+  auto_bytes,                        // 75% of the disk's total
+  config_bytes,                      // config.yaml's global_cache_size; null unless the file sets it
+  limit_effective_bytes,             // the limit after precedence and clamping
+  effective_bytes,                   // the cap applied to the cache now (the floor)
+  floored, floor_free_bytes,         // the floor holds effective_bytes below the limit; 5 GiB
+  min_bytes, max_bytes,              // 4 GiB; 90% of the disk's total
+  reserve_bytes,                     // min(20 GiB, 25% of the limit): never pinned
+  disk: {total_bytes, free_bytes},   // statfs(metadata_folder)
+  usage: {kept_bytes, smart_bytes, cache_bytes},   // on disk now, from the piece cache; cache = filled − pinned
+  committed_kept_bytes,              // the wanted size of every kept download, on disk or not; a shared file counts once
+  kept:  {max_bytes, effective_max_bytes,          // null max: 50% of the limit
+          default_until_watched, default_days},    // a Keep's default duration
+  smart: {enabled, episodes_ahead,
+          max_bytes, effective_max_bytes},         // null max: 15% of the limit
+  background: {enabled, pause_while_streaming, windows: [{start, end}]}
+}
+```
+- **Defaults.**
+  - `kept.default_until_watched: true` and `kept.default_days: 30`: "until watched, at most 30 days". `default_days` is 7, 30 or 90, or null for no maximum.
+  - `smart.enabled: false`, until the device session in #202 passes. `episodes_ahead: 2`, from 1 to 5.
+  - `background.enabled: true`. It's the kill switch for every background download, kept and smart; `smart.enabled` is smart's own.
+  - `background.pause_while_streaming: true`. While anything streams, background downloads of the other torrents wait, until a minute after the last stream ends. Prefetch inside the streaming torrent carries on at Normal priority, below its stream's windows.
+  - `background.windows: []` means any time. A window is `HH:MM`–`HH:MM` in the server's `TZ`, may cross midnight ("23:00"–"06:00"), and has `start ≠ end`. There are at most 4. Outside every window, downloads wait (`waiting_for_window`).
+- **`PUT /settings/storage`** with any of `{limit_bytes, kept: {max_bytes, default_until_watched, default_days}, smart: {enabled, episodes_ahead, max_bytes}, background: {enabled, pause_while_streaming, windows}}` → `200 StorageSettings` (all of it).
+  - It's partial: fields left out keep their value, nested objects merge, and `windows` is replaced whole. Unknown and read-only fields are ignored, and a body that isn't a JSON object is `400`.
+  - A bad value is `422 validation_error`, with `error.field` naming the first one in this order:
+    - `limit_bytes` (null, or `min_bytes`–`max_bytes`);
+    - `kept.max_bytes` (null, or 0 up to the limit minus the reserve), `kept.default_until_watched` (a boolean) and `kept.default_days` (7, 30, 90 or null);
+    - `smart.enabled`, `smart.episodes_ahead` (1–5) and `smart.max_bytes` (as `kept.max_bytes`);
+    - `background.enabled`, `background.pause_while_streaming` and `background.windows` (at most 4, `HH:MM`, `start ≠ end`).
+    - A nested value that isn't an object is 422 naming it (`kept`).
+  - Then `409 limit_below_committed` with `committed_kept_bytes` when the change would leave `kept.effective_max_bytes` below `committed_kept_bytes`, from a lower limit or a lower kept cap. Nothing is written; stop keeping something first.
+  - Both work with no downloads at all. The Settings page sends only the fields it changed.
+
+### Downloads (#77)
+A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a movie, a show, a season or an episode. It fetches the scope's torrent files in the background and pins them on disk while it lasts. Decisions: #77's decisions comment. Types: `web/src/lib/api/contract/downloads.ts`. Served by `internal/downloads` (P4 #202: Keep, the manager, caps and windows; P5 #203: smart picks) on the pinnable piece cache (P3 #201). Titles, the library and Activity show them (P6 #204). The web mock is stateful (`web/src/mocks/fixtures/downloads.ts`; scenarios `downloads-full`, `downloads-empty`). UI: P8 #206 (Download & keep) and P9 #207 (Activity), with the copy below.
+
+- **What it covers.** A show or season download also covers episodes assigned later, within the kept cap.
+  - Only torrent files count. HDRezka files (and pure-v2 torrents', which the piece map can't name) are `unavailable`.
+  - A file several episodes share counts once.
+- **How it runs.** The manager ticks every 30 s and is woken by every change. On each tick it:
+  - resolves what each download wants from the active assignments;
+  - pins it;
+  - loads at most 2 torrents with bytes left;
+  - sets their wanted files to Normal priority.
+- **Watched** means watched since it was created: a Trakt play newer than `created_at`, or a local session that reached 90%. Smart picks also count a later episode of the same show streaming.
+- **Releasing.** A download is released by DELETE, by its `expires_at` passing, or by `until_watched` once what it covers is watched. A show or season releases each episode's files as that episode is watched, and ends once every episode with a file is.
+  - Releasing unpins the data. It stays as ordinary cache and plays until the LRU evicts it.
+  - Smart picks are released when watched, or after 14 days, and the pieces of watched episodes are the first to be evicted (`Demote`).
+- **Smart picks** (P5) are the next `smart.episodes_ahead` episodes, with torrent files, of the shows being watched:
+  - Trakt's Up next shows watched in the last 21 days (`smart_source: up_next`);
+  - the episodes after the one streaming now (`streaming`), which works without Trakt.
+  - They're episodes only, and never evict anything kept.
+```
+GET /downloads → 200 DownloadList
+DownloadList {
+  items: [Download],                 // kept first, newest first; then smart picks, by show and episode order
+  usage: {kept_bytes, smart_bytes, committed_kept_bytes, kept_max_bytes, smart_max_bytes},
+                                     // on disk now; committed as /settings/storage; the maxima are the effective ones
+  paused_reason: streaming|window|disabled | null,   // why background downloads wait now
+  resumes_at | null                  // window: the next window's start; streaming: a minute after the last stream ended
+}                                    // (null while one still streams); disabled: null
+Download {
+  id, reason: kept|smart,
+  smart_source: up_next|streaming | null,          // null for kept
+  scope: movie|show|season|episode,
+  item: {media_type, tmdb_id, library_id,          // library_id: the movie's or the show's
+         title, poster_path,                       // the movie's or the show's
+         season_number | null, episode_number | null, episode_name | null},   // season and episode scopes
+  state,                                           // below
+  wanted_bytes, done_bytes,                        // over its torrent files; done: on disk, from the piece cache
+  download_bps,                                    // smoothed, over its torrents; 0 unless downloading
+  eta_seconds | null,                              // only while downloading with a speed
+  resumes_at | null,                               // waiting_for_window: the next window's start; stalled: the next retry
+  files: {total, done, unavailable},               // the assigned files it covers; on disk; HDRezka or pure v2
+  until_watched, expires_at | null,                // expires_at null: no maximum
+  created_at
+}
+```
+- **`state`**, the first that matches:
+  1. `unavailable`: it covers files, and none can be downloaded (HDRezka only, or pure v2).
+  2. `no_file`: it covers no assigned file yet. A movie gets one with a torrent, and a show or season with its first episode.
+  3. `done`: every wanted file is on disk.
+  4. `paused`: the user paused its torrent (B6), or background downloads are off (`background.enabled: false`).
+  5. `disk_full`: the floor or the kept or smart cap leaves no room to fetch more.
+  6. `waiting_for_window`: outside every download window.
+  7. `waiting_for_stream`: something else streams (`pause_while_streaming`), or the minute after the last stream ended.
+  8. `stalled`: no progress for 10 minutes. Its slot goes to the next torrent, and it's retried with backoff (`resumes_at`).
+  9. `downloading`: in one of the 2 slots.
+  10. `queued`: waiting for a slot.
+
+  The manager keeps this state per torrent. A download over several torrents is `done` when all of them are, `downloading` when any is, and otherwise the first state above that one of them has.
+- **`POST /downloads`**, a Keep:
+  ```
+  { "scope": "movie",   "id": <library movie id> }
+  { "scope": "show",    "id": <library show id> }
+  { "scope": "season",  "id": <library show id>, "season_number": n }
+  { "scope": "episode", "id": <library episode id> }
+    + optional "until_watched": bool, "expires_at": Timestamp | null   // both default from /settings/storage's kept
+  → 201 Download   // a new kept download
+  → 200 Download   // already kept (unchanged; PATCH changes its duration), or a smart pick turned kept
+  → 409 { "error": { "code": "storage_full", "message", "needed_bytes", "available_bytes" } }
+  → 422 { "error": { "code": "not_downloadable" | "validation_error", "message", "field"? } }
+  → 404            // the movie, show, season or episode isn't in the library
+  ```
+  - The defaults: `until_watched` is `kept.default_until_watched`, and `expires_at` is `created_at` + `kept.default_days` (null when that's null). An `expires_at` sent as null means no maximum.
+  - Checks, in order:
+    - `400` when the body isn't a JSON object;
+    - `422 validation_error` naming `scope`, `id`, `season_number`, `until_watched` or `expires_at` (not a time, or in the past);
+    - `404`;
+    - `422 not_downloadable` when every file it covers plays from HDRezka;
+    - `200` when it's already kept;
+    - `409 storage_full`;
+    - then `201`, or `200` for a smart pick turned kept.
+  - `409 storage_full`: `needed_bytes` is what the Keep adds to `committed_kept_bytes`, so a file another kept download has needs nothing. `available_bytes` is `kept.effective_max_bytes − committed_kept_bytes`.
+  - A Keep with nothing assigned yet is fine (`no_file`). The manager is woken, so its state moves within seconds.
+- **`GET /downloads/estimate?scope=&id=[&season_number=]`**, the same target as POST → `200 DownloadEstimate`. The Keep sheet uses it to say what a Keep needs before it's made.
+  ```
+  DownloadEstimate {
+    wanted_bytes,       // what the Keep would want (its torrent files)
+    needed_bytes,       // what it would add to committed_kept_bytes: 0 when it's already kept, or another kept download has its files
+    available_bytes,    // kept.effective_max_bytes − committed_kept_bytes
+    downloadable }      // false where POST answers 422 not_downloadable
+  ```
+  It writes nothing. A malformed target is `400 bad_request`, and an item that isn't in the library is `404`. `needed_bytes > available_bytes` is POST's `409 storage_full`.
+- **`PATCH /downloads/{id}`** with `{until_watched?, expires_at?}` (kept downloads only) → `200 Download`.
+  - `404` for an unknown id.
+  - `422 validation_error` for a smart pick (Keep it with POST first), or for a bad value, naming `until_watched` or `expires_at` (null, or a time in the future).
+- **`DELETE /downloads/{id}`** → `204`, or `404`. It releases the download (above). A smart pick that's deleted isn't picked again.
+
+### Storage and downloads: UI copy (#77, P7–P9)
+HANDOFF has no screens for these, so this is their spec. The wording lives in `lib/status.ts` (STYLE_GUIDE §5), and it follows STYLE_GUIDE §9: never promise what the system can't know. Sizes are written as the rest of the app writes them (`formatBytes`).
+
+**Pills and states** (title pages, episode rows, Activity cards and the "Kept & smart" list):
+
+| State | Copy |
+|---|---|
+| `kept` (reason) | "Kept" |
+| `smart` (reason) | "Smart" |
+| `queued` | "Queued" |
+| `downloading` | "Downloading N%" |
+| `waiting_for_stream` | "Waits for the stream to end" |
+| `waiting_for_window` | "Waits until 01:00" (from `resumes_at`, in browser time) |
+| `paused` | "Paused" |
+| `stalled` | "No peers · retrying" |
+| `disk_full` | "Disk full" |
+| `done` | "On disk" |
+| `no_file` | "No file yet" |
+| `unavailable` | "Can't keep: streams from HDRezka" |
+
+- **Expiry** reads "Kept until watched", "Kept until Nov 16", or "Kept until watched · by Nov 16". With neither, it's "Kept".
+- **Activity.** Cards take Kept and Smart pills from `holds` and progress and ETA from `wanted`, and say a waiting state with the copy above. An idle torrent whose downloads are done reads "On disk".
+
+**The Keep sheet** ("Download & keep"):
+- Options:
+  - "Until I watch it", with the sub-line "30 days at most". It's the default (`kept.default_*`).
+  - "7 days", "30 days" and "90 days".
+  - "Until I remove it".
+- It shows the size needed against the space left, from `GET /downloads/estimate`: "Needs 14.2 GB · 61 GB left for kept downloads". When the estimate doesn't fit, it says so before the Keep is sent, with the 409's copy.
+- On `409 storage_full`: "Not enough space: needs X, Y left. Free some kept downloads or raise the limit in Settings › Storage." It links to Settings › Storage.
+- On `422 not_downloadable`: "This plays from HDRezka, so it can't be kept on disk. Pick a torrent for it to keep it."
+- Existing keeps offer Change duration and Stop keeping.
+
+**Settings › Storage:**
+- The bar is "Kept · Smart · Cache · Free", with a marker at the limit.
+- The limit reads "Auto (75% of the disk) · 148 GB", or "Custom".
+- While `floored`, the note reads "Holding the cache at X to keep 5 GB of the disk free".
+- `409 limit_below_committed`: "Kept downloads need X. Stop keeping some, or set a limit that leaves room for them."
 
 ### System
 - `GET /status[?refresh=1]` (G2) returns:

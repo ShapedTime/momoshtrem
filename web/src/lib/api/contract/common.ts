@@ -15,6 +15,11 @@ export interface ApiErrorBody {
     field?: string;
     /** When a limit lifts, on the 429s that have one (the AI budget, Ask's daily limit). */
     resets_at?: Timestamp;
+    /** POST /downloads' 409 `storage_full` (#77): what the Keep needs, and what the kept cap has left. */
+    needed_bytes?: number;
+    available_bytes?: number;
+    /** PUT /settings/storage's 409 `limit_below_committed` (#77): what kept downloads need. */
+    committed_kept_bytes?: number;
   };
 }
 

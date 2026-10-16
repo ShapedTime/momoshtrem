@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import type { TorrentDetail, TorrentListItem, TorrentsPauseCount, TorrentsSummary, TorrentState } from '@/lib/api/contract';
+import { mockTorrentShare, onTorrentPaused, onTorrentRemoved, onTorrentResumed } from '../fixtures/downloads';
 import { TORRENTS, torrentDetail, torrentsSummary } from '../fixtures/torrents';
 import { scenario } from '../scenario';
 import { apiError, latency, noContent, notFound } from './util';
@@ -8,7 +9,9 @@ import { apiError, latency, noContent, notFound } from './util';
  * Activity (PLAN §6 "Torrents and activity (B6)"). Pauses, resumes and deletes
  * last for the page (resetMockTorrents in tests). Scenarios: `torrents-offline`,
  * the list and the summary answer as the proxy does when the backend is gone;
- * `torrents-quiet`, only the idle torrents and nothing streaming.
+ * `torrents-quiet`, only the idle torrents and nothing streaming. `wanted` and
+ * `holds` are the page's downloads (#77, fixtures/downloads.ts), and pausing,
+ * resuming or removing a torrent reaches them.
  */
 let torrents: TorrentListItem[] = structuredClone(TORRENTS);
 /** What a paused torrent was before, so a resume puts it back. */
@@ -18,6 +21,12 @@ export function resetMockTorrents(): void {
   torrents = structuredClone(TORRENTS);
   beforePause = new Map();
 }
+
+/** This page's torrents as they stand (handlers/downloads.ts matches Keeps to them). */
+export const mockTorrents = (): readonly TorrentListItem[] => torrents;
+
+/** A torrent as the API answers it: with what the page's downloads want of it. */
+const answer = (t: TorrentListItem): TorrentListItem => ({ ...t, ...mockTorrentShare(t) });
 
 const hex = /^[0-9a-f]{40}$/i;
 
@@ -33,6 +42,7 @@ function pause(t: TorrentListItem): void {
   if (t.state === 'paused') return;
   beforePause.set(t.info_hash, t.state);
   Object.assign(t, { state: 'paused', download_bps: 0, upload_bps: 0 });
+  onTorrentPaused(t.info_hash);
 }
 
 /** Back to what it was; a torrent paused from the start comes back fetching (loaded) or idle. */
@@ -40,10 +50,11 @@ function resume(t: TorrentListItem): void {
   if (t.state !== 'paused') return;
   t.state = beforePause.get(t.info_hash) ?? (t.loaded && !t.complete ? 'downloading' : 'idle');
   beforePause.delete(t.info_hash);
+  onTorrentResumed(t.info_hash);
 }
 
 const unreachable = () => apiError(502, 'backend_unreachable', 'momoshtrem isn’t answering.');
-const listed = () => (scenario() === 'torrents-quiet' ? torrents.filter((t) => t.state === 'idle') : torrents);
+const listed = () => (scenario() === 'torrents-quiet' ? torrents.filter((t) => t.state === 'idle') : torrents).map(answer);
 
 export const torrentsHandlers = [
   http.get('*/api/torrents', () => {
@@ -75,21 +86,21 @@ export const torrentsHandlers = [
     await latency();
     const t = find(params.hash);
     if (t instanceof Response) return t;
-    return HttpResponse.json<TorrentDetail>(torrentDetail(t));
+    return HttpResponse.json<TorrentDetail>(torrentDetail(answer(t)));
   }),
   http.post('*/api/torrents/:hash/pause', async ({ params }) => {
     await latency();
     const t = find(params.hash);
     if (t instanceof Response) return t;
     pause(t);
-    return HttpResponse.json<TorrentListItem>(t);
+    return HttpResponse.json<TorrentListItem>(answer(t));
   }),
   http.post('*/api/torrents/:hash/resume', async ({ params }) => {
     await latency();
     const t = find(params.hash);
     if (t instanceof Response) return t;
     resume(t);
-    return HttpResponse.json<TorrentListItem>(t);
+    return HttpResponse.json<TorrentListItem>(answer(t));
   }),
   http.delete('*/api/torrents/:hash', async ({ params, request }) => {
     await latency();
@@ -101,6 +112,7 @@ export const torrentsHandlers = [
     if (t instanceof Response) return t;
     torrents = torrents.filter((other) => other !== t);
     beforePause.delete(t.info_hash);
+    onTorrentRemoved(t.info_hash);
     return noContent();
   }),
 ];

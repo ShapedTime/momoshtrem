@@ -1,16 +1,47 @@
 import type { JobStatus } from './assignment';
 import type { MediaType, Timestamp } from './common';
+import type { DownloadReason, DownloadScope, DownloadState } from './downloads';
 
 /**
- * Activity (PLAN §6 "Torrents and activity (B6)"; #98, #99). Torrents stream
- * on demand: pieces are fetched around readers and kept in an LRU cache, and a
- * torrent loads on its first WebDAV read. So one the library knows but the
- * client hasn't loaded is `idle` with `loaded: false` and nulls, there's no
- * ETA, and progress can go down.
+ * Activity (PLAN §6 "Torrents and activity (B6)"; #98, #99, #77). Torrents
+ * still stream on demand: pieces are fetched around readers and kept in an LRU
+ * cache, and a torrent loads on its first WebDAV read, a mapping job, or when
+ * the download manager takes it. Downloads (#77) fetch the files they want in
+ * the background and pin them, so only those have an ETA (`wanted`); a
+ * torrent nothing keeps can still lose progress. One the library knows but
+ * the client hasn't loaded is `idle` with `loaded: false` and nulls.
  */
 
-/** The first rule that matches: paused; streaming (loaded, a streaming session); downloading (loaded, network on, not complete); idle. */
+/**
+ * The first rule that matches: paused; streaming (loaded, a streaming session); downloading (loaded,
+ * network on, and a download still wants bytes of it or `download_bps > 0`); idle.
+ */
 export type TorrentState = 'streaming' | 'downloading' | 'paused' | 'idle';
+
+/** The download manager's state for one torrent: `Download.state` without the ones about files. */
+export type TorrentWantedState = Exclude<DownloadState, 'no_file' | 'unavailable'>;
+
+/** What downloads want of a torrent (#77). */
+export interface TorrentWanted {
+  /** Its wanted files' total. */
+  bytes: number;
+  /** What's on disk of them, from the piece cache (not anacrolix's completion: the LRU can contradict it). */
+  done_bytes: number;
+  /** While it downloads with a speed. */
+  eta_seconds: number | null;
+  state: TorrentWantedState;
+  /** As `Download.resumes_at`: the next window's start, or a stalled torrent's next retry. */
+  resumes_at: Timestamp | null;
+}
+
+/** A download that wants a torrent's files (#77). */
+export interface TorrentHold {
+  download_id: number;
+  reason: DownloadReason;
+  scope: DownloadScope;
+  /** The movie's or the show's title. */
+  title: string;
+}
 
 /** A library title the torrent is for. */
 export interface TorrentTitle {
@@ -98,7 +129,7 @@ export interface TorrentListItem {
   seeders: number | null;
   /** The earliest active assignment or open job; the load time for a torrent nothing references. */
   added_at: Timestamp;
-  /** The last read since the server started (in memory); null when not loaded. */
+  /** The last read, resume, load or download-manager wake since the server started (in memory); null when not loaded. */
   last_active_at: Timestamp | null;
   /** Empty for a loaded torrent nothing references (an Inspect dry run, a WebDAV listing). */
   titles: TorrentTitle[];
@@ -106,6 +137,10 @@ export interface TorrentListItem {
   open_job: { id: number; status: JobStatus } | null;
   /** Its files' sessions, the most recently read first. */
   streaming: StreamingSession[];
+  /** What downloads want of it (#77); null when nothing does. Progress and ETA for Downloading come from here. */
+  wanted: TorrentWanted | null;
+  /** The downloads that want it, kept first, then by id: the Kept and Smart pills. */
+  holds: TorrentHold[];
 }
 
 /** A run of pieces in piece order. `priority`: not complete, priority ≥ High (the streaming windows), not started. */
@@ -186,8 +221,20 @@ export interface TorrentsSummary {
   /** The last 60 s of total speeds, oldest first: one sample per interval, fewer right after startup. */
   history: { interval_seconds: number; download_bps: number[]; upload_bps: number[] };
   counts: Record<TorrentState, number>;
-  /** The metadata folder's file system and the piece cache on it; null when it can't be read. */
-  disk: { total_bytes: number; free_bytes: number; torrents_bytes: number; cache_limit_bytes: number } | null;
+  /**
+   * The metadata folder's file system and the piece cache on it; null when it can't be read.
+   * `torrents_bytes` is the cache's fill (kept, smart and streaming cache together) and `cache_limit_bytes`
+   * the cap it applies now (/settings/storage's `effective_bytes`); `kept_bytes` and `smart_bytes` are
+   * what's pinned on disk for downloads (#77).
+   */
+  disk: {
+    total_bytes: number;
+    free_bytes: number;
+    torrents_bytes: number;
+    cache_limit_bytes: number;
+    kept_bytes: number;
+    smart_bytes: number;
+  } | null;
   /** Every session (HDRezka too), the most recently read first: "Streaming now" reads streaming[0]. */
   streaming: StreamingSession[];
 }

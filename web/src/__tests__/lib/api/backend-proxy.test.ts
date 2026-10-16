@@ -95,6 +95,15 @@ describe('proxyToBackend', () => {
     expect(seen[0].url).toBe(`${BACKEND}/api/hdrezka/search?media_type=movie&tmdb_id=157336`);
   });
 
+  it('forwards downloads (#77), PATCH bodies included', async () => {
+    const response = await proxyToBackend(
+      request('/api/downloads/5', { method: 'PATCH', body: '{"until_watched":false}', headers: { 'content-type': 'application/json' } }),
+      ['downloads', '5']
+    );
+    expect(response.status).toBe(200);
+    expect(seen[0]).toMatchObject({ url: `${BACKEND}/api/downloads/5`, body: '{"until_watched":false}' });
+  });
+
   it('only exposes the contract prefixes', async () => {
     const response = await proxyToBackend(request('/api/debug/pprof'), ['debug', 'pprof']);
     expect(response.status).toBe(404);

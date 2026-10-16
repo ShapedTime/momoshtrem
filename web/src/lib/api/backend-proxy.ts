@@ -17,6 +17,7 @@ export const BACKEND_PREFIXES = new Set([
   'episodes',
   'assignment-jobs',
   'torrents',
+  'downloads',
   'search',
   'settings',
   'integrations',

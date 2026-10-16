@@ -1,8 +1,10 @@
 import type { MediaType, Timestamp } from './common';
+import type { Keep } from './downloads';
 
 /**
  * Detail pages (B1; #4). Fields marked HANDOFF come from design-cinematic/HANDOFF.md §6.
- * The availability rules (stages, the "frontier", default season) are in PLAN §6.
+ * The availability rules (stages, the "frontier", default season) are in PLAN §6: a file
+ * is `downloading` only while a download (#77) wants it and it isn't all on disk.
  */
 
 export type AvailabilityStage = 'none' | 'needs_torrent' | 'downloading' | 'ready';
@@ -34,11 +36,13 @@ export interface WatchState {
   next_episode?: NextEpisode | null;
 }
 
+/** The files downloads want (#77) that aren't all on disk. */
 export interface DownloadProgress {
+  /** What's on disk of them, from the piece cache. */
   pct: number;
   /** Smoothed bytes per second; shows: summed over the torrents fetching their episodes. */
   speed_bps: number;
-  /** Null: torrents fetch on demand, so there's no finish time to promise. */
+  /** While they download with a speed; null otherwise. */
   eta_seconds: number | null;
   seeders: number;
 }
@@ -124,6 +128,8 @@ export interface TitleLibraryState {
   torrent: TitleTorrent | null;
   /** Movies playing from HDRezka (#63). */
   stream: TitleStream | null;
+  /** #77: a movie's download; a show's show-scope download (seasons and episodes carry their own). */
+  keep: Keep | null;
 }
 
 export interface CastMember {
@@ -215,6 +221,11 @@ export interface EpisodeSummary {
   source: FileSource | null;
   /** Set while it plays from HDRezka. */
   stream: EpisodeStream | null;
+  /**
+   * #77: what holds it: its own download, its season's or its show's (kept wins, then the
+   * narrowest), else a smart pick. `state` and `pct` are the episode file's.
+   */
+  keep: Keep | null;
 }
 
 /** A jump target in a long season: a TMDB story arc, or a block of up to 10 episodes. */
@@ -235,6 +246,8 @@ export interface SeasonDetail {
   name: string;
   episodes: EpisodeSummary[];
   ranges: EpisodeRange[];
+  /** #77: the season-scope download. */
+  keep: Keep | null;
 }
 
 export interface ShowTitle extends TitleBase {

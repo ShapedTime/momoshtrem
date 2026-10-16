@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { AddTitleResult, ClassifierMode, EpisodeGroup, EpisodeOrdering, ShowSettingsPatch } from '@/lib/api/contract';
 import { findTitle } from '../fixtures/catalog';
+import { onMovieFile, onTitleRemoved } from '../fixtures/downloads';
 import {
   addToLibrary,
   buildSeason,
@@ -97,6 +98,7 @@ export const titlesHandlers = [
       const found = findByLibraryId(library, mediaType, Number(params.id));
       if (!found) return notFound();
       library.delete(found.key);
+      onTitleRemoved(mediaType, found.entry.tmdb_id); // its downloads go with it (#77)
       removals.push({ media_type: mediaType, id: found.row.library_id, delete_data: deleteData === null ? null : deleteData === 'true' });
       return noContent();
     }),
@@ -111,6 +113,7 @@ export const titlesHandlers = [
     found.row.files = false;
     found.row.assigned = undefined;
     found.row.stream = undefined;
+    onMovieFile(found.entry.tmdb_id, null); // a kept movie has no file now (#77)
     return noContent();
   }),
   http.delete('*/api/episodes/:id/assign', ({ params }) => {

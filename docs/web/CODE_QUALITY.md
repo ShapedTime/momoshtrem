@@ -138,7 +138,7 @@ const save = useMutation({
 ```
 
 - **Never** call `fetch('/api/…')` directly: use `apiJson` (or `apiFetch` where you need the raw `Response`). A 401 then sends the user to `/login?redirect=…` instead of rendering a broken page.
-- **Errors** are `ApiError { status, code, message }` with the contract's `code`. A backend that rejects the web app's token arrives as `502 backend_auth`, never 401.
+- **Errors** are `ApiError { status, code, message }` with the contract's `code`. A backend that rejects the web app's token arrives as `502 backend_auth`, never 401. A 422's `field` and a 429's `resets_at` are `field` and `resetsAt`; any other extra field is in `details`, read through a type guard next to the call (`isStorageFullError` in `endpoints/downloads.ts`).
 - **No `setInterval` polling.** Use `refetchInterval` (it pauses in hidden tabs).
 
 ### Mock mode (`mocks/`)
