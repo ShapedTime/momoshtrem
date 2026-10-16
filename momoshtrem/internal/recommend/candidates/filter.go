@@ -35,22 +35,28 @@ var tvGenres = map[string]string{
 // Filter returns the candidates f lets through, best first, up to its
 // limit, and how many matched in all.
 func (p *Pool) Filter(f Filter) (items []Candidate, matched int) {
-	limit := f.Limit
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
-	limit = min(limit, MaxLimit)
-	items = []Candidate{}
+	all := p.Match(f)
+	return all[:min(len(all), f.EffectiveLimit())], len(all)
+}
+
+// Match returns every candidate f lets through, best first, whatever its
+// limit.
+func (p *Pool) Match(f Filter) []Candidate {
+	items := []Candidate{}
 	for _, c := range p.Items {
-		if !f.matches(&c) {
-			continue
-		}
-		matched++
-		if len(items) < limit {
+		if f.matches(&c) {
 			items = append(items, c)
 		}
 	}
-	return items, matched
+	return items
+}
+
+// EffectiveLimit is f's limit within 1–MaxLimit, DefaultLimit when unset.
+func (f Filter) EffectiveLimit() int {
+	if f.Limit <= 0 {
+		return DefaultLimit
+	}
+	return min(f.Limit, MaxLimit)
 }
 
 func (f Filter) matches(c *Candidate) bool {

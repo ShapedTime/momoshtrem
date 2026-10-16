@@ -1,0 +1,127 @@
+{
+  "name": "get_candidates",
+  "description": "The candidate pool: up to 150 titles TMDB suggests for this taste profile, best first (pre-ranked by overlap with the profile). Anything watched, started, dropped, hidden or turned down is already left out; library titles stay (in_library). Every filter is optional (null). Each item: media_type, tmdb_id, title, date, genres, lang, anime, runtime (minutes; a show's per episode), seasons, ended, vote (TMDB), why (its sources: rec:<loved title> and similar:<loved title> are TMDB's picks for a title they loved; kw their keywords; new, gems and lang discover; trending, upcoming, on_air), in_library, watchlist.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "media_type": {
+        "description": "movie or tv; null for both.",
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "genres": {
+        "description": "Any of these genres, by name as the profile and candidates name them (Drama, Science Fiction, Animation); null for any.",
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "min_runtime": {
+        "description": "At least this many minutes: a movie's runtime, a show's episode runtime. Titles with no known runtime are left out.",
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "max_runtime": {
+        "description": "At most this many minutes, as min_runtime.",
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "year_from": {
+        "description": "Released (or first aired) in this year or later.",
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "year_to": {
+        "description": "Released (or first aired) in this year or earlier.",
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "language": {
+        "description": "Original language, ISO 639-1 (en, ja, ko); null for any.",
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "anime": {
+        "description": "true: anime only; false: no anime; null: either.",
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "limit": {
+        "description": "At most this many, 1–60; null for 30.",
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "media_type",
+      "genres",
+      "min_runtime",
+      "max_runtime",
+      "year_from",
+      "year_to",
+      "language",
+      "anime",
+      "limit"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "check_seen",
+  "description": "Check whether titles can be recommended: can_pick is false for anything watched, started, dropped or hidden on Trakt, disliked, not interested or marked seen (excluded says which). Also answers plays, a show's progress, the user's rating and whether it's liked, in the library or on the watchlist. Check every title that didn't come from get_candidates.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "titles": {
+        "description": "The titles to check, at most 50.",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "media_type": {
+              "type": "string",
+              "enum": [
+                "movie",
+                "tv"
+              ]
+            },
+            "tmdb_id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "media_type",
+            "tmdb_id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "titles"
+    ],
+    "additionalProperties": false
+  }
+}

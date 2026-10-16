@@ -1,0 +1,45 @@
+{
+  "name": "tmdb_search",
+  "description": "Find a movie or show on TMDB by name, for a title that isn't in the candidates (one you know of, or found on the web). Answers up to 10 matches, most popular first, each with its tmdb_id, and excluded when it can't be picked (watched, started, dropped or hidden on Trakt, disliked, not interested, marked seen).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "description": "A title, as it's known in English or its original language.",
+        "type": "string"
+      },
+      "media_type": {
+        "description": "movie or tv; null searches both.",
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "year": {
+        "description": "The release (or first air) year, to tell remakes apart; null for any.",
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "query",
+      "media_type",
+      "year"
+    ],
+    "additionalProperties": false
+  }
+}
