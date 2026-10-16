@@ -1,4 +1,5 @@
 import type { TraktIntegration, TraktSync, TraktSyncStep } from '@/lib/api/contract';
+import { IMPORT_STEPS } from '@/lib/settings/trakt';
 import { formatNumber, plural } from '@/lib/title/format';
 
 /**
@@ -36,8 +37,8 @@ export function forYouState({ trakt, libraryTotal }: ForYouInput): ForYouState {
 }
 
 // ---- The first sync's steps -------------------------------------------------------
-
-export const SYNC_STEP_ORDER: readonly TraktSyncStep[] = ['history', 'ratings', 'watchlist', 'progress', 'details'];
+// For You says each step as a sentence ("Found Up next for 6 shows"); Settings › Trakt
+// keeps its compact labels and owns the shared copy (lib/settings/trakt.ts).
 
 type Progress = TraktSync['progress'];
 
@@ -46,8 +47,6 @@ interface StepCopy {
   done: (progress: Progress) => string;
   /** The count beside a finished step. */
   detail?: (progress: Progress) => string | null;
-  /** "stopped at …" */
-  noun: string;
 }
 
 const STEP_COPY: Record<TraktSyncStep, StepCopy> = {
@@ -55,29 +54,24 @@ const STEP_COPY: Record<TraktSyncStep, StepCopy> = {
     running: 'Importing your history',
     done: () => 'Imported your history',
     detail: (p) => (p.plays > 0 ? plural(p.plays, 'play') : null),
-    noun: 'your history',
   },
   ratings: {
     running: 'Importing your ratings',
     done: () => 'Imported your ratings',
     detail: (p) => (p.ratings > 0 ? plural(p.ratings, 'rating') : null),
-    noun: 'your ratings',
   },
   watchlist: {
     running: 'Importing your watchlist',
     done: () => 'Imported your watchlist',
     detail: (p) => (p.watchlist > 0 ? plural(p.watchlist, 'title') : null),
-    noun: 'your watchlist',
   },
   progress: {
     running: 'Finding Up next for your shows',
     done: (p) => (p.shows > 0 ? `Found Up next for ${plural(p.shows, 'show')}` : 'Checked your shows for Up next'),
-    noun: 'Up next',
   },
   details: {
     running: 'Fetching artwork and episode names',
     done: () => 'Fetched artwork and episode names',
-    noun: 'the artwork',
   },
 };
 
@@ -94,9 +88,9 @@ export interface SyncStepView {
  * rest pending. After an error the failed step says "Stopped here".
  */
 export function firstSyncSteps(sync: TraktSync): SyncStepView[] {
-  const current = sync.step === null ? -1 : SYNC_STEP_ORDER.indexOf(sync.step);
+  const current = sync.step === null ? -1 : IMPORT_STEPS.indexOf(sync.step);
   const failed = sync.status === 'error';
-  return SYNC_STEP_ORDER.map((step, index) => {
+  return IMPORT_STEPS.map((step, index) => {
     const copy = STEP_COPY[step];
     if (sync.status === 'idle' || index < current) {
       return { step, label: copy.done(sync.progress), detail: copy.detail?.(sync.progress) ?? null, state: 'done' };
@@ -126,9 +120,4 @@ export function importedSoFar(progress: Progress): string | null {
 export function firstSyncDetail(sync: TraktSync): string {
   const imported = importedSoFar(sync.progress);
   return imported ? `Imported ${imported} so far. Up next fills in as it goes.` : 'Reading your history from Trakt. Up next fills in as it goes.';
-}
-
-/** "The first sync stopped at your watchlist". */
-export function firstSyncStoppedTitle(sync: TraktSync): string {
-  return sync.step ? `The first sync stopped at ${STEP_COPY[sync.step].noun}` : 'The first sync stopped';
 }

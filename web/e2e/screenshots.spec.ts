@@ -644,7 +644,7 @@ test.describe('for you', () => {
   test('first sync stopped', async ({ page }, testInfo) => {
     await scenario(page, 'trakt-sync-error');
     await signIn(page, '/');
-    await page.getByText('The first sync stopped at your watchlist').waitFor();
+    await page.getByText('The first import didn’t finish').waitFor();
     await settle(page);
     await shoot(page, testInfo, 'home/sync-error', { fullPage: true });
   });

@@ -19,6 +19,7 @@ import { DEFAULT_FILTERS, type DiscoverFilters } from '@/lib/discover/filters';
 import { newEpisodeCard, upNextCard } from '@/lib/for-you/episode-card';
 import { heroPicks, localDateKey } from '@/lib/for-you/hero';
 import { forYouState } from '@/lib/for-you/state';
+import { REAUTH_TITLE, reauthBody } from '@/lib/settings/trakt';
 import { plural } from '@/lib/title/format';
 import { FirstSync } from './FirstSync';
 import { HomeHero, HomeHeroSkeleton } from './HomeHero';
@@ -201,14 +202,14 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
         {relinking && (
           <Banner
             tone="warning"
-            title={trakt.state === 'pending' ? 'Finish connecting Trakt' : 'Trakt needs you to sign in again'}
+            title={trakt.state === 'pending' ? 'Finish connecting Trakt' : REAUTH_TITLE}
             action={
               <ButtonLink href={TRAKT_SETTINGS_HREF} size="sm">
                 {trakt.state === 'pending' ? 'Open Settings' : 'Reconnect'}
               </ButtonLink>
             }
           >
-            {trakt.reauth_reason ?? 'Your history stays here; reconnect to keep it in sync.'}
+            {reauthBody(trakt)}
           </Banner>
         )}
         {allFailed ? (

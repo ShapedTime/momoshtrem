@@ -1,5 +1,5 @@
 import type { TraktIntegration, TraktSync } from '@/lib/api/contract';
-import { firstSyncDetail, firstSyncSteps, firstSyncStoppedTitle, forYouState, importedSoFar, traktLinked } from '@/lib/for-you/state';
+import { firstSyncDetail, firstSyncSteps, forYouState, importedSoFar, traktLinked } from '@/lib/for-you/state';
 
 const PROGRESS = { plays: 2184, plays_total: 2184, ratings: 312, watchlist: 41, shows: 6 };
 
@@ -84,7 +84,6 @@ describe('the first sync', () => {
     const steps = firstSyncSteps(failed);
     expect(steps.map((step) => step.state)).toEqual(['done', 'done', 'pending', 'pending', 'pending']);
     expect(steps[2]).toMatchObject({ label: 'Importing your watchlist', detail: 'Stopped here' });
-    expect(firstSyncStoppedTitle(failed)).toBe('The first sync stopped at your watchlist');
   });
 
   it('sums up what’s in so far', () => {

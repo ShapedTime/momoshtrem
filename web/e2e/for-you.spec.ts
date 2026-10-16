@@ -99,6 +99,8 @@ test.describe('For You', () => {
   });
 
   test('Play in Infuse and Add on episode cards', async ({ page }) => {
+    // Two sheets' worth of client navigations and an add; a busy dev server needs more than 30 s
+    test.setTimeout(90_000);
     await signIn(page, '/');
     await heroSettled(page);
     await card(page, 'Up next', 'Frieren').getByRole('button', { name: /^Play Frieren.* S01E27 in Infuse$/ }).click();
@@ -170,15 +172,18 @@ test.describe('For You', () => {
     await expectAccessibleAndContained(page);
   });
 
-  test('first sync stopped: Try again picks it up, and For You fills in when it’s done', async ({ page }) => {
+  test('first sync stopped: Retry picks it up, and For You fills in when it’s done', async ({ page }) => {
+    // The mock imports one step per 3 s poll
+    test.setTimeout(90_000);
     await scenario(page, 'trakt-sync-error');
     await signIn(page, '/');
-    await expect(page.getByText('The first sync stopped at your watchlist')).toBeVisible();
-    await expect(page.getByText(/Trakt didn’t answer while importing your watchlist \(502\)/)).toBeVisible();
+    // The same words as Settings › Trakt (lib/settings/trakt.ts)
+    await expect(page.getByText('The first import didn’t finish')).toBeVisible();
+    await expect(page.getByText(/Trakt didn’t answer while importing your watchlist \(502\)\. Retry picks up from your watchlist\./)).toBeVisible();
     await expect(page.getByRole('listitem').filter({ hasText: 'Importing your watchlist' })).toContainText('Stopped here');
     await expectAccessibleAndContained(page);
 
-    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByText(/^Imported .* so far/)).toBeVisible();
     // The mock imports a step per poll (every 3 s); then the personal page takes over
     await expect(region(page, 'Your Trakt watchlist')).toBeVisible({ timeout: 30_000 });

@@ -1,27 +1,24 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { Banner, Button, Loader, Steps } from '@/components/ui';
+import { useTraktSync } from '@/hooks/useTraktActions';
 import type { TraktIntegration } from '@/lib/api/contract';
-import { traktApi, traktKeys } from '@/lib/api/endpoints';
-import { firstSyncDetail, firstSyncSteps, firstSyncStoppedTitle } from '@/lib/for-you/state';
+import { firstSyncDetail, firstSyncSteps } from '@/lib/for-you/state';
+import { syncErrorCopy } from '@/lib/settings/trakt';
 
 /**
  * The first import after connecting Trakt (HANDOFF §4.3: named steps, never
  * just a spinner): Noir's eyes while it runs, what's in so far, and the
- * steps. When it stops with an error, the eyes go and Try again picks it up
- * at the step that failed.
+ * steps. When it stops with an error, the eyes go and Retry picks it up at
+ * the step that failed, with the same words as Settings › Trakt.
  */
 export function FirstSync({ trakt }: { trakt: TraktIntegration }) {
-  const queryClient = useQueryClient();
   const { sync } = trakt;
   const failed = sync.status === 'error';
-  const retry = useMutation({
-    mutationFn: traktApi.sync,
-    // The answer is the integration with its sync running again, so polling resumes at once
-    onSuccess: (next) => queryClient.setQueryData(traktKeys.integration, next),
-  });
+  // The answer goes into the integration's cache, so polling resumes at once
+  const retry = useTraktSync();
+  const stopped = syncErrorCopy(sync);
 
   const steps = firstSyncSteps(sync).map(({ label, detail, state }) => ({ label, detail: detail ?? undefined, state }));
 
@@ -33,14 +30,14 @@ export function FirstSync({ trakt }: { trakt: TraktIntegration }) {
           <Banner
             tone="error"
             role="alert"
-            title={firstSyncStoppedTitle(sync)}
+            title={stopped.title}
             action={
               <Button size="sm" onClick={() => retry.mutate()} loading={retry.isPending}>
-                <RefreshCw size={16} aria-hidden="true" /> Try again
+                <RefreshCw size={16} aria-hidden="true" /> Retry
               </Button>
             }
           >
-            {retry.isError ? retry.error.message : (sync.error ?? 'Trakt didn’t answer.')} What’s imported so far stays.
+            {retry.isError ? `${retry.error.message} What’s imported so far stays.` : stopped.body}
           </Banner>
         </div>
       ) : (
