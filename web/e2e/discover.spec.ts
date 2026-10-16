@@ -52,6 +52,9 @@ test.describe('discover', () => {
     await expect(cards(page).filter({ hasText: 'Dune: Part Two' })).toContainText('Ready');
     await expect(cards(page).filter({ hasText: 'Dune: Part Two' })).toContainText('2024 · Movie');
     await expect(cards(page).filter({ hasText: 'Pluribus' })).toContainText('2025 · Series');
+    // The Library's short words, so the pill fits a phone's card
+    await expect(cards(page).filter({ hasText: 'Interstellar' })).toContainText('42%');
+    await expect(cards(page).filter({ hasText: 'One Battle After Another' })).toContainText('No torrent');
 
     if (isDesktop(testInfo)) {
       await sidebar(page).getByRole('button', { name: 'Shows', exact: true }).click();

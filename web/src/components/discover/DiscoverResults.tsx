@@ -5,14 +5,15 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link2 } from 'lucide-react';
 import { CatEyes } from '@/components/brand';
 import { libraryPill } from '@/components/library/LibraryPill';
-import { Banner, Button, LoadingRegion, PosterCard, PosterGrid, PosterSkeletons, Select, copyText, useToast } from '@/components/ui';
+import { Banner, Button, LoadingRegion, PosterCard, PosterGrid, PosterSkeletons, Select, StatusPill, copyText, useToast } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import { useLibraryLookup } from '@/hooks/useLibraryLookup';
 import { isApiError } from '@/lib/api/client';
-import type { DiscoverItem, DiscoverPage } from '@/lib/api/contract';
+import type { DiscoverItem, DiscoverPage, LibraryItem } from '@/lib/api/contract';
 import { discoverPagesQuery } from '@/lib/api/endpoints';
 import { activeFilters, clearFilters, countLabel, DISCOVER_SORTS, type DiscoverFilters, type DiscoverSort, SORT_LABELS, withoutFilter } from '@/lib/discover/filters';
 import { selectedMood } from '@/lib/discover/moods';
+import { posterBadge } from '@/lib/library/display';
 import { discoverHref } from '@/lib/discover/url';
 import { plural } from '@/lib/title/format';
 import { titleHref } from '@/lib/title/href';
@@ -134,11 +135,21 @@ function DiscoverCards({ items }: { items: DiscoverItem[] }) {
           // TMDB discover has no runtimes, so the type stands in (a deviation from the design)
           subtitle={[item.year, item.media_type === 'tv' ? 'Series' : 'Movie'].filter(Boolean).join(' · ')}
           posterSrc={buildImageUrl(item.poster_path, 'poster', 'medium')}
-          badge={libraryPill(library.get(item.media_type, item.tmdb_id))}
+          badge={libraryBadge(library.get(item.media_type, item.tmdb_id))}
         />
       ))}
     </>
   );
+}
+
+/**
+ * Where a title stands in your library, as the Library's own cards say it
+ * (Review, Playing, 42%, No torrent), else Ready. Short words fit the
+ * phone's 104 px cards, where "Downloading" would run off the poster.
+ */
+function libraryBadge(item: LibraryItem | undefined) {
+  const badge = item ? posterBadge(item) : null;
+  return badge ? <StatusPill status={badge.status} label={badge.label} pct={badge.pct} onArt /> : libraryPill(item);
 }
 
 /**
