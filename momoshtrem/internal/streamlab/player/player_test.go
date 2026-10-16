@@ -68,7 +68,7 @@ func setup(t *testing.T, f *file) (client.Device, *checks.Integrity) {
 	return client.Device{BaseURL: srv.URL, UserAgent: "player-test"}, checks.NewIntegrity(f.layout)
 }
 
-func session(cfg player.Config, l *media.Layout, integrity *checks.Integrity, onError func(int64, error)) *player.Session {
+func session(cfg player.Config, l *media.Layout, integrity *checks.Integrity, onError func(int64, time.Duration, error)) *player.Session {
 	return player.NewSession(cfg, player.Options{
 		Path: "/f.bin", Size: l.Size(),
 		Check:   func(off int64, p []byte) { integrity.Check(0, off, p) },
@@ -174,7 +174,12 @@ func TestBrokenBodyReconnects(t *testing.T) {
 	defer conn.Close()
 	var broke []int64
 	s := session(player.Config{Bitrate: 8 * mib, Playable: 256 << 10, MaxBuffer: 8 * mib}, l, integrity,
-		func(off int64, err error) { broke = append(broke, off) })
+		func(off int64, silence time.Duration, err error) {
+			broke = append(broke, off)
+			if silence < 0 || silence > 5*time.Second {
+				t.Errorf("silence before the break = %v", silence)
+			}
+		})
 	p, err := s.Open(context.Background(), conn, 0)
 	if err != nil {
 		t.Fatal(err)

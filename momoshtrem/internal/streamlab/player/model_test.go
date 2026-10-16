@@ -143,6 +143,24 @@ func TestPauseWhileStalled(t *testing.T) {
 	}
 }
 
+// A stall's resume bytes that arrive during a pause end it for good: no
+// zero-length stall on resuming.
+func TestPauseWhileStalledRefilled(t *testing.T) {
+	m := NewModel(cfg(), 0, t0)
+	m.Receive(at(0), 2*mib)
+	m.Advance(at(3 * time.Second)) // stalled since 2 s
+	m.Pause(at(4 * time.Second))
+	m.Receive(at(6*time.Second), 2*mib) // refilled while paused
+	m.Resume(at(9 * time.Second))
+	if m.State() != Playing {
+		t.Fatalf("state %v after resuming a refilled buffer, want playing", m.State())
+	}
+	s := m.End(at(9 * time.Second))
+	if len(s.Stalls) != 1 || s.StallTime != 2*time.Second {
+		t.Errorf("stalls %+v, stall time %v; want the one 2 s stall", s.Stalls, s.StallTime)
+	}
+}
+
 func TestStallTimeSoFar(t *testing.T) {
 	m := NewModel(cfg(), 0, t0)
 	m.Receive(at(0), 2*mib)

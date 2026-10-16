@@ -21,10 +21,11 @@ type Options struct {
 	// Check checks bytes received at a file offset (checks.Integrity).
 	Check func(off int64, p []byte)
 	// OnError is called when a body breaks or a request fails, at once,
-	// with the file offset it happened at: the caller can see what the
-	// server and the torrent were doing then (a known stall, say).
-	// Optional.
-	OnError func(off int64, err error)
+	// with the file offset it happened at and how long the body had been
+	// silent (since its last byte, or since the request when none came):
+	// the caller can see what the server and the torrent were doing then
+	// (a known stall, say). Optional.
+	OnError func(off int64, silence time.Duration, err error)
 	// Retries is how many times a playback reconnects after a failed read
 	// before it gives up, as a player retries a broken stream.
 	Retries int
@@ -141,10 +142,12 @@ type Play struct {
 	// reqFrom is the current request's first byte.
 	reqFrom int64
 
-	// pos is the file offset of the next byte to read.
-	pos    int64
-	buf    []byte
-	seekAt time.Time
+	// pos is the file offset of the next byte to read; lastData is when
+	// the current request was sent or its last byte arrived.
+	pos      int64
+	lastData time.Time
+	buf      []byte
+	seekAt   time.Time
 
 	requests int
 	retries  int
@@ -159,12 +162,13 @@ type Play struct {
 // HTTP error. Either ends the playback.
 func (p *Play) request() error {
 	p.aborting.Store(false)
+	p.lastData = p.s.opts.Now()
 	st, err := p.conn.Play(p.ctx, p.s.opts.Path, p.pos)
 	p.requests++
 	if err != nil {
 		p.err = fmt.Errorf("GET %s from %d: %w", p.s.opts.Path, p.pos, err)
 		if p.ctx.Err() == nil && p.s.opts.OnError != nil {
-			p.s.opts.OnError(p.pos, p.err)
+			p.s.opts.OnError(p.pos, p.s.opts.Now().Sub(p.lastData), p.err)
 		}
 		return p.err
 	}
@@ -337,6 +341,7 @@ func (p *Play) drive(done func() bool) error {
 		if n > 0 {
 			p.s.opts.Check(p.pos, p.buf[:n])
 			p.pos += int64(n)
+			p.lastData = now
 			p.model.Receive(now, n)
 		}
 		switch {
@@ -367,7 +372,7 @@ func (p *Play) readFailed(now time.Time, err error) {
 	p.s.readErrors = append(p.s.readErrors, ReadError{At: now, Offset: p.pos, Err: err.Error()})
 	p.s.mu.Unlock()
 	if p.s.opts.OnError != nil {
-		p.s.opts.OnError(p.pos, err)
+		p.s.opts.OnError(p.pos, now.Sub(p.lastData), err)
 	}
 	if p.retries >= p.s.opts.Retries {
 		p.err = fmt.Errorf("reading %s at %d: %w", p.s.opts.Path, p.pos, err)

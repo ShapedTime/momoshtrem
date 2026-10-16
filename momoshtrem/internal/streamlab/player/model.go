@@ -255,8 +255,9 @@ func (m *Model) Pause(now time.Time) {
 	m.pauseStart = now
 }
 
-// Resume restarts the playhead at now after a Pause. A playback that was
-// buffering, or stalled, waits for Playable bytes again.
+// Resume restarts the playhead at now after a Pause. A playback that
+// never became playable waits for Playable bytes; one paused while
+// stalled waits for Resume bytes, unless they arrived during the pause.
 func (m *Model) Resume(now time.Time) {
 	if m.state != Paused {
 		return
@@ -264,16 +265,24 @@ func (m *Model) Resume(now time.Time) {
 	m.pauseTime += now.Sub(m.pauseStart)
 	m.last = now
 	m.state = m.resumeTo
-	if m.state == Buffering && m.playableAt.IsZero() {
+	if m.state != Buffering {
+		return
+	}
+	if m.playableAt.IsZero() {
 		m.settle(now)
 		return
 	}
-	if m.state == Buffering {
-		// Was stalled: playing again needs the resume threshold.
+	// Paused while stalled.
+	switch buf := m.Buffer(); {
+	case buf >= m.cfg.Resume || (m.eof && buf > 0):
+		m.state = Playing
+	case m.eof:
+		m.state = Ended
+		m.endedAt = now
+	default:
 		m.state = Stalled
 		m.stallStart = now
 		m.stallPos = m.from + m.received
-		m.settle(now)
 	}
 }
 
