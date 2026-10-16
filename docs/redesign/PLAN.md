@@ -772,7 +772,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
     download_bps, upload_bps,          // smoothed bytes per second; 0 when not loaded
     peers: number | null, seeders: number | null,   // connected; null when not loaded
     added_at,                          // earliest active assignment or open job; the load time for one nothing references
-    last_active_at: Timestamp | null,  // last read since the server started (the activity manager's, in memory); null when not loaded
+    last_active_at: Timestamp | null,  // the last read, resume or load since the server started (the activity manager's, in memory); null when not loaded
     titles: [TorrentTitle],            // by title, then year
     open_job: {id, status} | null,     // the newest open, non-dry-run job
     streaming: []                      // StreamingSession[]; #99 fills it

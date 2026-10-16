@@ -167,7 +167,7 @@ Each torrent's metainfo is kept in `{metadata_folder}/metainfo/<hash>.torrent` w
 
 ## Tests
 
-`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service` and `internal/subtitle`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service`, `internal/subtitle` and `internal/activity`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine
