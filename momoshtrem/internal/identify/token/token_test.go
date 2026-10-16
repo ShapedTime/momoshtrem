@@ -133,6 +133,7 @@ func TestTokenize(t *testing.T) {
 		{"ten-bit", "[Group] Sousou no Frieren - 12 (1080p HEVC 10-bit AAC) [ABCD1234]",
 			"g:Group w:sousou w:no w:frieren - n:12 res:1080 codec:hevc codec:10-bit codec:aac crc"},
 		{"group and sample", "the.boys.s04e01.1080p.amzn.web-dl-ntb-sample", "w:the w:boys se:4/1 res:1080 src:amzn src:web-dl g:ntb w:sample"},
+		{"cam source and group", "Movie.2024.HDCAM-GRP", "w:movie y:2024 src:hdcam g:GRP"},
 		{"ampersand", "Law & Order - Special Victims Unit - 1x04 - Hysteria",
 			"w:law w:and w:order - w:special w:victims w:unit - nx:1/4 - w:hysteria"},
 		{"plex style", "The Boys (2019) - S02E03 - Over the Hill [WEBDL-1080p]", "w:the w:boys y:2019 - se:2/3 - w:over w:the w:hill src:webdl res:1080"},

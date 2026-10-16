@@ -615,6 +615,10 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   ```
   - `needs_torrent_fetch`: no magnet yet, so Add and Copy magnet call resolve first.
   - `hdr` and `audio` list only what the name says; `repack` covers PROPER too.
+  - `pack` (parsed by `internal/release`):
+    - `label` is short: "S01E29", "S01E01–E03", "Episode 29" and "Episodes 29–38" (absolute numbers, `seasons: []`), "Season 2", "Specials", "Seasons 1–4", "Complete".
+    - `complete` is the whole show without seasons ("Complete Series", a Batch with no numbers). "S01.COMPLETE" is a `season`, and "S01-S04.COMPLETE" a `multi_season`; only "Complete Series" or "Complete Collection" makes named seasons `complete`.
+    - `unknown`: markers that don't add up, such as episodes of two seasons ("S01E05-S02E03") or a half episode ("- 28.5").
 - **Allowed values** (they are both the facet values and the filter values):
   - `resolution`: 2160p, 1080p, 720p, 576p, 480p, unknown;
   - `source`: REMUX, BluRay, WEB-DL, WEBRip, WEB, HDTV, DVD, CAM (which also covers TS, HDTS, TELESYNC, TC and SCR), unknown;
