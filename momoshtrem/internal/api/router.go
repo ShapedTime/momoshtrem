@@ -79,6 +79,9 @@ type Options struct {
 	// Activity lists the torrents, sums them up, and pauses and resumes
 	// them. Nil makes those routes return 503.
 	Activity Activity
+	// Search serves torrent search (GET /search/torrents and resolve). Nil
+	// (no Jackett) makes those routes return 503.
+	Search TorrentSearch
 }
 
 // NewServer creates a new API server
@@ -207,6 +210,7 @@ func (s *Server) setupRoutes() {
 	s.registerHDRezkaRoutes(api)    // HDRezka search, titles, streams and assigns
 	s.registerQualityRoutes(api)    // GET and PUT /settings/quality-profile
 	s.registerInspectRoutes(api)    // Inspect: dry runs of a search result or magnet
+	s.registerSearchRoutes(api)     // Torrent search and resolve
 }
 
 // Handler returns the HTTP handler
