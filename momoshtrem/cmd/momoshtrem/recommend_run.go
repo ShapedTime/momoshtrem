@@ -161,8 +161,8 @@ func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *
 	fmt.Fprintf(out, "  system prompt:    %d bytes (byte-stable, cached with the tools)\n", prep.SystemSize)
 	fmt.Fprintf(out, "  first user turn:  %d bytes\n", len(prep.FirstTurn))
 	fmt.Fprintf(out, "  request body:     %d bytes\n", len(body))
-	fmt.Fprintf(out, "  effort:           %s; caps: %d calls, %d tokens, $%.2f, %d tool calls\n", prep.Request.Effort,
-		runs.Caps.Calls, runs.Caps.Tokens, runs.Caps.CostUSD, runs.Caps.ToolCalls)
+	fmt.Fprintf(out, "  effort:           %s; caps: %d calls, %d tokens, $%.2f, %d tool calls, %d web searches, %s\n",
+		prep.Request.Effort, runs.Caps.Calls, runs.Caps.Tokens, runs.Caps.CostUSD, runs.Caps.ToolCalls, runs.Caps.WebSearches, runs.Timeout)
 	if client == nil {
 		fmt.Fprintf(out, "  input tokens:     not counted: count_tokens needs ANTHROPIC_API_KEY (it's free)\n")
 		return 0
