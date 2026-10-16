@@ -162,6 +162,9 @@ func TestIntegration_Me(t *testing.T) {
 	s.progress(3, 9003, "Charlie", now.Add(-48*time.Hour), 8, -1, 0)
 	s.calendar(3, 9003, 1, 9, now.Add(-time.Hour))
 	s.calendar(3, 9003, 1, 10, now.Add(7*24*time.Hour))
+	// Foxtrot is only watchlisted: on Trakt's calendar, never started, not
+	// in the library. Its episode isn't new.
+	s.calendar(6, 9006, 1, 1, now.Add(-2*time.Hour))
 	// Delta is dropped.
 	s.progress(4, 9004, "Delta", now.Add(-time.Hour), 1, 1, 2)
 	s.exec(`INSERT INTO trakt_hidden (section, trakt_id, tmdb_id) VALUES ('dropped', 4, 9004)`)
@@ -228,8 +231,8 @@ func TestIntegration_Me(t *testing.T) {
 	for _, it := range fresh {
 		got = append(got, fmt.Sprintf("%s S%dE%d %s", it.Show.Title, it.Episode.Season, it.Episode.Episode, it.Availability))
 	}
-	// Bravo's E3 hasn't aired; Delta is dropped; Alpha's E6 is on the
-	// calendar and in the library: once.
+	// Bravo's E3 hasn't aired; Delta is dropped; Foxtrot isn't started;
+	// Alpha's E6 is on the calendar and in the library: once.
 	if want := "Charlie S1E9 needs_torrent, Alpha S1E6 ready, Echo S1E1 needs_torrent"; strings.Join(got, ", ") != want {
 		t.Errorf("new episodes = %s\nwant           %s", strings.Join(got, ", "), want)
 	}

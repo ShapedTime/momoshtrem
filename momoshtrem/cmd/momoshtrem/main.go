@@ -476,6 +476,23 @@ func main() {
 	if traktAuth.Configured() {
 		slog.Info("Trakt configured", "connected", traktAuth.Connected())
 	}
+	// The Trakt sync (#132): the initial import after a connect, a
+	// last_activities check every 30 minutes and a nightly reconcile.
+	// Artwork for titles outside the library comes through the TMDB cache.
+	var traktArtwork trakt.Artwork
+	if cfg.TMDB.APIKey != "" {
+		traktArtwork = cachedTMDB
+	}
+	traktSync := trakt.NewSyncer(trakt.SyncDeps{
+		Auth:    traktAuth,
+		Store:   library.NewTraktSyncStore(db),
+		Artwork: traktArtwork,
+	})
+	traktAuth.SetHooks(traktSync.Hooks())
+	if traktAuth.Configured() {
+		traktSync.Start()
+		apiOpts.TraktNudge = traktSync // reading Up next syncs when the last check is 5 min old
+	}
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
 	apiOpts.TMDB = cachedTMDB
@@ -682,7 +699,8 @@ func main() {
 	// job in flight resumes on the next start.
 	jobService.Close()
 
-	// Stop polling a pending Trakt device code
+	// Stop the Trakt sync (at most 10 s), then polling a pending device code
+	traktSync.Stop()
 	traktAuth.Close()
 
 	// Close torrent service
