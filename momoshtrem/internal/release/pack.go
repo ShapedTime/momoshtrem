@@ -17,8 +17,9 @@ type coverage struct {
 	total    int           // "Серии: 1-10 из 10": the season's episode count
 	half     string        // "- 28.5": a recap between episodes
 	date     string        // a dated episode
-	complete bool          // "Complete", "Batch"
+	complete bool          // "Complete"
 	series   bool          // "Complete Series", "Complete Collection": the whole show even with seasons
+	batch    bool          // "Batch": a fansub batch, which doesn't say what it holds
 }
 
 // rangeWords make a following range something other than episodes:
@@ -41,7 +42,11 @@ func (p *parser) pack() *Pack {
 		case token.SxxEyy, token.NxNN:
 			c.se = append(c.se, t)
 		case token.Season:
-			for s := t.Season; s <= t.LastSeason; s++ {
+			last := t.LastSeason
+			if s, ok := p.spacedSeasonRange(i); ok { // "S01 S04"
+				last, i = s, i+1
+			}
+			for s := t.Season; s <= last; s++ {
 				c.seasons = append(c.seasons, s)
 			}
 		case token.Episode:
@@ -51,6 +56,11 @@ func (p *parser) pack() *Pack {
 				c.spans = append(c.spans, Span{t.Lo, t.Hi})
 			}
 		case token.Num:
+			if s, ok := p.spacedRange(i); ok { // "(01 28)"
+				c.spans = append(c.spans, s)
+				i++
+				break
+			}
 			// The first number after a dash ("Frieren - 29"), or the
 			// fansub-style one before the tags.
 			afterDash := i > 0 && p.toks[i-1].Kind == token.Dash && !t.Bracket
@@ -79,9 +89,11 @@ func (p *parser) pack() *Pack {
 func (p *parser) packWord(c *coverage, i int) int {
 	n, next := p.toks[i].Norm, p.tok(i+1)
 	switch {
-	case n == "complete" || n == "batch":
+	case n == "complete":
 		c.complete = true
 		c.series = c.series || p.norm(i+1) == "series" || p.norm(i+1) == "collection"
+	case n == "batch":
+		c.batch = true
 	case n == "specials":
 		c.seasons = append(c.seasons, 0)
 	case seasonWordsRU[n] && next.Kind == token.Num:
@@ -135,6 +147,8 @@ func (c coverage) pack() *Pack {
 		return &Pack{Type: PackEpisode, Label: c.date, Seasons: []int{}, Date: c.date}
 	case c.complete:
 		return &Pack{Type: PackComplete, Label: "Complete", Seasons: []int{}}
+	case c.batch:
+		return &Pack{Type: PackUnknown, Label: "Batch", Seasons: []int{}}
 	}
 	return nil
 }

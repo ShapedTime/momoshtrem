@@ -24,8 +24,8 @@ const (
 	PackMultiEpisode = "multi_episode" // S01E01-E03, or an absolute range: "(29-38)"
 	PackSeason       = "season"        // S01, "Season 1"
 	PackMultiSeason  = "multi_season"  // S01-S04, "Seasons 1-4"
-	PackComplete     = "complete"      // the whole show: "Complete Series", a Batch with no numbers
-	PackUnknown      = "unknown"       // markers that don't add up: "S01E05.S02E03", "- 28.5"
+	PackComplete     = "complete"      // the whole show: "Complete Series", "Complete" without seasons
+	PackUnknown      = "unknown"       // markers that don't add up: "S01E05.S02E03", "- 28.5", a Batch with no numbers
 )
 
 // Release is what a release name says. It marshals to PLAN §6
@@ -54,7 +54,7 @@ type Release struct {
 // TMDB's: "Frieren S02E01" may be TMDB's S01E29.
 type Pack struct {
 	Type     string `json:"type"`     // PackEpisode, PackMultiEpisode, …
-	Label    string `json:"label"`    // "S01E29", "S01E01–E03", "Episode 29", "Episodes 29–38", "Season 2", "Specials", "Seasons 1–4", "Complete"
+	Label    string `json:"label"`    // "S01E29", "S01E01–E03", "Episode 29", "Episodes 29–38", "Season 2", "Specials", "Seasons 1–4", "Complete", "Batch"
 	Seasons  []int  `json:"seasons"`  // the seasons named, ascending; empty for absolute numbers and "Complete"
 	Episodes *Span  `json:"episodes"` // nil for whole seasons
 	// Absolute: Episodes are absolute numbers, since the name gives no

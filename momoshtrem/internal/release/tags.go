@@ -154,6 +154,9 @@ func (p *parser) readTags(r *Release) {
 		if r.Channels == "" && (t.Kind == token.Codec || t.Kind == token.Word) {
 			r.Channels = channelsOf(n)
 		}
+		if r.Channels == "" {
+			r.Channels = p.spacedChannels(i)
+		}
 
 		switch {
 		case isMultiSub(n):
