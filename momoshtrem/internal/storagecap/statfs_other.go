@@ -1,10 +1,11 @@
 //go:build !unix
 
-package activity
+package storagecap
 
 import "errors"
 
-// statfs isn't implemented off Unix: the summary's disk is null there.
-func statfs(string) (total, free int64, err error) {
+// Statfs isn't implemented off Unix: Activity's disk is null there, and
+// the storage limit can't follow the disk.
+func Statfs(string) (total, free int64, err error) {
 	return 0, 0, errors.New("statfs is not supported on this platform")
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
+	"github.com/shapedtime/momoshtrem/internal/storagecap"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
@@ -164,7 +165,7 @@ func New(d Deps) *Service {
 		s.now = time.Now
 	}
 	if s.statfs == nil {
-		s.statfs = statfs
+		s.statfs = storagecap.Statfs
 	}
 	return s
 }
