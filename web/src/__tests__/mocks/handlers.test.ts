@@ -17,10 +17,11 @@ import {
   torrentsApi,
   traktApi,
 } from '@/lib/api/endpoints';
-import type { AskEvent } from '@/lib/api/contract';
+import type { AskEvent, TorrentState } from '@/lib/api/contract';
 import { setMockScenario } from '@/mocks/scenario';
 import { episodeId } from '@/mocks/fixtures/titles';
 import { mockRemovals } from '@/mocks/handlers/titles';
+import { TORRENTS } from '@/mocks/fixtures/torrents';
 
 // The endpoint modules call relative /api/* URLs, as the browser does; resolve
 // them against a base. Wrap the fetch MSW installs on listen(), not the original.
@@ -36,6 +37,10 @@ afterAll(() => {
   global.fetch = mswFetch;
   server.close();
 });
+
+const torrentWith = (state: TorrentState) => TORRENTS.find((t) => t.state === state)!.info_hash;
+const DOWNLOADING = torrentWith('downloading');
+const PAUSED = torrentWith('paused');
 
 const INTERSTELLAR = 'https://rezka.ag/films/fiction/2259-interstellar-2014.html';
 const SEVERANCE = 'https://hdrezka.me/series/thriller/47283-razdelenie-2022.html';
@@ -103,6 +108,11 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /settings/ai/usage', () => settingsApi.aiUsage()],
     ['GET /status', () => systemApi.status()],
     ['GET /torrents/summary', () => torrentsApi.summary()],
+    ['POST /torrents/{hash}/pause', () => torrentsApi.pause(DOWNLOADING)],
+    ['POST /torrents/{hash}/resume', () => torrentsApi.resume(PAUSED)],
+    ['POST /torrents/pause-all', () => torrentsApi.pauseAll()],
+    ['POST /torrents/resume-all', () => torrentsApi.resumeAll()],
+    ['DELETE /torrents/{hash}', () => torrentsApi.remove(DOWNLOADING, { deleteData: true })],
     ['GET /hdrezka/search', () => hdrezkaApi.search({ media_type: 'movie', tmdb_id: 157336 })],
     ['GET /hdrezka/titles', () => hdrezkaApi.title({ url: INTERSTELLAR, movie_id: 2 })],
     ['GET /hdrezka/streams', () => hdrezkaApi.streams({ url: INTERSTELLAR, translator_id: 238 })],
@@ -181,6 +191,49 @@ describe('GET /library (#97)', () => {
       { media_type: 'movie', id: 1, delete_data: null },
     ]);
     expect((await libraryApi.list()).summary.total).toBe(6);
+  });
+});
+
+describe('Activity in mock mode (B6, #98)', () => {
+  it('has a torrent in every state, and idle ones the client has not loaded', () => {
+    expect(new Set(TORRENTS.map((t) => t.state))).toEqual(new Set(['streaming', 'downloading', 'paused', 'idle']));
+    const notLoaded = TORRENTS.filter((t) => !t.loaded);
+    expect(notLoaded.length).toBeGreaterThan(0);
+    for (const t of notLoaded) {
+      expect(t).toMatchObject({ state: 'idle', progress: null, complete: null, peers: null, seeders: null, last_active_at: null, download_bps: 0 });
+    }
+    expect(TORRENTS.some((t) => t.loaded && t.titles.length === 0)).toBe(true); // an Inspect dry run
+    expect(TORRENTS.some((t) => t.open_job !== null)).toBe(true);
+  });
+
+  it('keeps the legacy shape at GET /torrents for the legacy page and badge', async () => {
+    const { torrents } = await torrentsApi.legacyList();
+    expect(torrents).toHaveLength(TORRENTS.length);
+    expect(torrents.filter((t) => !t.is_paused && t.progress < 1)).toHaveLength(1);
+  });
+
+  it('pauses and resumes a torrent, and the summary counts follow', async () => {
+    expect((await torrentsApi.summary()).counts).toEqual({ streaming: 1, downloading: 1, paused: 1, idle: 4 });
+    expect(await torrentsApi.pause(DOWNLOADING.toUpperCase())).toMatchObject({ info_hash: DOWNLOADING, state: 'paused', download_bps: 0 });
+    expect((await torrentsApi.summary()).counts).toMatchObject({ downloading: 0, paused: 2 });
+    expect(TORRENTS.find((t) => t.info_hash === DOWNLOADING)?.state).toBe('downloading'); // the page's copy changed, not the fixture
+    expect((await torrentsApi.pause(DOWNLOADING)).state).toBe('paused'); // idempotent
+    expect((await torrentsApi.resume(DOWNLOADING)).state).toBe('downloading');
+    expect((await torrentsApi.resume(PAUSED)).state).toBe('downloading'); // paused from the start, loaded and partial
+  });
+
+  it('pauses the streaming and downloading torrents, and resumes every paused one', async () => {
+    expect(await torrentsApi.pauseAll()).toEqual({ count: 2 });
+    expect(await torrentsApi.pauseAll()).toEqual({ count: 0 });
+    expect(await torrentsApi.resumeAll()).toEqual({ count: 3 });
+    expect((await torrentsApi.summary()).counts).toEqual({ streaming: 1, downloading: 2, paused: 0, idle: 4 });
+  });
+
+  it('deletes a torrent, and rejects unknown and malformed hashes', async () => {
+    await torrentsApi.remove(DOWNLOADING);
+    expect((await torrentsApi.legacyList()).torrents.map((t) => t.info_hash)).not.toContain(DOWNLOADING);
+    await expect(torrentsApi.pause(DOWNLOADING)).rejects.toMatchObject({ status: 404 });
+    await expect(torrentsApi.resume('summary')).rejects.toMatchObject({ status: 400 });
   });
 });
 

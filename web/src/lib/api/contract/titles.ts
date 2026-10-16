@@ -22,15 +22,18 @@ export interface WatchState {
 
 export interface DownloadProgress {
   pct: number;
-  /** 0 until B6 reports real speeds. */
+  /** Smoothed bytes per second; shows: summed over the torrents fetching their episodes. */
   speed_bps: number;
   /** Null: torrents fetch on demand, so there's no finish time to promise. */
   eta_seconds: number | null;
   seeders: number;
 }
 
-/** `not_loaded`: known to the library, not loaded in the torrent client (it loads on first read). */
-export type TitleTorrentState = 'active' | 'idle' | 'not_loaded';
+/**
+ * `not_loaded`: known to the library, not loaded in the torrent client (it loads on first read).
+ * `paused`: the user paused it (B6), loaded or not; it wins over the others, and reads don't wake it.
+ */
+export type TitleTorrentState = 'active' | 'idle' | 'not_loaded' | 'paused';
 
 /** A movie's assigned torrent. */
 export interface TitleTorrent {

@@ -9,7 +9,7 @@ import { resetMockSettings, settingsHandlers } from './settings';
 import { resetMockSubtitles, subtitlesHandlers } from './subtitles';
 import { systemHandlers } from './system';
 import { resetMockLibrary, titlesHandlers } from './titles';
-import { torrentsHandlers } from './torrents';
+import { resetMockTorrents, torrentsHandlers } from './torrents';
 import { traktHandlers } from './trakt';
 
 /**
@@ -32,7 +32,7 @@ export const handlers = [
   ...legacyHandlers,
 ];
 
-/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile and stored subtitles live per page). */
+/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile, stored subtitles and torrent pauses live per page). */
 export function resetMockState(): void {
   resetMockLibrary();
   resetMockSettings();
@@ -40,5 +40,6 @@ export function resetMockState(): void {
   resetMockSubtitles();
   resetMockHDRezka();
   resetMockSearch();
+  resetMockTorrents();
   setMockScenario(null);
 }

@@ -1,6 +1,7 @@
 import { MomoshtremClient, BACKEND_AUTH_CODE } from '@/lib/api/momoshtrem';
 import { APIError } from '@/lib/errors';
 import { parseMomoshtremError } from '@/types/momoshtrem';
+import { TORRENTS } from '@/mocks/fixtures/torrents';
 
 interface FakeResponseInit {
   status: number;
@@ -110,6 +111,42 @@ describe('MomoshtremClient', () => {
 
       expect(error.statusCode).toBe(500);
       expect(error.message).toBe('Failed to get movies: Internal Server Error');
+    });
+  });
+
+  describe('legacy torrents (until #102)', () => {
+    it("adapts the backend's items to the legacy shape the /torrents page and the badge read", async () => {
+      fetchMock.mockResolvedValue(fakeResponse({ status: 200, body: { items: TORRENTS } }));
+
+      const torrents = await new MomoshtremClient().getTorrents();
+
+      expect(fetchMock.mock.calls[0][0]).toBe('http://backend:4444/api/torrents');
+      expect(torrents).toHaveLength(TORRENTS.length);
+      const byName = new Map(torrents.map((t) => [t.name, t]));
+      // Fetching: its stats pass through.
+      expect(byName.get('Frieren.S02.1080p.WEB-DL.x264-SubsPlease')).toEqual({
+        info_hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+        name: 'Frieren.S02.1080p.WEB-DL.x264-SubsPlease',
+        total_size: 12_600_000_000,
+        downloaded: 8_064_000_000,
+        progress: 0.64,
+        seeders: 31,
+        leechers: 17,
+        download_speed: 6_400_000,
+        upload_speed: 420_000,
+        is_paused: false,
+      });
+      // Not loaded: zeros where it had nulls, and its network is off.
+      expect(byName.get('Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX')).toMatchObject({
+        total_size: 18_400_000_000, downloaded: 0, progress: 0, seeders: 0, leechers: 0, is_paused: true,
+      });
+      // The badge's count (not paused, not complete) stays the downloading torrent.
+      expect(torrents.filter((t) => !t.is_paused && t.progress < 1).map((t) => t.name)).toEqual(['Frieren.S02.1080p.WEB-DL.x264-SubsPlease']);
+    });
+
+    it('answers an empty list for an empty body', async () => {
+      fetchMock.mockResolvedValue(fakeResponse({ status: 200, body: { items: [] } }));
+      await expect(new MomoshtremClient().getTorrents()).resolves.toEqual([]);
     });
   });
 });
