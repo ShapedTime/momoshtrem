@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -181,7 +182,7 @@ func (s *Server) postRecommendationFeedback(c *gin.Context) {
 func (s *Server) deleteRecommendationFeedback(c *gin.Context) {
 	mediaType := c.Param("media_type")
 	tmdbID, err := strconv.Atoi(c.Param("tmdb_id"))
-	if (mediaType != "movie" && mediaType != "tv") || err != nil || tmdbID <= 0 {
+	if (mediaType != "movie" && mediaType != "tv") || err != nil || !validTMDBID(tmdbID) {
 		errorResponse(c, http.StatusBadRequest, "Use /recommendations/feedback/{movie|tv}/{tmdb_id}.")
 		return
 	}
@@ -212,9 +213,13 @@ func parseFeedback(raw []byte) (recommend.Feedback, bool) {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return recommend.Feedback{}, false
 	}
-	ok := (f.MediaType == "movie" || f.MediaType == "tv") && f.TMDBID > 0 && feedbackSignals[f.Signal] && feedbackSources[f.Source]
+	ok := (f.MediaType == "movie" || f.MediaType == "tv") && validTMDBID(f.TMDBID) && feedbackSignals[f.Signal] && feedbackSources[f.Source]
 	return f, ok
 }
+
+// validTMDBID is a TMDB id the database can hold (int4): a larger one is
+// the client's mistake, never a 500.
+func validTMDBID(id int) bool { return id > 0 && id <= math.MaxInt32 }
 
 // recsErrorResponse maps the recommendations' and Ask's errors.
 func recsErrorResponse(c *gin.Context, err error) {

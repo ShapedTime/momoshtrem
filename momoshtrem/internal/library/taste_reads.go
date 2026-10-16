@@ -406,6 +406,9 @@ func (r *TasteRepository) TitleStates(ctx context.Context, refs []TitleRef) ([]T
 	}
 	types, ids := make([]string, len(refs)), make([]int32, len(refs))
 	for i, ref := range refs {
+		if ref.TMDBID <= 0 || ref.TMDBID > math.MaxInt32 {
+			return nil, fmt.Errorf("TMDB id %d is out of range", ref.TMDBID)
+		}
 		types[i], ids[i] = ref.MediaType, int32(ref.TMDBID)
 	}
 	rows, err := r.db.QueryContext(ctx, `

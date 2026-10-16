@@ -202,6 +202,10 @@ func TestTasteRepository(t *testing.T) {
 		if none, err := repo.TitleStates(ctx, nil); err != nil || none != nil {
 			t.Errorf("no refs = %v, %v", none, err)
 		}
+		// int4 holds TMDB ids: a larger one is refused, never wrapped
+		if _, err := repo.TitleStates(ctx, []TitleRef{{TitleMovie, 1 << 31}}); err == nil {
+			t.Error("an id past int4 was looked up")
+		}
 	})
 }
 

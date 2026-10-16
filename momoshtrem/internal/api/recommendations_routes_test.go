@@ -265,3 +265,23 @@ func TestRecommendationDebugRoute(t *testing.T) {
 		t.Errorf("debug error = %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A TMDB id the database can't hold (int4) is a bad request, never a 500.
+func TestRecommendationFeedbackRoutes_IDRange(t *testing.T) {
+	f := &fakeFeedback{}
+	s := newTestServer(Options{RecFeedback: f})
+	for _, r := range []struct{ method, path, body string }{
+		{"POST", "/api/recommendations/feedback", `{"media_type":"movie","tmdb_id":2147483648,"signal":"like","source":"title"}`},
+		{"DELETE", "/api/recommendations/feedback/movie/2147483648", ""},
+	} {
+		if rec := doBody(t, s, r.method, r.path, r.body); rec.Code != 400 {
+			t.Errorf("%s %s = %d, want 400", r.method, r.path, rec.Code)
+		}
+	}
+	if rec := doBody(t, s, "DELETE", "/api/recommendations/feedback/movie/2147483647", ""); rec.Code != 204 {
+		t.Errorf("the largest int4 = %d, want 204", rec.Code)
+	}
+	if len(f.feedback) != 0 || len(f.cleared) != 1 {
+		t.Errorf("reached the store: %+v, %v", f.feedback, f.cleared)
+	}
+}
