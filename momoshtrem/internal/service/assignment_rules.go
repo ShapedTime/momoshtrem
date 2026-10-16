@@ -306,10 +306,13 @@ func settledStatus(listedProposals []*library.AssignmentProposal) library.JobSta
 
 // autoApplies reports whether a freshly classified job applies on its own
 // (with auto_apply_high_confidence on): not a dry run, no conflict,
-// something to apply, nothing that maps pending and all of it high, and no
-// unmatched video. A torrent of extras alone (openings, endings) waits for
-// the user instead of ending applied with nothing written.
-func autoApplies(job *library.AssignmentJob, listedProposals []*library.AssignmentProposal) bool {
+// something to apply, nothing that maps pending and all of it high, no
+// unmatched video, and nothing that would replace a file an episode
+// already has, from another torrent or HDRezka (a proposal's `replaces`;
+// refs has the target episodes with their files). A torrent of extras
+// alone (openings, endings) waits for the user instead of ending applied
+// with nothing written.
+func autoApplies(job *library.AssignmentJob, listedProposals []*library.AssignmentProposal, refs map[int64]*library.EpisodeRef) bool {
 	if job.DryRun {
 		return false
 	}
@@ -318,7 +321,10 @@ func autoApplies(job *library.AssignmentJob, listedProposals []*library.Assignme
 		return false
 	}
 	for _, p := range listedProposals {
-		if p.Decision != library.DecisionIgnored && p.Maps() && p.Confidence != string(identify.ConfidenceHigh) {
+		if p.Decision == library.DecisionIgnored || !p.Maps() {
+			continue
+		}
+		if p.Confidence != string(identify.ConfidenceHigh) || proposalReplaces(job, p, refs) != nil {
 			return false
 		}
 	}

@@ -178,7 +178,15 @@ func TestJob_ReapplyIsAuthoritative(t *testing.T) {
 	if e.job(first).Status != library.JobApplied {
 		t.Fatalf("first = %s", e.job(first).Status)
 	}
-	if e.assignShow(showID, other, nil); e.active(library.ItemTypeEpisode, eps["S01E01"]).InfoHash != other {
+	// The second torrent replaces E01's file, so it waits for the user.
+	next := e.assignShow(showID, other, nil)
+	if d := e.detail(next); d.Job.Status != library.JobReady || d.Proposals[0].Replaces == nil {
+		t.Fatalf("second torrent = %s, replaces %+v", d.Job.Status, d.Proposals[0].Replaces)
+	}
+	if _, err := e.svc.Apply(e.ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	if e.active(library.ItemTypeEpisode, eps["S01E01"]).InfoHash != other {
 		t.Fatal("the second torrent didn't take E01")
 	}
 
