@@ -406,16 +406,20 @@ func TestReport_DBDownCachedBriefly(t *testing.T) {
 func TestReport_LiveFieldsNotCached(t *testing.T) {
 	clock := newFakeClock()
 	readers := 1
+	traktConnected := false
 	svc := NewService(Options{
-		DB:            &fakeDB{},
-		StartedAt:     clock.Now(),
-		ActiveReaders: func() int { return readers },
-		Now:           clock.Now,
+		DB:              &fakeDB{},
+		StartedAt:       clock.Now(),
+		ActiveReaders:   func() int { return readers },
+		TraktConfigured: true,
+		TraktConnected:  func() bool { return traktConnected },
+		Now:             clock.Now,
 	})
 
 	first := svc.Report(context.Background(), false)
 	clock.Advance(10 * time.Second)
 	readers = 3
+	traktConnected = true
 	second := svc.Report(context.Background(), false)
 
 	if first.CheckedAt != second.CheckedAt {
@@ -426,6 +430,9 @@ func TestReport_LiveFieldsNotCached(t *testing.T) {
 	}
 	if *second.WebDAV.ActiveReaders != 3 {
 		t.Errorf("active_readers = %d, want 3 (live)", *second.WebDAV.ActiveReaders)
+	}
+	if first.Trakt.Connected || !second.Trakt.Connected || !second.Trakt.Configured {
+		t.Errorf("trakt = %+v then %+v, want connected live", first.Trakt, second.Trakt)
 	}
 }
 

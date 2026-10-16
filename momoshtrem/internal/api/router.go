@@ -83,6 +83,9 @@ type Options struct {
 	// assign routes take {info_hash} (Re-run mapping). Nil makes an assign
 	// by info_hash return 503.
 	Magnets TorrentMagnets
+	// Trakt serves /integrations/trakt: connect, disconnect, settings and
+	// sync (B5). Nil makes those routes return 503.
+	Trakt Trakt
 }
 
 // NewServer creates a new API server
@@ -207,6 +210,7 @@ func (s *Server) setupRoutes() {
 	s.registerQualityRoutes(api)    // GET and PUT /settings/quality-profile
 	s.registerInspectRoutes(api)    // Inspect: dry runs of a search result or magnet
 	s.registerSearchRoutes(api)     // Torrent search and resolve
+	s.registerTraktRoutes(api)      // Trakt connect, disconnect, settings and sync
 }
 
 // Handler returns the HTTP handler
