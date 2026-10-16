@@ -1,5 +1,5 @@
 import type { AssignmentJob, TraktIntegration } from '@/lib/api/contract';
-import { findTorrentHref, matchingActions, type PaletteActionInput, paletteActions } from '@/lib/title-search/actions';
+import { askAction, findTorrentHref, matchingActions, type PaletteActionInput, paletteActions } from '@/lib/title-search/actions';
 import { libraryItem, libraryShow } from '@/mocks/fixtures/library-item';
 
 function job(id: number, title: string, overrides: Partial<AssignmentJob> = {}): AssignmentJob {
@@ -102,6 +102,28 @@ describe('the Trakt action', () => {
 });
 
 describe('findTorrentHref', () => {
+  it('offers Ask momoshtrem after Discover only with an Anthropic key (#156)', () => {
+    expect(labels(paletteActions(input({ ask: true }))).slice(2, 5)).toEqual(['Go to Discover', 'Ask momoshtrem', 'Open settings']);
+    expect(paletteActions(input({ ask: true })).find((action) => action.key === 'ask')).toEqual({
+      key: 'ask',
+      label: 'Ask momoshtrem',
+      sub: 'Conversational picks from your history',
+      icon: 'ask',
+      target: { kind: 'href', href: '/ask' },
+    });
+    expect(paletteActions(input()).some((action) => action.key === 'ask')).toBe(false);
+  });
+
+  it('asks Noir about what you typed', () => {
+    expect(askAction('  a cosy show  ')).toEqual({
+      key: 'ask-query',
+      label: 'Ask momoshtrem: “a cosy show”',
+      sub: 'Picks with a reason for each',
+      icon: 'ask',
+      target: { kind: 'href', href: '/ask?q=a%20cosy%20show' },
+    });
+  });
+
   it('opens a title’s page with torrent search on it', () => {
     expect(findTorrentHref({ media_type: 'movie', tmdb_id: 666277 })).toBe('/movie/666277?sheet=torrent&movie=666277');
     expect(findTorrentHref({ media_type: 'tv', tmdb_id: 1396 })).toBe('/tv/1396?sheet=torrent&show=1396');

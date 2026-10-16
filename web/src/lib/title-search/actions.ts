@@ -2,6 +2,7 @@ import type { AssignmentJob, LibraryItem, MediaType, TorrentState, TraktIntegrat
 import { isJobWorking } from '@/lib/api/contract/assignment';
 import { activityHref, type FindTarget } from '@/lib/library/actions';
 import { shortTitle } from '@/lib/mapping/review';
+import { askHref } from '@/lib/recommendations/ask-href';
 import { lastSyncedLine, REAUTH_TITLE } from '@/lib/settings/trakt';
 import { plural } from '@/lib/title/format';
 import { titleHref } from '@/lib/title/href';
@@ -11,12 +12,14 @@ import { hasEveryWord, queryWords } from './text';
 /**
  * The palette's actions (js/screens/search.js `ACTIONS`), in order: review
  * each open mapping job, find what library titles lack, go to Activity,
- * Library and Discover, Trakt (connect, or sync now), settings, Infuse
- * setup, log out. Pure: the palette adds icons and runs them. Ask (#9)
- * joins when it lands.
+ * Library and Discover, Ask momoshtrem (with an Anthropic key), Trakt
+ * (connect, or sync now), settings, Infuse setup, log out. Pure: the
+ * palette adds icons and runs them. While you type it also offers
+ * "Ask momoshtrem: “q”" (`askAction`).
  */
 
-export type PaletteActionIcon = 'review' | 'find' | 'activity' | 'library' | 'discover' | 'trakt' | 'sync' | 'settings' | 'infuse' | 'logout';
+/** `ask` is Noir's face, not a line icon. */
+export type PaletteActionIcon = 'review' | 'find' | 'activity' | 'library' | 'discover' | 'ask' | 'trakt' | 'sync' | 'settings' | 'infuse' | 'logout';
 
 /** `trakt-sync` runs in place: POST /integrations/trakt/sync and a toast. */
 export type PaletteActionTarget =
@@ -46,6 +49,8 @@ export interface PaletteActionInput {
   torrentSheet: boolean;
   /** GET /integrations/trakt; without it there's no Trakt action. */
   trakt?: TraktIntegration | null;
+  /** Ask momoshtrem is set up (`/recommendations/home` `configured`): its action shows. */
+  ask?: boolean;
   /** For "Last synced 4 min ago". */
   now?: number;
 }
@@ -95,7 +100,7 @@ function traktAction(trakt: TraktIntegration, now: number): PaletteAction {
   }
 }
 
-export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, torrentSheet, trakt, now = Date.now() }: PaletteActionInput): PaletteAction[] {
+export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, torrentSheet, trakt, ask = false, now = Date.now() }: PaletteActionInput): PaletteAction[] {
   const reviews = jobs.map(
     (job): PaletteAction => ({
       key: `review:${job.id}`,
@@ -123,6 +128,7 @@ export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, 
       target: { kind: 'href', href: '/library' },
     },
     { key: 'discover', label: 'Go to Discover', sub: 'Browse with filters', icon: 'discover', target: { kind: 'href', href: '/discover' } },
+    ...(ask ? [{ key: 'ask', label: 'Ask momoshtrem', sub: 'Conversational picks from your history', icon: 'ask', target: { kind: 'href', href: askHref() } } satisfies PaletteAction] : []),
     ...(trakt ? [traktAction(trakt, now)] : []),
     { key: 'settings', label: 'Open settings', sub: 'Integrations, AI, quality, playback', icon: 'settings', target: { kind: 'href', href: '/settings' } },
     { key: 'infuse', label: 'Infuse setup', sub: 'Copy the WebDAV address', icon: 'infuse', target: { kind: 'sheet', name: 'infuse-setup' } },
@@ -138,6 +144,12 @@ export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, 
 export function findTorrentHref(item: { media_type: MediaType; tmdb_id: number }): string {
   const params = new URLSearchParams({ sheet: 'torrent', [item.media_type === 'movie' ? 'movie' : 'show']: String(item.tmdb_id) });
   return `${titleHref(item.media_type, item.tmdb_id)}?${params}`;
+}
+
+/** "Ask momoshtrem: “q”", always offered while you type (with an Anthropic key): a new conversation that asks it. */
+export function askAction(query: string): PaletteAction {
+  const typed = query.trim();
+  return { key: 'ask-query', label: `Ask momoshtrem: “${typed}”`, sub: 'Picks with a reason for each', icon: 'ask', target: { kind: 'href', href: askHref(typed) } };
 }
 
 /** The actions whose label and line hold every word of the query ("lib" → Go to Library). */

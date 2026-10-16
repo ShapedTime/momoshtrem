@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DEBOUNCE_DELAY } from '@/config/ui';
+import { useAskAvailable } from '@/hooks/useAskAvailable';
 import { useDebounce } from '@/hooks/useDebounce';
 import { usePendingRemovals } from '@/hooks/useUndoableRemoval';
 import { assignmentJobsQuery, libraryQuery, torrentsSummaryQuery, traktIntegrationQuery } from '@/lib/api/endpoints';
@@ -23,7 +24,8 @@ const INCOMPLETE_PAGE = 20;
  * Everything the ⌘K palette lists, fetched only while it's open: the
  * search (TMDB plus your library), your recent searches and titles, and
  * what its actions need (open mapping jobs, titles lacking a file, the
- * torrent counts, the library's size and the Trakt integration).
+ * torrent counts, the library's size and the Trakt integration), and
+ * whether Ask momoshtrem is set up.
  */
 export function usePaletteData(rawQuery: string, open: boolean) {
   const query = cleanQuery(useDebounce(rawQuery, DEBOUNCE_DELAY)) ?? '';
@@ -37,6 +39,7 @@ export function usePaletteData(rawQuery: string, open: boolean) {
   const jobs = useQuery({ ...assignmentJobsQuery('open'), enabled: open });
   const summary = useQuery({ ...torrentsSummaryQuery(), enabled: open, refetchInterval: false, retry: false });
   const trakt = useQuery({ ...traktIntegrationQuery(), enabled: open, refetchInterval: false, retry: false });
+  const ask = useAskAvailable();
 
   const actions = useMemo(
     () =>
@@ -47,8 +50,9 @@ export function usePaletteData(rawQuery: string, open: boolean) {
         libraryTotal: latest.data?.summary.total ?? null,
         torrentSheet: getSheet('torrent') !== undefined,
         trakt: trakt.data ?? null,
+        ask,
       }),
-    [jobs.data, incomplete.data, pending, summary.data, latest.data, trakt.data]
+    [jobs.data, incomplete.data, pending, summary.data, latest.data, trakt.data, ask]
   );
 
   const recentTitles = useMemo(() => visibleItems(latest.data?.items ?? [], pending).slice(0, RECENT_TITLES), [latest.data, pending]);
@@ -59,5 +63,7 @@ export function usePaletteData(rawQuery: string, open: boolean) {
     recentQueries: recent.slice(0, RECENT_QUERIES),
     recentTitles,
     actions,
+    /** "Ask momoshtrem: “q”" joins the typed rows. */
+    ask,
   };
 }

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { Command } from 'cmdk';
 import { CornerDownLeft, type LucideIcon } from 'lucide-react';
+import { CatAvatar } from '@/components/brand';
 import { Media } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 
@@ -43,6 +44,15 @@ export function PaletteIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="ic" aria-hidden="true">
       <Icon size={16} />
+    </span>
+  );
+}
+
+/** Noir's face for Ask momoshtrem's rows (search.js `actionItem`, `ic: 'ask'`). */
+export function PaletteAskIcon() {
+  return (
+    <span className="ic is-accent" aria-hidden="true">
+      <CatAvatar size={24} />
     </span>
   );
 }

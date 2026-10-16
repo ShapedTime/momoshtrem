@@ -712,3 +712,60 @@ test.describe('for you', () => {
     await shoot(page, testInfo, 'home/loading');
   });
 });
+
+test.describe('Ask momoshtrem (#156)', () => {
+  const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
+  const SEVERANCE = '/ask?q=something%20like%20Severance%20but%20lighter';
+  const settle = async (page: Page) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(600);
+  };
+
+  test('empty', async ({ page }, testInfo) => {
+    await signIn(page, '/ask');
+    await page.getByRole('list', { name: 'Example asks' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'ask/empty');
+  });
+
+  test('working', async ({ page }, testInfo) => {
+    await signIn(page, SEVERANCE);
+    // The first card is in, the next one is a skeleton
+    await page.locator('article.ask-card').first().waitFor();
+    await shoot(page, testInfo, 'ask/working');
+  });
+
+  test('results', async ({ page }, testInfo) => {
+    await signIn(page, SEVERANCE);
+    await page.getByRole('group', { name: 'Refine these picks' }).waitFor({ timeout: 20_000 });
+    await settle(page);
+    await shoot(page, testInfo, 'ask/results', { fullPage: true });
+  });
+
+  test('budget reached', async ({ page }, testInfo) => {
+    await scenario(page, 'ask-budget');
+    await signIn(page, '/ask?q=a%2090-minute%20thriller%20for%20tonight');
+    await page.getByRole('heading', { name: 'This month’s AI budget is used up' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'ask/error');
+  });
+
+  test('Search: Not quite it?', async ({ page }, testInfo) => {
+    await signIn(page, '/search?q=dune');
+    await page.getByRole('link', { name: /Not quite it\?/ }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'ask/search', { fullPage: true });
+  });
+
+  test('palette: Ask momoshtrem about what you typed', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'Desktop affordance');
+    await signIn(page, '/library');
+    await page.keyboard.press('ControlOrMeta+k');
+    await page.getByRole('dialog', { name: 'Search or jump to' }).waitFor();
+    await page.keyboard.type('sev');
+    await page.getByRole('option', { name: /^Ask momoshtrem: “sev”/ }).waitFor();
+    await page.getByRole('group', { name: 'Your library' }).getByRole('option').first().waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'ask/palette');
+  });
+});

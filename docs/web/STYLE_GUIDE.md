@@ -57,7 +57,7 @@ Use `.release-name` and `.path` for strings that must wrap only at separators.
 - **Rails** (`<Rail>`) scroll inside their own container and bleed to the screen edge. The next card always peeks. Arrows appear only with a fine pointer.
 - **Breakpoints:** Tailwind `sm` = 640, `lg` = 1024, `xl` = 1440. `md` (768) is legacy and not part of the design.
 - **Safe areas:** anything fixed to an edge (tab bar, sheet foot, action dock) adds `env(safe-area-inset-*)`.
-- **Task pages** (the mapping review, `/mapping/{id}`) have their own back link and sticky foot. Their route wraps the page in `<div className="task-page">`. `shell.css` then hides the phone bar and tab bar (the desktop top bar stays), drops the main area's bottom padding and, below 1024 px, moves toasts to the bottom edge. The shell still renders both bars and CSS hides them, so the server's HTML is right from the first paint, with no flash or shift.
+- **Task pages** (the mapping review, `/mapping/{id}`; Ask momoshtrem, `/ask`) have their own back link and sticky foot. Their route wraps the page in `<div className="task-page">`. `shell.css` then hides the phone bar and tab bar (the desktop top bar stays), drops the main area's bottom padding and, below 1024 px, moves toasts to the bottom edge. The shell still renders both bars and CSS hides them, so the server's HTML is right from the first paint, with no flash or shift.
 
 ## 4. Components
 
