@@ -57,16 +57,19 @@ interface FilterChipProps {
   /** Opens a menu or nested sheet instead of toggling. */
   onOpenMenu?: () => void;
   disabled?: boolean;
+  /** When the visible words aren't the whole story ("Sort: Seeders" on an icon-only chip). */
+  'aria-label'?: string;
   className?: string;
   children: ReactNode;
 }
 
-export function FilterChip({ pressed, onPressedChange, count, onRemove, onOpenMenu, disabled, className, children }: FilterChipProps) {
+export function FilterChip({ pressed, onPressedChange, count, onRemove, onOpenMenu, disabled, className, children, ...rest }: FilterChipProps) {
   const zero = count === 0 && !pressed;
   return (
     <button
       type="button"
       className={cx('fchip', onOpenMenu && 'fchip--menu', zero && 'is-zero', className)}
+      aria-label={rest['aria-label']}
       aria-pressed={onOpenMenu ? undefined : pressed}
       aria-haspopup={onOpenMenu ? 'dialog' : undefined}
       disabled={disabled}

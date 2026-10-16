@@ -19,6 +19,8 @@ export interface SheetProps {
   closeLabel?: string;
   /** Short line under the title; also the dialog's accessible description. */
   description?: ReactNode;
+  /** A quiet action in the title row, before the close button: the Filters sheet's Reset. */
+  titleAction?: ReactNode;
   /**
    * default: sizes to content. narrow: 480 px panel on desktop.
    * full: opens at full height immediately so loading never changes the height
@@ -55,11 +57,12 @@ function keepOpenForToasts(event: Event) {
   if (event.target instanceof Element && event.target.closest('.toast-region')) event.preventDefault();
 }
 
-function SheetHead({ title, kicker, closeLabel = 'Close', description, head, Title, Description, Close }: {
+function SheetHead({ title, kicker, closeLabel = 'Close', description, titleAction, head, Title, Description, Close }: {
   title: ReactNode;
   kicker?: ReactNode;
   closeLabel?: string;
   description?: ReactNode;
+  titleAction?: ReactNode;
   head?: ReactNode;
   Title: typeof Dialog.Title;
   Description: typeof Dialog.Description;
@@ -79,6 +82,7 @@ function SheetHead({ title, kicker, closeLabel = 'Close', description, head, Tit
           </Title>
           {description && <Description className="t-small text-fg-3">{description}</Description>}
         </div>
+        {titleAction && <span className="ml-auto shrink-0">{titleAction}</span>}
         <Close asChild>
           <IconButton aria-label={closeLabel} size="sm" className="-mr-2 shrink-0">
             <X size={20} aria-hidden="true" />
@@ -90,7 +94,7 @@ function SheetHead({ title, kicker, closeLabel = 'Close', description, head, Tit
   );
 }
 
-function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, size, nested, head, footer, className, children }: SheetProps) {
+function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, size, nested, head, footer, className, children }: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true });
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -109,6 +113,7 @@ function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description
             kicker={kicker}
             closeLabel={closeLabel}
             description={description}
+            titleAction={titleAction}
             head={head}
             Title={Dialog.Title}
             Description={Dialog.Description}
@@ -122,7 +127,7 @@ function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description
   );
 }
 
-function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, size, nested, head, footer, className, children }: SheetProps) {
+function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, size, nested, head, footer, className, children }: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true });
   const Root = nested ? Drawer.NestedRoot : Drawer.Root;
   return (
@@ -145,6 +150,7 @@ function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, descriptio
             kicker={kicker}
             closeLabel={closeLabel}
             description={description}
+            titleAction={titleAction}
             head={head}
             Title={Drawer.Title}
             Description={Drawer.Description}
