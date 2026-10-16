@@ -14,5 +14,9 @@ func wireAsk(d aiDeps, core *aiCore, recs *recsWiring, opts *api.Options) *askWi
 	return &askWiring{}
 }
 
-// Close cancels the turn in flight, if any.
+// Close cancels the turns in flight (each ends cancelled, its usage
+// recorded, its stream closed) and refuses new ones. main registers it
+// with the REST server's RegisterOnShutdown, so it runs, in its own
+// goroutine, as shutdown starts: http.Server.Shutdown doesn't cancel
+// request contexts, and a stream would otherwise hold it for 10 s.
 func (w *askWiring) Close() {}

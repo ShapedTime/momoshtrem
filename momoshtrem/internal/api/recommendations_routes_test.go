@@ -11,17 +11,20 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 )
 
-// fakeRecs answers each call with err, or a value.
+// fakeRecs answers each call with err, or a value: zero values, nil lists
+// included, which the handlers must still answer as [].
 type fakeRecs struct {
 	err       error
+	home      *recommend.Home
 	limits    []int
-	feedback  []recommend.Feedback
-	cleared   []string
 	runExists bool
 }
 
 func (f *fakeRecs) Home(context.Context) (*recommend.Home, error) {
-	return &recommend.Home{Enabled: true, HeroPicks: []recommend.HeroPick{}, Shelves: []recommend.Shelf{}}, f.err
+	if f.home != nil {
+		return f.home, f.err
+	}
+	return &recommend.Home{}, f.err
 }
 
 func (f *fakeRecs) Refresh(context.Context) (int64, error) { return 43, f.err }
@@ -35,20 +38,29 @@ func (f *fakeRecs) Run(_ context.Context, id int64) (*recommend.RunDetail, error
 	if !f.runExists {
 		return nil, f.err
 	}
-	return &recommend.RunDetail{RunProgress: recommend.RunProgress{RunSummary: recommend.RunSummary{ID: id, Status: recommend.StatusRunning}, Steps: []recommend.Step{}}}, f.err
+	return &recommend.RunDetail{RunProgress: recommend.RunProgress{RunSummary: recommend.RunSummary{ID: id, Status: recommend.StatusQueued}}}, f.err
 }
 
-func (f *fakeRecs) SetFeedback(_ context.Context, fb recommend.Feedback) error {
+var _ Recommendations = (*fakeRecs)(nil)
+
+// fakeFeedback records the feedback it's given.
+type fakeFeedback struct {
+	err      error
+	feedback []recommend.Feedback
+	cleared  []string
+}
+
+func (f *fakeFeedback) SetFeedback(_ context.Context, fb recommend.Feedback) error {
 	f.feedback = append(f.feedback, fb)
 	return f.err
 }
 
-func (f *fakeRecs) ClearFeedback(_ context.Context, mediaType string, tmdbID int) error {
+func (f *fakeFeedback) ClearFeedback(_ context.Context, mediaType string, tmdbID int) error {
 	f.cleared = append(f.cleared, fmt.Sprintf("%s:%d", mediaType, tmdbID))
 	return f.err
 }
 
-var _ Recommendations = (*fakeRecs)(nil)
+var _ RecFeedback = (*fakeFeedback)(nil)
 
 // errorOf reads an error body.
 func errorOf(t *testing.T, body []byte) ErrorDetail {
@@ -89,10 +101,6 @@ func TestRecommendationRoutes(t *testing.T) {
 	f := &fakeRecs{runExists: true}
 	s := newTestServer(Options{Recommendations: f})
 
-	rec := doBody(t, s, "GET", "/api/recommendations/home", "")
-	if want := `{"enabled":true,"run":null,"active_run":null,"hero_picks":[],"shelves":[]}`; rec.Code != 200 || rec.Body.String() != want {
-		t.Errorf("home = %d %s, want %s", rec.Code, rec.Body, want)
-	}
 	if rec := doBody(t, s, "POST", "/api/recommendations/refresh", ""); rec.Code != 202 || rec.Body.String() != `{"run_id":43}` {
 		t.Errorf("refresh = %d %s", rec.Code, rec.Body)
 	}
@@ -103,11 +111,54 @@ func TestRecommendationRoutes(t *testing.T) {
 	if fmt.Sprint(f.limits) != "[10 50]" {
 		t.Errorf("limits = %v, want [10 50]", f.limits)
 	}
-	rec = doBody(t, s, "GET", "/api/recommendations/runs/7", "")
-	var run map[string]any
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &run) != nil || run["id"] != float64(7) || run["usage"] == nil || run["steps"] == nil {
-		t.Errorf("run = %d %s", rec.Code, rec.Body)
+	if rec := doBody(t, s, "GET", "/api/recommendations/runs/9", ""); rec.Code != 200 {
+		t.Errorf("run 9 = %d", rec.Code)
 	}
+	f.runExists = false
+	if rec := doBody(t, s, "GET", "/api/recommendations/runs/9", ""); rec.Code != 404 {
+		t.Errorf("unknown run = %d, want 404", rec.Code)
+	}
+	// Feedback is its own dependency: without it, 503 while the picks answer
+	if rec := doBody(t, s, "DELETE", "/api/recommendations/feedback/tv/1", ""); rec.Code != 503 {
+		t.Errorf("feedback without RecFeedback = %d, want 503", rec.Code)
+	}
+}
+
+// Lists are always arrays: a service's nil slices answer [], never null.
+func TestRecommendationRoutes_EmptyLists(t *testing.T) {
+	f := &fakeRecs{runExists: true}
+	s := newTestServer(Options{Recommendations: f})
+
+	rec := doBody(t, s, "GET", "/api/recommendations/home", "")
+	if want := `{"configured":false,"enabled":false,"run":null,"active_run":null,"hero_picks":[],"shelves":[]}`; rec.Code != 200 || rec.Body.String() != want {
+		t.Errorf("zero home = %d %s, want %s", rec.Code, rec.Body, want)
+	}
+
+	f.home = &recommend.Home{
+		Configured: true,
+		Enabled:    true,
+		ActiveRun:  &recommend.RunProgress{RunSummary: recommend.RunSummary{ID: 43, Status: recommend.StatusQueued}},
+		Shelves:    []recommend.Shelf{{Slug: "anime", Kind: recommend.ShelfAnime, Title: "Anime you’ll like"}},
+	}
+	var home struct {
+		ActiveRun struct{ Steps json.RawMessage }   `json:"active_run"`
+		Shelves   []struct{ Items json.RawMessage } `json:"shelves"`
+	}
+	rec = doBody(t, s, "GET", "/api/recommendations/home", "")
+	if json.Unmarshal(rec.Body.Bytes(), &home) != nil || string(home.ActiveRun.Steps) != "[]" || len(home.Shelves) != 1 || string(home.Shelves[0].Items) != "[]" {
+		t.Errorf("home = %s", rec.Body)
+	}
+
+	rec = doBody(t, s, "GET", "/api/recommendations/runs/7", "")
+	var run map[string]json.RawMessage
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &run) != nil || string(run["id"]) != "7" || string(run["steps"]) != "[]" || run["usage"] == nil {
+		t.Errorf("zero run = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRecommendationFeedbackRoutes(t *testing.T) {
+	f := &fakeFeedback{}
+	s := newTestServer(Options{RecFeedback: f}) // feedback lands before the picks (#153)
 
 	body := `{"media_type":"movie","tmdb_id":666277,"signal":"not_interested","source":"hero"}`
 	if rec := doBody(t, s, "POST", "/api/recommendations/feedback", body); rec.Code != 204 {
@@ -119,19 +170,20 @@ func TestRecommendationRoutes(t *testing.T) {
 	if rec := doBody(t, s, "DELETE", "/api/recommendations/feedback/movie/666277", ""); rec.Code != 204 || fmt.Sprint(f.cleared) != "[movie:666277]" {
 		t.Errorf("delete feedback = %d, cleared %v", rec.Code, f.cleared)
 	}
-
-	if rec := doBody(t, s, "GET", "/api/recommendations/runs/9", ""); rec.Code != 200 {
-		t.Errorf("run 9 = %d", rec.Code)
+	if rec := doBody(t, s, "GET", "/api/recommendations/home", ""); rec.Code != 503 {
+		t.Errorf("home without Recommendations = %d, want 503", rec.Code)
 	}
-	f.runExists = false
-	if rec := doBody(t, s, "GET", "/api/recommendations/runs/9", ""); rec.Code != 404 {
-		t.Errorf("unknown run = %d, want 404", rec.Code)
+
+	s = newTestServer(Options{RecFeedback: &fakeFeedback{err: errors.New("db down")}})
+	if rec := doBody(t, s, "POST", "/api/recommendations/feedback", body); rec.Code != 500 {
+		t.Errorf("failure = %d, want 500", rec.Code)
 	}
 }
 
 func TestRecommendationRoutes_BadRequests(t *testing.T) {
 	f := &fakeRecs{}
-	s := newTestServer(Options{Recommendations: f})
+	fb := &fakeFeedback{}
+	s := newTestServer(Options{Recommendations: f, RecFeedback: fb})
 	for _, r := range []struct{ method, path, body string }{
 		{"GET", "/api/recommendations/runs?limit=0", ""},
 		{"GET", "/api/recommendations/runs?limit=51", ""},
@@ -150,7 +202,7 @@ func TestRecommendationRoutes_BadRequests(t *testing.T) {
 			t.Errorf("%s %s %s = %d, want 400", r.method, r.path, r.body, rec.Code)
 		}
 	}
-	if len(f.feedback)+len(f.cleared)+len(f.limits) != 0 {
+	if len(fb.feedback)+len(fb.cleared)+len(f.limits) != 0 {
 		t.Error("a bad request reached the service")
 	}
 }
@@ -166,7 +218,7 @@ func TestRecommendationRoutes_Errors(t *testing.T) {
 		{"no key", recommend.ErrUnavailable, 503, CodeUnavailable},
 		{"picks off", recommend.ErrDisabled, 409, CodeRecsDisabled},
 		{"no history", recommend.ErrNoHistory, 409, CodeNoHistory},
-		{"budget", fmt.Errorf("refresh: %w", &recommend.LimitError{Code: recommend.CodeBudgetExceeded, ResetsAt: resets}), 429, CodeBudgetExceeded},
+		{"budget", fmt.Errorf("refresh: %w", &recommend.LimitError{Code: recommend.CodeBudgetExceeded, ResetsAt: resets}), 429, recommend.CodeBudgetExceeded},
 		{"canceled", context.Canceled, StatusClientClosedRequest, CodeClientClosed},
 		{"other", errors.New("db down"), 500, CodeInternalError},
 	} {

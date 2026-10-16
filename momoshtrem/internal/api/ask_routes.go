@@ -30,7 +30,10 @@ type Ask interface {
 	// the channel, start first and done or error last; then it's closed.
 	// The turn runs under ctx: when the client goes away ctx is cancelled,
 	// and Ask must mark the turn cancelled, record what it spent, and
-	// never block sending once ctx is done.
+	// never block sending once ctx is done. Shutdown does the same: the
+	// server's RegisterOnShutdown hook (cmd/momoshtrem) cancels every turn
+	// in flight and closes its channel, since http.Server.Shutdown doesn't
+	// cancel request contexts and a stream would otherwise hold it.
 	Ask(ctx context.Context, req recommend.AskRequest) (<-chan recommend.Event, error)
 }
 
@@ -84,7 +87,7 @@ func (s *Server) getAskThread(c *gin.Context) {
 		recsErrorResponse(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, thread)
+	c.JSON(http.StatusOK, emptyThreadSlices(*thread))
 }
 
 // POST /recommendations/ask {thread_id?, message} → JSON errors, then
@@ -156,7 +159,7 @@ func streamAskEvents(ctx context.Context, c *gin.Context, events <-chan recommen
 			if !open {
 				return
 			}
-			data, err := json.Marshal(event.Data)
+			data, err := json.Marshal(emptyEventSlices(event).Data)
 			if err != nil {
 				slog.Error("Couldn't encode an Ask event", "event", event.Name, "error", err)
 				continue

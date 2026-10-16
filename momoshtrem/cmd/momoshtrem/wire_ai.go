@@ -19,10 +19,12 @@ type aiDeps struct {
 	settings *library.SettingsRepository // app_settings: "ai" and "trakt" (use_ratings)
 	aiStore  *library.AIStore            // ai_usage and ai_cache, shared with the classifier
 	tmdb     *tmdb.Cached
-	// catalog joins the library state onto rec cards (LibraryStates).
+	// catalog joins the library state onto rec cards (LibraryStates) and
+	// takes the title pages' reasons (a SetReasons setter, #157).
 	catalog *catalog.Service
-	// traktAuth says whether Trakt is connected; traktSync's hooks queue
-	// the first_sync run when the initial import finishes.
+	// traktAuth says whether Trakt is connected; the first_sync run hooks
+	// onto traktSync when the initial import finishes (a SetOnImported
+	// setter, #157).
 	traktAuth *trakt.Auth
 	traktSync *trakt.Syncer
 }

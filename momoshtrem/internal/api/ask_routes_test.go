@@ -27,11 +27,19 @@ type fakeAsk struct {
 
 func (f *fakeAsk) Threads(context.Context) ([]recommend.ThreadSummary, error) { return nil, f.err }
 
+// Thread 12 has one turn with nil lists, 13 is a zero value; the handler
+// answers their lists as [].
 func (f *fakeAsk) Thread(_ context.Context, id int64) (*recommend.Thread, error) {
-	if f.err != nil || id != 12 {
+	switch {
+	case f.err != nil:
 		return nil, f.err
+	case id == 12:
+		turn := recommend.Turn{ID: 46, Message: "anime", Status: recommend.TurnStatusCancelled}
+		return &recommend.Thread{ThreadSummary: recommend.ThreadSummary{ID: 12, Title: "Anime", TurnCount: 1}, Model: recommend.ModelOpus, Turns: []recommend.Turn{turn}}, nil
+	case id == 13:
+		return &recommend.Thread{}, nil
 	}
-	return &recommend.Thread{ThreadSummary: recommend.ThreadSummary{ID: 12, Title: "Something like Severance but lighter", TurnCount: 0}, Model: recommend.ModelOpus, Turns: []recommend.Turn{}}, nil
+	return nil, nil
 }
 
 func (f *fakeAsk) Ask(ctx context.Context, req recommend.AskRequest) (<-chan recommend.Event, error) {
@@ -70,6 +78,17 @@ var askScript = []recommend.Event{
 	{Name: recommend.EventStatus, Data: recommend.Step{Step: recommend.StepHistory, State: recommend.StepDone, Detail: detail("2,184 plays")}},
 	{Name: recommend.EventText, Data: recommend.TextEvent{Delta: "Five picks"}},
 	{Name: recommend.EventDone, Data: recommend.DoneEvent{ThreadID: 13, TurnID: 46, ElapsedMS: 9100, Refinements: []string{"Lighter"}, Usage: recommend.TurnUsage{CostUSD: 0.02}}},
+}
+
+// done's refinements are [] even when the service leaves them nil.
+func TestAskRoutes_DoneWithoutRefinements(t *testing.T) {
+	for _, data := range []any{recommend.DoneEvent{ThreadID: 1, TurnID: 2}, &recommend.DoneEvent{ThreadID: 1, TurnID: 2}} {
+		f := &fakeAsk{script: []recommend.Event{{Name: recommend.EventDone, Data: data}}}
+		rec := doBody(t, newTestServer(Options{Ask: f}), "POST", "/api/recommendations/ask", `{"message":"anime"}`)
+		if !strings.Contains(rec.Body.String(), `"refinements":[]`) {
+			t.Errorf("%T: stream = %s, want refinements []", data, rec.Body)
+		}
+	}
 }
 
 func TestAskRoutes_Stream(t *testing.T) {
@@ -172,8 +191,8 @@ func TestAskRoutes_Errors(t *testing.T) {
 		{recommend.ErrNotFound, 404, CodeNotFound},
 		{recommend.ErrThreadFull, 409, CodeThreadFull},
 		{recommend.ErrAskBusy, 409, CodeAskBusy},
-		{&recommend.LimitError{Code: recommend.CodeAskLimit, ResetsAt: midnight}, 429, CodeAskLimit},
-		{&recommend.LimitError{Code: recommend.CodeBudgetExceeded, ResetsAt: midnight}, 429, CodeBudgetExceeded},
+		{&recommend.LimitError{Code: recommend.CodeAskLimit, ResetsAt: midnight}, 429, recommend.CodeAskLimit},
+		{&recommend.LimitError{Code: recommend.CodeBudgetExceeded, ResetsAt: midnight}, 429, recommend.CodeBudgetExceeded},
 		{errors.New("db down"), 500, CodeInternalError},
 	} {
 		rec := doBody(t, newTestServer(Options{Ask: &fakeAsk{err: tt.err}}), "POST", "/api/recommendations/ask", `{"message":"anime"}`)
@@ -193,9 +212,21 @@ func TestAskRoutes_Threads(t *testing.T) {
 		t.Errorf("threads = %d %s", rec.Code, rec.Body)
 	}
 	rec := doBody(t, s, "GET", "/api/recommendations/threads/12", "")
-	var thread map[string]any
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &thread) != nil || thread["turn_count"] != float64(0) || thread["model"] != recommend.ModelOpus {
-		t.Errorf("thread = %d %s", rec.Code, rec.Body)
+	var thread struct {
+		TurnCount int `json:"turn_count"`
+		Model     string
+		Turns     []map[string]json.RawMessage
+	}
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &thread) != nil || thread.TurnCount != 1 || thread.Model != recommend.ModelOpus || len(thread.Turns) != 1 {
+		t.Fatalf("thread = %d %s", rec.Code, rec.Body)
+	}
+	for _, list := range []string{"steps", "items", "refinements"} {
+		if got := string(thread.Turns[0][list]); got != "[]" {
+			t.Errorf("turn %s = %s, want []", list, got)
+		}
+	}
+	if rec := doBody(t, s, "GET", "/api/recommendations/threads/13", ""); !strings.Contains(rec.Body.String(), `"turns":[]`) {
+		t.Errorf("zero thread = %s, want turns []", rec.Body)
 	}
 	if rec := doBody(t, s, "GET", "/api/recommendations/threads/99", ""); rec.Code != 404 {
 		t.Errorf("unknown thread = %d, want 404", rec.Code)

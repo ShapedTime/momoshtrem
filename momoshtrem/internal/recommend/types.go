@@ -118,17 +118,16 @@ const (
 
 // Limits from the contract.
 const (
-	ReasonMaxChars          = 140
-	MatchTagMaxChars        = 32
-	ShelfMinItems           = 6
-	ShelfMaxItems           = 15
-	HeroPicksPerDay         = 3
-	HeroPicksMax            = 9
-	AskMessageMaxChars      = 500
-	AskDailyLimit           = 30
-	ThreadMaxTurns          = 20
-	RefinementsMax          = 5
-	DefaultMonthlyBudgetUSD = 15.0 // an explicit null is no cap
+	ReasonMaxChars     = 140
+	MatchTagMaxChars   = 32
+	ShelfMinItems      = 6
+	ShelfMaxItems      = 15
+	HeroPicksPerDay    = 3
+	HeroPicksMax       = 9
+	AskMessageMaxChars = 500
+	AskDailyLimit      = 30
+	ThreadMaxTurns     = 20
+	RefinementsMax     = 5
 )
 
 // ItemMeta is a title's facts as a run snapshots them (rec_items.meta), so
@@ -229,13 +228,15 @@ type RunDetail struct {
 }
 
 // Home is GET /recommendations/home. Without a key or with rec_enabled off
-// it's {enabled: false} with everything else empty.
+// it's {enabled: false} with everything else empty; Configured tells the
+// two apart (Ask needs only the key).
 type Home struct {
-	Enabled   bool         `json:"enabled"`
-	Run       *RunSummary  `json:"run"`        // the newest succeeded run; null before the first
-	ActiveRun *RunProgress `json:"active_run"` // the queued or running run
-	HeroPicks []HeroPick   `json:"hero_picks"` // the day's three
-	Shelves   []Shelf      `json:"shelves"`
+	Configured bool         `json:"configured"` // ANTHROPIC_API_KEY is set
+	Enabled    bool         `json:"enabled"`    // configured and rec_enabled
+	Run        *RunSummary  `json:"run"`        // the newest succeeded run; null before the first
+	ActiveRun  *RunProgress `json:"active_run"` // the queued or running run
+	HeroPicks  []HeroPick   `json:"hero_picks"` // the day's three
+	Shelves    []Shelf      `json:"shelves"`
 }
 
 // RunAccepted is POST /recommendations/refresh's 202.
@@ -283,7 +284,9 @@ type TurnError struct {
 }
 
 // Turn is one ask and its answer, as ask_turns.view saved it when it
-// ended; a streaming turn has its message only.
+// ended; a streaming turn has its message only. An ended turn has no
+// active step: one still active when it failed or was cancelled is
+// dropped from the view.
 type Turn struct {
 	ID          int64      `json:"id"`
 	Message     string     `json:"message"`
@@ -347,7 +350,8 @@ type DoneEvent struct {
 // ---- Settings and usage ----
 
 // Settings is GET/PUT /settings/ai: app_settings key "ai", read over the
-// defaults. library.AISettings is the classifier's share of it.
+// defaults, which live with the store (library.DefaultAISettings, #154).
+// library.AISettings is the classifier's share of it.
 type Settings struct {
 	RecEnabled              bool     `json:"rec_enabled"`
 	RecModel                string   `json:"rec_model"`
@@ -356,20 +360,6 @@ type Settings struct {
 	ClassifierEnabled       bool     `json:"classifier_enabled"`
 	ClassifierModel         string   `json:"classifier_model"`
 	AutoApplyHighConfidence bool     `json:"auto_apply_high_confidence"`
-}
-
-// DefaultSettings are a fresh install's.
-func DefaultSettings() Settings {
-	budget := DefaultMonthlyBudgetUSD
-	return Settings{
-		RecEnabled:              true,
-		RecModel:                ModelOpus,
-		RecSchedule:             ScheduleNightly,
-		MonthlyBudgetUSD:        &budget,
-		ClassifierEnabled:       true,
-		ClassifierModel:         ModelHaiku,
-		AutoApplyHighConfidence: true,
-	}
 }
 
 // SettingsPatch is PUT /settings/ai's body: nil fields keep their value.

@@ -38,13 +38,29 @@ func (f *fakeAISettings) UpdateAISettings(_ context.Context, p recommend.Setting
 }
 
 func (f *fakeAISettings) AIUsage(context.Context) (*recommend.UsageReport, error) {
-	return &recommend.UsageReport{Configured: false, ByFeature: []recommend.FeatureUsage{}, AskDailyLimit: recommend.AskDailyLimit}, f.err
+	// Nil lists and map: the handler makes them [] and a key per model
+	return &recommend.UsageReport{AskDailyLimit: recommend.AskDailyLimit}, f.err
 }
 
 var _ AISettings = (*fakeAISettings)(nil)
 
+// freshAISettings are a fresh install's (PLAN §6); the store owns the real
+// defaults (library.DefaultAISettings, #154).
+func freshAISettings() recommend.Settings {
+	budget := 15.0
+	return recommend.Settings{
+		RecEnabled:              true,
+		RecModel:                recommend.ModelOpus,
+		RecSchedule:             recommend.ScheduleNightly,
+		MonthlyBudgetUSD:        &budget,
+		ClassifierEnabled:       true,
+		ClassifierModel:         recommend.ModelHaiku,
+		AutoApplyHighConfidence: true,
+	}
+}
+
 func TestAISettingsRoutes(t *testing.T) {
-	f := &fakeAISettings{settings: recommend.DefaultSettings()}
+	f := &fakeAISettings{settings: freshAISettings()}
 	s := newTestServer(Options{AISettings: f})
 
 	rec := doBody(t, s, "GET", "/api/settings/ai", "")
@@ -64,7 +80,13 @@ func TestAISettingsRoutes(t *testing.T) {
 		t.Errorf("patch = %+v", p)
 	}
 
-	if rec := doBody(t, s, "GET", "/api/settings/ai/usage", ""); rec.Code != 200 {
+	rec = doBody(t, s, "GET", "/api/settings/ai/usage", "")
+	var usage struct {
+		ByFeature []recommend.FeatureUsage   `json:"by_feature"`
+		Estimates map[string]json.RawMessage `json:"estimates"`
+	}
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &usage) != nil || usage.ByFeature == nil ||
+		string(usage.Estimates["run_usd"]) != `{"claude-opus-5-5":null,"claude-sonnet-5-5":null}` {
 		t.Errorf("usage = %d %s", rec.Code, rec.Body)
 	}
 }
@@ -108,7 +130,7 @@ func TestParseAISettingsPatch(t *testing.T) {
 }
 
 func TestAISettingsRoutes_Errors(t *testing.T) {
-	s := newTestServer(Options{AISettings: &fakeAISettings{settings: recommend.DefaultSettings()}})
+	s := newTestServer(Options{AISettings: &fakeAISettings{settings: freshAISettings()}})
 	rec := doBody(t, s, "PUT", "/api/settings/ai", `{"rec_model":"gpt-5"}`)
 	if e := errorOf(t, rec.Body.Bytes()); rec.Code != 422 || e.Code != CodeValidationError || e.Field != "rec_model" || e.Message != "rec_model must be claude-opus-5-5 or claude-sonnet-5-5" {
 		t.Errorf("422 = %d %s", rec.Code, rec.Body)

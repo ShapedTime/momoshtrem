@@ -89,11 +89,14 @@ func (s *Server) getAIUsage(c *gin.Context) {
 		return
 	}
 	usage, err := s.opts.AISettings.AIUsage(c.Request.Context())
+	if err == nil && usage == nil {
+		err = errors.New("no usage report")
+	}
 	if err != nil {
 		aiSettingsErrorResponse(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, usage)
+	c.JSON(http.StatusOK, emptyUsageSlices(*usage))
 }
 
 var errNotAnObject = errors.New("send the settings to change as a JSON object")

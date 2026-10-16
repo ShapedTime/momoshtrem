@@ -644,6 +644,9 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", cfg.Server.HTTPPort),
 		Handler: apiServer.Handler(),
 	}
+	// Shutdown doesn't cancel request contexts, so an Ask stream would hold
+	// it for its whole timeout: cancel the turns in flight as it starts.
+	httpServer.RegisterOnShutdown(ask.Close)
 
 	webdavHTTPServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.WebDAVPort),
@@ -718,9 +721,8 @@ func main() {
 	// job in flight resumes on the next start.
 	jobService.Close()
 
-	// Stop Ask (a turn in flight is cancelled) and the picks' scheduler,
-	// then the AI core they run on
-	ask.Close()
+	// Stop the picks' scheduler, then the AI core it runs on (Ask's turns
+	// were cancelled when the REST server began shutting down)
 	recs.Close()
 	aiCoreService.Close()
 

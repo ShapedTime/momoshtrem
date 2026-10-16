@@ -90,10 +90,13 @@ type Options struct {
 	// TraktNudge is nudged by GET /me/up-next (#132). Nil: reading Up next
 	// never starts a sync.
 	TraktNudge TraktNudger
-	// Recommendations serves the picks: /recommendations/home, refresh,
-	// runs and feedback (R1/R2, #153/#157; cmd/momoshtrem/wire_recs.go).
-	// Nil makes those routes return 503.
+	// Recommendations serves the picks: /recommendations/home, refresh and
+	// runs (R2, #157; cmd/momoshtrem/wire_recs.go). Nil makes those routes
+	// return 503.
 	Recommendations Recommendations
+	// RecFeedback serves /recommendations/feedback (R1, #153;
+	// wire_recs.go). Nil makes those routes return 503.
+	RecFeedback RecFeedback
 	// Ask serves Ask momoshtrem over SSE and its threads (R3, #158;
 	// wire_ask.go). Nil makes those routes return 503.
 	Ask Ask

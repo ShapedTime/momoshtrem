@@ -36,15 +36,13 @@ const (
 	CodeTorrentUnavailable = "torrent_unavailable"
 	// Recommendations and Ask (#9): 409 recs_disabled (refresh while
 	// rec_enabled is off), 409 no_history (refresh without enough Trakt
-	// history), 429 budget_exceeded (the month's AI budget is spent), 409
-	// ask_busy (another turn is streaming), 409 thread_full (20 turns), 429
-	// ask_limit (30 asks today). The 429s carry resets_at.
-	CodeRecsDisabled   = "recs_disabled"
-	CodeNoHistory      = "no_history"
-	CodeBudgetExceeded = "budget_exceeded"
-	CodeAskBusy        = "ask_busy"
-	CodeThreadFull     = "thread_full"
-	CodeAskLimit       = "ask_limit"
+	// history), 409 ask_busy (another turn is streaming), 409 thread_full
+	// (20 turns). The 429s (budget_exceeded, ask_limit) take their code
+	// and resets_at from recommend.LimitError.
+	CodeRecsDisabled = "recs_disabled"
+	CodeNoHistory    = "no_history"
+	CodeAskBusy      = "ask_busy"
+	CodeThreadFull   = "thread_full"
 )
 
 // StatusClientClosedRequest (nginx's 499) answers a request the client

@@ -15,9 +15,9 @@ import (
 )
 
 // Recommendations serves the picks (PLAN §6 "Recommendations (R1–R3)"):
-// /recommendations/home, refresh and runs (R2, #157), and feedback (R1,
-// #153). Once wired it's always set, with or without ANTHROPIC_API_KEY:
-// /home then answers enabled: false and refresh recommend.ErrUnavailable.
+// /recommendations/home, refresh and runs (R2, #157). Once wired it's
+// always set, with or without ANTHROPIC_API_KEY: /home then answers
+// configured: false and refresh recommend.ErrUnavailable.
 type Recommendations interface {
 	// Home is the newest succeeded run's shelves and the day's hero picks,
 	// with the active run; feedback, library and watchlist joined.
@@ -30,9 +30,14 @@ type Recommendations interface {
 	// Run is one run with its progress and usage; recommend.ErrNotFound
 	// for an unknown one.
 	Run(ctx context.Context, id int64) (*recommend.RunDetail, error)
-	// SetFeedback upserts a title's signal; ClearFeedback removes it
-	// (idempotent).
+}
+
+// RecFeedback stores feedback on titles (R1, #153), apart from the picks
+// so it can land before them. It works without a key.
+type RecFeedback interface {
+	// SetFeedback upserts a title's signal; the newest wins.
 	SetFeedback(ctx context.Context, f recommend.Feedback) error
+	// ClearFeedback removes it; idempotent.
 	ClearFeedback(ctx context.Context, mediaType string, tmdbID int) error
 }
 
@@ -47,7 +52,8 @@ var (
 )
 
 // registerRecommendationRoutes adds /recommendations (but Ask's, in
-// ask_routes.go). Without Options.Recommendations they answer 503.
+// ask_routes.go). Without Options.Recommendations the picks' routes
+// answer 503, and without Options.RecFeedback the feedback routes.
 func (s *Server) registerRecommendationRoutes(api *gin.RouterGroup) {
 	api.GET("/recommendations/home", s.getRecommendationsHome)
 	api.POST("/recommendations/refresh", s.refreshRecommendations)
@@ -65,17 +71,28 @@ func (s *Server) recsReady(c *gin.Context) bool {
 	return true
 }
 
+func (s *Server) feedbackReady(c *gin.Context) bool {
+	if s.opts.RecFeedback == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Feedback isn't available")
+		return false
+	}
+	return true
+}
+
 // GET /recommendations/home → 200 Home
 func (s *Server) getRecommendationsHome(c *gin.Context) {
 	if !s.recsReady(c) {
 		return
 	}
 	home, err := s.opts.Recommendations.Home(c.Request.Context())
+	if err == nil && home == nil {
+		home = &recommend.Home{}
+	}
 	if err != nil {
 		recsErrorResponse(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, home)
+	c.JSON(http.StatusOK, emptyHomeSlices(*home))
 }
 
 // POST /recommendations/refresh → 202 {run_id}
@@ -122,12 +139,14 @@ func (s *Server) getRecommendationRun(c *gin.Context) {
 		recsErrorResponse(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, run)
+	detail := *run
+	detail.RunProgress = emptyProgressSlices(detail.RunProgress)
+	c.JSON(http.StatusOK, detail)
 }
 
 // POST /recommendations/feedback {media_type, tmdb_id, signal, source} → 204
 func (s *Server) postRecommendationFeedback(c *gin.Context) {
-	if !s.recsReady(c) {
+	if !s.feedbackReady(c) {
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 64<<10))
@@ -140,7 +159,7 @@ func (s *Server) postRecommendationFeedback(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, "Send media_type (movie|tv), tmdb_id, signal (like|dislike|not_interested|seen) and source (shelf|hero|ask|title).")
 		return
 	}
-	if err := s.opts.Recommendations.SetFeedback(c.Request.Context(), f); err != nil {
+	if err := s.opts.RecFeedback.SetFeedback(c.Request.Context(), f); err != nil {
 		recsErrorResponse(c, err)
 		return
 	}
@@ -155,10 +174,10 @@ func (s *Server) deleteRecommendationFeedback(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, "Use /recommendations/feedback/{movie|tv}/{tmdb_id}.")
 		return
 	}
-	if !s.recsReady(c) {
+	if !s.feedbackReady(c) {
 		return
 	}
-	if err := s.opts.Recommendations.ClearFeedback(c.Request.Context(), mediaType, tmdbID); err != nil {
+	if err := s.opts.RecFeedback.ClearFeedback(c.Request.Context(), mediaType, tmdbID); err != nil {
 		recsErrorResponse(c, err)
 		return
 	}
