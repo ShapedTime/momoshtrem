@@ -3,13 +3,45 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clipboard, RefreshCw, WifiOff } from 'lucide-react';
+import { Check, CircleDashed, Clipboard, RefreshCw, TriangleAlert, WifiOff } from 'lucide-react';
 import { Banner, Button, copyText, Panel, Skeleton, StatusPill, useToast } from '@/components/ui';
 import { isApiError } from '@/lib/api/client';
 import { statusQuery, systemApi, systemKeys } from '@/lib/api/endpoints/system';
-import { serviceRows, summarize } from './status-model';
+import { type IndexerRow, serviceRows, summarize } from './status-model';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+/** Jackett's indexers under its row: a check and the latency, or what's wrong. */
+function IndexerList({ indexers }: { indexers: IndexerRow[] }) {
+  return (
+    <ul aria-label="Jackett indexers" className="set-indexers col-span-2 col-start-2 mt-0">
+      {indexers.map((indexer) =>
+        indexer.state === 'failing' ? (
+          <li key={indexer.name} className="is-warn">
+            <TriangleAlert size={15} className="text-warning" aria-hidden="true" />
+            <span className="flex min-w-0 flex-col">
+              <span className="wrap-any">{indexer.name}</span>
+              <span className="wrap-any text-fg-3">{indexer.text}</span>
+            </span>
+          </li>
+        ) : (
+          <li key={indexer.name}>
+            {indexer.state === 'ok' ? (
+              <Check size={15} className="text-ready" aria-hidden="true" />
+            ) : (
+              <CircleDashed size={15} className="text-fg-3" aria-hidden="true" />
+            )}
+            <span className="wrap-any min-w-0 grow">{indexer.name}</span>
+            <span className="shrink-0 text-right text-fg-3 tabular-nums">
+              {indexer.state === 'ok' && <span className="sr-only">OK, </span>}
+              {indexer.text}
+            </span>
+          </li>
+        )
+      )}
+    </ul>
+  );
+}
 
 /** System status (screens/settings/status): every service momoshtrem depends on. */
 export function StatusSection() {
@@ -90,6 +122,7 @@ export function StatusSection() {
                   <span className="t-small wrap-any text-fg-3">{row.detail}</span>
                 </div>
                 <StatusPill status={row.pill.status} label={row.pill.label} />
+                {row.indexers && <IndexerList indexers={row.indexers} />}
               </li>
             );
           })}

@@ -8,7 +8,12 @@ export type MediaType = 'movie' | 'tv';
 
 /** Every error: `{error: {code, message}}`. */
 export interface ApiErrorBody {
-  error: { code: string; message: string };
+  error: {
+    code: string;
+    message: string;
+    /** A 422 that's about one field names its JSON key, where the endpoint says so (the quality profile). */
+    field?: string;
+  };
 }
 
 /** Every list: `{items, total, page, page_size}`. */

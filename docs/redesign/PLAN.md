@@ -689,7 +689,7 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
 - Errors: `400 bad_request` (neither `release_id` nor `magnet_uri`, an unknown `media_type`, no `tmdb_id`, a magnet without an info hash, a negative season or an episode below 1), `404 not_found` (an expired release or an unknown TMDB title), `502 tmdb_unavailable` (TMDB is down for a title outside the library), and resolve's `502 torrent_unavailable` and `504 timeout` for a `release_id`.
 
 **`GET` and `PUT /settings/quality-profile`**
-- `PUT` takes the whole profile and answers the saved one. Invalid values are `422 validation_error`, naming the field ("max_gb_per_hour must be between 1 and 20"); a value of the wrong JSON type is `400 bad_request`.
+- `PUT` takes the whole profile and answers the saved one. Invalid values are `422 validation_error` with `error.field`, the bad field's JSON key, and a `message` that names it too: `{code: "validation_error", message: "max_gb_per_hour must be between 1 and 20", field: "max_gb_per_hour"}`. Settings shows `message` next to that field. A value of the wrong JSON type is `400 bad_request`.
 - `PUT` trims terms and groups and drops case-insensitive duplicates (the first spelling stays) before checking the limits, so the answer can differ from the request.
 - Stored in `app_settings` under the key `quality_profile` (§5). A missing field takes its default, in a `PUT` too.
 ```

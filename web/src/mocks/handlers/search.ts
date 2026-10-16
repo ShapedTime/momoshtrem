@@ -2,10 +2,10 @@ import { http, HttpResponse } from 'msw';
 import type { IndexerReport, ResolveResponse } from '@/lib/api/contract';
 import { findMockRelease, searchFixture } from '../fixtures/search';
 import { matchesQuery, parseSearchParams, planKey, searchAnswer } from '../fixtures/search-rules';
-import { QUALITY_PROFILE } from '../fixtures/settings';
 import { buildTitle } from '../fixtures/titles';
 import { scenario } from '../scenario';
 import { createInspectJob } from './assignment';
+import { getMockQualityProfile } from './settings';
 import { mockLibrary } from './titles';
 import { accepted, apiError, isRecord, jsonBody, latency, notFound } from './util';
 
@@ -69,8 +69,8 @@ export const searchHandlers = [
       searchAnswer({
         parsed,
         found,
-        // The fixture profile: Settings › Quality (#94) can hand over the page's live one
-        profile: QUALITY_PROFILE,
+        // The page's live profile, as Settings › Quality (#94) saved it
+        profile: getMockQualityProfile(),
         queries: params.q ? [{ q: params.q, label: null }] : fixture.queries,
         indexers,
         complete: indexers.every((indexer) => indexer.status !== 'pending'),

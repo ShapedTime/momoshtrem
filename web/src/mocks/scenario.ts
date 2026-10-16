@@ -26,6 +26,9 @@
  * - `search-slow`: torrent search answers `complete: false` with pending indexers, and one more
  *   indexer answers each second (about three polls) until it's complete.
  * - `search-down`: torrent search answers 503 `unavailable` (Jackett isn't set up).
+ * - `indexers-degraded`: /status lists a Jackett indexer timing out for 2 h and one failing for
+ *   5 min, so Settings › Status says Degraded.
+ * - `quality-invalid`: saving the quality profile answers 422 naming `avoid_terms`.
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -48,7 +51,9 @@ export type MockScenario =
   | 'search-partial'
   | 'search-none'
   | 'search-slow'
-  | 'search-down';
+  | 'search-down'
+  | 'indexers-degraded'
+  | 'quality-invalid';
 
 let override: MockScenario | null = null;
 

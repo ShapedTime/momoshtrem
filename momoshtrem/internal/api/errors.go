@@ -48,6 +48,10 @@ type ErrorBody struct {
 type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Field is the JSON name of the field a 422 is about, where the
+	// endpoint says so (the quality profile), so the UI can show the
+	// message next to it.
+	Field string `json:"field,omitempty"`
 }
 
 // errorResponse writes an error with a code derived from the HTTP status.

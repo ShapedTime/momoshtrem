@@ -134,16 +134,17 @@ func TestQualityRoutes_PutErrors(t *testing.T) {
 		wantStatus int
 		wantCode   string
 		wantMsg    string
+		wantField  string // a 422's error.field
 	}{
-		{"not JSON", `{nope`, http.StatusBadRequest, CodeBadRequest, ""},
-		{"empty body", ``, http.StatusBadRequest, CodeBadRequest, ""},
-		{"wrong type", `{"max_gb_per_hour": "lots"}`, http.StatusBadRequest, CodeBadRequest, "max_gb_per_hour has the wrong type"},
-		{"size limit", `{"max_gb_per_hour": 25}`, http.StatusUnprocessableEntity, CodeValidationError, "max_gb_per_hour must be between 1 and 20"},
-		{"size step", `{"max_gb_per_hour": 7.25}`, http.StatusUnprocessableEntity, CodeValidationError, "max_gb_per_hour must be a multiple of 0.5"},
-		{"resolution", `{"preferred_resolution": "4K"}`, http.StatusUnprocessableEntity, CodeValidationError, "preferred_resolution must be 720p, 1080p or 2160p"},
-		{"limit below preferred", `{"preferred_resolution": "2160p", "max_resolution": "1080p"}`, http.StatusUnprocessableEntity, CodeValidationError, "max_resolution must be at least preferred_resolution"},
-		{"blank term", `{"avoid_terms": ["CAM", ""]}`, http.StatusUnprocessableEntity, CodeValidationError, "avoid_terms must be 1–30 characters each"},
-		{"long group", `{"preferred_groups": ["` + strings.Repeat("g", 31) + `"]}`, http.StatusUnprocessableEntity, CodeValidationError, "preferred_groups must be 1–30 characters each"},
+		{"not JSON", `{nope`, http.StatusBadRequest, CodeBadRequest, "", ""},
+		{"empty body", ``, http.StatusBadRequest, CodeBadRequest, "", ""},
+		{"wrong type", `{"max_gb_per_hour": "lots"}`, http.StatusBadRequest, CodeBadRequest, "max_gb_per_hour has the wrong type", ""},
+		{"size limit", `{"max_gb_per_hour": 25}`, http.StatusUnprocessableEntity, CodeValidationError, "max_gb_per_hour must be between 1 and 20", "max_gb_per_hour"},
+		{"size step", `{"max_gb_per_hour": 7.25}`, http.StatusUnprocessableEntity, CodeValidationError, "max_gb_per_hour must be a multiple of 0.5", "max_gb_per_hour"},
+		{"resolution", `{"preferred_resolution": "4K"}`, http.StatusUnprocessableEntity, CodeValidationError, "preferred_resolution must be 720p, 1080p or 2160p", "preferred_resolution"},
+		{"limit below preferred", `{"preferred_resolution": "2160p", "max_resolution": "1080p"}`, http.StatusUnprocessableEntity, CodeValidationError, "max_resolution must be at least preferred_resolution", "max_resolution"},
+		{"blank term", `{"avoid_terms": ["CAM", ""]}`, http.StatusUnprocessableEntity, CodeValidationError, "avoid_terms must be 1–30 characters each", "avoid_terms"},
+		{"long group", `{"preferred_groups": ["` + strings.Repeat("g", 31) + `"]}`, http.StatusUnprocessableEntity, CodeValidationError, "preferred_groups must be 1–30 characters each", "preferred_groups"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -158,6 +159,9 @@ func TestQualityRoutes_PutErrors(t *testing.T) {
 			}
 			if tt.wantMsg != "" && got.Message != tt.wantMsg {
 				t.Errorf("message = %q, want %q", got.Message, tt.wantMsg)
+			}
+			if got.Field != tt.wantField {
+				t.Errorf("field = %q, want %q", got.Field, tt.wantField)
 			}
 			if fake.saves != 0 {
 				t.Errorf("saved %d times, want none", fake.saves)

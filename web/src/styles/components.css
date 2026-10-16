@@ -157,6 +157,7 @@
   .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--line-1); max-width: 100%; }
   .seg button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 var(--sp-3); border-radius: 9px; font-size: var(--t-small); font-weight: var(--w-medium); color: var(--text-2); white-space: nowrap; transition: background-color var(--d-base) var(--ease-out), color var(--d-fast); flex: 1 1 auto; }
   .seg button:hover { color: var(--text-1); }
+  .seg button:disabled { color: var(--text-4); cursor: not-allowed; }
   .seg button[aria-selected="true"], .seg button[aria-pressed="true"] { background: var(--surface-4); color: var(--text-1); box-shadow: var(--e-1), inset 0 1px 0 rgb(255 255 255 / 0.06); }
   .seg--block { display: flex; width: 100%; }
 
