@@ -218,7 +218,7 @@ Comparing reports from different machines is refused without `--force`.
 | R2 | A hook never takes `fs.mu`, `TorrentFile.mu`, `PriorityReader.mu`, `Prioritizer.mu` or the anacrolix client lock, and never calls anacrolix. |
 | R3 | A hook is one line after an existing statement, reusing values already computed. No reordering, no new error path, no new goroutine in the read path. |
 | R4 | Standard library only. `STREAM_TRACE=off\|summary\|detailed`. `summary` stays under ~50 events/s during playback; `detailed` adds per-read events for the lab. |
-| R5 | Every hook PR passes a lab A/B at off, summary and detailed. Exact metrics are identical, timings are within noise, `BenchmarkEmit` makes 0 allocs at under ~20 ns, and event counts reconcile with the Prometheus counters. |
+| R5 | Every hook PR passes a lab A/B at off, summary and detailed. Exact metrics are identical, timings are within noise, `BenchmarkEmit` makes 0 allocs; off costs ≈ 1 ns; a recorded event costs about one monotonic clock read, plus one atomic add, plus ≤10 ns of ring work (≈30–35 ns on arm64; amd64 unmeasured); and event counts reconcile with the Prometheus counters. |
 
 **Hook sites:**
 - **HTTP:** an outermost `traceMiddleware` (request ID, Range, If-Range, UA, status, bytes, TTFB, abort), and `webdavFile.Seek`.
