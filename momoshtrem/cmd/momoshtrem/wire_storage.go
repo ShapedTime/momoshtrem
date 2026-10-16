@@ -23,9 +23,8 @@ func newStorageGovernor(cfg *config.Config, settings *library.SettingsRepository
 }
 
 // storageCache adapts the piece cache (#201's piececache) to the Governor:
-// its cap, its fill with the pinned part, and its trims. The streaming
-// reserve (SetReserve) isn't wired here yet: the downloads core (#77 P4)
-// does that.
+// its cap, its fill with the pinned part, the streaming reserve (set on
+// every pass, #77 P4) and its trims.
 func storageCache(fc *piececache.Cache) storagecap.Cache {
 	return storagecap.CacheFuncs{
 		InfoFunc: func() storagecap.CacheInfo {
@@ -33,6 +32,7 @@ func storageCache(fc *piececache.Cache) storagecap.Cache {
 			return storagecap.CacheInfo{Capacity: info.Capacity, Filled: info.Filled, Pinned: info.Pinned}
 		},
 		SetCapacityFunc:    fc.SetCapacity,
+		SetReserveFunc:     fc.SetReserve,
 		TrimToCapacityFunc: fc.TrimToCapacity,
 	}
 }
