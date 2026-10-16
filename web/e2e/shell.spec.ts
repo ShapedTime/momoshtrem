@@ -81,7 +81,10 @@ test.describe('command palette', () => {
     await page.keyboard.press('/');
     await expect(page.getByRole('dialog', { name: 'Search or jump to' })).toBeVisible();
     await page.keyboard.type('frieren');
+    // Your library's Frieren comes first; "Search all results" is always last
+    await expect(page.getByRole('option', { name: /^Frieren: Beyond Journey’s End/ })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('option', { name: /Search all results for “frieren”/ })).toBeVisible();
+    await page.keyboard.press('End');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/search\?q=frieren$/);
   });
@@ -112,7 +115,8 @@ test.describe('URL-driven sheets', () => {
     test.skip(!isDesktop(testInfo.project.name), 'Opened from the palette here');
     await signIn(page, '/library');
     await page.keyboard.press('ControlOrMeta+k');
-    await page.keyboard.type('how to play');
+    await page.keyboard.type('infuse');
+    await expect(page.getByRole('option', { name: /^Infuse setup/ })).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Enter');
     const sheet = page.getByRole('dialog', { name: 'Play it in Infuse' });
     await expect(sheet).toBeVisible();

@@ -2,5 +2,5 @@
  * UI-related configuration constants.
  */
 
-/** Delay in milliseconds before triggering search after user stops typing */
-export const DEBOUNCE_DELAY = 300;
+/** Delay in milliseconds before searching once the user stops typing (search page, ⌘K palette) */
+export const DEBOUNCE_DELAY = 250;

@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { StatusPill } from '@/components/ui';
-import type { AvailabilityStage } from '@/lib/api/contract';
+import type { AvailabilityStage, LibraryItem } from '@/lib/api/contract';
+import { posterBadge } from '@/lib/library/display';
 import type { StatusKey } from '@/lib/status';
 
 /** Library pills on TMDB cards; titles outside the library get none. Short labels for narrow cards. */
@@ -27,4 +28,15 @@ export function LibraryPill({ library }: { library: InLibrary }) {
 /** The pill for a card's `badge` slot, or undefined so the card draws no badge. */
 export function libraryPill(library: InLibrary): ReactElement | undefined {
   return library && PILL[library.availability_stage] ? <LibraryPill library={library} /> : undefined;
+}
+
+/**
+ * Where a TMDB card's title stands in your library (Discover, Search), as
+ * the Library's own cards say it (Review, Playing, 42%, No torrent), else
+ * Ready. Short words fit the phone's 104 px cards, where "Downloading"
+ * would run off the poster.
+ */
+export function libraryBadge(item: LibraryItem | undefined): ReactElement | undefined {
+  const badge = item ? posterBadge(item) : null;
+  return badge ? <StatusPill status={badge.status} label={badge.label} pct={badge.pct} onArt /> : libraryPill(item);
 }

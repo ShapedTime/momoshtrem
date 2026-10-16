@@ -9,6 +9,7 @@ import { resetMockSearch, searchHandlers } from './search';
 import { resetMockSettings, settingsHandlers } from './settings';
 import { resetMockSubtitles, subtitlesHandlers } from './subtitles';
 import { systemHandlers } from './system';
+import { titleSearchHandlers } from './title-search';
 import { resetMockLibrary, titlesHandlers } from './titles';
 import { resetMockTorrents, torrentsHandlers } from './torrents';
 import { traktHandlers } from './trakt';
@@ -31,6 +32,7 @@ export const handlers = [
   ...torrentsHandlers,
   ...hdrezkaHandlers,
   ...discoverHandlers,
+  ...titleSearchHandlers,
   ...legacyHandlers,
 ];
 

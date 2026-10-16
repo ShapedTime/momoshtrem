@@ -44,7 +44,7 @@ describe('apiFetch', () => {
   it('treats an upstream 401 (a rejected API key) as an ordinary error, not a lost session', async () => {
     stubWindow('/search');
     respond(401, { error: 'TMDB API request failed: Request failed with status code 401' });
-    const response = await apiFetch('/api/tmdb/search?q=x');
+    const response = await apiFetch('/api/title-search?q=x');
     expect(response.status).toBe(401);
     expect(assign).not.toHaveBeenCalled();
   });
