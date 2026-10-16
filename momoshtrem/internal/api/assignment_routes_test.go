@@ -137,6 +137,7 @@ func TestAssignmentRoutes(t *testing.T) {
 		{"detail", "GET", "/api/assignment-jobs/5", "", nil, true, 200, "", "detail"},
 		{"detail of an unknown job", "GET", "/api/assignment-jobs/5", "", library.ErrJobNotFound, true, 404, CodeNotFound, "detail"},
 		{"detail with a bad id", "GET", "/api/assignment-jobs/0", "", nil, true, 400, CodeBadRequest, ""},
+		{"detail of a dry run without TMDB", "GET", "/api/assignment-jobs/5", "", fmt.Errorf("%w: down", library.ErrTMDBFetch), true, 502, CodeTMDBUnavailable, "detail"},
 		{"apply", "POST", "/api/assignment-jobs/5/apply", "", nil, true, 200, "", "apply"},
 		{"apply an unknown job", "POST", "/api/assignment-jobs/5/apply", "", library.ErrJobNotFound, true, 404, CodeNotFound, "apply"},
 		{"apply a dry run", "POST", "/api/assignment-jobs/5/apply", "", conflictErr(service.CodeDryRun), true, 409, service.CodeDryRun, "apply"},

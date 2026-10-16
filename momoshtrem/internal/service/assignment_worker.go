@@ -138,11 +138,7 @@ func (s *JobService) janitor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if n, err := s.jobs.DeleteDryRuns(ctx, dryRunTTL); err != nil {
-				s.log.Warn("Failed to remove old dry runs", "error", err)
-			} else if n > 0 {
-				s.log.Info("Removed old dry runs", "jobs", n)
-			}
+			s.sweepDryRuns(ctx)
 			if s.aiCache != nil {
 				if _, err := s.aiCache.DeleteExpiredCache(ctx); err != nil {
 					s.log.Warn("Failed to prune the AI cache", "error", err)
@@ -218,8 +214,12 @@ func (s *JobService) fail(ctx context.Context, job *library.AssignmentJob, f fai
 // processShow fetches the torrent's file list (refreshing the show's
 // metadata and reading its TMDB extras meanwhile), classifies the files,
 // stores the proposals and, when AI is available and something is unsure,
-// asks it. A job that needs nothing reviewed applies on its own.
+// asks it. A job that needs nothing reviewed applies on its own. A dry run
+// on a show outside the library goes to processTMDBShow.
 func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob) error {
+	if outsideLibrary(job) {
+		return s.processTMDBShow(ctx, job)
+	}
 	if job.ShowID == nil {
 		return s.fail(ctx, job, failTitleGone)
 	}
@@ -327,17 +327,28 @@ func (s *JobService) processShow(ctx context.Context, job *library.AssignmentJob
 
 // processMovie fetches the torrent's file list, ranks its videos as the
 // film and stores the proposals. A file picked up front is accepted and
-// the job applies; otherwise one plausible film applies on its own.
+// the job applies; otherwise one plausible film applies on its own. A dry
+// run on a film outside the library reads it from TMDB.
 func (s *JobService) processMovie(ctx context.Context, job *library.AssignmentJob) error {
-	if job.MovieID == nil {
+	var film identify.MovieInfo
+	switch {
+	case outsideLibrary(job):
+		t, err := s.tmdbTitle(ctx, library.JobMovie, job.TMDBID)
+		if err != nil {
+			return s.tmdbFailed(ctx, job, err)
+		}
+		film = identify.MovieInfo{Title: t.Title, Year: t.Year, RuntimeMin: t.Runtime}
+	case job.MovieID == nil:
 		return s.fail(ctx, job, failTitleGone)
-	}
-	movie, err := s.movies.GetByID(*job.MovieID)
-	if err != nil {
-		return err
-	}
-	if movie == nil {
-		return s.fail(ctx, job, failTitleGone)
+	default:
+		movie, err := s.movies.GetByID(*job.MovieID)
+		if err != nil {
+			return err
+		}
+		if movie == nil {
+			return s.fail(ctx, job, failTitleGone)
+		}
+		film = identify.MovieInfo{Title: movie.Title, Year: movie.Year, RuntimeMin: movie.Runtime}
 	}
 	info, err := s.addTorrent(ctx, job.MagnetURI, job.InfoHash)
 	if err != nil {
@@ -352,10 +363,10 @@ func (s *JobService) processMovie(ctx context.Context, job *library.AssignmentJo
 	res := identify.Classify(identify.Input{
 		TorrentName: info.Name,
 		Files:       info.Files,
-		Show:        &identify.ShowCatalog{Title: movie.Title, Year: movie.Year},
+		Show:        &identify.ShowCatalog{Title: film.Title, Year: film.Year},
 		Now:         s.now(),
 	})
-	candidates := identify.RankMovieFiles(info.Files, identify.MovieInfo{Title: movie.Title, Year: movie.Year, RuntimeMin: movie.Runtime})
+	candidates := identify.RankMovieFiles(info.Files, film)
 	drafts := movieDrafts(res.Proposals, candidates)
 	if err := s.setFileList(ctx, job, info, drafts); err != nil {
 		return err

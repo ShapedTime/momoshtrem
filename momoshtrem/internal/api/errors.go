@@ -30,6 +30,9 @@ const (
 	// CodePremiumOnly is a 409: the translation or quality needs an
 	// HDRezka Premium account.
 	CodePremiumOnly = "premium_only"
+	// CodeTorrentUnavailable is a 502: the indexer's link for a search
+	// result gave no torrent.
+	CodeTorrentUnavailable = "torrent_unavailable"
 )
 
 // StatusClientClosedRequest (nginx's 499) answers a request the client

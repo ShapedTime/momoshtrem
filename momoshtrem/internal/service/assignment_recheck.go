@@ -54,7 +54,7 @@ type ReclassifyRequest struct {
 //     alternative.
 //   - When the AI fails, ai_error is set and nothing else changes.
 //
-// It answers a JobConflictError (job_closed, job_working),
+// It answers a JobConflictError (dry_run, job_closed, job_working),
 // ErrAIUnavailable or ErrInvalidRecheck/ErrInvalidHint.
 func (s *JobService) Reclassify(ctx context.Context, id int64, req ReclassifyRequest) error {
 	if req.Scope != RecheckUnresolved && req.Scope != RecheckAll {
@@ -69,6 +69,8 @@ func (s *JobService) Reclassify(ctx context.Context, id int64, req ReclassifyReq
 	started := false
 	err := s.jobs.Locked(ctx, id, func(t *library.JobTx) error {
 		switch {
+		case t.Job.DryRun:
+			return conflict(CodeDryRun, "A dry run is read-only.")
 		case !t.Job.Status.Open():
 			return conflict(CodeJobClosed, fmt.Sprintf("This mapping job is already %s.", t.Job.Status))
 		case t.Job.Status.Working():

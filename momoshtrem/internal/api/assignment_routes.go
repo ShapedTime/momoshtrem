@@ -250,6 +250,8 @@ func assignmentErrorResponse(c *gin.Context, err error) {
 		errorResponse(c, http.StatusServiceUnavailable, "AI isn't available for this job.")
 	case errors.Is(err, library.ErrNoVideoFiles):
 		errorResponse(c, http.StatusBadRequest, "No video files found in torrent")
+	case errors.Is(err, library.ErrTMDBFetch): // a dry run outside the library reads TMDB
+		errorCodeResponse(c, http.StatusBadGateway, CodeTMDBUnavailable, "TMDB couldn't be reached. Try again in a moment.")
 	case errors.Is(err, context.Canceled):
 		errorCodeResponse(c, StatusClientClosedRequest, CodeClientClosed, "The request was canceled")
 	case errors.Is(err, context.DeadlineExceeded):

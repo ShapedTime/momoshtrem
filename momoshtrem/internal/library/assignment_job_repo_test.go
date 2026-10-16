@@ -574,7 +574,76 @@ func TestJobRepository_FailCancelTorrentInUse(t *testing.T) {
 	if _, err := db.Exec(`UPDATE assignment_jobs SET dry_run = TRUE, created_at = NOW() - interval '2 days' WHERE id = $1`, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := repo.DeleteDryRuns(ctx, 24*time.Hour); err != nil || n != 1 {
-		t.Errorf("deleted dry runs = %d, %v", n, err)
+	if hashes, err := repo.DeleteDryRuns(ctx, 24*time.Hour); err != nil || len(hashes) != 1 || hashes[0] != hash {
+		t.Errorf("deleted dry runs = %q, %v", hashes, err)
+	}
+}
+
+// A dry run is reused within the window by the same title in the same
+// library state, unless it was cancelled; concurrent Inspects of one
+// torrent create one.
+func TestJobRepository_CreateDryRun(t *testing.T) {
+	db := openSchemaDB(t)
+	ctx := context.Background()
+	repo := NewAssignmentJobRepository(db)
+	show, _ := jobShow(t, db, 1)
+	hash := strings.Repeat("9", 40)
+	outside := func() *AssignmentJob {
+		return &AssignmentJob{MediaType: JobTV, TMDBID: show.TMDBID, InfoHash: hash, MagnetURI: "magnet:?xt=urn:btih:" + hash, TorrentName: hash}
+	}
+
+	const callers = 5
+	ids := make(chan int64, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			j := outside()
+			created, err := repo.CreateDryRun(ctx, j, time.Hour)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if created {
+				ids <- j.ID
+			}
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("created %d dry runs, want 1", len(ids))
+	}
+	first := <-ids
+	got, err := repo.Get(ctx, first)
+	if err != nil || !got.DryRun || got.ShowID != nil || got.Status != JobQueued || got.Title != "" {
+		t.Errorf("dry run = %+v, %v", got, err)
+	}
+
+	// The same title in the library is another state: a new dry run.
+	inLibrary := outside()
+	inLibrary.ShowID = &show.ID
+	if created, err := repo.CreateDryRun(ctx, inLibrary, time.Hour); err != nil || !created || inLibrary.ID == first {
+		t.Errorf("in the library = %v (%d), %v", created, inLibrary.ID, err)
+	}
+	// An assign of the torrent isn't blocked by the dry runs.
+	if created, err := repo.Create(ctx, newShowJob(show, hash)); err != nil || !created {
+		t.Errorf("assign = %v, %v", created, err)
+	}
+	if ok, err := repo.Cancel(ctx, first); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	again := outside()
+	if created, err := repo.CreateDryRun(ctx, again, time.Hour); err != nil || !created || again.ID == first {
+		t.Errorf("after a cancel = %v (%d), %v", created, again.ID, err)
+	}
+	if created, err := repo.CreateDryRun(ctx, outside(), 0); err != nil || !created {
+		t.Errorf("outside the window = %v, %v", created, err)
 	}
 }

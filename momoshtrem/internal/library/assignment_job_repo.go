@@ -148,6 +148,59 @@ func (r *AssignmentJobRepository) Create(ctx context.Context, j *AssignmentJob) 
 	return false, fmt.Errorf("failed to create assignment job: the open job kept changing")
 }
 
+// CreateDryRun inserts a queued dry run (#6 Inspect) and sets j.ID. When
+// the title, in the same library state (j.ShowID, j.MovieID), had the
+// torrent inspected within reuse by a dry run that wasn't cancelled and
+// didn't fail, it sets j.ID to the newest such one instead and returns
+// created false. Concurrent calls for one title and torrent serialize on
+// an advisory lock.
+func (r *AssignmentJobRepository) CreateDryRun(ctx context.Context, j *AssignmentJob, reuse time.Duration) (created bool, err error) {
+	var hint any
+	if j.Hint != nil {
+		raw, err := json.Marshal(j.Hint)
+		if err != nil {
+			return false, fmt.Errorf("failed to encode hint: %w", err)
+		}
+		hint = string(raw)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("inspect:%s:%d:%s", j.MediaType, j.TMDBID, j.InfoHash)); err != nil {
+		return false, fmt.Errorf("failed to lock the dry run: %w", err)
+	}
+	err = tx.QueryRowContext(ctx, `
+		SELECT id FROM assignment_jobs
+		WHERE dry_run AND media_type = $1 AND tmdb_id = $2 AND info_hash = $3
+		  AND show_id IS NOT DISTINCT FROM $4 AND movie_id IS NOT DISTINCT FROM $5
+		  AND status NOT IN ('cancelled', 'failed') AND created_at > NOW() - make_interval(secs => $6)
+		ORDER BY id DESC LIMIT 1
+	`, j.MediaType, j.TMDBID, j.InfoHash, j.ShowID, j.MovieID, reuse.Seconds()).Scan(&j.ID)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("failed to find a recent dry run: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO assignment_jobs (media_type, tmdb_id, show_id, movie_id, info_hash, magnet_uri,
+		                             torrent_name, indexer, dry_run, hint)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), TRUE, $9::jsonb)
+		RETURNING id
+	`, j.MediaType, j.TMDBID, j.ShowID, j.MovieID, j.InfoHash, j.MagnetURI,
+		j.TorrentName, j.Indexer, hint).Scan(&j.ID); err != nil {
+		return false, fmt.Errorf("failed to create the dry run: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit: %w", err)
+	}
+	j.DryRun = true
+	return true, nil
+}
+
 // Get returns a job with its title, or ErrJobNotFound.
 func (r *AssignmentJobRepository) Get(ctx context.Context, id int64) (*AssignmentJob, error) {
 	return getJob(ctx, r.db, id, "")
@@ -409,15 +462,26 @@ func (r *AssignmentJobRepository) TorrentInUse(ctx context.Context, infoHash str
 }
 
 // DeleteDryRuns removes dry-run jobs created before olderThan ago (#6
-// Inspect keeps them for a day).
-func (r *AssignmentJobRepository) DeleteDryRuns(ctx context.Context, olderThan time.Duration) (int64, error) {
-	res, err := r.db.ExecContext(ctx, `
+// Inspect keeps them for a day) and returns their info hashes, one per
+// job deleted.
+func (r *AssignmentJobRepository) DeleteDryRuns(ctx context.Context, olderThan time.Duration) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
 		DELETE FROM assignment_jobs WHERE dry_run AND created_at < NOW() - make_interval(secs => $1)
+		RETURNING info_hash
 	`, olderThan.Seconds())
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete dry runs: %w", err)
+		return nil, fmt.Errorf("failed to delete dry runs: %w", err)
 	}
-	return res.RowsAffected()
+	defer rows.Close()
+	var hashes []string
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			return nil, fmt.Errorf("failed to scan a deleted dry run: %w", err)
+		}
+		hashes = append(hashes, hash)
+	}
+	return hashes, rows.Err()
 }
 
 // JobTx is a job locked for a change (FOR UPDATE), with its proposals.
