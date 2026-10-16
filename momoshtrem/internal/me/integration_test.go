@@ -260,8 +260,9 @@ func TestIntegration_Me(t *testing.T) {
 
 	// A disconnect purges every Trakt table: /me answers empty, but new
 	// episodes of the library's shows.
-	s.exec(`TRUNCATE trakt_history, trakt_watched_movies, trakt_watched_episodes, trakt_ratings, trakt_watchlist,
-		trakt_show_progress, trakt_hidden, trakt_calendar`)
+	if err := library.NewTraktAuthRepository(db).Purge(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if upNext, err := svc.UpNext(ctx); err != nil || len(upNext) != 0 {
 		t.Errorf("up next without Trakt = %+v, %v", upNext, err)
 	}
