@@ -126,26 +126,3 @@ export function isLibraryMovie(item: LibraryMovie | LibraryShow): item is Librar
 export function isLibraryShow(item: LibraryMovie | LibraryShow): item is LibraryShow {
   return 'seasons' in item;
 }
-
-// =============================================================================
-// Recently Aired Types
-// =============================================================================
-
-export interface RecentlyAiredEpisode {
-  show_id: number;
-  show_tmdb_id: number;
-  show_title: string;
-  show_year: number;
-  season_number: number;
-  episode_id: number;
-  episode_number: number;
-  episode_name: string;
-  air_date: string;
-  has_assignment: boolean;
-}
-
-export interface RecentlyAiredResponse {
-  episodes: RecentlyAiredEpisode[];
-  last_sync_time: string;
-  sync_status: 'ok' | 'pending' | 'in_progress' | 'error' | 'disabled';
-}

@@ -30,6 +30,7 @@ import {
   ConfirmDialog,
   CopyField,
   EmptyState,
+  EpisodeCard,
   FilterChip,
   IconButton,
   Input,
@@ -68,9 +69,11 @@ import {
 } from '@/components/ui';
 import { PrimaryPanel } from '@/components/title';
 import { EpisodeRow } from '@/components/title/show';
+import { newEpisodeCard, upNextCard } from '@/lib/for-you/episode-card';
 import { STATUS, type StatusKey } from '@/lib/status';
 import { primaryActionFor } from '@/lib/title/stage-copy';
-import { buildSeason, buildTitle } from '@/mocks/fixtures/titles';
+import { buildSeason, buildTitle, seedLibrary } from '@/mocks/fixtures/titles';
+import { DEFAULT_TRAKT_SETTINGS, newEpisodeItems, upNextItems } from '@/mocks/fixtures/trakt';
 
 function Section({ id, title, subtitle, children }: { id: string; title: string; subtitle?: string; children: ReactNode }) {
   return (
@@ -163,6 +166,14 @@ const EPISODE_ROWS = (
   const episode = episodeNumber === 0 ? episodes.find((e) => e.state === 'downloading') : episodes.find((e) => e.episode_number === episodeNumber);
   return episode ? [[key, episode, ordering, isNext] as const] : [];
 });
+
+/** The mock account's Up next (one card per availability) and a new episode with its day. */
+const EPISODE_CARDS = (() => {
+  const now = new Date();
+  const library = seedLibrary();
+  const [fresh] = newEpisodeItems(library, 7, true);
+  return [...upNextItems(library, DEFAULT_TRAKT_SETTINGS).map((item) => upNextCard(item, now)), ...(fresh ? [newEpisodeCard(fresh, now)] : [])];
+})();
 
 export function Gallery() {
   const { toast } = useToast();
@@ -478,7 +489,37 @@ export function Gallery() {
             </span>
           </div>
         </Frame>
-        <Rail title="Up next" subtitle="Rail with arrows on fine pointers" seeAllHref="#">
+        <Rail title="Up next" subtitle="EpisodeCard (landscape): the code over the still, a bar while it downloads, the day a new episode aired, then the availability’s pill and its one action" kind="wide">
+          {EPISODE_CARDS.map((card) => (
+            <RailItem key={card.key}>
+              <EpisodeCard
+                href="#"
+                show={card.show}
+                name={card.name}
+                code={card.code}
+                when={card.when}
+                downloadPct={card.downloadPct}
+                status={<StatusPill status={card.pill.status} label={card.pill.label} pct={card.pill.pct} />}
+                action={
+                  card.action && (
+                    <Button
+                      variant={card.action.intent === 'play' || card.action.intent === 'details' ? 'ghost' : 'secondary'}
+                      size="sm"
+                      aria-label={card.action.ariaLabel}
+                      onClick={() => toast({ tone: 'info', title: card.action?.ariaLabel ?? '' })}
+                    >
+                      {card.action.intent === 'play' && <Tv size={16} aria-hidden="true" />}
+                      {card.action.intent === 'find' && <Search size={16} aria-hidden="true" />}
+                      {card.action.intent === 'add' && <Plus size={16} aria-hidden="true" />}
+                      {card.action.label}
+                    </Button>
+                  )
+                }
+              />
+            </RailItem>
+          ))}
+        </Rail>
+        <Rail title="Trending this week" subtitle="Rail with arrows on fine pointers" seeAllHref="#">
           {Array.from({ length: 12 }, (_, i) => (
             <RailItem key={i}>
               <PosterCard href="#" title={`Title ${i + 1}`} subtitle="2024" />
