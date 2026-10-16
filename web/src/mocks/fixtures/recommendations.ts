@@ -253,6 +253,8 @@ const DESIGN_RESULT: RunResult = {
         ['pushingdaisies', 'Whimsical, gone too soon, complete in 2 seasons'],
         ['perfectdays', 'A quiet life in Tokyo, told with enormous warmth'],
         ['paradiso', 'A love letter to the cinema you’ve never got round to'],
+        // The title page's "Why it's for you" (a shelf's reason wins over the hero's; e2e/title-movie.spec.ts)
+        ['pastlives', 'Quiet, warm and under two hours.'],
       ],
     },
     {

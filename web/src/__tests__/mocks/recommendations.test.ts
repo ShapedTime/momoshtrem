@@ -161,7 +161,7 @@ describe('feedback', () => {
     expect(titles(await recApi.home())).toContain('Silo');
 
     // The hero skips it and the day's next pick fills in; the title page loses its reason
-    expect((await titlesApi.get('movie', PAST_LIVES.tmdb_id)).recommendation_reason).toMatch(/Perfect Days/);
+    expect((await titlesApi.get('movie', PAST_LIVES.tmdb_id)).recommendation_reason).toBe('Quiet, warm and under two hours.');
     await recApi.feedback({ ...PAST_LIVES, signal: 'not_interested', source: 'hero' });
     expect((await recApi.home()).hero_picks.map((p) => p.kicker)).toEqual(['New for you', 'Ready in Infuse', 'Something quiet']);
     expect((await titlesApi.get('movie', PAST_LIVES.tmdb_id)).recommendation_reason).toBeNull();
