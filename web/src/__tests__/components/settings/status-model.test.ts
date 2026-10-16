@@ -1,5 +1,5 @@
 import { serviceRows, summarize, versionLabel } from '@/components/settings/status-model';
-import type { IndexerHealth, SystemStatus } from '@/lib/api/contract';
+import type { IndexerHealth, SystemStatus, TraktIntegration } from '@/lib/api/contract';
 import { degradedIndexers, systemStatus } from '@/mocks/fixtures/system';
 
 describe('System status model', () => {
@@ -29,6 +29,25 @@ describe('System status model', () => {
     const blocked = serviceRows({ ...systemStatus(), hdrezka: { configured: true, reachable: false, error: 'HDRezka answered with its anti-bot page' } });
     expect(blocked.find((r) => r.id === 'hdrezka')).toMatchObject({ health: 'error', detail: 'HDRezka answered with its anti-bot page' });
     expect(serviceRows({ ...systemStatus(), hdrezka: undefined }).map((r) => r.id)).not.toContain('hdrezka');
+  });
+
+  it('details Trakt from the integration: who and when, a lapsed sign-in, or Connect', () => {
+    const now = Date.parse('2026-10-16T21:44:00Z');
+    const trakt = (overrides: Partial<TraktIntegration>) =>
+      ({ configured: true, state: 'connected', username: 'teymur', last_sync_at: new Date(now - 4 * 60_000).toISOString(), sync: { status: 'idle' }, ...overrides }) as TraktIntegration;
+    const row = (integration?: TraktIntegration, status: Partial<SystemStatus['trakt']> = {}) =>
+      serviceRows({ ...systemStatus(), trakt: { configured: true, connected: true, ...status } }, integration, now).find((r) => r.id === 'trakt');
+
+    expect(row()).toMatchObject({ detail: 'Connected', health: 'ok', pill: { status: 'ok' } });
+    expect(row(trakt({}))).toMatchObject({ detail: 'Connected as teymur · synced 4 min ago', health: 'ok' });
+    expect(row(trakt({ sync: { status: 'error' } as TraktIntegration['sync'] }))).toMatchObject({ health: 'warning', pill: { label: 'Sync failed' } });
+    expect(row(trakt({ state: 'reauth' }), { connected: false })).toMatchObject({ detail: 'teymur · needs you to sign in again', health: 'warning', pill: { status: 'warning', label: 'Sign in again' } });
+    expect(row(trakt({ state: 'off', username: null }), { connected: false })).toMatchObject({ detail: 'Not connected', health: 'off', action: { label: 'Connect', href: '/settings?section=trakt' } });
+    expect(row(undefined, { connected: false })).toMatchObject({ detail: 'Not connected', action: { label: 'Connect' } });
+    expect(row(undefined, { configured: false, connected: false })).toMatchObject({ health: 'off', pill: { status: 'not_configured' } });
+
+    const reauth = serviceRows({ ...systemStatus(), trakt: { configured: true, connected: false } }, trakt({ state: 'reauth' }), now);
+    expect(summarize(reauth)).toMatchObject({ tone: 'warning', body: 'Trakt needs you to sign in again. Your imported history is still here.' });
   });
 
   it('flags a database outage on the backend row', () => {

@@ -4,16 +4,18 @@ import { useRouter } from 'next/navigation';
 import { type KeyboardEvent, type ReactNode, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Command } from 'cmdk';
-import { Activity, Compass, History, LibraryBig, ListChecks, LogOut, Search, Settings, Tv, type LucideIcon } from 'lucide-react';
+import { Activity, Compass, History, LibraryBig, Link2, ListChecks, LogOut, RefreshCw, Search, Settings, Tv, type LucideIcon } from 'lucide-react';
 import { MarkMono } from '@/components/brand';
 import { Highlight } from '@/components/title-search/Highlight';
 import { PaletteIcon, PaletteRow, PaletteThumb } from '@/components/title-search/PaletteRow';
 import { usePaletteData } from '@/components/title-search/usePaletteData';
-import { Kbd, StatusPill } from '@/components/ui';
+import { Kbd, StatusPill, useToast } from '@/components/ui';
 import { useRestoreFocus } from '@/hooks/useRestoreFocus';
+import { useTraktSync } from '@/hooks/useTraktActions';
 import type { LibraryItem, TitleSearchItem } from '@/lib/api/contract';
 import type { FindTarget } from '@/lib/library/actions';
 import { kindLine } from '@/lib/library/display';
+import { SYNC_STARTED_TOAST } from '@/lib/settings/trakt';
 import { getSheet } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { findTorrentHref, matchingActions, type PaletteAction, type PaletteActionIcon, type PaletteActionTarget } from '@/lib/title-search/actions';
@@ -36,6 +38,8 @@ const ACTION_ICONS: Record<PaletteActionIcon, LucideIcon> = {
   activity: Activity,
   library: LibraryBig,
   discover: Compass,
+  trakt: Link2,
+  sync: RefreshCw,
   settings: Settings,
   infuse: Tv,
   logout: LogOut,
@@ -76,13 +80,16 @@ interface Row {
  *   none. The footer names it when there is one.
  * - Phone: pinned to the top with Cancel; the footer and pills are hidden.
  *
- * "Ask momoshtrem" (#9) and Trakt (#8) join when they land.
+ * Trakt's action is Connect Trakt (its settings) or Sync Trakt now, which
+ * runs here with a toast. "Ask momoshtrem" (#9) joins when it lands.
  */
 export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const router = useRouter();
   const signOut = useSignOut();
   const sheets = useSheet();
   const focus = useRestoreFocus();
+  const { toast } = useToast();
+  const traktSync = useTraktSync();
   const [query, setQuery] = useState('');
   const [wasOpen, setWasOpen] = useState(open);
   const [selected, setSelected] = useState('');
@@ -101,7 +108,12 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const runAction = (target: PaletteActionTarget) => {
     if (target.kind === 'href') go(target.href);
     else if (target.kind === 'sheet') sheets.open(target.name, target.params);
-    else void signOut();
+    else if (target.kind === 'trakt-sync') {
+      traktSync.mutate(undefined, {
+        onSuccess: () => toast({ tone: 'info', icon: RefreshCw, ...SYNC_STARTED_TOAST }),
+        onError: (error) => toast({ tone: 'error', title: 'Couldn’t start a sync', body: error.message }),
+      });
+    } else void signOut();
   };
   /** Opening a title keeps the search that found it in Recent. */
   const openTitle = (href: string) => () => {

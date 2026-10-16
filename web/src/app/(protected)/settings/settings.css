@@ -1,6 +1,7 @@
 /* ==========================================================================
-   Settings (screens/settings): cards and rows, the quality profile's preview,
-   range and tags, the indexer list and the save bar. Ported from
+   Settings (screens/settings): cards and rows, Trakt's screens (connect,
+   device code, waiting, connected), the quality profile's preview, range
+   and tags, the indexer list and the save bar. Ported from
    docs/redesign/design-cinematic/css/screens/settings.css. The React parts
    live in components/settings. Tokens only.
    ========================================================================== */
@@ -26,6 +27,68 @@
   @media (min-width: 1024px) {
     .set-row--stack:not(:has(.set-range)) { flex-direction: row; align-items: center; }
   }
+
+  /* A banner's words share the icon's line on phone too; its action wraps below */
+  .set-content .banner > .grow { flex: 1 1 200px; }
+
+  .set-card-foot { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-1); }
+  @media (min-width: 640px) { .set-card-foot { padding: var(--sp-3) var(--sp-5); } }
+
+  /* ---- Trakt: not connected ---------------------------------------------- */
+  .set-trakt-off {
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-5); border-radius: inherit;
+    background: radial-gradient(90% 120% at 0% 100%, rgb(242 179 61 / 0.09), transparent 60%);
+  }
+  .set-trakt-art { color: var(--ink-0); }
+  @media (min-width: 640px) { .set-trakt-off { grid-template-columns: 136px minmax(0, 1fr); align-items: center; padding: var(--sp-6) var(--sp-8) var(--sp-6) var(--sp-6); } }
+  .set-imports { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-1) 0 var(--sp-2); }
+  .set-imports li { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-weight: var(--w-medium); color: var(--text-1); }
+  .set-imports svg { color: var(--accent-text); flex-shrink: 0; }
+  .set-imports span { color: var(--text-3); font-weight: var(--w-regular); font-size: var(--t-small); }
+
+  /* ---- Trakt: device code ---------------------------------------------------- */
+  .set-device { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); padding: var(--sp-5); }
+  @media (min-width: 768px) { .set-device { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: var(--sp-8); padding: var(--sp-6); } }
+  .set-device-code {
+    display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-5) var(--sp-4); text-align: center;
+    border-radius: var(--r-lg); background: var(--ink-1); border: 1px solid var(--accent-line); box-shadow: 0 0 40px -12px rgb(242 179 61 / 0.25);
+  }
+  .set-device-code .code {
+    font-family: var(--font-mono); font-size: clamp(2.1rem, 9vw, 2.75rem); font-weight: var(--w-medium); letter-spacing: 0.08em;
+    color: var(--text-1); line-height: 1.1; font-variant-numeric: tabular-nums; max-width: 100%; overflow-wrap: anywhere;
+  }
+  .set-expiry { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 220px; margin-top: var(--sp-1); }
+  .set-expiry .progress > span { background: var(--text-3); transition: width 1s linear; }
+  .set-device-steps strong { font-weight: var(--w-semibold); color: var(--text-1); }
+  .set-open-trakt { align-self: flex-start; margin-top: var(--sp-1); }
+  .set-noir { align-items: center; }
+  .eyes-box { display: grid; place-items: center; width: 52px; height: 30px; border-radius: 15px; background: var(--ink-0); flex-shrink: 0; }
+  @media (max-width: 639px) {
+    .set-open-trakt { align-self: stretch; }
+    .set-card--code .set-card-foot .btn { flex: 1; }
+  }
+
+  /* ---- Trakt: waiting for the approval ------------------------------------ */
+  .set-waiting { display: flex; flex-direction: column; align-items: center; padding-bottom: var(--sp-6); border-radius: inherit; }
+  .set-wait-steps { justify-content: center; padding: 0 var(--sp-4); }
+
+  /* ---- Trakt: connected ------------------------------------------------------- */
+  .set-profile { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5); flex-wrap: wrap; }
+  .set-avatar {
+    width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--surface-4), var(--surface-2)); border: 1px solid var(--line-2);
+    font-weight: var(--w-semibold); font-size: 20px; color: var(--text-1);
+  }
+  @media (max-width: 639px) { .set-profile-actions { width: 100%; } .set-profile-actions .btn { width: 100%; } }
+  .set-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line-1); }
+  .set-counts > div { display: flex; flex-direction: column; gap: 4px; padding: var(--sp-4); min-width: 0; }
+  .set-counts > div + div { border-left: 1px solid var(--line-1); }
+  .set-counts dt { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+  .set-counts dd { margin: 0; font-size: 1.375rem; font-weight: var(--w-semibold); letter-spacing: -0.02em; color: var(--text-1); overflow-wrap: anywhere; }
+  .set-counts dd span { font-size: var(--t-small); font-weight: var(--w-regular); color: var(--text-3); letter-spacing: 0; }
+  @media (min-width: 640px) { .set-counts > div { padding: var(--sp-4) var(--sp-5); } }
+  .set-quiet-zone { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-4) var(--sp-1); flex-wrap: wrap; }
+  .set-quiet-zone > div { flex: 1 1 260px; min-width: 0; }
 
   /* ---- Quality: preview, range, tags ---------------------------------------- */
   .set-preview {

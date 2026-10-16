@@ -34,8 +34,8 @@ test.describe('settings', () => {
       await expect(services.getByText(name, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole('status').filter({ hasText: 'All good' })).toBeVisible();
-    // The mock's Trakt account starts connected (fixtures/trakt.ts)
-    await expect(services.getByText('Connected', { exact: true })).toBeVisible();
+    // The mock's Trakt account starts connected (fixtures/trakt.ts); Settings' integration names it
+    await expect(services.getByText('Connected as teymur · synced 4 min ago', { exact: true })).toBeVisible();
     const recheck = page.getByRole('button', { name: 'Re-check' });
     const refreshed = page.waitForRequest((request) => request.url().endsWith('/api/status?refresh=1'));
     await recheck.click();

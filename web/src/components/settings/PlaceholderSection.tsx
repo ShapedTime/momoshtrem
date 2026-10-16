@@ -2,10 +2,6 @@ import { EmptyState, Panel } from '@/components/ui';
 import type { SectionId } from './sections';
 
 const COPY: Partial<Record<SectionId, { title: string; body: string }>> = {
-  trakt: {
-    title: 'Trakt sync is on its way',
-    body: 'Connect once and momoshtrem knows which episode is next for every show you watch. Read-only.',
-  },
   ai: {
     title: 'AI picks are on their way',
     body: 'Noir will write nightly picks from your history and answer “Ask momoshtrem”, within a monthly budget you set.',

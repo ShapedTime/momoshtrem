@@ -315,6 +315,7 @@ function startingAccount(from: MockScenario | null, now: number): MockTraktAccou
   switch (from) {
     case 'trakt-off':
     case 'trakt-denied':
+    case 'trakt-pending':
     case 'first-time':
       return { ...account, ...off };
     case 'trakt-unconfigured':
@@ -432,14 +433,15 @@ function advance(a: MockTraktAccount, now: number): void {
 
 /**
  * GET /integrations/trakt. Reading moves the machine on: the second read after
- * a connect approves the code (`trakt-denied`: denies it) and starts the
- * initial import; every later read imports one step.
+ * a connect approves the code (`trakt-denied`: denies it; `trakt-pending`:
+ * never) and starts the initial import; every later read imports one step.
  */
 export function readTraktIntegration(library: MockLibrary, now = Date.now()): TraktIntegration {
   const a = current(now);
   if (a.state === 'pending' && a.pending) {
     const expired = Date.parse(a.pending.expires_at) <= now;
-    if (expired || ++a.reads >= 2) {
+    // `trakt-pending`: Trakt never answers the code
+    if (expired || (a.scenario !== 'trakt-pending' && ++a.reads >= 2)) {
       a.pending = null;
       if (expired || a.scenario === 'trakt-denied') {
         a.state = a.linked ? 'reauth' : 'off';

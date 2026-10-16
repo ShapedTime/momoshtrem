@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleDashed, Clipboard, RefreshCw, TriangleAlert, WifiOff } from 'lucide-react';
-import { Banner, Button, copyText, Panel, Skeleton, StatusPill, useToast } from '@/components/ui';
+import { Banner, Button, ButtonLink, copyText, Panel, Skeleton, StatusPill, useToast } from '@/components/ui';
 import { isApiError } from '@/lib/api/client';
+import type { TraktIntegration } from '@/lib/api/contract';
 import { statusQuery, systemApi, systemKeys } from '@/lib/api/endpoints/system';
 import { type IndexerRow, serviceRows, summarize } from './status-model';
 
@@ -43,8 +44,11 @@ function IndexerList({ indexers }: { indexers: IndexerRow[] }) {
   );
 }
 
-/** System status (screens/settings/status): every service momoshtrem depends on. */
-export function StatusSection() {
+/**
+ * System status (screens/settings/status): every service momoshtrem depends
+ * on. `trakt` (the integration, when Settings has it) details Trakt's row.
+ */
+export function StatusSection({ trakt }: { trakt?: TraktIntegration } = {}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data, isPending, error } = useQuery(statusQuery());
@@ -95,7 +99,7 @@ export function StatusSection() {
 
   if (!data) return errorBanner;
 
-  const rows = serviceRows(data);
+  const rows = serviceRows(data, trakt);
   const summary = summarize(rows);
 
   return (
@@ -121,7 +125,13 @@ export function StatusSection() {
                   <span className="font-semibold text-fg-1">{row.name}</span>
                   <span className="t-small wrap-any text-fg-3">{row.detail}</span>
                 </div>
-                <StatusPill status={row.pill.status} label={row.pill.label} />
+                {row.action ? (
+                  <ButtonLink href={row.action.href} size="sm">
+                    {row.action.label}
+                  </ButtonLink>
+                ) : (
+                  <StatusPill status={row.pill.status} label={row.pill.label} />
+                )}
                 {row.indexers && <IndexerList indexers={row.indexers} />}
               </li>
             );
