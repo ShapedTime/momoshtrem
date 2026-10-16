@@ -182,6 +182,7 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `internal/streaming/prioritizer.go` - Piece prioritization (torrents stream on demand: pieces only around readers, kept in an LRU file cache)
 - `internal/secret/` - AES-256-GCM box for secrets at rest under `SECRET_KEY` (64 hex chars, or ≥ 32 chars hashed)
 - `internal/trakt/` - Trakt, read-only (PLAN §6 B5): `client.go` (auth and API hosts, rate limits, 429/5xx retries, `Paginate`), `auth.go` the connection (device-code connect, sealed rotating tokens, `Token`/`Invalidate`/`Get`, reauth, disconnect, `Hooks` for the sync); `trakttest/` a fake Trakt; `library/trakt_auth_repo.go` stores and purges
+- `internal/trakt/sync*.go` - The Trakt sync (#132): `sync.go` the `Syncer` (one sync at a time, one queued; the 30-minute schedule, nightly reconcile, `Nudge`, the `Hooks`), `sync_run.go` the steps (initial import = reconcile, incremental from `last_activities`, `details` artwork through `tmdb.Cached`), `sync_items.go` Trakt's answers as rows; `library/trakt_sync_store.go` writes them, each write guarded by the connection's `connected_at`
 
 **web (Next.js, `web/`):**
 - `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)
