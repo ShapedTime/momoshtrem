@@ -104,18 +104,20 @@ func (r *CatalogRepository) show(ctx context.Context, where string, arg any) (*S
 }
 
 // ShowEpisodes returns every season of a show (season 0 included) with lean
-// episode rows: ID, number, absolute number, air date, runtime and the active
-// assignment. Names, overviews and stills are left out; title summaries don't
-// need them. One query.
+// episode rows: ID, number, absolute number, air date, runtime, whether
+// Trakt has a play of it and the active assignment. Names, overviews and
+// stills are left out; title summaries don't need them. One query.
 func (r *CatalogRepository) ShowEpisodes(ctx context.Context, showID int64) ([]Season, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT sn.id, sn.season_number, COALESCE(sn.name, ''),
 		       e.id, COALESCE(e.episode_number, 0), e.absolute_number, COALESCE(e.air_date, ''), COALESCE(e.runtime, 0),
+		       `+episodeWatchedSQL("s.tmdb_id", libraryEpisode, `w.show_tmdb_id = (SELECT tmdb_id FROM shows WHERE id = $1)`)+`,
 		       `+assignmentColumns+`
-		FROM seasons sn
+		FROM shows s
+		JOIN seasons sn ON sn.show_id = s.id
 		LEFT JOIN episodes e ON e.season_id = sn.id
 		`+activeAssignmentLateral("episode", "e.id")+`
-		WHERE sn.show_id = $1
+		WHERE s.id = $1
 		ORDER BY sn.season_number, e.episode_number
 	`, showID)
 	if err != nil {
@@ -130,7 +132,7 @@ func (r *CatalogRepository) ShowEpisodes(ctx context.Context, showID int64) ([]S
 		var epID, absolute sql.NullInt64
 		dest, finish := assignmentDest(ItemTypeEpisode)
 		dest = append([]any{&season.ID, &season.SeasonNumber, &season.Name,
-			&epID, &ep.EpisodeNumber, &absolute, &ep.AirDate, &ep.Runtime}, dest...)
+			&epID, &ep.EpisodeNumber, &absolute, &ep.AirDate, &ep.Runtime, &ep.Watched}, dest...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("failed to scan show episode: %w", err)
 		}
@@ -169,13 +171,14 @@ type SeasonView struct {
 }
 
 // SeasonByTMDBID returns a season of the show with that TMDB ID, with full
-// episode rows and active assignments, or nil when the show isn't in the
-// library. One query.
+// episode rows, whether Trakt has a play of each and active assignments, or
+// nil when the show isn't in the library. One query.
 func (r *CatalogRepository) SeasonByTMDBID(ctx context.Context, tmdbID, seasonNumber int) (*SeasonView, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT s.id, s.title, s.year, s.include_specials,
 		       sn.id, COALESCE(sn.name, ''), COALESCE(sn.poster_path, ''),
 		       `+episodeColumns+`,
+		       `+episodeWatchedSQL("s.tmdb_id", libraryEpisode, `w.show_tmdb_id = $1`)+`,
 		       `+assignmentColumns+`
 		FROM shows s
 		LEFT JOIN seasons sn ON sn.show_id = s.id AND sn.season_number = $2
@@ -199,6 +202,7 @@ func (r *CatalogRepository) SeasonByTMDBID(ctx context.Context, tmdbID, seasonNu
 		taDest, taFinish := assignmentDest(ItemTypeEpisode)
 		dest := append([]any{&v.ShowID, &v.ShowTitle, &v.ShowYear, &v.IncludeSpecials,
 			&seasonID, &seasonName, &seasonPoster}, epDest...)
+		dest = append(dest, &ep.Watched)
 		if err := rows.Scan(append(dest, taDest...)...); err != nil {
 			return nil, fmt.Errorf("failed to scan season row: %w", err)
 		}
