@@ -172,12 +172,12 @@ func TestCached_Lists(t *testing.T) {
 		{"discover", func() error {
 			_, err := c.Discover(ctx, MediaMovie, DiscoverQuery{Keywords: []int{9715, 4344}, From: "2025-01-01"})
 			return err
-		}, "tmdb:v1:en-US:discover/movie?include_adult=false&include_video=false&page=1&primary_release_date.gte=2025-01-01&sort_by=popularity.desc&with_keywords=9715%7C4344", DiscoverTTL},
-		{"trending", func() error { _, err := c.Trending(ctx, MediaMovie, "week"); return err }, "tmdb:v1:en-US:trending/movie/week", TrendingTTL},
-		{"upcoming", func() error { _, err := c.UpcomingMovies(ctx, 1); return err }, "tmdb:v1:en-US:movie/upcoming?page=1", UpcomingTTL},
-		{"on the air", func() error { _, err := c.OnTheAir(ctx, 1); return err }, "tmdb:v1:en-US:tv/on_the_air?page=1", OnTheAirTTL},
-		{"search", func() error { _, err := c.Search(ctx, MediaTV, " Severance ", 2022); return err }, "tmdb:v1:en-US:search/tv?query=severance&year=2022", SearchTTL},
-		{"genres", func() error { _, err := c.GenreList(ctx, MediaMovie); return err }, "tmdb:v1:en-US:genre/movie/list", GenresTTL},
+		}, "tmdb:v2:en-US:discover/movie?include_adult=false&include_video=false&page=1&primary_release_date.gte=2025-01-01&sort_by=popularity.desc&with_keywords=9715%7C4344", DiscoverTTL},
+		{"trending", func() error { _, err := c.Trending(ctx, MediaMovie, "week"); return err }, "tmdb:v2:en-US:trending/movie/week", TrendingTTL},
+		{"upcoming", func() error { _, err := c.UpcomingMovies(ctx, 1); return err }, "tmdb:v2:en-US:movie/upcoming?page=1", UpcomingTTL},
+		{"on the air", func() error { _, err := c.OnTheAir(ctx, 1); return err }, "tmdb:v2:en-US:tv/on_the_air?page=1", OnTheAirTTL},
+		{"search", func() error { _, err := c.Search(ctx, MediaTV, " Severance ", 2022); return err }, "tmdb:v2:en-US:search/tv?query=severance&year=2022", SearchTTL},
+		{"genres", func() error { _, err := c.GenreList(ctx, MediaMovie); return err }, "tmdb:v2:en-US:genre/movie/list", GenresTTL},
 	}
 	for _, tt := range calls {
 		t.Run(tt.name, func(t *testing.T) {

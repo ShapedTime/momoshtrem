@@ -20,8 +20,10 @@ const (
 )
 
 // cacheVersion prefixes every key; bump it when the cached types change
-// incompatibly.
-const cacheVersion = "tmdb:v1"
+// incompatibly, or gain fields readers rely on (v2: list items'
+// origin_country and episodes' runtime, #153). Old entries expire on
+// their own.
+const cacheVersion = "tmdb:v2"
 
 // defaultFetchTimeout bounds one upstream fetch, retries included. The fetch
 // outlives the request that started it so other waiters still get a result.
