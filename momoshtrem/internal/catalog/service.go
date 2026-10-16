@@ -15,6 +15,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
+	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
@@ -81,12 +82,21 @@ type SettingsApplier interface {
 
 var _ SettingsApplier = (*metadata.Syncer)(nil)
 
-// Deps are the Service's dependencies. Torrents, Colors and Settings are
-// optional.
+// Sessions are the clients streaming over WebDAV. *sessions.Registry
+// implements it.
+type Sessions interface {
+	Sessions(ctx context.Context) []sessions.Session
+}
+
+var _ Sessions = (*sessions.Registry)(nil)
+
+// Deps are the Service's dependencies. Torrents, Sessions, Colors and
+// Settings are optional.
 type Deps struct {
 	Store    Store
 	TMDB     TMDB
 	Torrents Torrents        // nil: nothing is ever loaded
+	Sessions Sessions        // nil: nothing is ever streaming
 	Colors   Colors          // nil: colours are always null
 	Settings SettingsApplier // nil: PatchShow fails with ErrSettingsUnavailable
 	// WebDAVPublicURL is the address Infuse reaches WebDAV at
@@ -103,6 +113,7 @@ type Service struct {
 	store      Store
 	tmdb       TMDB
 	torrents   Torrents
+	sessions   Sessions
 	colors     Colors
 	settings   SettingsApplier
 	publicURL  string
@@ -125,6 +136,7 @@ func New(d Deps) *Service {
 		store:      d.Store,
 		tmdb:       d.TMDB,
 		torrents:   d.Torrents,
+		sessions:   d.Sessions,
 		colors:     d.Colors,
 		settings:   d.Settings,
 		publicURL:  d.WebDAVPublicURL,

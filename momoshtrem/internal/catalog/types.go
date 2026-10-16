@@ -277,7 +277,7 @@ type LibraryItem struct {
 	ReviewJobID *int64           `json:"review_job_id"` // the mapping job to review (review rules)
 	Download    *LibraryDownload `json:"download"`      // while a file is being fetched
 	Missing     *MissingRun      `json:"missing"`       // shows: the first frontier run
-	Streaming   bool             `json:"streaming"`     // false until B6c (#99) knows the readers
+	Streaming   bool             `json:"streaming"`     // a streaming session plays it (a show: any episode)
 }
 
 // LibraryDownload is how far along a library title's files are.

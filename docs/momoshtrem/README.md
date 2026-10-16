@@ -134,7 +134,7 @@ An assign also downloads the stream's subtitles: WebVTT tracks, such as the Engl
 
 ## Episode mapping
 
-Assigning a torrent (`POST /api/shows/{id}/assign-torrent`, or `/movies/{id}/…`) starts a mapping job and answers `202 {job_id}`; nothing blocks on the torrent. A worker (`internal/service/assignment_worker.go`) takes it from there:
+Assigning a torrent (`POST /api/shows/{id}/assign-torrent`, or `/movies/{id}/…`) starts a mapping job and answers `202 {job_id}`; nothing blocks on the torrent. `{info_hash}` instead of `{magnet_uri}` re-runs the mapping of a torrent the library already knows, with the magnet it stored. A worker (`internal/service/assignment_worker.go`) takes it from there:
 
 1. It fetches the file list, refreshing the show's metadata when it's stale.
 2. The rules classifier (`internal/identify`) maps every file to episodes, with a confidence and a reason.
@@ -153,6 +153,8 @@ What the torrents are doing, for the Activity screen (`internal/activity`; the c
 - **`GET /api/torrents`** lists every torrent the library knows (active assignments and open mapping jobs), loaded or not, plus loaded torrents nothing references. Torrents stream on demand and load on their first WebDAV read, so one that isn't loaded is `idle` with null progress, and there's no ETA.
 - **`GET /api/torrents/summary`** has the total speeds, the last minute of them, how many torrents are in each state, and the disk under `metadata_folder` with the piece cache's fill.
 - **Speeds** come from a sampler that reads each loaded torrent's byte counters every 2 s and smooths them.
+- **Streaming sessions** (`internal/sessions`) say who plays what: the WebDAV server puts each request's method, User-Agent and address in its context, and every video a GET opens reports its reads. One client on one file is one session, however many Range GETs it makes, until 30 s after its last read. Sniffs (under 64 KB, closed within 2 s) and PROPFIND or HEAD opens don't count. Each session has the client and device from the User-Agent ("Infuse", "Apple TV"), the item, a smoothed rate, a position from the runtime and, for a torrent, how much is buffered ahead. They're on `/api/torrents` items and the summary, they make a torrent `streaming`, and `/api/status` counts them (`webdav.active_readers`).
+- **`GET /api/torrents/{hash}`** is a torrent's detail: its piece map (run-length), files with what each plays as or why it's ignored, trackers and totals. It never loads the torrent: an unloaded one's files come from its stored metainfo, else from the newest job.
 - **`POST /api/torrents/{hash}/pause`** and **`/resume`**, and **`/pause-all`** and **`/resume-all`**. A pause is sticky: it's kept in `app_settings` (key `torrents`) across restarts, reads don't wake the torrent, and a torrent that isn't loaded is paused when it loads. It goes with the torrent: deleting or releasing a torrent clears it, and startup prunes the pauses of torrents the library no longer knows.
 
 ## Removing torrents and titles
@@ -167,7 +169,7 @@ Each torrent's metainfo is kept in `{metadata_folder}/metainfo/<hash>.torrent` w
 
 ## Tests
 
-`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service`, `internal/subtitle` and `internal/activity`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service`, `internal/subtitle`, `internal/activity` and `internal/api`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine

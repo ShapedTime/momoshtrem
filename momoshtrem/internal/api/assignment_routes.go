@@ -10,6 +10,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/service"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // AssignmentJobs runs assignment jobs (PLAN §6 "Assignment").
@@ -47,10 +48,22 @@ func (s *Server) assignmentsReady(c *gin.Context) bool {
 	return true
 }
 
+// TorrentMagnets finds a magnet for a torrent the library knows: an
+// assignment's, else a job's; "" when it knows none.
+// *library.AssignmentJobRepository implements it.
+type TorrentMagnets interface {
+	TorrentMagnet(ctx context.Context, infoHash string) (string, error)
+}
+
+var _ TorrentMagnets = (*library.AssignmentJobRepository)(nil)
+
 // assignTorrentRequest is POST /shows/{id}/assign-torrent and
 // /movies/{id}/assign-torrent. hint is for shows, file_path for movies.
+// info_hash instead of magnet_uri re-runs the mapping of a torrent the
+// library knows (magnet_uri wins when both are sent).
 type assignTorrentRequest struct {
 	MagnetURI string           `json:"magnet_uri"`
+	InfoHash  string           `json:"info_hash"`
 	Hint      *library.JobHint `json:"hint"`
 	Indexer   string           `json:"indexer"`
 	FilePath  string           `json:"file_path"`
@@ -62,9 +75,10 @@ type jobAccepted struct {
 }
 
 // assignTorrent creates a job for the torrent: 202 {job_id}, or 200 with
-// the open job for the same title and torrent. ?wait=true is the legacy
-// synchronous assign: it waits, applies and answers 201 with the old
-// response plus job_id.
+// the open job for the same title and torrent. {info_hash} instead of a
+// magnet re-runs the mapping of a torrent the library knows, with its
+// stored magnet. ?wait=true is the legacy synchronous assign: it waits,
+// applies and answers 201 with the old response plus job_id.
 func (s *Server) assignTorrent(mediaType library.JobMediaType) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
@@ -72,12 +86,18 @@ func (s *Server) assignTorrent(mediaType library.JobMediaType) gin.HandlerFunc {
 			return
 		}
 		var body assignTorrentRequest
-		if err := c.ShouldBindJSON(&body); err != nil || body.MagnetURI == "" {
-			errorResponse(c, http.StatusBadRequest, "Send {magnet_uri, hint?, indexer?}.")
+		if err := c.ShouldBindJSON(&body); err != nil || (body.MagnetURI == "" && body.InfoHash == "") {
+			errorResponse(c, http.StatusBadRequest, "Send {magnet_uri | info_hash, hint?, indexer?}.")
 			return
 		}
-		req := service.AssignRequest{MagnetURI: body.MagnetURI, Hint: body.Hint, Indexer: body.Indexer, FilePath: body.FilePath}
 		ctx := c.Request.Context()
+		magnet := body.MagnetURI
+		if magnet == "" {
+			if magnet, ok = s.knownMagnet(c, body.InfoHash); !ok {
+				return
+			}
+		}
+		req := service.AssignRequest{MagnetURI: magnet, Hint: body.Hint, Indexer: body.Indexer, FilePath: body.FilePath}
 
 		if c.Query("wait") == "true" {
 			s.assignAndWait(c, mediaType, id, req)
@@ -94,6 +114,32 @@ func (s *Server) assignTorrent(mediaType library.JobMediaType) gin.HandlerFunc {
 		}
 		c.JSON(status, jobAccepted{JobID: jobID})
 	}
+}
+
+// knownMagnet finds the magnet of a torrent the library knows, for an
+// assign by info_hash: 400 for a malformed hash, 404 for one the library
+// doesn't know.
+func (s *Server) knownMagnet(c *gin.Context, infoHash string) (string, bool) {
+	hash := torrent.NormalizeInfoHash(infoHash)
+	if hash == "" {
+		errorResponse(c, http.StatusBadRequest, "Not a BitTorrent info hash: send 40 hex characters or 32 base32 ones")
+		return "", false
+	}
+	if s.opts.Magnets == nil {
+		errorResponse(c, http.StatusServiceUnavailable, "Re-running a mapping isn't configured")
+		return "", false
+	}
+	magnet, err := s.opts.Magnets.TorrentMagnet(c.Request.Context(), hash)
+	if err != nil {
+		slog.Error("Failed to find a torrent's magnet", "info_hash", hash, "error", err)
+		errorResponse(c, http.StatusInternalServerError, "Couldn't look the torrent up")
+		return "", false
+	}
+	if magnet == "" {
+		errorResponse(c, http.StatusNotFound, "Torrent not found")
+		return "", false
+	}
+	return magnet, true
 }
 
 // assignAndWait is the legacy synchronous assign.

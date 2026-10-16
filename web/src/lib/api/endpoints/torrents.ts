@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiJson } from '../client';
-import type { TorrentListItem, TorrentsPauseCount, TorrentsSummary } from '../contract';
+import type { TorrentDetail, TorrentListItem, TorrentsPauseCount, TorrentsSummary } from '../contract';
 import type { TorrentListResponse } from '@/types/torrent';
 
 /**
@@ -8,13 +8,15 @@ import type { TorrentListResponse } from '@/types/torrent';
  *
  * Until #102 retires app/api/torrents/**, the legacy web routes answer these
  * paths on the real stack: GET /api/torrents keeps the legacy `{torrents}`
- * shape, and the [hash] routes catch summary, pause, resume and the *-all
- * routes. Mock mode (MSW) answers the new shapes, except GET /api/torrents.
+ * shape, and the [hash] routes catch summary, the detail, pause, resume and
+ * the *-all routes. Mock mode (MSW) answers the new shapes, except GET
+ * /api/torrents.
  */
 export const torrentKeys = {
   all: ['torrents'] as const,
   list: ['torrents', 'list'] as const,
   summary: ['torrents', 'summary'] as const,
+  detail: (infoHash: string) => ['torrents', 'detail', infoHash.toLowerCase()] as const,
   legacy: ['torrents', 'legacy'] as const,
 };
 
@@ -23,6 +25,8 @@ const torrentPath = (infoHash: string) => `/api/torrents/${encodeURIComponent(in
 export const torrentsApi = {
   list: () => apiJson<{ items: TorrentListItem[] }>('/api/torrents'),
   summary: () => apiJson<TorrentsSummary>('/api/torrents/summary'),
+  /** The list item plus pieces, files, trackers and totals; never loads the torrent. 404 for one nothing knows. */
+  detail: (infoHash: string) => apiJson<TorrentDetail>(torrentPath(infoHash)),
   /** Sticky: the network stays off and reads don't wake it, across restarts. Idempotent. */
   pause: (infoHash: string) => apiJson<TorrentListItem>(`${torrentPath(infoHash)}/pause`, { method: 'POST' }),
   /** A loaded torrent comes back on until the idle timeout; one that isn't loaded stays unloaded. */
@@ -41,6 +45,10 @@ export const torrentsApi = {
 /** Every torrent the library knows, loaded or not; polls every 5 s while the tab is visible. */
 export const torrentsListQuery = () =>
   queryOptions({ queryKey: torrentKeys.list, queryFn: torrentsApi.list, refetchInterval: 5000 });
+
+/** One torrent's detail (Activity's detail page); polls every 5 s while the tab is visible. */
+export const torrentDetailQuery = (infoHash: string) =>
+  queryOptions({ queryKey: torrentKeys.detail(infoHash), queryFn: () => torrentsApi.detail(infoHash), refetchInterval: 5000 });
 
 /** Live torrent stats; polls every 5 s while the tab is visible. */
 export const legacyTorrentsQuery = (refetchInterval: number | false = 5000) =>

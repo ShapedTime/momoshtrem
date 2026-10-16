@@ -194,6 +194,12 @@ type Service interface {
 	// GetDebugInfo returns detailed piece-level debug information for a torrent.
 	GetDebugInfo(infoHash string) (*DebugInfo, error)
 
+	// Detail returns what the client knows of a loaded torrent: its piece
+	// map (run-length), files, trackers and totals, for Activity's detail.
+	// The hash may be hex in either case, or base32. Returns
+	// ErrTorrentNotFound if the torrent is not loaded; it never loads one.
+	Detail(infoHash string) (*Detail, error)
+
 	// FilesProgress returns how much of each file of a loaded torrent is on
 	// disk, keyed by path. It's cheap: no piece map. Returns
 	// ErrTorrentNotFound if the torrent is not loaded; the map is empty while

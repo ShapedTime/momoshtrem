@@ -41,6 +41,9 @@ afterAll(() => {
 const torrentWith = (state: TorrentState) => TORRENTS.find((t) => t.state === state)!.info_hash;
 const DOWNLOADING = torrentWith('downloading');
 const PAUSED = torrentWith('paused');
+const STREAMING = torrentWith('streaming');
+const FRIEREN_BATCH = TORRENTS.find((t) => t.open_job?.id === 101)!.info_hash; // not loaded, job 101 in review
+const DUNE_TORRENT = TORRENTS.find((t) => !t.loaded && t.titles[0]?.media_type === 'movie')!.info_hash;
 
 const INTERSTELLAR = 'https://rezka.ag/films/fiction/2259-interstellar-2014.html';
 const SEVERANCE = 'https://hdrezka.me/series/thriller/47283-razdelenie-2022.html';
@@ -108,6 +111,8 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /settings/ai/usage', () => settingsApi.aiUsage()],
     ['GET /status', () => systemApi.status()],
     ['GET /torrents/summary', () => torrentsApi.summary()],
+    ['GET /torrents/{hash}', () => torrentsApi.detail(DOWNLOADING)],
+    ['POST /shows/{id}/assign-torrent {info_hash}', () => assignmentApi.assignShow(1, { info_hash: FRIEREN_BATCH })],
     ['POST /torrents/{hash}/pause', () => torrentsApi.pause(DOWNLOADING)],
     ['POST /torrents/{hash}/resume', () => torrentsApi.resume(PAUSED)],
     ['POST /torrents/pause-all', () => torrentsApi.pauseAll()],
@@ -234,6 +239,70 @@ describe('Activity in mock mode (B6, #98)', () => {
     expect((await torrentsApi.legacyList()).torrents.map((t) => t.info_hash)).not.toContain(DOWNLOADING);
     await expect(torrentsApi.pause(DOWNLOADING)).rejects.toMatchObject({ status: 404 });
     await expect(torrentsApi.resume('summary')).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('Streaming sessions, the torrent detail and Re-run mapping in mock mode (B6, #99)', () => {
+  it('has Infuse on the Apple TV streaming an episode, first in the summary, with an HDRezka session after it', async () => {
+    const streaming = TORRENTS.find((t) => t.info_hash === STREAMING)!.streaming;
+    expect(streaming).toHaveLength(1);
+    expect(streaming[0]).toMatchObject({
+      source: 'torrent',
+      info_hash: STREAMING,
+      client: 'Infuse',
+      device: 'Apple TV',
+      item: { media_type: 'tv', title: 'Severance', season_number: 2, episode_number: 5, episode_name: 'Trojan’s Horse' },
+    });
+    expect(streaming[0].buffered_ahead_bytes).toBeGreaterThan(0);
+    expect(streaming[0].position_seconds).toBeLessThan(streaming[0].duration_seconds!);
+    for (const t of TORRENTS.filter((other) => other.info_hash !== STREAMING)) expect(t.streaming).toEqual([]);
+
+    const summary = await torrentsApi.summary();
+    expect(summary.streaming.map((s) => s.source)).toEqual(['torrent', 'hdrezka']); // the most recently read first
+    expect(summary.streaming[0]).toEqual(streaming[0]);
+    expect(summary.streaming[1]).toMatchObject({ info_hash: null, file_path: null, buffered_ahead_bytes: null, buffered_ahead_seconds: null });
+
+    await torrentsApi.remove(STREAMING); // its sessions go with it
+    expect((await torrentsApi.summary()).streaming.map((s) => s.source)).toEqual(['hdrezka']);
+  });
+
+  it('details a loaded torrent: pieces, progress, totals, and the file Infuse reads', async () => {
+    const d = await torrentsApi.detail(STREAMING.toUpperCase());
+    expect(d).toMatchObject({ info_hash: STREAMING, state: 'streaming', loaded: true, swarm: { connected_peers: 12, total_seeders: null } });
+    expect(d.pieces!.reduce((sum, r) => sum + r.count, 0)).toBe(d.pieces_total);
+    expect(d.pieces_have).toBe(d.pieces_total); // complete
+    expect(d.files).toHaveLength(10);
+    const reading = d.files.find((f) => f.path === d.streaming[0].file_path)!;
+    expect(reading).toMatchObject({ progress: 1, plays_as: [{ label: 'S02E05', episode_name: 'Trojan’s Horse' }], ignored: null });
+    expect(d.trackers.every((t) => t.status === 'unknown')).toBe(true);
+
+    const fetching = await torrentsApi.detail(DOWNLOADING);
+    expect(fetching.pieces!.map((r) => r.state)).toEqual(['have', 'partial', 'priority', 'missing']);
+    expect(fetching.ratio).toBeGreaterThan(0);
+  });
+
+  it('details a torrent the client has not loaded: no pieces, null progress, and why files are ignored', async () => {
+    const d = await torrentsApi.detail(FRIEREN_BATCH);
+    expect(d).toMatchObject({ loaded: false, pieces: null, pieces_have: null, downloaded_bytes: null, ratio: null, swarm: null });
+    expect(d.files.every((f) => f.progress === null)).toBe(true);
+    expect(d.files.map((f) => f.ignored?.label).filter(Boolean)).toEqual(['Ignored (NCOP)', 'Ignored (NCED)', 'Ignored (font)']);
+    expect((await torrentsApi.detail(DUNE_TORRENT)).files[0].plays_as).toEqual([expect.objectContaining({ media_type: 'movie', label: 'Movie' })]);
+
+    await torrentsApi.pause(DOWNLOADING);
+    expect((await torrentsApi.detail(DOWNLOADING)).state).toBe('paused'); // the page's state
+    await expect(torrentsApi.detail('0'.repeat(40))).rejects.toMatchObject({ status: 404 });
+    await expect(torrentsApi.detail('not-a-hash')).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('re-runs a mapping by info hash: the open job, or a new one from the stored magnet', async () => {
+    expect(await assignmentApi.assignShow(1, { info_hash: FRIEREN_BATCH.toUpperCase() })).toEqual({ job_id: 101 }); // job 101 is open
+    const { job_id: jobId } = await assignmentApi.assignMovie(1, { info_hash: DUNE_TORRENT });
+    expect(jobId).toBeGreaterThan(103);
+    expect((await assignmentApi.job(jobId)).job.torrent.info_hash).toBe(DUNE_TORRENT);
+
+    await expect(assignmentApi.assignShow(1, { info_hash: '0'.repeat(40) })).rejects.toMatchObject({ status: 404 });
+    await expect(assignmentApi.assignShow(1, { info_hash: 'summary' })).rejects.toMatchObject({ status: 400 });
+    await expect(assignmentApi.assignShow(1, {} as { info_hash: string })).rejects.toMatchObject({ status: 400 });
   });
 });
 

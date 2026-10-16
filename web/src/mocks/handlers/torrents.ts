@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
-import type { TorrentListItem, TorrentsPauseCount, TorrentState } from '@/lib/api/contract';
+import type { TorrentDetail, TorrentListItem, TorrentsPauseCount, TorrentState } from '@/lib/api/contract';
 import { legacyTorrentStatus, type TorrentListResponse } from '@/types/torrent';
-import { TORRENTS, torrentsSummary } from '../fixtures/torrents';
+import { TORRENTS, torrentDetail, torrentsSummary } from '../fixtures/torrents';
 import { apiError, latency, noContent, notFound } from './util';
 
 /**
@@ -62,6 +62,13 @@ export const torrentsHandlers = [
     const targets = torrents.filter((t) => t.state === 'paused');
     targets.forEach(resume);
     return HttpResponse.json<TorrentsPauseCount>({ count: targets.length });
+  }),
+  /** The detail (#99): the item as the page left it, plus pieces, files, trackers and totals. */
+  http.get('*/api/torrents/:hash', async ({ params }) => {
+    await latency();
+    const t = find(params.hash);
+    if (t instanceof Response) return t;
+    return HttpResponse.json<TorrentDetail>(torrentDetail(t));
   }),
   http.post('*/api/torrents/:hash/pause', async ({ params }) => {
     await latency();

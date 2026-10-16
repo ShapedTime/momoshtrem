@@ -12,21 +12,21 @@ import (
 type Facts struct {
 	Paused   bool // the user paused it, loaded or not
 	Loaded   bool // the torrent client has it
-	Readers  int  // open readers of its files (#99: streaming sessions)
+	Sessions int  // its streaming sessions
 	Active   bool // its network is on: not idled by the activity manager
 	Complete bool // every piece is on disk
 }
 
 // StateOf is a torrent's state: the first rule that matches wins.
 //   - paused: the user paused it;
-//   - streaming: loaded, with a reader open;
+//   - streaming: loaded, with a streaming session;
 //   - downloading: loaded, its network on, and not complete;
 //   - idle: anything else, including a torrent that isn't loaded.
 func StateOf(f Facts) State {
 	switch {
 	case f.Paused:
 		return StatePaused
-	case f.Loaded && f.Readers > 0:
+	case f.Loaded && f.Sessions > 0:
 		return StateStreaming
 	case f.Loaded && f.Active && !f.Complete:
 		return StateDownloading

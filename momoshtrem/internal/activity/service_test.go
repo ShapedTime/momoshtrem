@@ -13,19 +13,30 @@ import (
 	"github.com/anacrolix/missinggo/v2/filecache"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
-	"github.com/shapedtime/momoshtrem/internal/streaming"
+	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // Fakes for the Service's dependencies.
 
 type fakeTorrents struct {
-	loaded map[string]torrent.TorrentStatus
-	paused map[string]time.Time
+	loaded  map[string]torrent.TorrentStatus
+	details map[string]*torrent.Detail
+	paused  map[string]time.Time
 }
 
 func newFakeTorrents() *fakeTorrents {
-	return &fakeTorrents{loaded: map[string]torrent.TorrentStatus{}, paused: map[string]time.Time{}}
+	return &fakeTorrents{loaded: map[string]torrent.TorrentStatus{}, details: map[string]*torrent.Detail{}, paused: map[string]time.Time{}}
+}
+
+func (f *fakeTorrents) Detail(hash string) (*torrent.Detail, error) {
+	if _, ok := f.loaded[hash]; !ok {
+		return nil, torrent.ErrTorrentNotFound
+	}
+	if d, ok := f.details[hash]; ok {
+		return d, nil
+	}
+	return &torrent.Detail{}, nil // metadata still arriving
 }
 
 func (f *fakeTorrents) ListTorrents() ([]torrent.TorrentStatus, error) {
@@ -67,7 +78,28 @@ func (f *fakeTorrents) Pauses() map[string]time.Time { return maps.Clone(f.pause
 
 func (f *fakeTorrents) RestorePauses(p map[string]time.Time) { maps.Copy(f.paused, p) }
 
-type fakeLibrary struct{ known []library.KnownTorrent }
+type fakeLibrary struct {
+	known    []library.KnownTorrent
+	magnets  map[string]string
+	mappings map[string][]library.FileMapping
+	jobFiles map[string][]library.JobFile
+}
+
+func (f *fakeLibrary) TorrentMagnet(_ context.Context, hash string) (string, error) {
+	return f.magnets[hash], nil
+}
+
+func (f *fakeLibrary) ActiveMappings(_ context.Context, hash string) ([]library.FileMapping, error) {
+	return f.mappings[hash], nil
+}
+
+func (f *fakeLibrary) JobFiles(_ context.Context, hash string) ([]library.JobFile, error) {
+	return f.jobFiles[hash], nil
+}
+
+type fakeMetainfo map[string]*torrent.StoredInfo
+
+func (f fakeMetainfo) Summary(hash string) (*torrent.StoredInfo, error) { return f[hash], nil }
 
 func (f *fakeLibrary) KnownTorrents(_ context.Context, hash string) ([]library.KnownTorrent, error) {
 	if hash == "" {
@@ -115,10 +147,21 @@ func (f *fakePauseStore) ResumeTorrents(_ context.Context, hashes []string) erro
 	return nil
 }
 
-type fakeReaders map[string]int
+// fakeSessions are the sessions streaming now, the most recently read
+// first.
+type fakeSessions []sessions.Session
 
-func (f fakeReaders) GetReaders(hash string) []streaming.ReaderSnapshot {
-	return make([]streaming.ReaderSnapshot, f[hash])
+func (f fakeSessions) Sessions(context.Context) []sessions.Session { return slices.Clone(f) }
+
+// session is Infuse on the Apple TV reading a torrent's file (hdrezka
+// when hash is "").
+func session(id, hash string, lastRead time.Time) sessions.Session {
+	s := sessions.Session{ID: id, Source: sessions.SourceHDRezka, FileName: "f.mkv", Client: ptr("Infuse"), Device: ptr("Apple TV"),
+		OffsetBytes: 100, SizeBytes: 1000, RateBps: 9_000_000, StartedAt: at(45), LastReadAt: lastRead}
+	if hash != "" {
+		s.Source, s.InfoHash, s.FilePath = sessions.SourceTorrent, &hash, ptr("Show/f.mkv")
+	}
+	return s
 }
 
 type fakeSpeeds struct {
@@ -155,7 +198,8 @@ func episodes(season, from, to int) (out []library.EpisodeNumber) {
 // env is a Service over fakes holding one torrent of each kind:
 //   - frieren: a show's, not loaded, with an open job;
 //   - dune: a movie's, loaded and fetching;
-//   - severance: a show's, loaded, with a reader;
+//   - severance: a show's, loaded, with a streaming session (and an
+//     HDRezka session elsewhere);
 //   - past: a movie's, not loaded, paused;
 //   - inspect: loaded, nothing references it (a dry run);
 //   - legacy: a movie's, not loaded, no job (its magnet has a dn);
@@ -203,9 +247,10 @@ func newEnv() *env {
 		Progress: 1, Complete: true, LoadedAt: at(23), LastActive: at(40)}
 	e.torrents.paused[past] = at(10)
 	e.svc = New(Deps{
-		Torrents: e.torrents, Library: e.lib, Pauses: e.store, Readers: fakeReaders{severance: 1},
-		Speeds: fakeSpeeds{total: torrent.Rate{Down: 2_000_000, Up: 30_000}, history: []torrent.Rate{{Down: 1, Up: 2}, {Down: 3, Up: 4}}},
-		Cache:  fakeCache{}, DiskPath: "/data/torrents",
+		Torrents: e.torrents, Library: e.lib, Pauses: e.store,
+		Sessions: fakeSessions{session("1", severance, at(49)), session("2", "", at(48))},
+		Speeds:   fakeSpeeds{total: torrent.Rate{Down: 2_000_000, Up: 30_000}, history: []torrent.Rate{{Down: 1, Up: 2}, {Down: 3, Up: 4}}},
+		Cache:    fakeCache{}, DiskPath: "/data/torrents",
 		Now: func() time.Time { return at(50) },
 		Statfs: func(path string) (int64, int64, error) {
 			if e.statfs != nil {

@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	// cacheVersion 5 stores each file's source (Kind) and HDRezka stream,
-	// so a stream restored from the cache still streams; v4 split a
-	// grouped file at gaps in its episodes (E07 and E09 are two entries);
-	// v3 named a file a job mapped to several episodes once
-	// ("S01E01-E02"); v2 added subtitle files. An older cache is ignored
-	// and the tree rebuilt from the database.
-	cacheVersion = 5
+	// cacheVersion 6 stores each video's item (movie or episode id), so a
+	// streaming session knows what it plays; v5 stored each file's source
+	// (Kind) and HDRezka stream, so a stream restored from the cache still
+	// streams; v4 split a grouped file at gaps in its episodes (E07 and E09
+	// are two entries); v3 named a file a job mapped to several episodes
+	// once ("S01E01-E02"); v2 added subtitle files. An older cache is
+	// ignored and the tree rebuilt from the database.
+	cacheVersion = 6
 	cacheFile    = "vfs_tree.gob"
 )
 
@@ -31,6 +32,7 @@ type treeCache struct {
 
 type cachedMovie struct {
 	FolderName string
+	ItemID     int64 // the movie's id
 	FileName   string
 	FileSize   int64
 	Kind       library.AssignmentKind
@@ -91,6 +93,7 @@ func restoreSubtitles(tree *DirectoryTree, dir *VirtualDir, dirPath string, subs
 }
 
 type cachedEpisode struct {
+	ItemID    int64 // the (first) episode's id
 	FileName  string
 	FileSize  int64
 	Kind      library.AssignmentKind
@@ -135,6 +138,7 @@ func (fs *LibraryFS) loadTreeFromCache() error {
 		// Restore video file
 		assignment := &library.TorrentAssignment{
 			ItemType:  library.ItemTypeMovie,
+			ItemID:    cm.ItemID,
 			Kind:      cm.Kind,
 			InfoHash:  cm.InfoHash,
 			MagnetURI: cm.MagnetURI,
@@ -166,6 +170,7 @@ func (fs *LibraryFS) loadTreeFromCache() error {
 			for _, ce := range csn.Episodes {
 				assignment := &library.TorrentAssignment{
 					ItemType:  library.ItemTypeEpisode,
+					ItemID:    ce.ItemID,
 					Kind:      ce.Kind,
 					InfoHash:  ce.InfoHash,
 					MagnetURI: ce.MagnetURI,
@@ -226,6 +231,7 @@ func (fs *LibraryFS) saveTreeToCache() {
 				}
 				cache.Movies = append(cache.Movies, cachedMovie{
 					FolderName: folderName,
+					ItemID:     pf.assignment.ItemID,
 					FileName:   fileName,
 					FileSize:   pf.assignment.FileSize,
 					Kind:       pf.assignment.Kind,
@@ -263,6 +269,7 @@ func (fs *LibraryFS) saveTreeToCache() {
 						continue
 					}
 					csn.Episodes = append(csn.Episodes, cachedEpisode{
+						ItemID:    pf.assignment.ItemID,
 						FileName:  fileName,
 						FileSize:  pf.assignment.FileSize,
 						Kind:      pf.assignment.Kind,
