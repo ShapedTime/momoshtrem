@@ -1,13 +1,15 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, History, Plus } from 'lucide-react';
 import { CatAvatar } from '@/components/brand';
 import { Banner, Button, ButtonLink, EmptyState, IconButton, LoadingRegion, Skeleton } from '@/components/ui';
 import { useAskConversation } from '@/hooks/useAskConversation';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { DESKTOP_QUERY } from '@/hooks/useMediaQuery';
+import { useNow } from '@/components/settings/trakt/useNow';
 import { isApiError } from '@/lib/api/client';
 import { recommendationsHomeQuery, traktIntegrationQuery } from '@/lib/api/endpoints';
 import { askAnnouncement, askProblem, type ComposerBlock, composerPlaceholder, costNote, headerLine } from '@/lib/ask/copy';
@@ -46,7 +48,8 @@ export function AskScreen() {
   const home = useQuery({ ...recommendationsHomeQuery(), refetchInterval: false });
   const usage = useQuery(askUsageQuery());
   const trakt = useQuery({ ...traktIntegrationQuery(), refetchInterval: false, retry: false });
-  const [now] = useState(() => Date.now());
+  // A pause lifts at `resets_at` while the page stays open; "4 min ago" moves on
+  const now = useNow(60_000);
   const log = useRef<HTMLDivElement | null>(null);
 
   const notConfigured = home.data?.configured === false;
@@ -95,24 +98,37 @@ export function AskScreen() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [stop, working]);
 
-  // A new ask scrolls its message to the top, under the header
-  const liveCount = session.live.length;
-  const seenLive = useRef(liveCount);
+  // A new ask scrolls its message to the top, under the header. After a refine chip or Try again (which
+  // go away or turn off once they send), focus moves on: to the field on desktop, to your message on phone.
+  const newestKey = newest?.key ?? null;
+  const seenNewest = useRef(newestKey);
+  const focusAfterSend = useRef(false);
   useEffect(() => {
-    const message = newest ? log.current?.querySelector(`[data-turn="${newest.key}"]`) : null;
+    if (newestKey === seenNewest.current) return;
+    seenNewest.current = newestKey;
+    const message = newestKey ? log.current?.querySelector<HTMLElement>(`[data-turn="${newestKey}"]`) : null;
+    if (!message) return;
+    if (focusAfterSend.current) {
+      focusAfterSend.current = false;
+      if (window.matchMedia(DESKTOP_QUERY).matches) document.getElementById('ask-input')?.focus({ preventScroll: true });
+      else message.focus({ preventScroll: true });
+    }
     // Only when it would move a fair way down (a follow-up under the fold), never to nudge the first ask
-    if (liveCount > seenLive.current && message && message.getBoundingClientRect().top - parseFloat(getComputedStyle(message).scrollMarginTop) > 40) {
+    if (message.getBoundingClientRect().top - parseFloat(getComputedStyle(message).scrollMarginTop) > 40) {
       message.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
     }
-    seenLive.current = liveCount;
-  }, [liveCount, newest]);
+  }, [newestKey]);
 
   const onNew = () => {
     if (routeThread === null) reset();
   };
-  const onSend = (message: string, refine = false) => void send(message, { refine });
+  const onRefine = (refinement: string) => {
+    focusAfterSend.current = send(refinement, { refine: true });
+  };
   // A turn refused before its stream was never saved, so the new one takes its place; one that failed mid-stream stays in the thread
-  const onRetry = (turn: AskTurnView) => void send(turn.message, { refine: turn.refine, replaces: turn.live && turn.id === null ? turn.key : undefined });
+  const onRetry = (turn: AskTurnView) => {
+    focusAfterSend.current = send(turn.message, { refine: turn.refine, replaces: turn.live && turn.id === null ? turn.key : undefined });
+  };
   const lastIndex = turns.length - 1;
 
   let body;
@@ -159,7 +175,8 @@ export function AskScreen() {
             library={library}
             problemContext={problemContext}
             now={now}
-            onRefine={(refinement) => onSend(refinement, true)}
+            refinedWith={turns[index + 1]?.message ?? null}
+            onRefine={onRefine}
             onRetry={onRetry}
             onNew={() => (routeThread === null ? reset() : router.push(ASK_ROUTE))}
           />
@@ -212,7 +229,7 @@ export function AskScreen() {
             disabled={block !== null || threadMissing}
             working={Boolean(working)}
             note={costNote(usage.data?.estimates.ask_usd)}
-            onSend={(message) => onSend(message)}
+            onSend={(message) => send(message)}
             onStop={stop}
           />
         </section>

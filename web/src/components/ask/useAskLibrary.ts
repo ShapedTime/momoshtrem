@@ -28,7 +28,7 @@ export interface AskLibrary {
 
 /**
  * The library side of Ask's cards. Adding is For You's (`useAddRecTitle`:
- * the same toast and refetches). An item's `library` is what it was when
+ * the same refetches; its toast offers Find a torrent here). An item's `library` is what it was when
  * Noir picked it; `/library?ids=` for the answered turns says what it is
  * now, so a title added from its "…" sheet, or removed elsewhere, shows that
  * too. A title added here is "In library" with Find a torrent, which opens
@@ -36,7 +36,8 @@ export interface AskLibrary {
  */
 export function useAskLibrary(answered: readonly AskItem[]): AskLibrary {
   const sheets = useSheet();
-  const addTitle = useAddRecTitle();
+  const findTorrent = useCallback((item: TitleRef) => sheets.open('torrent', torrentSheetParams(item)), [sheets]);
+  const addTitle = useAddRecTitle({ findTorrent });
   const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
   const lookup = useLibraryLookup(answered.map((item): LibraryRef => ({ media_type: item.media_type, tmdb_id: item.tmdb_id })));
   const settled = !lookup.isPending && !lookup.error;
@@ -51,7 +52,6 @@ export function useAskLibrary(answered: readonly AskItem[]): AskLibrary {
     return item.library ? { kind: 'in', stage: item.library.availability_stage } : { kind: 'none' };
   };
 
-  const findTorrent = useCallback((item: TitleRef) => sheets.open('torrent', torrentSheetParams(item)), [sheets]);
   const pending = addTitle.isPending && addTitle.variables ? keyOf(addTitle.variables) : null;
 
   return {

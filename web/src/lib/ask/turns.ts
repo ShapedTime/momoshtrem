@@ -213,9 +213,3 @@ export function visibleTurns(thread: Pick<AskThread, 'turns'> | undefined, live:
   const saved = (thread?.turns ?? []).filter((turn) => !liveIds.has(turn.id)).map(turnFromSaved);
   return [...saved, ...live];
 }
-
-/** The turn this page is streaming, if any: one at a time. */
-export const workingTurn = (session: AskSession): AskTurnView | undefined => session.live.find((turn) => isWorking(turn));
-
-/** A saved turn still streaming in another tab or window: the page polls the thread until it ends. */
-export const hasRemoteStreaming = (turns: readonly AskTurnView[]): boolean => turns.some((turn) => !turn.live && turn.phase === 'streaming');

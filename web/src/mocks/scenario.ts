@@ -73,6 +73,8 @@
  *   the failed turn.
  * - `ask-hold`: an ask stops at "Searching the web…" and never finishes, so Stop can be tested; stopping
  *   cancels the turn.
+ * - `ask-working`: an ask holds like the design's working frame (screens/ask/working-*): the history and the web
+ *   read, TMDB being checked, the first pick in; it never finishes.
  *
  * Without a scenario the recommendations mock is a state machine (fixtures/recommendations.ts): Refresh walks
  * a run through its steps, one per read of /home or the run, then /home serves the new picks; feedback hides
@@ -129,7 +131,8 @@ export type MockScenario =
   | 'ask-budget'
   | 'ask-limit'
   | 'ask-error'
-  | 'ask-hold';
+  | 'ask-hold'
+  | 'ask-working';
 
 let override: MockScenario | null = null;
 

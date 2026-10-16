@@ -8,10 +8,12 @@ import type { AskLibrary } from './useAskLibrary';
 
 interface AskTurnProps {
   turn: AskTurnView;
-  /** The conversation's newest turn: only it offers refine chips and Try again. */
+  /** The conversation's newest turn: only its refine chips and Try again can send. */
   last: boolean;
   /** Nothing is streaming: chips and Try again can send. */
   idle: boolean;
+  /** The next message, when there is one: a chip it matches shows as the one used. */
+  refinedWith: string | null;
   library: AskLibrary;
   problemContext: AskProblemContext;
   now: number;
@@ -26,16 +28,19 @@ function whoLine(turn: AskTurnView, now: number): string {
 }
 
 /** Your message, then Noir's answer (ask.js `userMsg`, `noirTurn`): steps while it works, then the trace, the intro, the cards and the refine chips. */
-export function AskTurn({ turn, last, idle, library, problemContext, now, onRefine, onRetry, onNew }: AskTurnProps) {
+export function AskTurn({ turn, last, idle, refinedWith, library, problemContext, now, onRefine, onRetry, onNew }: AskTurnProps) {
   const working = isWorking(turn);
   const problem = working ? null : askProblem(turn, problemContext);
   // The next card is on its way once the intro starts (the usual order: status…, text…, item…, done)
   const coming = working && turn.live && (turn.intro !== '' || turn.items.length > 0);
-  const chips = last && idle && turn.phase === 'done' && turn.refinements.length > 0;
+  // Every answer keeps its chips (ask.js `refineRow`): only the newest's send, and the one used stays pressed
+  const chips = turn.phase === 'done' && turn.refinements.length > 0;
+  const chipsLive = last && idle;
+  const used = refinedWith?.trim().toLowerCase();
 
   return (
     <>
-      <div className="msg msg--me" data-turn={turn.key}>
+      <div className="msg msg--me" data-turn={turn.key} tabIndex={-1}>
         <span className="sr-only">You asked: </span>
         {turn.message}
       </div>
@@ -70,7 +75,14 @@ export function AskTurn({ turn, last, idle, library, problemContext, now, onRefi
                 Refine
               </span>
               {turn.refinements.map((refinement) => (
-                <button key={refinement} type="button" className="fchip" onClick={() => onRefine(refinement)}>
+                <button
+                  key={refinement}
+                  type="button"
+                  className="fchip"
+                  disabled={!chipsLive}
+                  aria-pressed={refinement.toLowerCase() === used}
+                  onClick={() => onRefine(refinement)}
+                >
                   {refinement}
                 </button>
               ))}

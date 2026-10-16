@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MessageCircle, Plus } from 'lucide-react';
+import { useNow } from '@/components/settings/trakt/useNow';
 import { ButtonLink, Progress, Skeleton } from '@/components/ui';
 import { aiUsageQuery, askThreadsQuery } from '@/lib/api/endpoints';
 import { formatUsd, threadWhen } from '@/lib/ask/copy';
@@ -15,7 +15,7 @@ export const askUsageQuery = () => ({ ...aiUsageQuery(), refetchInterval: false 
 /** Recent conversations (ask.js `threadList`), the newest first. */
 export function AskThreadList({ current, onPick }: { current: number | null; onPick?: () => void }) {
   const threads = useQuery(askThreadsQuery());
-  const [now] = useState(() => Date.now());
+  const now = useNow(60_000);
   if (threads.isPending) {
     return (
       <div className="ask-threads" aria-hidden="true">

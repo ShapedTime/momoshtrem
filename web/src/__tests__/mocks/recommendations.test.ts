@@ -395,6 +395,25 @@ describe('scenarios', () => {
     expect(turn.steps.map((s) => `${s.step}:${s.state}`)).toEqual(['history:done']);
   });
 
+  it('ask-working: holds at TMDB with the first pick in, as the design’s working frame', async () => {
+    setMockScenario('ask-working');
+    const controller = new AbortController();
+    const stream = askStream({ message: 'something like Severance but lighter' }, controller.signal);
+    const received: AskEvent[] = [];
+    for (let i = 0; i < 7; i++) received.push((await stream.next()).value as AskEvent);
+    expect(received.map((e) => (e.event === 'status' ? `${e.data.step}:${e.data.state}` : e.event === 'item' ? `item:${e.data.title}` : e.event))).toEqual([
+      'start',
+      'history:active',
+      'history:done',
+      'web:active',
+      'web:done',
+      'tmdb:active',
+      'item:The Good Place',
+    ]);
+    controller.abort();
+    await stream.return(undefined);
+  });
+
   it('ask-hold: the stream never finishes; another ask is busy; Stop cancels the turn', async () => {
     setMockScenario('ask-hold');
     const controller = new AbortController();

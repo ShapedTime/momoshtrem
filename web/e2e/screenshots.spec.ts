@@ -729,9 +729,12 @@ test.describe('Ask momoshtrem (#156)', () => {
   });
 
   test('working', async ({ page }, testInfo) => {
+    // As the design's frame: history and the web read, TMDB being checked, the first pick in and a skeleton
+    await scenario(page, 'ask-working');
     await signIn(page, SEVERANCE);
-    // The first card is in, the next one is a skeleton
     await page.locator('article.ask-card').first().waitFor();
+    await page.locator('.ask-card.is-skel').waitFor();
+    await settle(page);
     await shoot(page, testInfo, 'ask/working');
   });
 

@@ -103,10 +103,11 @@ export function useAskConversation(routeThread: number | null) {
   }, [routeThread, session.route, session.threadId]);
 
   const threadId = session.threadId;
+  /** Ask. True when the message was taken (not blank, and nothing else streaming), so the composer clears only then. */
   const send = useCallback(
-    async (raw: string, { refine = false, replaces }: SendOptions = {}) => {
+    (raw: string, { refine = false, replaces }: SendOptions = {}): boolean => {
       const message = raw.trim();
-      if (!message || running.current) return;
+      if (!message || running.current) return false;
       const key = `ask:${++turnCount}`;
       const abort = new AbortController();
       running.current = { key, abort, thread: threadId };
@@ -114,41 +115,49 @@ export function useAskConversation(routeThread: number | null) {
       const afterStop = stoppedLast.current;
       stoppedLast.current = false;
 
-      let target = threadId;
-      let streamed = false;
-      let ended = false;
-      try {
-        for (let attempt = 0; ; attempt++) {
-          try {
-            for await (const event of askStream(target === null ? { message } : { thread_id: target, message }, abort.signal)) {
-              streamed = true;
-              dispatch({ type: 'event', key, event });
-              if (event.event === 'start') {
-                target = event.data.thread_id;
-                if (running.current?.key === key) running.current.thread = target;
-                void queryClient.invalidateQueries({ queryKey: recKeys.threads, exact: true });
+      const run = async () => {
+        let target = threadId;
+        let streamed = false;
+        let ended = false;
+        try {
+          for (let attempt = 0; ; attempt++) {
+            try {
+              for await (const event of askStream(target === null ? { message } : { thread_id: target, message }, abort.signal)) {
+                streamed = true;
+                dispatch({ type: 'event', key, event });
+                if (event.event === 'start') {
+                  target = event.data.thread_id;
+                  if (running.current?.key === key) running.current.thread = target;
+                  void queryClient.invalidateQueries({ queryKey: recKeys.threads, exact: true });
+                }
+                if (event.event === 'done' || event.event === 'error') {
+                  // The answer is complete: let go of the stream now (its `finally` cancels the reader), so the next ask isn't turned away
+                  ended = true;
+                  break;
+                }
               }
-              if (event.event === 'done' || event.event === 'error') ended = true;
-            }
-            if (!ended && !abort.signal.aborted) dispatch({ type: 'cut', key });
-          } catch (error) {
-            if (abort.signal.aborted) break;
-            if (!streamed && afterStop && attempt === 0 && isApiError(error) && error.code === 'ask_busy') {
-              await pause(BUSY_RETRY_MS, abort.signal);
+              if (!ended && !abort.signal.aborted) dispatch({ type: 'cut', key });
+            } catch (error) {
               if (abort.signal.aborted) break;
-              continue;
+              if (!streamed && afterStop && attempt === 0 && isApiError(error) && error.code === 'ask_busy') {
+                await pause(BUSY_RETRY_MS, abort.signal);
+                if (abort.signal.aborted) break;
+                continue;
+              }
+              dispatch(streamed ? { type: 'cut', key } : { type: 'failed', key, failure: failureOf(error) });
             }
-            dispatch(streamed ? { type: 'cut', key } : { type: 'failed', key, failure: failureOf(error) });
+            break;
           }
-          break;
+        } finally {
+          if (running.current?.key === key) running.current = null;
+          // The thread's saved view, its place in Recent and the month's spend all moved
+          if (target !== null) void queryClient.invalidateQueries({ queryKey: recKeys.thread(target) });
+          void queryClient.invalidateQueries({ queryKey: recKeys.threads, exact: true });
+          void queryClient.invalidateQueries({ queryKey: settingsKeys.aiUsage });
         }
-      } finally {
-        if (running.current?.key === key) running.current = null;
-        // The thread's saved view, its place in Recent and the month's spend all moved
-        if (target !== null) void queryClient.invalidateQueries({ queryKey: recKeys.thread(target) });
-        void queryClient.invalidateQueries({ queryKey: recKeys.threads, exact: true });
-        void queryClient.invalidateQueries({ queryKey: settingsKeys.aiUsage });
-      }
+      };
+      void run();
+      return true;
     },
     [queryClient, threadId]
   );

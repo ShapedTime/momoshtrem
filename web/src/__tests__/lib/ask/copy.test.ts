@@ -133,6 +133,9 @@ describe('the turn', () => {
     expect(askAnnouncement(undefined, null)).toBe('');
     expect(askAnnouncement(turn('sending'), null)).toBe('Noir is thinking…');
     expect(askAnnouncement(turn('streaming', [done('history', 'a'), { step: 'web', state: 'active', detail: null }]), null)).toBe('Searching the web for new releases…');
+    // Between a step's done and the next one's start, the words don't change (nothing is announced twice)
+    expect(askAnnouncement(turn('streaming', [done('history', 'a')]), null)).toBe('Reading your history…');
+    expect(askAnnouncement(turn('streaming'), null)).toBe('Noir is thinking…');
     expect(askAnnouncement(turn('streaming', [done('write', 'a')], 0, 'Five'), null)).toBe('Noir is writing…');
     expect(askAnnouncement(turn('done', [], 5), null)).toBe('Noir found 5 picks.');
     expect(askAnnouncement(turn('cancelled'), null)).toBe('Stopped.');

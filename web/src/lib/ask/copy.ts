@@ -279,9 +279,10 @@ export function askAnnouncement(turn: Pick<AskTurnView, 'phase' | 'steps' | 'ite
     case 'sending':
       return 'Noir is thinking…';
     case 'streaming': {
-      const active = turn.steps.find((step) => step.state === 'active');
-      if (active) return stepLabel(active.step, 'active');
-      return turn.intro ? 'Noir is writing…' : 'Noir is thinking…';
+      if (turn.intro) return 'Noir is writing…';
+      // Between one step's `done` and the next one's `active`, the last step's words stay, so nothing is said twice
+      const step = turn.steps.find((s) => s.state === 'active') ?? turn.steps.at(-1);
+      return step ? stepLabel(step.step, 'active') : 'Noir is thinking…';
     }
     case 'done':
       return turn.items.length > 0 ? `Noir found ${plural(turn.items.length, 'pick')}.` : 'Noir answered.';

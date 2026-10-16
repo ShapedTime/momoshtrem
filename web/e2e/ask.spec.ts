@@ -72,6 +72,10 @@ test.describe('Ask momoshtrem', () => {
 
     // Refine: the chip is the next message, and it re-ranks
     await page.getByRole('group', { name: 'Refine these picks' }).getByRole('button', { name: 'Lighter' }).click();
+    // The chips turn off as it sends, so focus moves on: to the field on desktop, to your message on phone
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement?.id === 'ask-input' ? 'field' : document.activeElement?.classList.contains('msg--me') ? 'message' : 'lost')))
+      .toBe(isDesktop(testInfo) ? 'field' : 'message');
     await expect(page.locator('.msg--me')).toHaveText([`You asked: ${SEVERANCE}`, 'You asked: Lighter']);
     const second = answers(page).nth(1);
     await expect(second.locator('.ask-steps .step')).toHaveText([/Re-rank/, /Writ/]);
@@ -82,8 +86,12 @@ test.describe('Ask momoshtrem', () => {
     const bluey = cards(second).filter({ hasText: 'Bluey' });
     await expect(bluey.locator('.pill')).toHaveText('Ready');
     await expect(bluey.getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/tv/82728');
-    // Only the newest answer offers chips
-    await expect(page.getByRole('group', { name: 'Refine these picks' })).toHaveCount(1);
+    // Every answer keeps its chips; the first one's are off, with the one used pressed (ask.js `refineRow`)
+    const refines = page.getByRole('group', { name: 'Refine these picks' });
+    await expect(refines).toHaveCount(2);
+    await expect(refines.first().getByRole('button', { name: 'Lighter' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(refines.first().getByRole('button', { name: 'Shorter' })).toBeDisabled();
+    await expect(refines.nth(1).getByRole('button', { name: 'Shorter' })).toBeEnabled();
   });
 
   test('Add to library, then Find a torrent opens season packs (flow 2)', async ({ page }) => {
@@ -91,8 +99,10 @@ test.describe('Ask momoshtrem', () => {
     await expect(page).toHaveURL(/\/ask\/13$/);
     const goodPlace = card(page, 'The Good Place');
     await goodPlace.getByRole('button', { name: 'Add to library' }).click();
-    // For You's add (useAddRecTitle): the same toast
-    await expect(page.getByRole('status').filter({ hasText: 'Added to library' })).toContainText('The Good Place · next, find a torrent');
+    // For You's add (useAddRecTitle), whose toast offers the next step here
+    const added = page.getByRole('status').filter({ hasText: 'Added to library' });
+    await expect(added).toContainText('The Good Place');
+    await expect(added.getByRole('button', { name: 'Find a torrent' })).toBeVisible();
     await expect(goodPlace.locator('.pill')).toHaveText('In library');
     await goodPlace.getByRole('button', { name: 'Find a torrent' }).click();
     await expect(page).toHaveURL(/\/ask\/13\?sheet=torrent&show=66573&season=1$/);
@@ -208,7 +218,8 @@ test.describe('Ask momoshtrem', () => {
     await expect(answers(page).locator('.ask-trace summary')).toHaveText(['History, web and TMDB checked · 9 s', 'Re-ranked your picks · 4 s']);
     await expect(cards(answers(page).first())).toHaveCount(5);
     await expect(cards(answers(page).nth(1))).toHaveCount(3);
-    await expect(page.getByRole('group', { name: 'Refine these picks' })).toHaveCount(1);
+    await expect(page.getByRole('group', { name: 'Refine these picks' })).toHaveCount(2);
+    await expect(page.getByRole('group', { name: 'Refine these picks' }).first().getByRole('button', { name: 'Lighter' })).toHaveAttribute('aria-pressed', 'true');
     await expectAccessibleAndContained(page);
 
     // Another conversation: the rail on desktop, Past conversations on phone
@@ -272,7 +283,8 @@ test.describe('Ask entry points', () => {
     await expect(askRow).toContainText('Picks with a reason for each');
     await askRow.click();
     await expect(page).toHaveURL(/\/ask\/13$/);
-    await expect(cards(answers(page).first()).getByRole('heading')).toHaveText(['Mushishi', 'My Neighbor Totoro', 'Dan Da Dan', 'Paprika'], { timeout: 20_000 });
+    await expect(page.locator('.msg--me')).toHaveText('You asked: anime with a Frieren vibe');
+    await expect(answers(page).first().locator('.ask-steps .step').first()).toBeVisible();
   });
 
   test('without an Anthropic key every entry hides, and /ask says what it needs', async ({ page }, testInfo) => {

@@ -19,7 +19,8 @@ interface AskComposerProps {
   working: boolean;
   /** Under the field on desktop: what Noir reads and what an ask costs. */
   note: string;
-  onSend: (message: string) => void;
+  /** True when the message was taken; the field keeps it otherwise. */
+  onSend: (message: string) => boolean;
   onStop: () => void;
   /** A new conversation on desktop starts with the field focused (a phone keyboard would cover the examples). */
   focusOnDesktop?: boolean;
@@ -51,8 +52,7 @@ export function AskComposer({ placeholder, disabled, working, note, onSend, onSt
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) return;
-    onSend(value);
-    setValue('');
+    if (onSend(value)) setValue('');
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

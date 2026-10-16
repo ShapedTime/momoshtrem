@@ -1,5 +1,5 @@
 import type { AskEvent, AskItem, AskTurn } from '@/lib/api/contract';
-import { askReducer, initialSession, isWorking, turnFromSaved, visibleTurns, workingTurn, type AskAction, type AskSession } from '@/lib/ask/turns';
+import { askReducer, initialSession, isWorking, turnFromSaved, visibleTurns, type AskAction, type AskSession } from '@/lib/ask/turns';
 
 /** Ask's conversation reducer (#156): the events of POST /recommendations/ask folded into the turn the page shows. */
 
@@ -48,7 +48,7 @@ describe('askReducer: a turn streams', () => {
     let session = run([send()]);
     expect(session.live).toHaveLength(1);
     expect(session.live[0]).toMatchObject({ key: 'a', id: null, phase: 'sending', live: true, steps: [], createdAt: null });
-    expect(workingTurn(session)?.key).toBe('a');
+    expect(session.live.find(isWorking)?.key).toBe('a');
 
     session = run(events('a', [START, status('history', 'active'), status('history', 'done', '2,184 plays'), status('web', 'active')]), session);
     expect(session.threadId).toBe(13);
@@ -85,7 +85,7 @@ describe('askReducer: a turn streams', () => {
     expect(turn.steps.map((s) => s.state)).toEqual(['done', 'done', 'done']);
     expect(turn.refinements).toEqual(['Lighter', 'Shorter']);
     expect(turn.elapsedMs).toBe(9100);
-    expect(workingTurn(session)).toBeUndefined();
+    expect(session.live.find(isWorking)).toBeUndefined();
   });
 
   it('ignores events after the turn ended, and events for a turn the page left', () => {
