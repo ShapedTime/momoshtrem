@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anacrolix/missinggo/v2/filecache"
 	atorrent "github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+
+	"github.com/shapedtime/momoshtrem/internal/torrent/piececache"
 )
 
 // The lifecycle tests run a real anacrolix client on loopback, with no DHT
@@ -67,7 +68,7 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T, addTimeout time.Duration) *testEnv {
 	t.Helper()
-	fc, err := filecache.NewCache(t.TempDir())
+	fc, err := piececache.NewCache(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

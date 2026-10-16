@@ -10,11 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anacrolix/missinggo/v2/filecache"
-
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
+	"github.com/shapedtime/momoshtrem/internal/torrent/piececache"
 )
 
 // Fakes for the Service's dependencies.
@@ -176,8 +175,8 @@ func (f fakeSpeeds) Interval() time.Duration { return 2 * time.Second }
 // fakeCache holds 1 GB of a 4 GB cache.
 type fakeCache struct{}
 
-func (fakeCache) Info() filecache.CacheInfo {
-	return filecache.CacheInfo{Capacity: 4 << 30, Filled: 1 << 30}
+func (fakeCache) Info() piececache.CacheInfo {
+	return piececache.CacheInfo{Capacity: 4 << 30, Filled: 1 << 30}
 }
 
 // hash is 40 of c: a well-formed info hash.

@@ -9,11 +9,11 @@ import (
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	tlog "github.com/anacrolix/log"
-	"github.com/anacrolix/missinggo/v2/filecache"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
 
 	"github.com/shapedtime/momoshtrem/internal/config"
+	"github.com/shapedtime/momoshtrem/internal/torrent/piececache"
 )
 
 // ClientConfig holds all components needed for client creation.
@@ -45,8 +45,13 @@ func (h *torrentLogHandler) Handle(r tlog.Record) {
 }
 
 // InitStorage creates the storage layer for torrents.
-// Returns the storage implementation, file cache, piece completion database, and any error.
-func InitStorage(metadataFolder string, cacheSizeMB int64) (storage.ClientImpl, *filecache.Cache, storage.PieceCompletion, error) {
+// Returns the storage implementation, piece cache, piece completion database, and any error.
+//
+// The piece cache is missinggo's filecache with pins (piececache). With
+// nothing pinned it behaves as filecache did, trimming from the first write.
+// To hold trims until pins are restored after a restart, call DeferTrim on
+// it before the torrent client exists, then Ready once the pins are set.
+func InitStorage(metadataFolder string, cacheSizeMB int64) (storage.ClientImpl, *piececache.Cache, storage.PieceCompletion, error) {
 	// Create cache directory
 	cacheDir := filepath.Join(metadataFolder, "cache")
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -54,7 +59,7 @@ func InitStorage(metadataFolder string, cacheSizeMB int64) (storage.ClientImpl, 
 	}
 
 	// Create file cache for pieces
-	fc, err := filecache.NewCache(cacheDir)
+	fc, err := piececache.NewCache(cacheDir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
