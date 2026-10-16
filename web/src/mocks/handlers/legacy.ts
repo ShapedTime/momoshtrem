@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
-import type { LibraryMovie, LibraryShow, RecentlyAiredResponse } from '@/types/momoshtrem';
+import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 import type { TrendingResults } from '@/types/tmdb';
-import { CATALOG, iso } from '../fixtures/catalog';
+import { CATALOG } from '../fixtures/catalog';
 
 /** Just enough of the legacy web routes for the old pages to render in mock mode. */
 const trending: TrendingResults = {
@@ -27,11 +27,8 @@ const trending: TrendingResults = {
   })),
 };
 
-const recentlyAired: RecentlyAiredResponse = { episodes: [], last_sync_time: iso(0), sync_status: 'ok' };
-
 export const legacyHandlers = [
   http.get('*/api/tmdb/trending', () => HttpResponse.json(trending)),
-  http.get('*/api/library/recently-aired', () => HttpResponse.json(recentlyAired)),
   http.get('*/api/library/movies', () => HttpResponse.json<{ movies: LibraryMovie[] }>({ movies: [] })),
   http.get('*/api/library/shows', () => HttpResponse.json<{ shows: LibraryShow[] }>({ shows: [] })),
 ];
