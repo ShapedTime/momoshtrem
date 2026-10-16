@@ -20,12 +20,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anacrolix/missinggo/v2/filecache"
-
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/storagecap"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
+	"github.com/shapedtime/momoshtrem/internal/torrent/piececache"
 )
 
 // Torrents is the torrent client. torrent.Service implements it.
@@ -92,12 +91,12 @@ type Speeds interface {
 
 var _ Speeds = (*torrent.SpeedSampler)(nil)
 
-// Cache is the piece cache. *filecache.Cache implements it.
+// Cache is the piece cache. *piececache.Cache implements it.
 type Cache interface {
-	Info() filecache.CacheInfo
+	Info() piececache.CacheInfo
 }
 
-var _ Cache = (*filecache.Cache)(nil)
+var _ Cache = (*piececache.Cache)(nil)
 
 // Deps are a Service's dependencies. Sessions, Metainfo, Speeds and Cache
 // are optional: without them nothing streams, an unloaded torrent's detail

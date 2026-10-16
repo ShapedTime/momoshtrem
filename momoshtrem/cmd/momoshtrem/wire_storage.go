@@ -1,11 +1,10 @@
 package main
 
 import (
-	"github.com/anacrolix/missinggo/v2/filecache"
-
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/storagecap"
+	"github.com/shapedtime/momoshtrem/internal/torrent/piececache"
 )
 
 // newStorageGovernor sizes the piece cache (#200): the storage setting,
@@ -23,13 +22,15 @@ func newStorageGovernor(cfg *config.Config, settings *library.SettingsRepository
 	})
 }
 
-// storageCache adapts the piece cache to the Governor. When #201 swaps in
-// internal/torrent/piececache, only the type and Info's Pinned change here.
-func storageCache(fc *filecache.Cache) storagecap.Cache {
+// storageCache adapts the piece cache (#201's piececache) to the Governor:
+// its cap, its fill with the pinned part, and its trims. The streaming
+// reserve (SetReserve) isn't wired here yet: the downloads core (#77 P4)
+// does that.
+func storageCache(fc *piececache.Cache) storagecap.Cache {
 	return storagecap.CacheFuncs{
 		InfoFunc: func() storagecap.CacheInfo {
 			info := fc.Info()
-			return storagecap.CacheInfo{Capacity: info.Capacity, Filled: info.Filled}
+			return storagecap.CacheInfo{Capacity: info.Capacity, Filled: info.Filled, Pinned: info.Pinned}
 		},
 		SetCapacityFunc:    fc.SetCapacity,
 		TrimToCapacityFunc: fc.TrimToCapacity,
