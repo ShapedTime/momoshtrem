@@ -39,10 +39,12 @@ export function ActivityView() {
   const offline = list.isError;
   const summary = useQuery({ ...torrentsSummaryQuery(), refetchInterval: offline ? false : ACTIVITY_POLL_MS });
 
+  // Torrents waiting out their Undo are hidden everywhere on the page
   const items = useMemo(() => (list.data?.items ?? []).filter((item) => !pending.has(torrentRemovalKey(item.info_hash))), [list.data, pending]);
-  const hidden = useMemo(() => new Set((list.data?.items ?? []).map((item) => item.info_hash).filter((hash) => pending.has(torrentRemovalKey(hash)))), [list.data, pending]);
   const sections = groupTorrents(items);
-  const now = streamingNow(summary.data?.streaming ?? [], items, hidden);
+  const now = streamingNow(summary.data?.streaming ?? [], items);
+  // The page shows once both have answered, so "Nothing playing" is never a guess
+  const ready = list.data !== undefined && (summary.data !== undefined || summary.isError);
   const quiet = isQuiet(items);
   const canPauseAll = !offline && items.some(isActive);
 
@@ -64,7 +66,7 @@ export function ActivityView() {
       </header>
 
       <div className="page act-body">
-        {!list.data && list.isPending && <ActivityLoading />}
+        {!ready && !offline && <ActivityLoading />}
 
         {offline && (
           <>
@@ -79,7 +81,7 @@ export function ActivityView() {
           </>
         )}
 
-        {list.data && (
+        {list.data && (ready || offline) && (
           <>
             {!offline && <StatusLine items={items} now={now} />}
             <SummaryStrip summary={summary.data} items={items} now={now} stale={offline} />

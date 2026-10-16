@@ -1,5 +1,5 @@
 import type { StreamingSession, TorrentDetail, TorrentListItem } from '@/lib/api/contract';
-import { fileProgress, filesSummary, readersByPath, relativePath } from '@/lib/activity/files';
+import { fileProgress, filesSummary, readersByPath, relativePath, unmappedLabel } from '@/lib/activity/files';
 import { formatClock, formatPieceSize, nowTile, readerLine, sessionBanner, splitSpeed, torrentLabel } from '@/lib/activity/format';
 import { healthFor, isWeak } from '@/lib/activity/health';
 import { expandRuns, fileAtPiece, PIECE, pieceGrid, piecesHave } from '@/lib/activity/pieces';
@@ -91,8 +91,9 @@ describe('sections', () => {
     expect(streamingNow(sessions, TORRENTS)).toBe(STREAMING_SESSION);
     const paused = TORRENTS.map((t) => (t === STREAMING ? { ...t, state: 'paused' as const } : t));
     expect(streamingNow(sessions, paused)).toBe(HDREZKA_SESSION);
-    expect(streamingNow(sessions, TORRENTS, new Set([STREAMING.info_hash]))).toBe(HDREZKA_SESSION);
     expect(streamingNow([STREAMING_SESSION], paused)).toBeNull();
+    // Removed: the list no longer has it, though its session lingers
+    expect(streamingNow(sessions, TORRENTS.filter((t) => t !== STREAMING))).toBe(HDREZKA_SESSION);
     expect(streamingNow([], TORRENTS)).toBeNull();
   });
 });
@@ -220,6 +221,10 @@ describe('files', () => {
     expect(fileProgress({ ...file, progress: 0.926 })).toEqual({ kind: 'partial', pct: 92 });
     expect(fileProgress({ ...file, progress: null })).toEqual({ kind: 'unknown' });
     expect(fileProgress({ ...file, plays_as: [], ignored: { reason: 'opening', label: 'Ignored (NCOP)' } })).toEqual({ kind: 'skipped' });
+    // A subtitle that follows its video plays as nothing and isn't ignored
+    expect(unmappedLabel('Sintel/Sintel.de.srt', false)).toBe('Subtitle');
+    expect(unmappedLabel('Batch/Show - 29.mkv', true)).toBe('Not mapped yet');
+    expect(unmappedLabel('Batch/extra.mkv', false)).toBe('Not mapped');
   });
 
   it('marks the file a session reads, but not a paused torrent’s', () => {

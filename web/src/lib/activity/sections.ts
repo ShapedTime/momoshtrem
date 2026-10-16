@@ -44,14 +44,17 @@ export const isQuiet = (items: readonly TorrentListItem[]) => items.every((item)
 /**
  * The session the "Streaming now" tile shows: the most recently read one,
  * skipping those of paused torrents (a read doesn't wake them; the session
- * lingers for 30 s) and of torrents being removed. HDRezka's always count.
+ * lingers for 30 s), and of torrents `items` doesn't have: removed ones (a
+ * session outlives its torrent by 30 s) and ones waiting out their Undo, which
+ * the caller leaves out. HDRezka's always count.
  */
-export function streamingNow(sessions: readonly StreamingSession[], items: readonly TorrentListItem[], hidden: ReadonlySet<string> = new Set()): StreamingSession | null {
+export function streamingNow(sessions: readonly StreamingSession[], items: readonly TorrentListItem[]): StreamingSession | null {
   const states = new Map(items.map((item) => [item.info_hash, item.state]));
   return (
     sessions.find((session) => {
       if (session.source !== 'torrent' || !session.info_hash) return true;
-      return states.get(session.info_hash) !== 'paused' && !hidden.has(session.info_hash);
+      const state = states.get(session.info_hash);
+      return state !== undefined && state !== 'paused';
     }) ?? null
   );
 }

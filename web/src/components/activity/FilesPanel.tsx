@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { Check, Tv } from 'lucide-react';
 import { Button, Chip, FilePath, Progress } from '@/components/ui';
 import type { StreamingSession, TorrentDetail, TorrentDetailFile } from '@/lib/api/contract';
-import { FILES_COLLAPSE_OVER, FILES_PREVIEW, fileProgress, filesSummary, relativePath } from '@/lib/activity/files';
+import { FILES_COLLAPSE_OVER, FILES_PREVIEW, fileProgress, filesSummary, relativePath, unmappedLabel } from '@/lib/activity/files';
 import { formatBytes, formatNumber } from '@/lib/title/format';
 import { cx } from '@/lib/utils/cx';
 
-function FileRow({ file, root, reader }: { file: TorrentDetailFile; root: string | null; reader: StreamingSession | null }) {
+function FileRow({ file, root, reader, openJob }: { file: TorrentDetailFile; root: string | null; reader: StreamingSession | null; openJob: boolean }) {
   const progress = fileProgress(file);
   const ignored = file.plays_as.length === 0 && file.ignored !== null;
   const [single] = file.plays_as;
@@ -39,7 +39,7 @@ function FileRow({ file, root, reader }: { file: TorrentDetailFile; root: string
             {file.plays_as.length === 1 && single.episode_name && <span className="t-small clamp-1 text-fg-3">{single.episode_name}</span>}
           </>
         ) : (
-          <span className="t-small text-fg-3">Not mapped yet</span>
+          <span className="t-small text-fg-3">{unmappedLabel(file.path, openJob)}</span>
         )}
       </div>
       <div className="f-size">{formatBytes(file.size_bytes)}</div>
@@ -111,7 +111,7 @@ export function FilesPanel({ detail, readers }: { detail: TorrentDetail; readers
           </div>
           <ul className="td-filelist" aria-label="Files">
             {shown.map((file) => (
-              <FileRow key={file.path} file={file} root={summary.root} reader={readers.get(file.path) ?? null} />
+              <FileRow key={file.path} file={file} root={summary.root} reader={readers.get(file.path) ?? null} openJob={detail.open_job !== null} />
             ))}
           </ul>
           {collapsed && (

@@ -31,6 +31,18 @@ export function filesSummary(files: readonly TorrentDetailFile[]): { mapped: num
   return { mapped, ignored, root, text };
 }
 
+const SUBTITLE = /\.(srt|ass|ssa|vtt|sub|idx|sup)$/i;
+
+/**
+ * What the "Plays as" column says for a file with no target and not ignored:
+ * a subtitle that follows its video, or a file the mapping hasn't placed (yet,
+ * while a job is open).
+ */
+export function unmappedLabel(path: string, openJob: boolean): string {
+  if (SUBTITLE.test(path)) return 'Subtitle';
+  return openJob ? 'Not mapped yet' : 'Not mapped';
+}
+
 export type FileProgress = { kind: 'ready' } | { kind: 'partial'; pct: number } | { kind: 'skipped' } | { kind: 'unknown' };
 
 /** "✓ Ready", a bar and %, "Skipped" for an ignored file, or "—" while the torrent isn't loaded. */
