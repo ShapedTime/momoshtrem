@@ -580,18 +580,20 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   - `any`: everything that names the title.
 - **Hygiene:**
   - one Torznab request per indexer per query, with 8 s per request;
-  - adult categories (the 6000 range) are never requested, and results in them are dropped;
+  - requests ask for the title's categories only: TV and anime for a show, movies (plus anime for an anime film) for a movie. Adult categories (the 6000 range) are never requested, and results in them are dropped;
   - HTML entities are decoded;
-  - text-query results whose title matches none of the known titles are dropped (unless `q` was given);
+  - text-query results whose title matches none of the known titles are dropped (unless `q` was given). Known titles are the title, original title, romaji and aliases, plus their short forms for anime ("Frieren"); a trailing country tag ("The Office US") and any part of a slash-separated name count. A movie's text-query results from a year more than 1 off are dropped too. ID-query results are trusted;
   - duplicates are merged by info hash, otherwise by normalised title + size: the most seeders wins, and a magnet is preferred.
 - **Progress:**
   - a GET starts the plan's search unless it's cached or already running;
-  - the search runs detached from the request, with a single flight per plan;
+  - the search runs detached from the request, with a single flight per plan, and stops after 60 s (a `warnings` entry says so);
   - the GET that starts it answers when the search completes or after 2 s, whichever comes first; a GET that finds it running answers at once;
   - while `complete` is false, the client polls the same URL every second, without `refresh`;
   - filters, sort and paging apply to what has arrived so far.
 - **Cache:**
-  - 10 minutes per plan, keyed by (media type, TMDB id, scope, season, episode, `q`). Filters, sort and paging aren't part of it, so they never search again;
+  - 10 minutes per plan from when the search started, keyed by (media type, TMDB id, scope, season, episode, `q`). Filters, sort and paging aren't part of it, so they never search again;
+  - at most 200 plans, the oldest dropped first. A search that couldn't start (`jackett_unavailable`) isn't cached, so the next GET tries again;
+  - the title's files and its `missing` run are read on every GET, so an episode added meanwhile counts at once;
   - scores and the profile's hide rules are applied when results are read, so a profile change takes effect at once.
 - **Response:**
   ```
@@ -631,7 +633,7 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
     flags: [cam|no_seeders|low_seeders|size_outlier|over_size_limit|needs_torrent_fetch]
   }
   ```
-  - `needs_torrent_fetch`: no magnet yet, so Add and Copy magnet call resolve first.
+  - `needs_torrent_fetch`: no magnet yet, so Add and Copy magnet call resolve first. A release with an info hash but no magnet gets one built from the hash and its name (`magnet:?xt=urn:btih:…&dn=…`), so it isn't flagged.
   - `hdr` and `audio` list only what the name says; `repack` covers PROPER too.
   - `pack` (parsed by `internal/release`):
     - `label` is short: "S01E29", "S01E01–E03", "Episode 29" and "Episodes 29–38" (absolute numbers, `seasons: []`), "Season 2", "Specials", "Seasons 1–4", "Complete".
