@@ -204,6 +204,33 @@ func (c *Conn) Play(ctx context.Context, p string, from int64) (*Stream, error) 
 	return &Stream{Response: resp, From: from, cancel: cancel}, nil
 }
 
+// Get sends a GET of p with the extra headers (Range, If-Range) and
+// returns once the answer's headers are in, as Play does. From is the
+// first byte of a 206's Content-Range, 0 otherwise.
+func (c *Conn) Get(ctx context.Context, p string, header http.Header) (*Stream, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	req, err := c.request(ctx, http.MethodGet, p, nil)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	for k, vs := range header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	var from int64
+	if resp.StatusCode == http.StatusPartialContent {
+		fmt.Sscanf(resp.Header.Get("Content-Range"), "bytes %d-", &from)
+	}
+	return &Stream{Response: resp, From: from, cancel: cancel}, nil
+}
+
 // ErrAborted is a read from a Stream after Abort.
 var ErrAborted = errors.New("client: stream aborted")
 
