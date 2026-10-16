@@ -81,7 +81,7 @@ describe('pills, lines and status words', () => {
 describe('actions', () => {
   it('gives each state its action', () => {
     expect(libraryRowAction(readyMovie, off)).toEqual({ kind: 'play', label: 'Play' });
-    expect(libraryRowAction(downloading, off)).toEqual({ kind: 'activity', label: 'Activity', href: '/torrents' });
+    expect(libraryRowAction(downloading, off)).toEqual({ kind: 'activity', label: 'Activity', href: '/activity/h' });
     expect(libraryRowAction(reviewShow, off)).toEqual({ kind: 'review', label: 'Review', href: '/mapping/101' });
     expect(libraryRowAction(partialShow, off)).toEqual({ kind: 'find', label: 'Find missing', target: { kind: 'page', href: '/tv/209867?season=1' } });
     expect(libraryRowAction(noTorrent, off)).toEqual({ kind: 'find', label: 'Find', target: { kind: 'page', href: '/movie/1054867' } });

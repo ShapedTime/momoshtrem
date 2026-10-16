@@ -35,7 +35,6 @@ export function usePaletteData(rawQuery: string, open: boolean) {
   const latest = useQuery({ ...libraryQuery({ sort: 'added', page_size: RECENT_TITLES }), enabled: open });
   const incomplete = useQuery({ ...libraryQuery({ status: 'incomplete', page_size: INCOMPLETE_PAGE }), enabled: open });
   const jobs = useQuery({ ...assignmentJobsQuery('open'), enabled: open });
-  // Until #102 routes GET /api/torrents/summary to the backend, the real stack answers 405: no counts then
   const summary = useQuery({ ...torrentsSummaryQuery(), enabled: open, refetchInterval: false, retry: false });
 
   const actions = useMemo(
