@@ -463,13 +463,18 @@ func TestNewEpisodeCandidates(t *testing.T) {
 	seed.episodes(lima, 1, "2026-10-10")
 	tr.hidden("progress_watched", 31, lima.TMDBID)
 	// The calendar: one in the window, one after now, a special, a
-	// watched one and one of a hidden show.
+	// watched one and one of a hidden show, of shows the user started; one
+	// of a library show; one of a show only watchlisted (never started,
+	// not in the library), which never counts.
+	tr.progress(progressRow{traktID: 41, tmdbID: 8101, title: "Calendar show", aired: 1, lastWatched: now})
 	tr.calendar(41, 8101, 1, 1, 0, "Aired", time.Date(2026, 10, 13, 2, 0, 0, 0, time.UTC))
 	tr.calendar(41, 8101, 1, 2, 0, "Tonight", time.Date(2026, 10, 14, 20, 0, 0, 0, time.UTC))
 	tr.calendar(41, 8101, 0, 1, 0, "Special", time.Date(2026, 10, 12, 2, 0, 0, 0, time.UTC))
 	tr.calendar(42, 8102, 3, 4, 0, "Seen", time.Date(2026, 10, 12, 2, 0, 0, 0, time.UTC))
 	tr.watched(8102, 3, 4, 0, 1, now)
 	tr.calendar(43, lima.TMDBID, 1, 2, 0, "Hidden", time.Date(2026, 10, 12, 2, 0, 0, 0, time.UTC))
+	tr.calendar(44, kilo.TMDBID, 1, 3, 0, "Library", time.Date(2026, 10, 9, 2, 0, 0, 0, time.UTC))
+	tr.calendar(45, 8105, 1, 1, 0, "Watchlisted", time.Date(2026, 10, 13, 2, 0, 0, 0, time.UTC))
 
 	candidates, err := repo.NewEpisodeCandidates(ctx, from, now, "2026-10-07", "2026-10-14")
 	if err != nil {
@@ -482,6 +487,7 @@ func TestNewEpisodeCandidates(t *testing.T) {
 	slices.Sort(got)
 	want := []string{
 		fmt.Sprintf("%d S1E3 calendar=false 2026-10-09", kilo.TMDBID),
+		fmt.Sprintf("%d S1E3 calendar=true Library", kilo.TMDBID),
 		fmt.Sprintf("%d S1E4 calendar=false 2026-10-14", kilo.TMDBID),
 		"8101 S1E1 calendar=true Aired",
 	}

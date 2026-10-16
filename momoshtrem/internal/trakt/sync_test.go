@@ -31,6 +31,7 @@ var (
 	twd       = obj{"title": "The Walking Dead", "year": 2010, "ids": obj{"trakt": 1393, "tmdb": 1402}}
 	lost      = obj{"title": "Lost", "year": 2004, "ids": obj{"trakt": 511, "tmdb": 4607}}
 	noTMDBTV  = obj{"title": "Obscure Show", "year": 1970, "ids": obj{"trakt": 998, "tmdb": nil}}
+	theOA     = obj{"title": "The OA", "year": 2016, "ids": obj{"trakt": 101530, "tmdb": 69851}}
 )
 
 func ep(season, number, traktID, tmdbID int, title string) obj {
@@ -265,6 +266,9 @@ func (se *syncEnv) serveAccount() {
 			"next_episode": bb1x3, "last_episode": bb1x2, "stats": obj{"play_count": 2}}},
 		{"show": severance, "progress": obj{"aired": 19, "completed": 19, "last_watched_at": "2026-03-21T02:00:00.000Z", "reset_at": nil,
 			"next_episode": nil, "last_episode": ep(2, 10, 999000, 6999999, "Cold Harbor")}},
+		// Watchlisted, never started: not progress.
+		{"show": theOA, "progress": obj{"aired": 16, "completed": 0, "last_watched_at": nil, "reset_at": nil,
+			"next_episode": ep(1, 1, 2178520, 1213372, "Homecoming"), "last_episode": nil}},
 	})
 	// The calendar isn't paginated; it's served for whichever day the
 	// clock is on.
@@ -426,6 +430,7 @@ func TestSync_InitialImport(t *testing.T) {
 		{`SELECT concat_ws(' ', media_type, tmdb_id, rank, poster_path) FROM trakt_watchlist ORDER BY listed_at`,
 			[]string{"movie 603 2", "movie 693134 1 /m693134.jpg", "tv 95396 1 /t95396.jpg"}},
 		{`SELECT concat_ws(' ', section, tmdb_id) FROM trakt_hidden ORDER BY 1`, []string{"dropped 1402", "progress_watched 4607"}},
+		// The OA, watchlisted but never started, isn't progress.
 		{`SELECT concat_ws(' ', show_tmdb_id, aired, completed, last_season, last_episode, next_season, next_episode, next_episode_tmdb_id, next_still_path, poster_path)
 		  FROM trakt_show_progress ORDER BY 1`,
 			[]string{"1396 62 2 1 2 1 3 62087", "95396 19 19 2 10 /t95396.jpg"}},

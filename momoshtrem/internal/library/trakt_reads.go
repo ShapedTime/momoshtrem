@@ -459,7 +459,9 @@ type NewEpisodeCandidate struct {
 // NewEpisodeCandidates lists the regular episodes that aired from from
 // (midnight UTC; fromDate is its date) until now (today is its date): the
 // library shows' by air date and the calendar's by first airing, each
-// without a play. Shows dropped or hidden on Trakt are left out. One query.
+// without a play. The calendar also lists watchlisted shows, so its
+// entries count only for shows the user started (a progress row) or the
+// library has. Shows dropped or hidden on Trakt are left out. One query.
 func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, from, now time.Time, fromDate, today string) ([]NewEpisodeCandidate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT FALSE, s.tmdb_id, sn.season_number, e.episode_number, COALESCE(e.tmdb_episode_id, 0),
@@ -476,6 +478,8 @@ func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, from, now 
 		       COALESCE(c.episode_title, ''), COALESCE(c.still_path, ''), c.first_aired, ''
 		FROM trakt_calendar c
 		WHERE c.season > 0 AND c.first_aired >= $1 AND c.first_aired <= $2
+		  AND (EXISTS (SELECT 1 FROM trakt_show_progress p WHERE p.show_tmdb_id = c.show_tmdb_id)
+		    OR EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = c.show_tmdb_id))
 		  AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = c.show_tmdb_id)
 		  AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes w
 		                  WHERE w.show_tmdb_id = c.show_tmdb_id AND `+sameEpisode(traktEpisode("w"), traktEpisode("c"))+`)

@@ -165,7 +165,13 @@ func (w watchlistItem) item() (library.TraktWatchlistRow, bool) {
 	return out, true
 }
 
+// progress maps a show's progress. Trakt's bulk progress also lists
+// watchlisted shows never started (nothing completed, never watched, next
+// S01E01): those aren't progress, and are skipped.
 func (p progressItem) progress() (library.TraktShowProgressRow, bool) {
+	if p.Progress.Completed == 0 && p.Progress.LastWatchedAt == nil {
+		return library.TraktShowProgressRow{}, false
+	}
 	out := library.TraktShowProgressRow{
 		ShowTraktID: p.Show.IDs.Trakt, ShowTMDBID: p.Show.IDs.TMDB, Title: p.Show.Title, Year: p.Show.Year,
 		Aired: p.Progress.Aired, Completed: p.Progress.Completed,
