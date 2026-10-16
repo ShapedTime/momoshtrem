@@ -121,6 +121,9 @@ type Service interface {
 	// and download the torrent metadata.
 	// Returns ErrMetadataTimeout if metadata cannot be retrieved in time.
 	// Returns ErrInvalidMagnet if the magnet URI is invalid.
+	// A torrent whose metainfo is stored loads without waiting for peers.
+	// Adds, waits, drops and removes of one hash are serialised, and
+	// concurrent adds of one hash share one attempt.
 	AddTorrent(magnetURI string) (*TorrentInfo, error)
 
 	// GetTorrent returns information about an already-added torrent.
@@ -135,8 +138,11 @@ type Service interface {
 	// Returns ErrFileNotFound if the file path doesn't exist in the torrent.
 	GetFile(infoHash string, filePath string) (TorrentFileHandle, error)
 
-	// RemoveTorrent removes a torrent from the client.
-	// If deleteData is true, also deletes downloaded data.
+	// RemoveTorrent removes a torrent from the client (waiting for an add
+	// of it in flight) and deletes its stored metainfo. If deleteData is
+	// true, also deletes its pieces from the cache, from the live or the
+	// stored metainfo. The hash may be hex in either case, or base32.
+	// Returns ErrTorrentNotFound when it's neither loaded nor stored.
 	RemoveTorrent(infoHash string, deleteData bool) error
 
 	// ListTorrents returns status of all active torrents.

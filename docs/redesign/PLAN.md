@@ -313,9 +313,18 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - An episode is `needs_review` when one of those files targets it and it has no file, aired or not: a file (`ready`, `downloading`, `watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` or `upcoming` there, or in `EpisodeRange.missing`.
   - The frontier is about files: an aired episode under review is still part of it.
   - Cost: one more query for a title page or a season; `/library` reads it in its one query.
-- `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today). `DELETE /movies/{id}` and `DELETE /shows/{id}` → `204`.
+- `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today).
+- `DELETE /movies/{id}?delete_data=true|false` and `DELETE /shows/{id}?delete_data=` → `204` (B6, #96). `delete_data` defaults to `false`; any other value is `400 bad_request`. An unknown title is `404`.
+  - One transaction deletes the title (its seasons, episodes and jobs cascade) and deactivates its assignments, in one query for a whole show. The rows stay, inactive.
+  - Every subtitle of the title goes, from every source: the rows in one query, the files, and each item's folders (`{download_path}/{movie|episode}/{id}/` and `{download_path}/hdrezka/{movie|episode}/{id}/`).
+  - Each torrent the title used (its assignments, active or not, and its jobs) that `TorrentInUse` says nothing else uses is released: dropped from the client, with its data when `delete_data=true` (see "Torrents and activity (B6)").
+  - The WebDAV tree is rebuilt.
 - `POST /movies/{id}/refresh` (new) and `POST /shows/{id}/refresh` re-fetch TMDB metadata. The body is informational; refetch the title.
-- `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item.
+- `DELETE /movies/{id}/assign` and `DELETE /episodes/{id}/assign` → `204`. They drop the file and keep the item; an unknown item is `404`.
+  - The item's active assignment is deactivated.
+  - The subtitles that came with the file go: torrent rows, and HDRezka rows with their SRT files. Downloaded subtitles stay.
+  - The torrent is released when nothing else uses it, but its data is never deleted.
+  - The WebDAV tree is rebuilt, which renames a grouped entry's other episodes.
 - `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=added|title|last_watched|size&q=&page=&page_size=` (50 by default, max 200) → `Paginated<LibraryItem>`. Replaces the per-item TMDB calls. Types: `web/src/lib/api/contract/library.ts`.
   ```
   LibraryItem { id, media_type, tmdb_id, title, year, poster_path, availability_stage,
@@ -714,6 +723,20 @@ QualityProfile {
 - `GET /settings/ai` and `PUT /settings/ai` with `{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`.
 - `GET /settings/ai/usage`: month-to-date cost by feature.
 
+### Torrents and activity (B6)
+- **Hashes.** Every `/torrents/{hash}` route accepts hex in either case, or base32 (32 characters). Anything else is `400 bad_request`.
+- **`DELETE /torrents/{hash}?delete_data=true|false`** → `204` (#96). `delete_data` defaults to `false`; any other value is `400 bad_request`.
+  - It answers `404` only when nothing knows the hash: the torrent isn't loaded, no active torrent assignment uses it, and no open job has it (dry runs don't count).
+  - One transaction cancels its open jobs (dry runs too), deactivates its active assignments and deletes its `source = 'torrent'` subtitles. The rows stay, inactive, so history is kept.
+  - The torrent is dropped from the client. It first waits for an add of the torrent in flight, at most `add_timeout`, so the answer can come late. Readers still open on its files fail, and its stored metainfo is deleted.
+  - With `delete_data=true`, every piece is marked not complete, which deletes its file from the cache. The pieces come from the live info dict, else the stored metainfo. Partial pieces are left to the cache's LRU.
+  - When the torrent is neither loaded nor stored, the metainfo is fetched again from its newest magnet in the background, within `add_timeout`. Its data is then deleted, unless something uses the torrent again by then. Without peers, a log line says the data is left to the LRU.
+  - Then the WebDAV tree is rebuilt (`InvalidateTree`).
+- **Lifecycle** (`internal/torrent`).
+  - Adds, metadata waits, drops and removals of one hash are serialised in the torrent service. Concurrent adds (a job, a WebDAV read) share one attempt, so a timeout in one can't drop a torrent another is adding.
+  - When metadata arrives, the metainfo is stored in `{metadata_folder}/metainfo/<hash>.torrent`. An add loads it first, with no wait for peers.
+- **Releasing** a torrent (discard, title delete, unassign) drops it when `TorrentInUse` finds no active assignment and no open job using it.
+
 ### System
 - `GET /status[?refresh=1]` (G2) returns:
   ```
@@ -975,6 +998,11 @@ QualityProfile {
 - Honour `delete_data`.
 - Delete orphaned subtitles when items or torrents are removed.
 - Acceptance: tests for the speed calculation and the merged listing. The Activity view is never empty while the Library has assigned items.
+- **Landed in #96 (B6a):**
+  - The torrent and title deletes and the unassign cleanup (§6 "Torrents and activity (B6)" and "Titles and library"), run by `service.RemovalService`.
+  - The per-hash lifecycle and stored metainfo in `internal/torrent`.
+  - `torrent.NormalizeInfoHash`.
+  - The sweep of SRT files the assignment writer orphans is #82's.
 
 **B7 · Subtitles polish** (small; independent)
 - Owns `internal/subtitle`, `internal/opensubtitles` and `007_subtitles.sql`.

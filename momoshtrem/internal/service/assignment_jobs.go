@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/base32"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -456,17 +454,7 @@ func (s *JobService) aiAvailable(settings library.AISettings, job *library.Assig
 // (32 characters, used by some magnets) to hex, the form the torrent
 // client keys torrents by. It returns "" for anything else.
 func normalizeInfoHash(hash string) string {
-	switch len(hash) {
-	case 40:
-		if _, err := hex.DecodeString(hash); err == nil {
-			return strings.ToLower(hash)
-		}
-	case 32:
-		if raw, err := base32.StdEncoding.DecodeString(strings.ToUpper(hash)); err == nil && len(raw) == 20 {
-			return hex.EncodeToString(raw)
-		}
-	}
-	return ""
+	return torrent.NormalizeInfoHash(hash)
 }
 
 // magnetName is the magnet's display name (dn), else the hash: the job's

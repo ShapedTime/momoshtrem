@@ -253,12 +253,16 @@ func main() {
 		)
 	}
 
-	// Create torrent service
+	// Create torrent service. Each torrent's .torrent file is kept in
+	// {metadata_folder}/metainfo, so it loads again without waiting for
+	// peers, and its data can be deleted while it isn't loaded.
 	torrentService := torrent.NewService(
 		torrentClient,
 		activityManager,
 		time.Duration(cfg.Torrent.AddTimeout)*time.Second,
 		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
+		torrent.WithMetainfoStore(torrent.NewMetainfoStore(filepath.Join(cfg.Torrent.MetadataFolder, "metainfo"))),
+		torrent.WithPieceStorage(pieceStorage),
 	)
 	slog.Info("Torrent service initialized",
 		"add_timeout_seconds", cfg.Torrent.AddTimeout,
@@ -458,6 +462,18 @@ func main() {
 	})
 	apiOpts.Assignments = jobService
 	apiOpts.Review = jobService
+
+	// Removals: deleting torrents and titles and unassigning files, with
+	// their subtitles, jobs and the torrents nothing uses any more.
+	apiOpts.Removals = service.NewRemovalService(service.RemovalDeps{
+		Jobs:        library.NewAssignmentJobRepository(db),
+		Movies:      movieRepo,
+		Shows:       showRepo,
+		Assignments: assignmentRepo,
+		Torrents:    torrentService,
+		Subtitles:   subtitleService,
+		Tree:        libraryFS,
+	})
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)

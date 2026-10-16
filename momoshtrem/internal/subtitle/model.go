@@ -97,4 +97,7 @@ type SubtitleRepository interface {
 	GetDownloaded(ctx context.Context, itemType ItemType, itemID int64, languageCode string) (*Subtitle, error)
 	Delete(ctx context.Context, id int64) error
 	DeleteByItem(ctx context.Context, itemType ItemType, itemID int64) error
+	// DeleteByItems deletes the items' subtitles from the given sources
+	// (every source when none) in one query and returns the deleted rows.
+	DeleteByItems(ctx context.Context, items []Item, sources ...Source) ([]*Subtitle, error)
 }

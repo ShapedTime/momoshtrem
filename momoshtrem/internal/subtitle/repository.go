@@ -334,6 +334,47 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// DeleteByItems deletes the items' subtitles from the given sources (every
+// source when none are given) in one query, and returns the rows it
+// deleted, so the caller can remove their files.
+func (r *Repository) DeleteByItems(ctx context.Context, items []Item, sources ...Source) ([]*Subtitle, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	types := make([]string, len(items))
+	ids := make([]int64, len(items))
+	for i, it := range items {
+		types[i] = string(it.Type)
+		ids[i] = it.ID
+	}
+	var only []string // nil: every source
+	for _, src := range sources {
+		only = append(only, string(src))
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`DELETE FROM subtitles
+		 WHERE (item_type, item_id) IN (SELECT * FROM unnest($1::text[], $2::bigint[]))
+		   AND ($3::text[] IS NULL OR source = ANY($3::text[]))
+		 RETURNING `+subtitleColumns,
+		types, ids, only,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete subtitles for items: %w", err)
+	}
+	defer rows.Close()
+
+	var deleted []*Subtitle
+	for rows.Next() {
+		sub, err := scanSubtitle(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan subtitle: %w", err)
+		}
+		deleted = append(deleted, sub)
+	}
+	return deleted, rows.Err()
+}
+
 // DeleteByItem removes all subtitles for a library item
 func (r *Repository) DeleteByItem(ctx context.Context, itemType ItemType, itemID int64) error {
 	_, err := r.db.ExecContext(ctx,

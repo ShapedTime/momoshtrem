@@ -66,6 +66,9 @@ type Options struct {
 	// HDRezka searches HDRezka and assigns its streams. Nil (HDRezka off)
 	// makes those routes return 503.
 	HDRezka HDRezka
+	// Removals deletes torrents and titles and unassigns files, cleaning
+	// up after them. Nil makes those routes return 503.
+	Removals Removals
 }
 
 // NewServer creates a new API server
