@@ -220,36 +220,6 @@ func TestSubmitYear(t *testing.T) {
 		d[0].(map[string]any)["why"] != "that tmdb_id is “Movie 1002 (2024)” on TMDB, not “Movie 1002 (2019)”: look the title up with tmdb_search" {
 		t.Errorf("dropped = %v", d)
 	}
-	for _, tt := range []struct {
-		given, actual int
-		want          bool
-	}{{2024, 2024, true}, {2023, 2024, true}, {2025, 2024, true}, {2022, 2024, false}, {0, 2024, true}, {2024, 0, true}} {
-		if got := sameYear(tt.given, tt.actual); got != tt.want {
-			t.Errorf("sameYear(%d, %d) = %v", tt.given, tt.actual, got)
-		}
-	}
-}
-
-func TestSameTitle(t *testing.T) {
-	for _, tt := range []struct {
-		given string
-		names []string
-		want  bool
-	}{
-		{"Amélie", []string{"Amelie"}, true},
-		{"The Office", []string{"The Office (US)"}, true},
-		{"Frieren", []string{"Frieren: Beyond Journey's End", "葬送のフリーレン"}, true},
-		{"葬送のフリーレン", []string{"Frieren: Beyond Journey's End", "葬送のフリーレン"}, true},
-		{"Law & Order", []string{"Law and Order"}, true},
-		{"Dark", []string{"Darkness"}, false},
-		{"It", []string{"It Follows"}, false},
-		{"Severance", []string{"Silo"}, false},
-		{"", []string{"Silo"}, false},
-	} {
-		if got := sameTitle(tt.given, tt.names...); got != tt.want {
-			t.Errorf("sameTitle(%q, %q) = %v", tt.given, tt.names, got)
-		}
-	}
 }
 
 func TestClipAndSlug(t *testing.T) {

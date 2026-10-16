@@ -183,15 +183,17 @@ func decodeView(raw []byte) (*view, error) {
 }
 
 // metaOf is a title's facts from TMDB, as a pick's card shows them.
-// today is the server-local date: a title not out yet gets a badge.
-func metaOf(ctx context.Context, t TMDB, ref library.TitleRef, today time.Time) (recommend.ItemMeta, error) {
-	var m recommend.ItemMeta
+// today is the server-local date: a title not out yet gets a badge. names
+// are TMDB's names for it (its title and original title), to check the
+// model's name against.
+func metaOf(ctx context.Context, t TMDB, ref library.TitleRef, today time.Time) (m recommend.ItemMeta, names []string, err error) {
 	if ref.MediaType == library.TitleMovie {
 		d, err := t.MovieDetails(ctx, ref.TMDBID)
 		if err != nil {
-			return m, err
+			return m, nil, err
 		}
 		m.Title = d.Title
+		names = []string{d.Title, d.OriginalTitle}
 		m.Year = positive(yearOf(d.ReleaseDate))
 		m.PosterPath = nonEmpty(d.PosterPath)
 		m.RuntimeMinutes = positive(d.Runtime)
@@ -200,9 +202,10 @@ func metaOf(ctx context.Context, t TMDB, ref library.TitleRef, today time.Time) 
 	} else {
 		d, err := t.ShowDetails(ctx, ref.TMDBID)
 		if err != nil {
-			return m, err
+			return m, nil, err
 		}
 		m.Title = d.Name
+		names = []string{d.Name, d.OriginalName}
 		m.Year = positive(yearOf(d.FirstAirDate))
 		if d.Status == "Ended" || d.Status == "Canceled" {
 			m.YearEnd = positive(yearOf(d.LastAirDate))
@@ -223,7 +226,7 @@ func metaOf(ctx context.Context, t TMDB, ref library.TitleRef, today time.Time) 
 		m.ReleaseDate = dateOf(d.FirstAirDate)
 	}
 	m.Badge = badgeOf(m.ReleaseDate, today)
-	return m, nil
+	return m, names, nil
 }
 
 // badgeOf labels a title that isn't out yet: "Jan 16" within the next

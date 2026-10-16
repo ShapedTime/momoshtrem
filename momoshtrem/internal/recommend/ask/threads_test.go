@@ -168,6 +168,64 @@ func TestAsk_ShowPicksChecks(t *testing.T) {
 	}
 }
 
+// show_picks checks each pick's id against the title and year the model
+// names, as R2's shelves do: #160's live run showed The Mandalorian's card
+// with Upload's reason when the model sent an id from memory. A mismatch
+// is dropped with what the id is, and a resubmission with the right id
+// shows.
+func TestAsk_ShowPicksChecksTheID(t *testing.T) {
+	h := newHarness(t, newMemStore(),
+		fake.Response{Blocks: []fake.Block{toolUse("toolu_1", "show_picks", picksInput("Two.", []string{"Lighter"},
+			namedPick("tv", 1001, "Upload", 2020, "Afterlife satire", "The Good Place's warmth."),
+			namedPick("tv", 1002, "Party Down", 2015, "Ensemble", "A remake, by its year."),
+			namedPick("movie", 2002, "the menu", 0, "Dark comedy", "Loosely named, year unsure."),
+		))}},
+		fake.Response{Blocks: []fake.Block{toolUse("toolu_2", "show_picks", picksInput("", nil,
+			namedPick("tv", 1001, "Mythic Quest", 2020, "Workplace", "Looked up this time."),
+		))}},
+		fake.Response{Blocks: []fake.Block{fake.Text("Enjoy.")}},
+	)
+	events := h.open(`{"message":"something like Severance but lighter"}`).all()
+
+	var shown []string
+	for _, e := range events {
+		if e.Name == "item" {
+			shown = append(shown, field[string](t, e, "title"))
+		}
+	}
+	if strings.Join(shown, "|") != "The Menu|Mythic Quest" {
+		t.Errorf("shown = %v, want The Menu, then Mythic Quest once resubmitted", shown)
+	}
+
+	msgs := h.api.Requests()[1].Messages()
+	var result struct {
+		Content []struct {
+			Content string `json:"content"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(msgs[len(msgs)-1], &result); err != nil {
+		t.Fatal(err)
+	}
+	var answer struct {
+		Dropped []struct {
+			TMDBID int    `json:"tmdb_id"`
+			Why    string `json:"why"`
+		} `json:"dropped"`
+	}
+	if err := json.Unmarshal([]byte(result.Content[0].Content), &answer); err != nil {
+		t.Fatalf("show_picks answered %s: %v", result.Content[0].Content, err)
+	}
+	why := map[int]string{}
+	for _, d := range answer.Dropped {
+		why[d.TMDBID] = d.Why
+	}
+	if why[1001] != "that tmdb_id is “Mythic Quest (2020)” on TMDB, not “Upload (2020)”: look the title up with tmdb_search" ||
+		why[1002] != "that tmdb_id is “Party Down (2009)” on TMDB, not “Party Down (2015)”: look the title up with tmdb_search" ||
+		len(answer.Dropped) != 2 {
+		t.Errorf("show_picks answered %s", result.Content[0].Content)
+	}
+}
+
 // show_picks fits the request's strict schema budget: every object
 // closed, every property required (no optional parameters), no unions
 // across all of Ask's custom tools, and fewer than 20 strict tools.

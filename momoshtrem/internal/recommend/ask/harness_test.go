@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,8 +129,31 @@ func picksInput(intro string, refinements []string, items ...map[string]any) map
 	return map[string]any{"intro": intro, "items": items, "refinements": refinements}
 }
 
+// pick names the title as testTMDB has it, as the model would ("Unknown"
+// for an id TMDB doesn't know); namedPick names it as given.
 func pick(mediaType string, id int, tag, reason string) map[string]any {
-	return map[string]any{"media_type": mediaType, "tmdb_id": id, "match_tag": tag, "reason": reason}
+	title, year := "Unknown", 0
+	if mediaType == "movie" {
+		if d, err := testTMDB.MovieDetails(context.Background(), id); err == nil {
+			title, year = d.Title, testYear(d.ReleaseDate)
+		}
+	} else if d, err := testTMDB.ShowDetails(context.Background(), id); err == nil {
+		title, year = d.Name, testYear(d.FirstAirDate)
+	}
+	return namedPick(mediaType, id, title, year, tag, reason)
+}
+
+// testYear is a TMDB date's year, 0 without one.
+func testYear(date string) int {
+	if len(date) < 4 {
+		return 0
+	}
+	y, _ := strconv.Atoi(date[:4])
+	return y
+}
+
+func namedPick(mediaType string, id int, title string, year int, tag, reason string) map[string]any {
+	return map[string]any{"media_type": mediaType, "tmdb_id": id, "title": title, "year": year, "match_tag": tag, "reason": reason}
 }
 
 var anyCandidates = map[string]any{"media_type": "any", "genres": []string{}, "min_runtime": 0, "max_runtime": 0,

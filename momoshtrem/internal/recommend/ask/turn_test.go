@@ -189,15 +189,15 @@ func TestAsk_EndWriteFailures(t *testing.T) {
 	})
 }
 
-// ask-v1's system prompt and tool definitions are pinned: a thread replays
-// them as they were. When this fails, R1's tools, show_picks, the system
-// prompt or the core's encoding changed: add a new prompt version for new
-// threads, and retire ask-v1 from prompts (its threads then answer
-// thread_full), since the old definitions aren't kept. Only then update
-// the hash.
+// The current version's system prompt and tool definitions are pinned: a
+// thread replays them as they were. When this fails, R1's tools,
+// show_picks, the system prompt or the core's encoding changed: add a new
+// prompt version for new threads, and retire the old one from prompts (its
+// threads then answer thread_full), since the old definitions aren't kept.
+// Only then update the hash. ask-v1 retired in #160.
 func TestAsk_PromptVersionPinned(t *testing.T) {
 	pinned := map[string]string{
-		"ask-v1": "9bddc3bca2e935ba0bb5621bb27dedd9b3525bb6a365cec9e7c78db24865c1cb",
+		"ask-v2": "1ff3a6570e82e0f9df4207be9faf0d69d4c436efe9c431123483f50bf8917165",
 	}
 	h := newHarness(t, newMemStore(), fake.Response{Blocks: []fake.Block{fake.Text("Hi.")}})
 	h.open(`{"message":"hi"}`).all()
