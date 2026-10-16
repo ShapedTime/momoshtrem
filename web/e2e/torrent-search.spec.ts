@@ -200,6 +200,213 @@ test.describe('Torrent search', () => {
 });
 
 /**
+ * Filters, sort and Inspect (#93): the chip row, the nested Filters, Sort and
+ * Inspect sheets, and filtered-empty. Frieren's S01E29 has 27 results: 3 in
+ * 2160p, none of them with 100 seeders; its 29–38 batch inspects to 16 files.
+ */
+test.describe('Torrent search: filters, sort and Inspect', () => {
+  const chipRow = (page: Page) => sheet(page).getByRole('group', { name: 'Filter and sort' });
+  const filtersSheet = (page: Page) => page.getByRole('dialog', { name: 'Filters' });
+  const inspectSheet = (page: Page) => page.getByRole('dialog', { name: /^Inspect · nothing downloads yet/ });
+  const status = (page: Page, count: number) => sheet(page).getByText(`${count} results · Nyaa, TorrentLeech, The Pirate Bay`);
+
+  test('a quick chip filters at once, and the counts follow', async ({ page }, testInfo) => {
+    await signIn(page, FRIEREN_E29);
+    const chips = chipRow(page);
+    const uhd = chips.getByRole('button', { name: /^2160p/ });
+    await expect(uhd).toHaveAccessibleName('2160p 3');
+    await expect(chips.getByRole('button', { name: 'Sort: Best' })).toBeVisible();
+    const wide = chips.getByRole('button', { name: /^x265/ });
+    // Codec and Dolby Vision join from 640 px; DV finds nothing here, so it's disabled
+    if (testInfo.project.name === 'mobile') await expect(wide).toBeHidden();
+    else {
+      await expect(wide).toHaveAccessibleName('x265 13');
+      await expect(chips.getByRole('button', { name: /^Dolby Vision/ })).toBeDisabled();
+    }
+
+    await uhd.click();
+    await expect(uhd).toHaveAttribute('aria-pressed', 'true');
+    await expect(status(page, 3)).toBeVisible();
+    await expect(sheet(page).getByRole('article')).toHaveCount(3);
+    await expect(chips.getByRole('button', { name: 'Filters, 1 on' })).toBeVisible();
+    // Disjunctive: 2160p's own facet keeps its counts, the others narrow
+    await expect(chips.getByRole('button', { name: /^1080p/ })).toHaveAccessibleName('1080p 20');
+    if (testInfo.project.name === 'desktop') await expect(wide).toHaveAccessibleName('x265 3');
+    await expectAccessibleAndContained(page);
+
+    await uhd.click();
+    await expect(uhd).toHaveAttribute('aria-pressed', 'false');
+    await expect(status(page, 27)).toBeVisible();
+  });
+
+  test('the Filters sheet edits a draft: Show N counts it, Cancel drops it, Show applies it', async ({ page }) => {
+    await signIn(page, FRIEREN_E29);
+    const opener = chipRow(page).getByRole('button', { name: 'Filters' });
+    await opener.click();
+    const filters = filtersSheet(page);
+    const show = filters.getByRole('button', { name: /^Show / });
+    await expect(show).toHaveText('Show 27 results');
+    await filters.getByRole('group', { name: 'Pack type' }).getByRole('button', { name: /^Season \d/ }).click();
+    await expect(show).toHaveText('Show 7 results');
+    const maximum = filters.getByRole('slider', { name: 'Maximum size' });
+    await expect(maximum).toHaveAttribute('aria-valuetext', 'No maximum');
+    await maximum.fill('50');
+    await expect(maximum).toHaveAttribute('aria-valuetext', '1.4 GB');
+    // Season packs up to 1.4 GB an episode
+    await expect(show).toHaveText('Show 3 results');
+
+    await filters.getByRole('button', { name: 'Cancel' }).click();
+    await expect(filters).toBeHidden();
+    await expect(opener).toBeFocused();
+    await expect(status(page, 27)).toBeVisible();
+
+    // A new draft each time: nothing was applied
+    await opener.click();
+    await expect(show).toHaveText('Show 27 results');
+    await filters.getByRole('group', { name: 'Pack type' }).getByRole('button', { name: /^Season \d/ }).click();
+    await expect(show).toHaveText('Show 7 results');
+    await show.click();
+    await expect(filters).toBeHidden();
+    await expect(status(page, 7)).toBeVisible();
+    await expect(chipRow(page).getByRole('button', { name: 'Filters, 1 on' })).toBeFocused();
+
+    await chipRow(page).getByRole('button', { name: 'Filters, 1 on' }).click();
+    await filters.getByRole('button', { name: 'Reset' }).click();
+    await expect(show).toHaveText('Show 27 results');
+    // Last: the 320 px check swaps the panel for a drawer, which remounts the openers
+    await expectAccessibleAndContained(page);
+  });
+
+  test('the Sort sheet: a pick reorders, closes, and the best match steps aside', async ({ page }) => {
+    await signIn(page, FRIEREN_E29);
+    const opener = chipRow(page).getByRole('button', { name: 'Sort: Best' });
+    await opener.click();
+    const sort = page.getByRole('dialog', { name: 'Sort by' });
+    await expect(sort.getByRole('button', { name: /^Best match/ })).toHaveAttribute('aria-pressed', 'true');
+    await sort.getByRole('button', { name: /^Seeders/ }).click();
+    await expect(sort).toBeHidden();
+    await expect(chipRow(page).getByRole('button', { name: 'Sort: Seeders' })).toBeFocused();
+    await expect(sheet(page).getByRole('heading', { name: 'Results · sorted by seeders' })).toBeVisible();
+    await expect(sheet(page).getByText(/Best match/)).toHaveCount(0);
+    const cards = sheet(page).getByRole('article');
+    await expect(cards.nth(0)).toHaveAccessibleName(BATCH);
+    await expect(cards.nth(1)).toHaveAccessibleName('[SubsPlease] Sousou no Frieren - 29 (1080p) [9E3C5D21].mkv');
+
+    await chipRow(page).getByRole('button', { name: 'Sort: Seeders' }).click();
+    await sort.getByRole('button', { name: /^Size/ }).click();
+    await expect(sheet(page).getByRole('heading', { name: 'Results · sorted by size' })).toBeVisible();
+    await expect(cards.nth(0)).toHaveAccessibleName('[MiniFreeza] Frieren - 29 [480p HEVC]');
+
+    await chipRow(page).getByRole('button', { name: 'Sort: Size' }).click();
+    await expect(sort.getByRole('button', { name: /^Size/ })).toHaveAttribute('aria-pressed', 'true');
+    await expectAccessibleAndContained(page);
+  });
+
+  test('filtered to nothing: the filters by name, removable, then Clear all', async ({ page }) => {
+    await signIn(page, FRIEREN_E29);
+    await chipRow(page).getByRole('button', { name: 'Filters' }).click();
+    const filters = filtersSheet(page);
+    await filters.getByRole('group', { name: 'Resolution' }).getByRole('button', { name: /^2160p/ }).click();
+    await filters.getByRole('group', { name: 'Minimum seeders' }).getByRole('button', { name: '100+' }).click();
+    await filters.getByRole('slider', { name: 'Maximum size' }).fill('44');
+    await filters.getByRole('button', { name: 'Show 0 results' }).click();
+
+    const dialog = sheet(page);
+    await expect(dialog.getByRole('heading', { name: 'Your filters hide all 27 results' })).toBeVisible();
+    await expect(dialog.getByText('2160p, Up to 1 GB and 100+ seeders together match nothing for this episode.')).toBeVisible();
+    const active = dialog.getByRole('group', { name: 'Active filters' });
+    await expect(active.getByRole('button')).toHaveText(['2160p', 'Up to 1 GB', '100+ seeders']);
+    await expectAccessibleAndContained(page);
+
+    await active.getByRole('button', { name: '100+ seeders' }).click();
+    await expect(dialog.getByText('2160p and Up to 1 GB together match nothing for this episode.')).toBeVisible();
+    await expect(chipRow(page).getByRole('button', { name: 'Filters, 2 on' })).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Clear all filters' }).click();
+    await expect(status(page, 27)).toBeVisible();
+    await expect(chipRow(page).getByRole('button', { name: 'Filters' })).toBeVisible();
+  });
+
+  test('Inspect a show’s release: the steps and groups, then Add & review mapping', async ({ page }) => {
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('article', { name: BATCH }).getByRole('button', { name: 'Inspect' }).click();
+    const inspect = inspectSheet(page);
+    await expect(inspect).toHaveAccessibleName(/^Inspect · nothing downloads yet 16 files · \d+\.\d GB$/, { timeout: 15_000 });
+    await expect(inspect.getByText('Asked AI about 3 tricky ones')).toBeVisible();
+    const willMap = inspect.getByRole('list', { name: 'Will map · 9 episodes' });
+    await expect(willMap.getByRole('listitem').first()).toContainText('S01E29 Let’s Go Somewhere We Can’t Reach');
+    await expect(willMap.getByText('+ 5 more, all high confidence')).toBeVisible();
+    await expect(inspect.getByRole('list', { name: 'You’ll review · 3 files' })).toContainText('AI: "v2" is a re-release of #35');
+    await expect(inspect.getByRole('list', { name: 'Specials · 1' })).toContainText('S00E06');
+    await expect(inspect.getByRole('list', { name: 'Ignored · 3' })).toContainText('Opening (creditless)');
+    await expectAccessibleAndContained(page);
+
+    await inspect.getByRole('button', { name: 'Add & review mapping' }).click();
+    await expect(page).toHaveURL(/\/mapping\/\d+$/);
+    await expect(page.getByText(BATCH).first()).toBeVisible();
+  });
+
+  test('Inspect a movie’s release: the file it would use, then Add & download', async ({ page }) => {
+    await signIn(page, BATTLE);
+    const best = sheet(page).getByRole('article', { name: BATTLE_BEST });
+    await best.getByRole('button', { name: 'Inspect' }).click();
+    const inspect = inspectSheet(page);
+    await expect(inspect).toHaveAccessibleName(/2 files · 14\.3 GB$/, { timeout: 15_000 });
+    await expect(inspect.getByRole('list', { name: 'Will map · 1 file' })).toContainText('One Battle After Another');
+    await expect(inspect.getByRole('list', { name: 'Ignored · 1' })).toContainText('Sample');
+    await expectAccessibleAndContained(page);
+
+    await inspect.getByRole('button', { name: 'Add & download' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Torrent assigned to movie' })).toBeVisible({ timeout: 20_000 });
+    await expect(inspect).toBeHidden();
+    await expect(best.getByText('Added')).toBeVisible();
+  });
+
+  test('a dry run that fails says why, with Retry', async ({ page }) => {
+    await scenario(page, 'job-failed');
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('article', { name: BATCH }).getByRole('button', { name: 'Inspect' }).click();
+    const alert = inspectSheet(page).getByRole('alert');
+    await expect(alert).toContainText('Couldn’t look inside this torrent');
+    await expect(alert).toContainText('No peers sent the torrent’s file list within 60 s.');
+    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
+  });
+
+  test('nested sheets: Esc closes only the top one, and focus goes back to its opener', async ({ page }) => {
+    await signIn(page, FRIEREN_E29);
+    const filtersChip = chipRow(page).getByRole('button', { name: 'Filters' });
+    await filtersChip.click();
+    await expect(filtersSheet(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(filtersSheet(page)).toBeHidden();
+    await expect(sheet(page)).toBeVisible();
+    await expect(filtersChip).toBeFocused();
+
+    const inspectButton = sheet(page).getByRole('article', { name: BATCH }).getByRole('button', { name: 'Inspect' });
+    await inspectButton.click();
+    await expect(inspectSheet(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(inspectSheet(page)).toBeHidden();
+    await expect(sheet(page)).toBeVisible();
+    await expect(inspectButton).toBeFocused();
+
+    // One more Esc closes the search itself
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toBeHidden();
+  });
+
+  test('what the quality profile hid, when nothing else is left', async ({ page }) => {
+    await signIn(page, BATTLE);
+    const field = sheet(page).getByRole('searchbox', { name: 'Search releases' });
+    await field.fill('HDCAM');
+    await field.press('Enter');
+    await expect(sheet(page).getByRole('heading', { name: 'No releases for “HDCAM”' })).toBeVisible();
+    await expect(sheet(page).getByText('1 hidden by your quality profile')).toBeVisible();
+    await expect(sheet(page).getByRole('link', { name: 'Quality settings' })).toHaveAttribute('href', '/settings?section=quality');
+  });
+});
+
+/**
  * PR screenshots of the sheet's states at 390 and 1440, written to
  * docs/screenshots/v2/torrent/. Skipped in normal runs:
  *   SCREENSHOTS=1 npx playwright test torrent-search && node scripts/optimize-screenshots.mjs ../docs/screenshots/v2/torrent
@@ -250,5 +457,52 @@ test.describe('Torrent search screenshots', () => {
     await signIn(page, BATTLE);
     await expect(sheet(page).getByRole('article', { name: BATTLE_BEST })).toBeVisible();
     await shoot(page, testInfo, 'movie');
+  });
+
+  test('filters', async ({ page }, testInfo) => {
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('button', { name: 'Filters' }).click();
+    await expect(page.getByRole('dialog', { name: 'Filters' }).getByRole('button', { name: 'Show 27 results' })).toBeVisible();
+    await shoot(page, testInfo, 'filters');
+  });
+
+  test('sort', async ({ page }, testInfo) => {
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('button', { name: 'Sort: Best' }).click();
+    await expect(page.getByRole('dialog', { name: 'Sort by' })).toBeVisible();
+    await shoot(page, testInfo, 'sort');
+  });
+
+  test('filtered-empty', async ({ page }, testInfo) => {
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('button', { name: 'Filters' }).click();
+    const filters = page.getByRole('dialog', { name: 'Filters' });
+    await filters.getByRole('group', { name: 'Resolution' }).getByRole('button', { name: /^2160p/ }).click();
+    await filters.getByRole('group', { name: 'Minimum seeders' }).getByRole('button', { name: '100+' }).click();
+    await filters.getByRole('button', { name: 'Show 0 results' }).click();
+    await expect(sheet(page).getByRole('heading', { name: 'Your filters hide all 27 results' })).toBeVisible();
+    await shoot(page, testInfo, 'filtered-empty');
+  });
+
+  test('inspect-working', async ({ page }, testInfo) => {
+    await scenario(page, 'job-hold:classifying');
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('article', { name: BATCH }).getByRole('button', { name: 'Inspect' }).click();
+    await expect(page.getByRole('dialog', { name: /^Inspect/ }).getByText('Fetched file list')).toBeVisible({ timeout: 15_000 });
+    await shoot(page, testInfo, 'inspect-working');
+  });
+
+  test('inspect', async ({ page }, testInfo) => {
+    await signIn(page, FRIEREN_E29);
+    await sheet(page).getByRole('article', { name: BATCH }).getByRole('button', { name: 'Inspect' }).click();
+    await expect(page.getByRole('dialog', { name: /16 files/ }).getByRole('heading', { name: 'Will map · 9 episodes' })).toBeVisible({ timeout: 15_000 });
+    await shoot(page, testInfo, 'inspect');
+  });
+
+  test('inspect-movie', async ({ page }, testInfo) => {
+    await signIn(page, BATTLE);
+    await sheet(page).getByRole('article', { name: BATTLE_BEST }).getByRole('button', { name: 'Inspect' }).click();
+    await expect(page.getByRole('dialog', { name: /2 files/ }).getByRole('heading', { name: 'Will map · 1 file' })).toBeVisible({ timeout: 15_000 });
+    await shoot(page, testInfo, 'inspect-movie');
   });
 });
