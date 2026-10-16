@@ -168,7 +168,7 @@ test.describe('Settings › Trakt', () => {
     await scenario(page, 'trakt-unconfigured');
     await signIn(page, SECTION);
     const note = page.getByText('Trakt isn’t set up on this server').locator('..');
-    for (const name of ['TRAKT_CLIENT_ID', 'TRAKT_CLIENT_SECRET', 'SECRET_KEY']) await expect(note.getByText(name, { exact: true })).toBeVisible();
+    for (const name of ['TRAKT_CLIENT_ID', 'SECRET_KEY']) await expect(note.getByText(name, { exact: true })).toBeVisible();
     await expect(connectButton(page)).toHaveCount(0);
     await expectAccessibleAndContained(page);
     await expect(await navTrakt(page)).toContainText('Not set up');

@@ -21,8 +21,8 @@ export const SYNC_EVERY_MINUTES = 30;
 /** Trakt's device codes last 10 minutes (`expires_in: 600`); the expiry bar runs over that. */
 export const CODE_LIFETIME_SECONDS = 600;
 
-/** What the server needs before Trakt can connect (PLAN §4). */
-export const TRAKT_ENV = ['TRAKT_CLIENT_ID', 'TRAKT_CLIENT_SECRET', 'SECRET_KEY'] as const;
+/** What the server needs before Trakt can connect (PLAN §4); TRAKT_CLIENT_SECRET is optional (new Trakt apps have none). */
+export const TRAKT_ENV = ['TRAKT_CLIENT_ID', 'SECRET_KEY'] as const;
 
 /** `approvedCode`: the code "I've approved it" was pressed for, if any. */
 export function traktScreen(integration: TraktIntegration, approvedCode: string | null): TraktScreen {

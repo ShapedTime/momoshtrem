@@ -465,7 +465,7 @@ export type TraktResult<T> = { ok: true; value: T } | { ok: false; status: numbe
 export function connectTrakt(now = Date.now()): TraktResult<TraktConnect> {
   const a = current(now);
   if (!a.configured) {
-    return { ok: false, status: 503, code: 'unavailable', message: 'Trakt isn’t set up: set TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET and SECRET_KEY.' };
+    return { ok: false, status: 503, code: 'unavailable', message: 'Trakt isn’t set up: set TRAKT_CLIENT_ID and SECRET_KEY.' };
   }
   if (a.state === 'connected') return { ok: false, status: 409, code: 'conflict', message: 'Trakt is already connected.' };
   if (a.state === 'pending' && a.pending && Date.parse(a.pending.expires_at) > now) return { ok: true, value: a.pending };
