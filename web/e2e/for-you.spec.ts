@@ -132,7 +132,7 @@ test.describe('For You', () => {
     // Library pills on TMDB cards
     await expect(region(page, 'Popular movies').locator('article.pcard').filter({ hasText: 'Dune: Part Two' })).toContainText('Ready');
     // On a 390 × 844 phone, Connect Trakt's amber sits right under the glass tab bar, which
-    // dims its labels there; the tab bar's contrast depends on what scrolls under it, not on this page
+    // dims its labels there; the tab bar's contrast depends on what scrolls under it, not on this page (#144)
     await expectAccessibleAndContained(page, ['.tabbar']);
   });
 
