@@ -163,6 +163,9 @@ func (me *Cache) SetReserve(bytes int64) {
 // order among themselves, so the trim takes them before anything else.
 // A pinned piece keeps the demoted times for when it's unpinned. A later
 // read or write of an item makes it recent again.
+//
+// Demotion is in memory only: after a restart the rescan stamps items with
+// their files' times again, so callers demote again after Ready.
 func (me *Cache) Demote(hexes []string) {
 	me.mu.Lock()
 	defer me.mu.Unlock()
@@ -242,8 +245,12 @@ func (me *Cache) deferTrimFor(fallback time.Duration) {
 		return
 	}
 	me.deferring = true
+	// The generation keeps a stale timer, one that fired as Ready stopped
+	// it, from ending a later DeferTrim.
+	me.deferGen++
+	gen := me.deferGen
 	me.readyTimer = time.AfterFunc(fallback, func() {
-		if me.ready() {
+		if me.fallback(gen) {
 			slog.Warn("piece cache: pins weren't restored in time; trimming resumes",
 				"component", "piececache", "after", fallback)
 		}
@@ -253,13 +260,24 @@ func (me *Cache) deferTrimFor(fallback time.Duration) {
 // Ready ends DeferTrim. It doesn't trim: the next update or TrimToCapacity
 // does. Without DeferTrim it does nothing.
 func (me *Cache) Ready() {
-	me.ready()
-}
-
-// ready ends deferring, and says whether it was on.
-func (me *Cache) ready() bool {
 	me.mu.Lock()
 	defer me.mu.Unlock()
+	me.endDeferring()
+}
+
+// fallback is the timer of DeferTrim's generation gen: it ends deferring if
+// that DeferTrim still holds, and says whether it did.
+func (me *Cache) fallback(gen uint64) bool {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	if gen != me.deferGen {
+		return false
+	}
+	return me.endDeferring()
+}
+
+// endDeferring ends deferring, and says whether it was on.
+func (me *Cache) endDeferring() bool {
 	if !me.deferring {
 		return false
 	}

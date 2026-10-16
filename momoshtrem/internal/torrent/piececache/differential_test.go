@@ -27,10 +27,14 @@ import (
 // The LRU orders are compared by rank, since the two caches stamp their
 // own times. Every stamp comes from time.Now() and is preceded by a system
 // call, so there are no ties. Rename is the one operation that stamps an
-// item with its file's times (upstream stats the new name), which the two
-// folders don't share: the test renames only when the cache is within its
-// capacity, so that rename's own update trims nothing, and then reopens the
-// new name, which stamps it with time.Now() in both.
+// item with its file's times (upstream stats the new name), so the test
+// sets the source's times first, to the same past time in both folders.
+// That makes the renamed item the least recently used, which is the one
+// case without pins where the trim's victim is the key being updated while
+// other items remain: a rename over capacity evicts it, as upstream does.
+
+// renameEpoch is long before any time.Now() stamp.
+var renameEpoch = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // diffKeys is the key pool. No key is a directory of another, so no
 // operation fails halfway and leaves upstream's asynchronous prune behind.
@@ -169,9 +173,8 @@ func payload(r *rand.Rand, max int) []byte {
 	return b
 }
 
-// randomOp picks an operation. upstream is consulted only for the rename
-// guard, which needs the fill and the capacity.
-func randomOp(r *rand.Rand, upstream *diffCache) diffOp {
+// randomOp picks an operation, the same for both sides.
+func randomOp(r *rand.Rand) diffOp {
 	k := diffKeys[r.IntN(len(diffKeys))]
 	switch n := r.IntN(100); {
 	case n < 22: // a chunk write, as WriteAt through the resource does
@@ -214,22 +217,24 @@ func randomOp(r *rand.Rand, upstream *diffCache) diffOp {
 			return errResult(c.remove(k))
 		}}
 	case n < 64:
+		// The new name is stamped with the file's times: set them first, to
+		// a time long past, the same in both folders. So the renamed item is
+		// the least recently used, and a rename over capacity evicts it.
+		// Half the renames follow a capacity change, which doesn't trim, so
+		// that they often run over capacity.
 		to := diffKeys[r.IntN(len(diffKeys))]
-		capacity, filled, _, _ := upstream.info()
-		if capacity >= 0 && filled > capacity {
-			return diffOp{"trim (for a rename over capacity)", func(c *diffCache) result {
-				c.trim()
-				return result{}
-			}}
+		when := renameEpoch.Add(time.Duration(r.IntN(1<<20)) * time.Second)
+		capacity := int64(-2) // no change
+		if r.IntN(2) == 0 {
+			capacity = diffCapacities[r.IntN(len(diffCapacities))]
 		}
-		return diffOp{fmt.Sprintf("rename %q %q", k, to), func(c *diffCache) result {
-			err := c.rename(k, to)
-			if err == nil {
-				if f, err := c.open(to, os.O_RDONLY); err == nil {
-					f.Close()
-				}
+		return diffOp{fmt.Sprintf("rename %q %q (file times %s, capacity %d first)", k, to, when.Format(time.DateTime), capacity), func(c *diffCache) result {
+			if capacity != -2 {
+				c.setCapacity(capacity)
 			}
-			return errResult(err)
+			// A missing source fails here and in the rename alike.
+			_ = os.Chtimes(filepath.Join(c.root, filepath.FromSlash(k)), when, when)
+			return errResult(c.rename(k, to))
 		}}
 	case n < 72:
 		capacity := diffCapacities[r.IntN(len(diffCapacities))]
@@ -378,6 +383,41 @@ func mapsEqual[V comparable](a, b map[string]V) bool {
 	return true
 }
 
+// TestRenameOverCapacityMatchesUpstream is the one case without pins where
+// the trim's victim is the key being updated while other items remain: a
+// rename over capacity, whose new name carries old file times. Upstream
+// evicts it, and so must piececache.
+func TestRenameOverCapacityMatchesUpstream(t *testing.T) {
+	u, p := newUpstreamSide(t), newPiececacheSide(t)
+	for _, c := range []*diffCache{u, p} {
+		for _, k := range []string{"a", "b", "c"} {
+			f, err := c.open(k, os.O_CREATE|os.O_WRONLY)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Write(make([]byte, 10)); err != nil {
+				t.Fatal(err)
+			}
+			f.Close()
+		}
+		// 30 bytes in 25: over capacity, as SetCapacity doesn't trim.
+		c.setCapacity(25)
+		if err := os.Chtimes(filepath.Join(c.root, "c"), renameEpoch, renameEpoch); err != nil {
+			t.Fatal(err)
+		}
+		// Forgetting c leaves 20 bytes; d brings back 30 and is the
+		// oldest item, so the trim evicts d.
+		if err := c.rename("c", "d"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compareSides(t, u, p)
+	sizes, _ := itemsOf(p)
+	if _, ok := sizes["d"]; ok || len(sizes) != 2 {
+		t.Errorf("items %v, want a and b: the renamed item is evicted", sizes)
+	}
+}
+
 func TestDifferentialAgainstUpstream(t *testing.T) {
 	seeds, steps := 24, 400
 	if testing.Short() {
@@ -396,7 +436,7 @@ func TestDifferentialAgainstUpstream(t *testing.T) {
 			}()
 			var log []string
 			for step := range steps {
-				op := randomOp(r, u)
+				op := randomOp(r)
 				log = append(log, op.desc)
 				ur, pr := op.apply(u), op.apply(p)
 				if ur.err != pr.err || ur.n != pr.n || !bytes.Equal(ur.data, pr.data) || !slices.Equal(ur.names, pr.names) {

@@ -42,7 +42,7 @@ diff -r "$(go env GOMODCACHE)/github.com/anacrolix/missinggo/v2@v2.10.0/filecach
 - `TrimToCapacity` trims with no protected key.
 
 ### Deferred trimming (`pins.go`)
-- `DeferTrim()` skips every trim, `TrimToCapacity`'s included, until `Ready()`. A fallback timer calls `Ready` after `ReadyFallback` (2 minutes) and logs a warning.
+- `DeferTrim()` skips every trim, `TrimToCapacity`'s included, until `Ready()`. A fallback timer ends the deferral after `ReadyFallback` (2 minutes) and logs a warning. Each `DeferTrim` has its own generation, so a timer that fired as `Ready` stopped it can't end a later `DeferTrim`.
 - `Ready()` doesn't trim; the next update or `TrimToCapacity` does.
 - `InitStorage` doesn't call `DeferTrim`, so production trims from the first write as it did with `filecache`.
 
@@ -54,7 +54,7 @@ diff -r "$(go env GOMODCACHE)/github.com/anacrolix/missinggo/v2@v2.10.0/filecach
 ### Queries (`pins.go`)
 - `HavePieces([]PieceRef) []bool`: whether `completed/<hex>` exists with the piece's length, as anacrolix's completion check stats it. It reads the cache's own record of its files, not the disk.
 - `PieceRefFor(metainfo.Piece)` names a piece as the storage does (v1 hash in hex, and its length). It returns false for a pure v2 torrent's piece.
-- `Demote(hexes)` makes those pieces' items the least recently used, so the trim takes them first. Their order among themselves is kept. A pinned item keeps the demoted time for when it's unpinned, and a later access makes an item recent again.
+- `Demote(hexes)` makes those pieces' items the least recently used, so the trim takes them first. Their order among themselves is kept. A pinned item keeps the demoted time for when it's unpinned, and a later access makes an item recent again. Demotion is in memory only: after a restart the rescan stamps items with their files' times again, so callers demote again after `Ready`.
 
 ## Behaviour differences from upstream
 
@@ -64,7 +64,13 @@ diff -r "$(go env GOMODCACHE)/github.com/anacrolix/missinggo/v2@v2.10.0/filecach
 - the same `Info`, with `Pinned` 0;
 - the same answers.
 
-Three mutations of the trim are caught by it: protecting the updated key always, dropping its size test, and trimming at `filled >= capacity`.
+Renames set the source's file times first, the same in both folders, and half of them follow a capacity change. So they often run over capacity with the renamed item the least recently used. That is the one case without pins where the trim's victim is the key being updated while other items remain. `TestRenameOverCapacityMatchesUpstream` pins that case down deterministically.
+
+Four mutations of the trim are each caught:
+- protecting the updated key always;
+- dropping the "last unpinned item" test;
+- dropping the "fits on its own" test;
+- trimming at `filled >= capacity`.
 
 Only differences by design remain:
 - a reserve above 0 stops the trim at `max(capacity, reserve)` unpinned bytes;

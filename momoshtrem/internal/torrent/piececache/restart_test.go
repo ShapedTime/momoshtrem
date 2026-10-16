@@ -134,3 +134,32 @@ func TestDeferTrimFallback(t *testing.T) {
 	// Ready after the fallback does nothing.
 	f.c.Ready()
 }
+
+func TestStaleFallbackKeepsALaterDeferTrim(t *testing.T) {
+	c, err := NewCache(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen := func() uint64 {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.deferGen
+	}
+	deferring := func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.deferring
+	}
+	c.deferTrimFor(time.Hour)
+	stale := gen()
+	c.Ready()
+	c.deferTrimFor(time.Hour)
+	// The first timer fired just as Ready stopped it, so its callback runs
+	// now, during the second DeferTrim.
+	if c.fallback(stale) || !deferring() {
+		t.Fatal("a stale fallback ended a later DeferTrim")
+	}
+	if !c.fallback(gen()) || deferring() {
+		t.Fatal("the current fallback didn't end DeferTrim")
+	}
+}

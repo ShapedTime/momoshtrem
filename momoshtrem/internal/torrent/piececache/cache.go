@@ -46,8 +46,10 @@ type Cache struct {
 	// owners pin each hex. A hex is pinned while its count is above 0.
 	owners   map[string]map[string]struct{}
 	pinCount map[string]int
-	// deferring skips every trim until Ready (DeferTrim).
+	// deferring skips every trim until Ready (DeferTrim). deferGen counts
+	// the DeferTrims, so that a stale fallback timer is ignored.
 	deferring  bool
+	deferGen   uint64
 	readyTimer *time.Timer
 }
 
