@@ -267,20 +267,6 @@ func qualitySlug(quality string) string {
 	return b.String()
 }
 
-// RecentlyAiredEpisode represents an episode with show context for the recently-aired API
-type RecentlyAiredEpisode struct {
-	ShowID        int64
-	ShowTMDBID    int
-	ShowTitle     string
-	ShowYear      int
-	SeasonNumber  int
-	EpisodeID     int64
-	EpisodeNumber int
-	EpisodeName   string
-	AirDate       string
-	HasAssignment bool
-}
-
 // SanitizeFilename removes or replaces characters invalid in file paths
 func SanitizeFilename(name string) string {
 	// Replace problematic characters with safe alternatives

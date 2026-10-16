@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -24,7 +23,6 @@ type Server struct {
 	treeUpdater     vfs.TreeUpdater      // Optional: updates VFS tree on assignment changes
 	subtitleService *subtitle.Service    // Optional: subtitle search/download service
 	subtitleItems   subtitleItemResolver // Loads movies and episodes for the subtitle routes
-	airDateSync     *airdate.SyncService // Optional: air date sync service
 
 	opts Options
 }
@@ -128,12 +126,6 @@ func (s *Server) SetSubtitleService(svc *subtitle.Service) {
 	slog.Info("Subtitle service configured")
 }
 
-// SetAirDateSyncService configures air date sync support
-func (s *Server) SetAirDateSyncService(svc *airdate.SyncService) {
-	s.airDateSync = svc
-	slog.Info("Air date sync service configured")
-}
-
 func (s *Server) setupMiddleware() {
 	// Recovery middleware. Gin logs the panic and stack; the client gets the
 	// usual error body instead of an empty 500.
@@ -193,8 +185,6 @@ func (s *Server) setupRoutes() {
 	api.GET("/shows/:id", s.getShow)
 	api.DELETE("/shows/:id", s.deleteShow)
 	api.POST("/shows/:id/refresh", s.refreshShow) // Re-fetch seasons/episodes from TMDB
-	api.GET("/shows/recently-aired", s.getRecentlyAiredEpisodes)
-	api.POST("/shows/sync-air-dates", s.triggerAirDateSync)
 
 	// Episodes - only unassign, assignment is done via show-level API
 	api.DELETE("/episodes/:id/assign", s.unassignEpisodeTorrent)
