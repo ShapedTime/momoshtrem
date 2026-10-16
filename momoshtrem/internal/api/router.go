@@ -200,6 +200,7 @@ func (s *Server) setupRoutes() {
 	s.registerAssignmentRoutes(api) // Assign torrents (jobs), review and apply
 	s.registerReviewRoutes(api)     // Proposal edits, episode picker, manual overrides, torrent files
 	s.registerHDRezkaRoutes(api)    // HDRezka search, titles, streams and assigns
+	s.registerQualityRoutes(api)    // GET and PUT /settings/quality-profile
 }
 
 // Handler returns the HTTP handler

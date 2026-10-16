@@ -687,8 +687,9 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
 - Errors: `400 bad_request` (neither `release_id` nor `magnet_uri`, a magnet without an info hash), `404 not_found` (an expired release or an unknown TMDB title), and resolve's `502` and `504` for a release without a magnet.
 
 **`GET` and `PUT /settings/quality-profile`**
-- `PUT` takes the whole profile and answers the saved one. Invalid values are `422 validation_error`, naming the field.
-- Stored in `app_settings` under the key `quality_profile` (§5). A missing field takes its default.
+- `PUT` takes the whole profile and answers the saved one. Invalid values are `422 validation_error`, naming the field ("max_gb_per_hour must be between 1 and 20"); a value of the wrong JSON type is `400 bad_request`.
+- `PUT` trims terms and groups and drops case-insensitive duplicates (the first spelling stays) before checking the limits, so the answer can differ from the request.
+- Stored in `app_settings` under the key `quality_profile` (§5). A missing field takes its default, in a `PUT` too.
 ```
 QualityProfile {
   preferred_resolution: "720p"|"1080p"|"2160p",  // default "1080p"
@@ -699,7 +700,8 @@ QualityProfile {
   preferred_groups: [string]                     // ≤ 30; a small boost that never overrides seeders or the size limit; default []
 }
 ```
-- `max_gb_per_hour` compares the size per episode (or the movie's) with the runtime; without a runtime there's no check.
+- `max_gb_per_hour` compares the size per episode (or the movie's) with the runtime; without a runtime there's no check. Sizes are decimal (1 GB = 10⁹ bytes), as the web shows them, so a reason's "15.6 GB" is the card's.
+- An avoid term matches as a whole word of the release name: any run of characters other than letters and digits separates words, so "TS" hides "Movie.2023.TS.x264" but not "Ghosts", and "WEB-DL" also matches "WEB.DL".
 - There's no preview endpoint (in place of HANDOFF §6's `/settings/quality-profile/preview`): "Best match would prefer…" is a client-side function of the profile.
 
 ### Trakt (B5)
