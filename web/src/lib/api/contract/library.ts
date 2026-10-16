@@ -66,7 +66,7 @@ export interface LibraryItem {
   download: LibraryDownload | null;
   /** Shows: the first frontier run, as `TitleLibraryState.missing`. */
   missing: MissingRun | null;
-  /** Playing in Infuse now; false until B6c (#99). */
+  /** A streaming session plays it now (a show: any of its episodes; #99). */
   streaming: boolean;
 }
 

@@ -340,7 +340,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
                 review_job_id,                       // as TitleLibraryState (review rules)
                 download: {pct, info_hash} | null,   // while a file is being fetched; shows: combined, one of the hashes
                 missing: MissingRun | null,          // shows: the first frontier run, as TitleLibraryState.missing
-                streaming }                          // false until B6c (#99) knows the readers
+                streaming }                          // a streaming session plays it (a show: any episode); an in-memory overlay (#99)
   ```
   `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above; `last_watched_at` is null until B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`. `status=watching` matches nothing until B5 (`counts.watching` is 0); until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
   `ids=movie:603,tv:1399` looks titles up by TMDB id (Discover, Search and the palette mark library titles with it): comma-separated `media_type:tmdb_id`, at most 200, ANDed with the other filters; the answer is page 1 of all of them (`page_size` = the number of distinct ids; `page` and `page_size` are ignored). Malformed, or more than 200, is `400 bad_request`.
@@ -389,8 +389,8 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 
 | Endpoint | Answer | Errors |
 |---|---|---|
-| `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?, text?}, indexer?}` | `202 {job_id}`, or `200 {job_id}` of the open job for the same show and info hash (the new hint is ignored) | `400 bad_request` (no `magnet_uri`, no BitTorrent info hash, or an invalid hint: a negative season, an episode below 1, text over 500 characters), `404` |
-| `POST /movies/{id}/assign-torrent` with `{magnet_uri, file_path?, indexer?}` | As for shows. `file_path` picks the file up front: it's accepted, the other candidates are ignored, and the job applies once classified | As for shows |
+| `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?, text?}, indexer?}`, or `{info_hash, hint?}` instead of `magnet_uri` (Re-run mapping, #99) | `202 {job_id}`, or `200 {job_id}` of the open job for the same show and info hash (the new hint is ignored). With `info_hash` (hex in either case, or base32) the magnet is the library's for that torrent (`TorrentMagnet`: an assignment's, active first, else a job's), then it's an ordinary assign; `magnet_uri` wins when both are sent | `400 bad_request` (neither `magnet_uri` nor `info_hash`, a malformed `info_hash`, no BitTorrent info hash, or an invalid hint: a negative season, an episode below 1, text over 500 characters), `404` (the title, or an `info_hash` the library knows no magnet for) |
+| `POST /movies/{id}/assign-torrent` with `{magnet_uri, file_path?, indexer?}`, or `{info_hash}` instead of `magnet_uri` | As for shows. `file_path` picks the file up front: it's accepted, the other candidates are ignored, and the job applies once classified | As for shows |
 | `GET /assignment-jobs/{id}` | `200 AssignmentJobDetail` | `404`, `502 tmdb_unavailable` (a dry run on a title outside the library, when TMDB fails and nothing is cached) |
 | `GET /assignment-jobs?status=` | `{items: [AssignmentJob]}`, newest first, no dry runs. `status` is `open` (the default) or a comma-separated list of statuses | `400 bad_request` (unknown status) |
 | `PATCH /assignment-jobs/{id}/proposals` with `{items: [{id, decision?, episode_ids?}]}` | `200 AssignmentJobDetail`, all or nothing | `400 bad_request` (malformed body: an item with neither field, an empty `episode_ids`), `404`, `409` with `dry_run`, `job_closed` or `job_working` (checked in that order), `422 validation_error` (well-formed but invalid) |
@@ -752,7 +752,7 @@ QualityProfile {
 - `GET /settings/ai/usage`: month-to-date cost by feature.
 
 ### Torrents and activity (B6)
-Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#98) and `service.RemovalService` (#96).
+Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#98, #99), `internal/sessions` (#99) and `service.RemovalService` (#96).
 
 - **Torrents stream on demand.** `AddTorrent` sets every piece to no priority; the prioritizer raises pieces only around open readers, and pieces live in the LRU file cache (`global_cache_size`, 4 GB by default), so progress can go down. A torrent loads on its first WebDAV open (or a mapping job), and nothing reloads at startup. So:
   - a torrent the library knows but the client hasn't loaded is `idle`, with `loaded: false` and `complete`, `progress`, `bytes_completed`, `peers`, `seeders` and `last_active_at` all null;
@@ -764,7 +764,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   ```
   TorrentState = streaming | downloading | paused | idle     // the first rule that matches:
     paused       the user paused it (loaded or not)
-    streaming    loaded, with a reader open on one of its files (#99: a streaming session)
+    streaming    loaded, with a streaming session on one of its files (below)
     downloading  loaded, its network on (the activity manager hasn't idled it), and complete ≠ true
     idle         anything else
   TorrentListItem {
@@ -777,13 +777,13 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
     last_active_at: Timestamp | null,  // the last read, resume or load since the server started (the activity manager's, in memory); null when not loaded
     titles: [TorrentTitle],            // by title, then year
     open_job: {id, status} | null,     // the newest open, non-dry-run job
-    streaming: []                      // StreamingSession[]; #99 fills it
+    streaming: [StreamingSession]      // its files' sessions, the most recently read first
   }
   TorrentTitle { media_type, tmdb_id, library_id, title, year, poster_path, scope }
   ```
   - **Order:** by state (streaming, downloading, paused, idle), then `last_active_at` newest first (nulls last), then `added_at` newest first.
-  - **`name`:** the info dict's name when loaded, else the newest job's `torrent_name` (preferring a job that has seen the file list), else the magnet's `dn`, else the hash.
-  - **`size_bytes`:** the info dict's total when loaded, else that job's `size_bytes`, else the sum of its stored proposals, else null.
+  - **`name`:** the info dict's name when loaded, else the newest job's `torrent_name` (preferring a job that has seen the file list), else the stored metainfo's name (#99), else the magnet's `dn`, else the hash.
+  - **`size_bytes`:** the info dict's total when loaded, else that job's `size_bytes`, else the sum of its stored proposals, else the stored metainfo's total (#99), else null. The stored metainfo is read only for a torrent that isn't loaded and lacks a job's name or size, and cached by hash (an info dict never changes).
   - **`scope`** names a show's episodes the torrent's active assignments fill; null for movies, and for a show only an open job links. Whole seasons are `"Season 1"` or `"Seasons 1–3"` (a run of whole seasons; all of season 0 is `"Specials"`); a run within a season is `"S01E29–E38"`, one episode `"S01E05"`; anything more is the first of those and how many other episodes, `"S01E01–E05 +2"`. A season is whole when every episode it has is there. Specials go last.
 - **`GET /torrents/summary`** → `200`:
   ```
@@ -792,8 +792,32 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
     history: {interval_seconds: 2, download_bps: number[], upload_bps: number[]},   // the last 60 s of totals, oldest first; fewer right after startup
     counts: {streaming, downloading, paused, idle},
     disk: {total_bytes, free_bytes, torrents_bytes, cache_limit_bytes} | null,      // statfs(metadata_folder); the file cache's fill and capacity; null when unreadable
-    streaming: [] }
+    streaming: [StreamingSession] }   // every session, HDRezka's too, the most recently read first: "Streaming now" reads streaming[0]
   ```
+- **Streaming sessions** (#99, `internal/sessions`): who is streaming what over WebDAV, from every source.
+  - **Requests.** A handler wrapper on the WebDAV server puts each request's method, User-Agent and remote address in its context. There are no proxy settings, so the address is the socket's host (no port: Infuse reads one file over several connections). `webdavFS.OpenFile` passes the context to `LibraryFS.OpenContext`; `Open(path)` is `OpenContext` without one.
+  - **Reads.** A video a **GET** opens (a torrent's `TorrentFile` or an HDRezka `RemoteFile`) is wrapped so each read reports its offset and bytes. PROPFIND and HEAD opens (and opens outside a request) are never tracked, and a handle registers nothing until its first read, so listings cost nothing.
+  - **A session** is the reads with the same remote address, User-Agent and WebDAV path: one playback's Range GETs (header, index, playback) are one session. It ends 30 s after its last read; a read in flight (a torrent waiting for pieces) keeps it going. Reads after it ended start a new one.
+  - **Sniffs** never show: an open that read under 64 KB in all and closed within 2 s. A session shows once one of its opens isn't a sniff (64 KB read, or open for 2 s with a read); a session of only sniffs is dropped with its last open. A sniff that waits over 2 s for its first bytes (a torrent that isn't loaded yet) counts.
+  - Expiry is lazy (every read, listing and count drops the sessions that ended), with an injected clock in tests.
+  ```
+  StreamingSession {
+    id, source: torrent | hdrezka, info_hash | null,          // null for HDRezka
+    item: {media_type, tmdb_id, library_id, title,            // the movie, or the episode's show (library_id: the movie's or the show's)
+           season_number | null, episode_number | null, episode_name | null} | null,   // null when the library doesn't know the file
+    file_name,                                                // the name WebDAV shows
+    file_path | null,                                         // the path inside the torrent, as the detail's files[].path; null for HDRezka
+    client: Infuse | VLC | Safari | Kodi | Unknown | null,    // from the User-Agent; null without one
+    device | null,                                            // Apple TV, iPad, iPhone, Mac, Android, Windows, Linux when the User-Agent says so
+    offset_bytes, size_bytes,                                 // offset: the end of the last read (ahead of what plays by the client's buffer)
+    position_seconds | null, duration_seconds | null,         // offset ÷ size × runtime; null without a runtime
+    rate_bps,                                                 // EWMA, 5 s time constant
+    buffered_ahead_bytes | null, buffered_ahead_seconds | null,   // complete bytes contiguous from the offset, from the piece states; null for HDRezka
+    started_at, last_read_at }
+  ```
+  - **The item** is the VFS entry's assignment (the WebDAV tree cache keeps each video's item id, cache v6), resolved in one query and kept 5 minutes. The runtime is the movie's or the episode's; a torrent file several episodes share ("S01E01-E02") plays for their summed runtime, unknown when one of them is.
+  - **`client`**: a User-Agent starting `Infuse` (`Infuse-Direct/7.7`, `Infuse-Library/…`, the CFNetwork default) is Infuse; one with `VLC` is VLC; `Kodi/` or `XBMC/` is Kodi; Safari's `Safari/` without Chrome, Edge, Firefox, Opera or Android is Safari. Infuse's own User-Agent usually names no device, so `device` is often null for it.
+  - **Where they show:** each torrent's sessions on its list item (and they make a loaded torrent `streaming`), every session in the summary, `LibraryItem.streaming` (a session's item is that movie or show; an overlay on the one query) and `/status`'s `webdav.active_readers` (their count).
 - **Speeds.** Every 2 s a sampler reads each loaded torrent's data bytes read and written (`BytesReadData`, `BytesWrittenData`) and smooths each torrent's rate with an EWMA (5 s time constant). A torrent that's dropped falls out; one added again starts over. It keeps the last 30 totals for `history`.
 - **`POST /torrents/{hash}/pause`** and **`/resume`** → `200 TorrentListItem`, idempotent; `400` for a malformed hash, `404` for an unknown one.
   - **Pause is sticky.** It's stored, so it survives restarts. The torrent's network goes off and reads don't wake it (the activity manager ignores them, and the VFS's wait for peers returns at once). On a torrent that isn't loaded it applies when it loads.
@@ -801,9 +825,27 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - Pausing an already paused torrent keeps its first time; resuming one that isn't paused changes nothing.
 - **`POST /torrents/pause-all`** → `200 {count}`: pauses the streaming and downloading torrents only. **`POST /torrents/resume-all`** → `200 {count}`: resumes every paused torrent, loaded or not.
 - **Stored pauses.** `app_settings` key `torrents`, `{paused: {"<hash>": "<RFC 3339 time>"}}`. Every write is one atomic jsonb statement (an insert on conflict, `||`, `-` or `#-`), never a read-modify-write. They're loaded at startup, before anything loads a torrent, after the pauses of torrents the library doesn't know are pruned (see "Releasing" below). Without idle mode (`idle_enabled: false`) pauses still work: torrents stay active until paused.
-- **`GET /torrents/{hash}`** keeps the legacy status (`{info_hash, name, total_size, downloaded, progress, seeders, leechers, download_speed, upload_speed, is_paused}`, `404` when not loaded) until #99 replaces it with the detail. **`GET /torrents/{hash}/debug`** stays until #102.
+- **`GET /torrents/{hash}`** (#99) → `200 TorrentDetail`, Activity's detail page; `400` for a malformed hash, `404` for an unknown one (the "known" rule above). It replaces the legacy status. **It never loads the torrent**: its facts come from the client when it's loaded, else from its stored metainfo (`{metadata_folder}/metainfo/<hash>.torrent`, read without loading), else from the newest job's file list (preferring one that isn't a dry run). **`GET /torrents/{hash}/debug`** stays until #102.
+  ```
+  TorrentDetail = TorrentListItem + {
+    magnet_uri | null,                         // an assignment's (active first), else a job's; else, loaded, one built from the live torrent
+    piece_length | null, pieces_total | null,  // live or stored metainfo; null with only a job's list
+    pieces_have | null,                        // null when not loaded
+    pieces: [{state: have | partial | priority | missing, count}] | null,   // run-length in piece order (anacrolix's piece-state runs); null when not loaded
+    files: [{path, size_bytes,
+             progress | null,                  // 0–1; null when not loaded
+             plays_as: [{media_type, item_id, season_number | null, episode_number | null, episode_name | null, label}],   // label "S01E29" | "Movie"
+             ignored: {reason, label} | null}],
+    trackers: [{url, status: working | error | unknown, error | null, seeders | null, peers | null, last_announce_at | null}],
+    downloaded_bytes | null, uploaded_bytes | null, ratio | null,   // since it loaded (useful data in, data out); null when not loaded; ratio null before anything arrived
+    swarm: {connected_peers, connected_seeders, total_seeders | null} | null   // null when not loaded; total_seeders needs a scrape: null
+  }
+  ```
+  - **Piece states**, first match: `have` (complete), `partial` (some of it arrived), `priority` (not complete, priority High or more: the streaming windows), `missing`. Adjacent runs in the same state merge.
+  - **Files** are in the torrent's order, with paths as the client names them (`{name}/…` in a multi-file torrent). `plays_as` comes from the active assignments (`ActiveMappings`): a movie (`item_id` is the movie's), or its episodes in order (`item_id` is the episode's). `ignored` is for a file with no `plays_as` that the newest job's proposal ignored: `reason` is the extra's `extra_type` (labels "Ignored (NCOP)" for `opening`, "Ignored (NCED)" for `ending`, "Ignored (not video)" for `info` and `image`, "Ignored (older version)" for `superseded`, "Ignored (extra)" for `other`, else "Ignored (sample)" and the like), `subtitle` for a subtitle no video claims, or `user` ("Ignored") for a video the user or a movie pick left out. A subtitle that follows its video isn't ignored.
+  - **Trackers** are the live torrent's announce list, else the stored metainfo's, else the magnet's `tr`, each once. anacrolix keeps its announce results private, so `status` is `unknown` and the rest null; nothing scrapes.
 - **Static routes and hashes.** `summary`, `pause-all` and `resume-all` sit beside `/torrents/{hash}`; they're matched first, and `/torrents/summary/debug` is a malformed hash (`400`).
-- **The web app, until #102:** the legacy web route `GET /api/torrents` keeps answering the legacy `{torrents: [...]}` shape, adapted from these items (`is_paused` is true for `paused` and `idle`), and the legacy routes under `app/api/torrents/[hash]` shadow summary, pause, resume and the `*-all` routes. #102 retires `app/api/torrents/**`.
+- **The web app, until #102:** the legacy web route `GET /api/torrents` keeps answering the legacy `{torrents: [...]}` shape, adapted from these items (`is_paused` is true for `paused` and `idle`), and the legacy routes under `app/api/torrents/[hash]` shadow summary, pause, resume, the `*-all` routes and the detail (`GET`, a `405` there: that route is DELETE-only). #102 retires `app/api/torrents/**`.
 - **`DELETE /torrents/{hash}?delete_data=true|false`** → `204` (#96). `delete_data` defaults to `false`; any other value is `400 bad_request`.
   - It answers `404` only when nothing knows the hash: the torrent isn't loaded, no active torrent assignment uses it, and no open job has it (dry runs don't count).
   - One transaction cancels its open jobs (dry runs too), deactivates its active assignments, deletes its `source = 'torrent'` subtitles and clears its stored pause. The rows stay, inactive, so history is kept. The client's pause is cleared once it's dropped (#98).
@@ -823,7 +865,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   {
     version, uptime_seconds, checked_at,          // checked_at: RFC 3339, when the probes ran
     db: { ok, size_bytes, error? },
-    webdav: { url, port, auth_enabled, username?, active_readers? },  // username only when auth is on
+    webdav: { url, port, auth_enabled, username?, active_readers? },  // username only when auth is on (active_readers: the streaming sessions, #99)
     jackett: { configured, reachable, latency_ms?, error?,
                indexers?: [{name, status: ok|timeout|error|unknown, ms: number|null, since: Timestamp|null, error?}] },   // #6
     tmdb: { configured, reachable, latency_ms?, error? },
@@ -1088,7 +1130,11 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - The speed sampler (`torrent.SpeedSampler`), real speeds in the torrent status and the title pages' `download.speed_bps`.
   - Sticky pauses in the activity manager (`StatePaused`, `ErrPaused`), stored in `app_settings` key `torrents`; `torrent.state: paused` on title pages.
   - `torrent.listen_port` / `TORRENT_LISTEN_PORT`.
-  - Next: streaming sessions, the torrent detail and Re-run mapping (#99), then the Activity page (#102).
+- **Landed in #99 (B6c):**
+  - `internal/sessions`: the streaming sessions (§6 "Torrents and activity (B6)"), from a WebDAV handler wrapper that puts the request in the context, `LibraryFS.OpenContext` and a read-reporting wrapper on every video a GET opens (torrent and HDRezka). They feed the `streaming` state, `streaming` on the list and the summary, `LibraryItem.streaming` and `/status`'s `active_readers`.
+  - `GET /torrents/{hash}`: the detail, from `torrent.Service.Detail` (live), `MetainfoStore.Summary` (stored) or `JobFiles` (the newest job); the list's name and size fall back to the stored metainfo.
+  - Re-run mapping: the assign routes take `{info_hash}` (§6 "Assignment").
+  - Next: the Activity page (#102).
 
 **B7 · Subtitles polish** (small; independent)
 - Owns `internal/subtitle`, `internal/opensubtitles` and `007_subtitles.sql`.
