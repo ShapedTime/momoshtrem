@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -42,8 +43,8 @@ type entry struct {
 	order    []string // indexer ids, in first-request order
 	indexers map[string]*indexerState
 	items    []*item
-	byHash   map[string]*item // dedupe by info hash
-	byName   map[string]*item // dedupe by normalised title and size
+	byHash   map[string]*item   // dedupe by info hash
+	byName   map[string][]*item // dedupe by normalised title, then size
 	warnings []string
 	// showSeasons is how many regular seasons the run's catalog has.
 	showSeasons int
@@ -56,7 +57,7 @@ func newEntry(plan *QueryPlan, tc *service.TitleContext, now time.Time, timeout 
 		done:     make(chan struct{}),
 		indexers: map[string]*indexerState{},
 		byHash:   map[string]*item{},
-		byName:   map[string]*item{},
+		byName:   map[string][]*item{},
 	}
 	for _, q := range plan.TextQueries() {
 		e.queries = append(e.queries, sentQuery(q))
@@ -190,7 +191,9 @@ func (s *Service) pass(e *entry, in *ingester, queries []Query, list []torznab.I
 					}
 				}
 			}
-			e.progress(p, kept, s.now())
+			for id, magnet := range e.progress(p, kept, s.now()) {
+				s.index.setMagnet(id, magnet)
+			}
 		},
 	})
 }
@@ -225,8 +228,9 @@ func torznabQuery(q Query, tc *service.TitleContext) torznab.Query {
 	return tq
 }
 
-// progress applies a fan-out report and the releases it brought.
-func (e *entry) progress(p torznab.Progress, kept []*item, now time.Time) {
+// progress applies a fan-out report and the releases it brought. It
+// returns the magnets of the releases that absorbed a duplicate, by id.
+func (e *entry) progress(p torznab.Progress, kept []*item, now time.Time) (adopted map[string]string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	st := e.indexers[p.IndexerID]
@@ -237,41 +241,83 @@ func (e *entry) progress(p torznab.Progress, kept []*item, now time.Time) {
 	}
 	if p.RequestIndex < 0 {
 		st.startPass()
-		return
+		return nil
 	}
 	st.update(p, now)
 	for _, it := range kept {
-		e.add(it)
+		if id, magnet := e.add(it); id != "" {
+			if adopted == nil {
+				adopted = map[string]string{}
+			}
+			adopted[id] = magnet
+		}
 	}
+	return adopted
 }
 
-// add merges a release into the results: a duplicate (the same info hash,
-// else the same normalised title and size) keeps the copy with the most
-// seeders, or the one with a magnet on a tie.
-func (e *entry) add(it *item) {
-	nameKey := it.nameKey()
+// sizeTolerance: copies of a release on two indexers may differ this much
+// in size, since indexers round sizes ("1.4 GiB").
+const sizeTolerance = 0.05
+
+// add merges a release into the results. A duplicate has the same info
+// hash or, failing that, the same normalised title and a size within
+// sizeTolerance, and never another info hash; the copy with the most
+// seeders stays, or the one with a magnet on a tie. After a merge it
+// returns the id of the copy that stayed and its magnet (maybe the
+// other's), so the release index can match.
+func (e *entry) add(it *item) (adoptedID, magnet string) {
 	var cur *item
 	if it.infoHash != "" {
 		cur = e.byHash[it.infoHash]
 	}
-	if cur == nil && nameKey != "" {
-		cur = e.byName[nameKey]
+	if cur == nil {
+		cur = e.sameRelease(it)
 	}
 	if cur == nil {
 		e.items = append(e.items, it)
 		cur = it
 	} else {
 		*cur = merge(*cur, *it)
+		if cur.magnet != "" {
+			adoptedID, magnet = cur.id, cur.magnet
+		}
 	}
 	if cur.infoHash != "" {
 		e.byHash[cur.infoHash] = cur
 	}
-	if k := cur.nameKey(); k != "" {
-		e.byName[k] = cur
+	for _, name := range []string{normName(it.title), normName(cur.title)} {
+		if name != "" && !slices.Contains(e.byName[name], cur) {
+			e.byName[name] = append(e.byName[name], cur)
+		}
 	}
-	if nameKey != "" {
-		e.byName[nameKey] = cur
+	return adoptedID, magnet
+}
+
+// sameRelease is the release it duplicates by name: the same normalised
+// title, the closest size within sizeTolerance, and no other info hash.
+// Nil when there's none, or a size is unknown.
+func (e *entry) sameRelease(it *item) *item {
+	if it.size <= 0 {
+		return nil
 	}
+	var best *item
+	var bestDiff int64
+	for _, c := range e.byName[normName(it.title)] {
+		if c.size <= 0 || c.infoHash != "" && it.infoHash != "" && c.infoHash != it.infoHash {
+			continue
+		}
+		diff := c.size - it.size
+		if diff < 0 {
+			diff = -diff
+		}
+		if float64(diff) > sizeTolerance*float64(max(c.size, it.size)) {
+			continue
+		}
+		if best == nil || diff < bestDiff {
+			best, bestDiff = c, diff
+		}
+	}
+	return best
 }
 
 // merge picks between two copies of a release. The winner takes the

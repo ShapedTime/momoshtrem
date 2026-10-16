@@ -48,16 +48,6 @@ type item struct {
 	sceneNote       string
 }
 
-// nameKey dedupes releases without an info hash: the normalised title and
-// the size. "" when either is unknown.
-func (it item) nameKey() string {
-	n := normName(it.title)
-	if it.size <= 0 || n == "" {
-		return ""
-	}
-	return n + "|" + strconv.FormatInt(it.size, 10)
-}
-
 // ingester turns a search's Torznab results into items: parsed, checked
 // against the title, mapped to TMDB episodes and kept when in scope. It's
 // used by one search at a time (fan-out reports are serialised).

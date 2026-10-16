@@ -583,7 +583,7 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   - requests ask for the title's categories only: TV and anime for a show, movies (plus anime for an anime film) for a movie. Adult categories (the 6000 range) are never requested, and results in them are dropped;
   - HTML entities are decoded;
   - text-query results whose title matches none of the known titles are dropped (unless `q` was given). Known titles are the title, original title, romaji and aliases, plus their short forms for anime ("Frieren"); a trailing country tag ("The Office US") and any part of a slash-separated name count. A movie's text-query results from a year more than 1 off are dropped too. ID-query results are trusted;
-  - duplicates are merged by info hash, otherwise by normalised title + size: the most seeders wins, and a magnet is preferred.
+  - duplicates are merged by info hash, otherwise by normalised title + size: the most seeders wins, and a magnet is preferred. Sizes match within 5%, because indexers round them ("1.4 GiB"), and two different info hashes are never merged. The copy that stays takes the other's magnet when it has none.
 - **Progress:**
   - a GET starts the plan's search unless it's cached or already running;
   - the search runs detached from the request, with a single flight per plan, and stops after 60 s (a `warnings` entry says so);

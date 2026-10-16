@@ -197,13 +197,25 @@ func TestEntryAdd_Dedupe(t *testing.T) {
 			t.Fatalf("items = %+v", e.items)
 		}
 	})
-	t.Run("the same title and size without a hash", func(t *testing.T) {
+	t.Run("the same title and a size within 5% without a hash", func(t *testing.T) {
 		e := newEntry(plan, tc, testNow, defaultRunTimeout)
 		defer e.cancel()
 		e.add(mustIngest(t, in, result("Perfect.Days.2023.720p", noMagnet(), seeders(30)), q))
-		e.add(mustIngest(t, in, result("Perfect Days 2023 720p", noMagnet(), seeders(20), indexer("beta", "Beta")), q))
-		e.add(mustIngest(t, in, result("Perfect Days 2023 720p", noMagnet(), size(2_000_000_000)), q))
-		if len(e.items) != 2 || e.items[0].seeders != 30 {
+		// Indexers round sizes: "1.4 GiB" is 1,503,238,553 bytes.
+		e.add(mustIngest(t, in, result("Perfect Days 2023 720p", noMagnet(), seeders(20), size(1_503_238_553), indexer("beta", "Beta")), q))
+		e.add(mustIngest(t, in, result("Perfect Days 2023 720p", noMagnet(), size(2_000_000_000), guid("big")), q))
+		if len(e.items) != 2 || e.items[0].seeders != 30 || e.items[1].size != 2_000_000_000 {
+			t.Fatalf("items = %+v", e.items)
+		}
+	})
+	t.Run("two info hashes are two releases, whatever the name", func(t *testing.T) {
+		e := newEntry(plan, tc, testNow, defaultRunTimeout)
+		defer e.cancel()
+		e.add(mustIngest(t, in, result("Perfect.Days.2023.1080p.WEB", infoHash(hashOf("one"))), q))
+		e.add(mustIngest(t, in, result("Perfect.Days.2023.1080p.WEB", infoHash(hashOf("two")), guid("two")), q))
+		// A copy without a hash joins the closest in size.
+		e.add(mustIngest(t, in, result("Perfect Days 2023 1080p WEB", noMagnet(), seeders(500), size(1_510_000_000), guid("three")), q))
+		if len(e.items) != 2 || e.items[0].seeders != 500 || e.items[1].seeders != 100 {
 			t.Fatalf("items = %+v", e.items)
 		}
 	})
@@ -218,11 +230,16 @@ func TestEntryAdd_Dedupe(t *testing.T) {
 
 		e2 := newEntry(plan, tc, testNow, defaultRunTimeout)
 		defer e2.cancel()
-		e2.add(mustIngest(t, in, result("Perfect.Days.2023.2160p", noMagnet(), seeders(80)), q))
-		e2.add(mustIngest(t, in, result("Perfect.Days.2023.2160p", seeders(5), guid("b")), q))
+		first := mustIngest(t, in, result("Perfect.Days.2023.2160p", noMagnet(), seeders(80)), q)
+		e2.add(first)
+		id, magnet := e2.add(mustIngest(t, in, result("Perfect.Days.2023.2160p", seeders(5), guid("b")), q))
 		it := e2.items[0]
 		if len(e2.items) != 1 || it.seeders != 80 || it.magnet == "" || it.infoHash != hashOf("Perfect.Days.2023.2160p") {
 			t.Fatalf("items = %+v", e2.items)
+		}
+		// The release index learns the magnet the release now has.
+		if id != first.id || magnet != it.magnet {
+			t.Errorf("add = %q, %q; want the kept release's id and magnet", id, magnet)
 		}
 	})
 }
