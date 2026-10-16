@@ -47,6 +47,8 @@ export function Media({ shape = 'poster', src, alt = '', sizes, priority, viewTr
 interface PosterCardProps {
   href: string;
   title: string;
+  /** Drawn in place of `title`, e.g. with a search match marked; `title` stays the link's name. */
+  titleContent?: ReactNode;
   /** "2024 · Series", "2h 12m"; one line. */
   subtitle?: string;
   /** Why it's recommended (replaces the subtitle). */
@@ -72,7 +74,7 @@ interface PosterCardProps {
 }
 
 /** Title and year are always visible (never hover-only), clamped to 2 lines. */
-export function PosterCard({ href, title, subtitle, reason, posterSrc, badge, watchedPct, footer, action, lines, dismissed, className }: PosterCardProps) {
+export function PosterCard({ href, title, titleContent, subtitle, reason, posterSrc, badge, watchedPct, footer, action, lines, dismissed, className }: PosterCardProps) {
   return (
     <article className={cx('pcard', dismissed && 'is-dismissed', action !== undefined && 'has-action', className)}>
       <Link href={href} className="flex flex-col gap-2 rounded-md" aria-label={subtitle ? `${title}, ${subtitle}` : title}>
@@ -88,7 +90,7 @@ export function PosterCard({ href, title, subtitle, reason, posterSrc, badge, wa
       {action && <div className="pcard-action">{action}</div>}
       <div className="meta">
         <Link href={href} className="title" tabIndex={-1}>
-          {title}
+          {titleContent ?? title}
         </Link>
         {lines ?? (reason ? <p className="reason">{reason}</p> : subtitle ? <p className="sub">{subtitle}</p> : null)}
       </div>

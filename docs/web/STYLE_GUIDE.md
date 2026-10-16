@@ -112,7 +112,7 @@ to the map and don't invent wording in a component.
 - **Removal from a list** offers Undo for 10 s.
 
 **Keyboard and focus:**
-- ⌘K / Ctrl K / `/` open the command palette, and Esc closes the top overlay.
+- ⌘K / Ctrl K / `/` open the command palette, and Esc closes the top overlay. In the palette, ↑ ↓ move (and wrap), ↵ opens, and ⌘↵ (Ctrl ↵) runs the selected row's secondary action: torrent search (Find missing for a library title that lacks a file, Find a torrent for a TMDB title). The footer names it when the row has one.
 - The focus ring is a 2 px canvas gap plus a 2 px amber ring.
 - Every icon-only button has an `aria-label`, and the skip link goes to `#main`.
 

@@ -83,10 +83,27 @@
     font-size: var(--t-micro); letter-spacing: var(--tr-micro); text-transform: uppercase;
     font-weight: var(--w-semibold); color: var(--text-3);
   }
-  .palette [cmdk-item] { cursor: pointer; }
-  @media (hover: none) { .palette .p-foot { display: none; } }
+  .palette [cmdk-item] { cursor: pointer; color: var(--text-1); }
+  /* The list scrolls between the field and the footer, so a long list never pushes the footer out */
+  .palette [cmdk-root] { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .palette .p-body { flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
+  .palette .p-input, .palette .p-foot { flex-shrink: 0; }
+  /* Rows (#101; search.js MS.palette): a 30 px poster or an icon, the label, then a pill or "Add" */
+  .palette .p-item .thumb { width: 30px; }
+  .palette .p-item .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .palette .p-item .grow > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* text-3 drops under 4.5:1 on the selected row's lighter fill */
+  .palette .p-item[aria-selected="true"] .grow > span:last-child { color: var(--text-2); }
+  .palette .p-item .pill, .palette .p-add { flex-shrink: 0; }
+  .palette .p-foot .ml-auto svg { color: var(--text-3); }
+  .palette .p-cancel { flex-shrink: 0; }
+  @media (min-width: 1024px) { .palette .p-cancel { display: none; } }
+  @media (hover: none), (max-width: 639px) { .palette .p-foot { display: none; } }
+  /* Phone: pinned to the top; taller rows, no pills */
   @media (max-width: 639px) {
-    .palette { top: calc(env(safe-area-inset-top, 0px) + 8px); width: calc(100% - 16px); max-height: 80vh; border-radius: var(--r-lg); }
+    .palette { top: calc(env(safe-area-inset-top, 0px) + 8px); width: calc(100% - 16px); max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px)); border-radius: var(--r-lg); }
+    .palette .p-item { min-height: 52px; }
+    .palette .p-item .p-pill, .palette .p-add { display: none; }
   }
 
   /* Skeletons appear only after 150 ms, so cached loads never flash (HANDOFF §4.3) */

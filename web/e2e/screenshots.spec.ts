@@ -448,6 +448,69 @@ test.describe('library', () => {
   });
 });
 
+test.describe('search', () => {
+  const phone = (testInfo: TestInfo) => testInfo.project.name === 'mobile';
+  const recent = (page: Page) =>
+    page.addInitScript(() =>
+      window.localStorage.setItem('momoshtrem:recent-searches', JSON.stringify(['frieren', 'severance s02', 'past lives', 'wim wenders', 'one piece egghead']))
+    );
+  const settle = async (page: Page) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(600);
+  };
+  const palette = async (page: Page, testInfo: TestInfo) => {
+    if (phone(testInfo)) {
+      await page.locator('header.phone-bar').getByRole('button', { name: /Account menu/ }).click();
+      await page.getByRole('dialog', { name: 'Account' }).getByRole('button', { name: 'Command palette' }).click();
+    } else {
+      await page.keyboard.press('ControlOrMeta+k');
+    }
+    await page.getByRole('dialog', { name: 'Search or jump to' }).waitFor();
+  };
+
+  test('idle', async ({ page }, testInfo) => {
+    await recent(page);
+    await signIn(page, '/search');
+    await page.getByRole('region', { name: 'Trending this week' }).locator('article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'search/idle', { fullPage: true });
+  });
+
+  test('results', async ({ page }, testInfo) => {
+    await signIn(page, '/search?q=dune');
+    await page.locator('.srch-hit article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'search/results', { fullPage: true });
+  });
+
+  test('none', async ({ page }, testInfo) => {
+    await signIn(page, '/search?q=zzxq');
+    await page.getByRole('region', { name: 'Popular right now' }).locator('article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'search/none', { fullPage: true });
+  });
+
+  test('palette', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await page.locator('.lib-results').waitFor();
+    await palette(page, testInfo);
+    await page.keyboard.type('sev');
+    await page.getByRole('option', { name: /^Seven Samurai/ }).waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'search/palette');
+  });
+
+  test('palette, before typing', async ({ page }, testInfo) => {
+    await recent(page);
+    await signIn(page, '/library');
+    await page.locator('.lib-results').waitFor();
+    await palette(page, testInfo);
+    await page.getByRole('option', { name: /^Go to Activity/ }).waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'search/palette-empty');
+  });
+});
+
 test.describe('discover', () => {
   const phone = (testInfo: TestInfo) => testInfo.project.name === 'mobile';
   // Tall enough for the first rows, short enough that the infinite-scroll footer stays out of reach

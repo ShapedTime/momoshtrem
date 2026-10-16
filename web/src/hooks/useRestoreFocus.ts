@@ -28,6 +28,14 @@ export function useRestoreFocus({ focusContainer = false }: { focusContainer?: b
   const onCloseAutoFocus = useCallback((event: Event) => {
     const opener = openerRef.current;
     openerRef.current = null;
+    // Another overlay took over as this one closed (the phone's account sheet opening
+    // the ⌘K palette): leave focus in it, or typing would land behind it
+    const active = document.activeElement;
+    const closing = event.target instanceof Node ? event.target : null;
+    if (active instanceof HTMLElement && active.closest('[role="dialog"], [role="alertdialog"]') && !closing?.contains(active)) {
+      event.preventDefault();
+      return;
+    }
     if (opener && opener.isConnected) {
       event.preventDefault();
       opener.focus();

@@ -1,8 +1,8 @@
 import { MovieDb } from 'moviedb-promise';
-import type { MovieResponse, ShowResponse, MovieResult, TvResult } from 'moviedb-promise';
+import type { MovieResponse, ShowResponse, MovieResult, PersonResult, TvResult } from 'moviedb-promise';
 import { TRENDING_TIME_WINDOW, SEARCH_MAX_RESULTS } from '@/config/tmdb';
 import { APIError, NotFoundError } from '@/lib/errors';
-import type { DiscoverPage, DiscoverRelaxed } from '@/lib/api/contract';
+import type { DiscoverPage, DiscoverRelaxed, TitleSearchResult } from '@/lib/api/contract';
 import { type DiscoverFilters, withoutFilter } from '@/lib/discover/filters';
 import {
   type DiscoverRow,
@@ -15,6 +15,7 @@ import {
   toDiscoverItem,
   yearOf,
 } from '@/lib/discover/tmdb-query';
+import { type PersonCandidate, rankTitleSearch, type TitleCandidate } from '@/lib/title-search/rank';
 import type {
   Movie,
   MovieDetails,
@@ -22,7 +23,6 @@ import type {
   TVShowDetails,
   Season,
   SeasonDetails,
-  SearchResult,
   MovieSearchResult,
   TVSearchResult,
   TrendingResults,
@@ -149,47 +149,6 @@ class TMDBClient {
     }));
   }
 
-  private transformSearchResult(raw: {
-    id?: number;
-    media_type?: string;
-    poster_path?: string | null;
-    backdrop_path?: string | null;
-    vote_average?: number;
-    overview?: string;
-    title?: string;
-    release_date?: string;
-    name?: string;
-    first_air_date?: string;
-  }): SearchResult | null {
-    if (raw.media_type === 'person') {
-      return null;
-    }
-
-    const base = {
-      id: raw.id ?? 0,
-      posterPath: raw.poster_path ?? null,
-      backdropPath: raw.backdrop_path ?? null,
-      voteAverage: raw.vote_average ?? 0,
-      overview: raw.overview ?? '',
-    };
-
-    if (raw.media_type === 'movie') {
-      return {
-        ...base,
-        mediaType: 'movie',
-        title: raw.title ?? '',
-        releaseDate: raw.release_date ?? '',
-      } as MovieSearchResult;
-    }
-
-    return {
-      ...base,
-      mediaType: 'tv',
-      name: raw.name ?? '',
-      firstAirDate: raw.first_air_date ?? '',
-    } as TVSearchResult;
-  }
-
   // ----------------------------------------
   // Public API Methods
   // ----------------------------------------
@@ -240,27 +199,6 @@ class TMDBClient {
         }));
 
       return { movies, tvShows };
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Search for movies and TV shows.
-   */
-  async search(query: string): Promise<SearchResult[]> {
-    if (!query.trim()) {
-      return [];
-    }
-
-    try {
-      const response = await this.getClient().searchMulti({ query: query.trim() });
-
-      return (response.results ?? [])
-        .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
-        .slice(0, SEARCH_MAX_RESULTS)
-        .map((item) => this.transformSearchResult(item))
-        .filter((item): item is SearchResult => item !== null);
     } catch (error) {
       throw this.handleError(error);
     }
@@ -407,7 +345,7 @@ class TMDBClient {
 
   private async discoverStream({ mediaType, params }: DiscoverStream): Promise<{ rows: DiscoverRow[]; total: number; totalPages: number }> {
     const client = this.getClient();
-    const config = { timeout: TMDB_DISCOVER_TIMEOUT_MS };
+    const config = { timeout: TMDB_BROWSE_TIMEOUT_MS };
     try {
       if (mediaType === 'movie') {
         const response = await client.discoverMovie(params, config);
@@ -436,22 +374,105 @@ class TMDBClient {
       }));
       return { rows, total: response.total_results ?? 0, totalPages: response.total_pages ?? 0 };
     } catch (error) {
-      throw discoverError(error);
+      throw browseError(error);
+    }
+  }
+
+  // ----------------------------------------
+  // Search (#101)
+  // ----------------------------------------
+
+  /**
+   * Titles for a query: TMDB's movie, TV and person searches (page 1 each,
+   * at once), merged and ranked (lib/title-search/rank.ts).
+   */
+  async searchTitles(query: string): Promise<TitleSearchResult> {
+    const client = this.getClient();
+    const params = { query, include_adult: false };
+    const config = { timeout: TMDB_BROWSE_TIMEOUT_MS };
+    try {
+      const [movies, shows, people] = await Promise.all([
+        client.searchMovie(params, config),
+        client.searchTv(params, config),
+        client.searchPerson(params, config),
+      ]);
+      return rankTitleSearch(query, {
+        movies: (movies.results ?? []).flatMap(movieCandidate),
+        shows: (shows.results ?? []).flatMap(showCandidate),
+        people: (people.results ?? []).map(personCandidate),
+      });
+    } catch (error) {
+      throw browseError(error);
     }
   }
 }
 
-/** A hung TMDB mustn't hold the page: give up and say so. */
-const TMDB_DISCOVER_TIMEOUT_MS = 10_000;
+/** A hung TMDB mustn't hold the page (Discover, Search): give up and say so. */
+const TMDB_BROWSE_TIMEOUT_MS = 10_000;
 
 /**
- * Discover's errors: a rejected key is 502 `tmdb_auth` (a 401 would send the
- * browser to sign in), anything else TMDB does wrong is 502 `tmdb_unavailable`.
+ * Discover's and Search's errors: a rejected key is 502 `tmdb_auth` (a 401
+ * would send the browser to sign in), anything else TMDB does wrong is 502
+ * `tmdb_unavailable`.
  */
-function discoverError(error: unknown): APIError {
+function browseError(error: unknown): APIError {
   const status = Number(/status code (\d+)/.exec(error instanceof Error ? error.message : '')?.[1]);
   if (status === 401 || status === 403) return new APIError('TMDB rejected the API key. Check TMDB_API_KEY.', 502, 'tmdb_auth');
   return new APIError('TMDB didn’t answer. Try again in a moment.', 502, 'tmdb_unavailable');
+}
+
+// ---- Search candidates (TMDB's shapes → lib/title-search/rank.ts) -----------
+
+/** TMDB sends the original title even when it's the same. */
+const differs = (original: string | undefined, title: string) => (original && original !== title ? original : null);
+
+/** A search or `known_for` movie; none without an id or a title. */
+function movieCandidate(raw: MovieResult): TitleCandidate[] {
+  const title = raw.title ?? '';
+  if (!raw.id || !title) return [];
+  return [
+    {
+      media_type: 'movie',
+      tmdb_id: raw.id,
+      title,
+      original_title: differs(raw.original_title, title),
+      year: yearOf(raw.release_date),
+      poster_path: raw.poster_path ?? null,
+      vote_average: raw.vote_average ?? 0,
+      vote_count: raw.vote_count ?? 0,
+      popularity: raw.popularity ?? 0,
+    },
+  ];
+}
+
+/** A search or `known_for` show; none without an id or a name. */
+function showCandidate(raw: TvResult): TitleCandidate[] {
+  const title = raw.name ?? '';
+  if (!raw.id || !title) return [];
+  return [
+    {
+      media_type: 'tv',
+      tmdb_id: raw.id,
+      title,
+      original_title: differs(raw.original_name, title),
+      year: yearOf(raw.first_air_date),
+      poster_path: raw.poster_path ?? null,
+      vote_average: raw.vote_average ?? 0,
+      vote_count: raw.vote_count ?? 0,
+      popularity: raw.popularity ?? 0,
+    },
+  ];
+}
+
+/** A person and the titles they're known for. moviedb-promise's type lacks `known_for_department`, which TMDB sends. */
+function personCandidate(raw: PersonResult & { known_for_department?: string }): PersonCandidate {
+  return {
+    name: raw.name ?? '',
+    department: raw.known_for_department ?? null,
+    known_for: (raw.known_for ?? []).flatMap((title) =>
+      title.media_type === 'movie' ? movieCandidate(title) : title.media_type === 'tv' ? showCandidate(title) : []
+    ),
+  };
 }
 
 // Export singleton instance

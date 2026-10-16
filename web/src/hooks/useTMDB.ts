@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { TrendingResults, SearchResult } from '@/types/tmdb';
+import type { TrendingResults } from '@/types/tmdb';
 import { apiFetch } from '@/lib/api/client';
 
 // ============================================
@@ -86,72 +86,4 @@ export function useTrending(): FetchStateWithRefetch<TrendingResults> {
   }, [fetchTrending]);
 
   return { ...state, refetch: fetchTrending };
-}
-
-// ============================================
-// useSearch
-// ============================================
-
-interface UseSearchResult extends FetchState<SearchResult[]> {
-  search: (query: string) => void;
-  clearResults: () => void;
-}
-
-export function useSearch(): UseSearchResult {
-  const [state, setState] = useState<FetchState<SearchResult[]>>({
-    data: null,
-    isLoading: false,
-    error: null,
-  });
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  const search = useCallback(async (query: string) => {
-    if (!query.trim()) {
-      setState({ data: null, isLoading: false, error: null });
-      return;
-    }
-
-    // Cancel any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    abortControllerRef.current = new AbortController();
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-    try {
-      const data = await fetchAPI<SearchResult[]>(
-        `/api/tmdb/search?q=${encodeURIComponent(query)}`,
-        abortControllerRef.current.signal
-      );
-      setState({ data, isLoading: false, error: null });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return;
-      }
-      setState({
-        data: null,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Search failed',
-      });
-    }
-  }, []);
-
-  const clearResults = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    setState({ data: null, isLoading: false, error: null });
-  }, []);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
-
-  return { ...state, search, clearResults };
 }

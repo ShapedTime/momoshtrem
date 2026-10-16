@@ -1,0 +1,83 @@
+/* ==========================================================================
+   Search (/search, PLAN F6; #101).
+   Ported from the Search part of docs/redesign/design-cinematic/css/screens/discover.css.
+   The React parts live in components/title-search. Tokens only.
+   ========================================================================== */
+
+@layer components {
+  .srch { display: flex; flex-direction: column; gap: var(--sp-6); }
+
+  /* ---- Head: title, the field and the ⌘K tip; stays on top while results scroll ---- */
+  .srch-head {
+    position: sticky; top: 0; z-index: var(--z-sticky);
+    display: flex; flex-direction: column; gap: var(--sp-3);
+    padding-top: calc(env(safe-area-inset-top, 0px) + var(--sp-2)); padding-bottom: var(--sp-3);
+    background: linear-gradient(180deg, var(--ink-1) 70%, rgb(11 13 18 / 0));
+  }
+  .srch-head h1 { font-size: var(--t-title-1); line-height: var(--lh-title-1); letter-spacing: var(--tr-title-1); font-weight: var(--w-bold); }
+  @media (min-width: 1024px) {
+    .srch-head { top: var(--topbar-h); padding-top: var(--sp-10); padding-bottom: var(--sp-4); }
+    .srch-head h1 { font-size: var(--t-display); letter-spacing: var(--tr-display); font-weight: var(--w-semibold); }
+  }
+  .srch-form { max-width: 880px; }
+  .srch-form .input-wrap > svg:first-child { left: 16px; }
+  .srch-form .input { height: 52px; font-size: 17px; border-radius: var(--r-lg); padding-left: 48px; padding-right: 52px; background: var(--surface-1); }
+  .srch-form input::-webkit-search-cancel-button { display: none; }
+  .srch-form .input-end { right: 4px; }
+  @media (min-width: 1024px) { .srch-form .input { height: 60px; font-size: 19px; } }
+  .srch-tip { display: none; align-items: center; gap: var(--sp-2); }
+  @media (min-width: 1024px) { .srch-tip { display: flex; } }
+
+  .srch-body { display: flex; flex-direction: column; gap: var(--sp-10); }
+  .srch-sections { display: flex; flex-direction: column; gap: var(--sp-10); }
+  .srch mark { background: none; color: var(--accent-text); }
+
+  /* ---- Tabs: under the head on phone, in the flow on desktop ---- */
+  .srch-tabs { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 124px); z-index: 5; background: var(--ink-1); }
+  @media (min-width: 1024px) { .srch-tabs { position: static; } }
+
+  /* ---- Idle: recent searches and moods side by side on desktop, trending below ---- */
+  .srch-idle { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-10); }
+  @media (min-width: 1024px) {
+    .srch-idle { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .srch-idle .srch-full { grid-column: 1 / -1; }
+  }
+  .srch-recent { display: flex; flex-direction: column; }
+  .srch-recent li { display: flex; align-items: center; gap: var(--sp-1); border-bottom: 1px solid var(--line-1); }
+  .srch-recent li a { flex: 1; display: flex; align-items: center; gap: var(--sp-3); min-height: 52px; min-width: 0; color: var(--text-1); border-radius: var(--r-sm); }
+  .srch-recent li a svg { color: var(--text-3); flex-shrink: 0; }
+  .srch-recent li a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (min-width: 1024px) { .srch-recent { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--sp-8); } }
+  .srch-moods .fchip { height: 40px; padding: 0 var(--sp-4); font-size: var(--t-body); }
+
+  /* ---- "In your library" rows: one column on phone, two from 768, three from 1440 ---- */
+  .srch-lib { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+  @media (min-width: 768px) { .srch-lib { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); } }
+  @media (min-width: 1440px) { .srch-lib { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .srch-row {
+    display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-2); min-height: 92px;
+    border-radius: var(--r-lg); background: var(--surface-1); border: 1px solid var(--line-1);
+    transition: border-color var(--d-fast);
+  }
+  .srch-row:hover { border-color: var(--line-2); }
+  .srch-row .media--poster { border-radius: var(--r-sm); }
+  .srch-thumb { border-radius: var(--r-sm); }
+  .srch-row .info { display: flex; flex-direction: column; gap: 4px; min-width: 0; align-items: flex-start; }
+  .srch-title {
+    font-weight: var(--w-semibold); color: var(--text-1); line-height: 1.3; border-radius: var(--r-xs);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+  }
+  .srch-row .sub { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .srch-row-skel { height: 92px; border-radius: var(--r-lg); }
+  .srch-group-h { display: flex; align-items: baseline; gap: var(--sp-2); }
+  .srch-group-h .n { color: var(--text-3); font-size: var(--t-small); font-variant-numeric: tabular-nums; }
+  .srch-tab-empty { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+  /* ---- Nothing found ---- */
+  .srch-none { display: flex; flex-direction: column; gap: var(--sp-8); }
+  .srch-none .empty { padding-bottom: 0; }
+  .srch-tips { display: flex; flex-direction: column; gap: var(--sp-2); text-align: left; color: var(--text-2); font-size: var(--t-small); }
+  .srch-tips li { display: flex; gap: var(--sp-2); align-items: flex-start; }
+  .srch-tips li svg { color: var(--text-3); margin-top: 2px; flex-shrink: 0; }
+}
