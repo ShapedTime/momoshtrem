@@ -543,8 +543,8 @@ func TestCallCounts_DontGrowWithEpisodes(t *testing.T) {
 		}
 	}
 	small, large := measure(10, showTitle), measure(1000, showTitle)
-	if small != large || small.store != 4 || small.tmdb != 1 {
-		t.Errorf("ShowTitle calls: 10 episodes %+v, 1,000 episodes %+v; want {4 1} for both", small, large)
+	if small != large || small.store != 5 || small.tmdb != 1 {
+		t.Errorf("ShowTitle calls: 10 episodes %+v, 1,000 episodes %+v; want {5 1} for both", small, large)
 	}
 
 	season := func(f *fixture) {
@@ -566,10 +566,11 @@ func TestCallCounts_DontGrowWithEpisodes(t *testing.T) {
 func TestLibrary(t *testing.T) {
 	f := newFixture()
 	reviewJob := int64(101)
+	watchedAt := time.Date(2026, 10, 12, 21, 30, 0, 0, time.UTC)
 	f.store.library = []library.LibraryItem{
 		{MediaType: "tv", ID: 3, TMDBID: frierenTMDB, Title: "Frieren", Year: 2023, PosterPath: "/f.jpg", CreatedAt: addedAt,
-			EpisodesTotal: intPtr(38), EpisodesReady: intPtr(28), SizeBytes: 28_000, Stage: "needs_torrent",
-			NeedsReview: 2, ReviewJobID: &reviewJob, HasFile: true,
+			EpisodesTotal: intPtr(38), EpisodesReady: intPtr(28), EpisodesWatched: intPtr(26), LastWatchedAt: &watchedAt,
+			SizeBytes: 28_000, Stage: "needs_torrent", NeedsReview: 2, ReviewJobID: &reviewJob, HasFile: true,
 			// E28 is 42% fetched (the fixture's torrent client)
 			Downloading: []library.FileRef{{InfoHash: frierenHash, Path: "Frieren S01/Frieren.S01E28.mkv"}},
 			Missing:     &library.FrontierRun{SeasonNumber: 1, From: 29, To: 38, AbsoluteFrom: intPtr(29), AbsoluteTo: intPtr(38), Count: 10}},
@@ -578,7 +579,7 @@ func TestLibrary(t *testing.T) {
 		{MediaType: "movie", ID: 9, TMDBID: 1054867, Title: "One Battle After Another", Year: 2025, CreatedAt: addedAt, Stage: "needs_torrent"},
 	}
 	f.store.libTotal = 51
-	f.store.libCounts = library.LibraryCounts{All: 51, Movies: 20, Shows: 31, Ready: 40, Incomplete: 11, NeedsReview: 2}
+	f.store.libCounts = library.LibraryCounts{All: 51, Movies: 20, Shows: 31, Watching: 7, Ready: 40, Incomplete: 11, NeedsReview: 2}
 	f.store.libSummary = library.LibrarySummary{Total: 60, SizeBytes: 2_000_000_000_000, Ready: 45}
 
 	page, err := f.svc.Library(context.Background(), LibraryParams{Status: StatusIncomplete, Sort: "size", Query: "fr", Page: 2, PageSize: 500})
@@ -609,12 +610,12 @@ func TestLibrary(t *testing.T) {
 		t.Errorf("huge page = %+v (offset %d), %v; want it capped at %d", page, f.store.lastQuery.Offset, err, MaxPage)
 	}
 
-	// Watching matches nothing in the database until B5, but the page still
+	// Watching is the database's filter, in the same one query; the page
 	// carries the counts and summary.
 	before := f.store.total()
 	page, err = f.svc.Library(context.Background(), LibraryParams{Status: StatusWatching})
 	if err != nil || f.store.lastQuery.Status != StatusWatching || f.store.total() != before+1 || page.Counts.All != 51 ||
-		page.Counts.Watching != 0 || page.Summary.Total != 60 {
+		page.Counts.Watching != 7 || page.Summary.Total != 60 {
 		t.Errorf("watching = %+v, %v (store calls %d)", page, err, f.store.total()-before)
 	}
 

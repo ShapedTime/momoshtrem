@@ -15,6 +15,8 @@ type EpisodeFact struct {
 	// UnderReview: a file of an open mapping job targets it (PLAN §6
 	// "Review rules"). It's needs_review only without a file of its own.
 	UnderReview bool
+	// Watched: Trakt has a play of it (B5). It wins over the rest.
+	Watched bool
 }
 
 // SeasonFacts is one season of a library show and its episodes.
@@ -33,14 +35,15 @@ type ShowSummary struct {
 	EpisodesReady int
 	AnyFile       bool // any episode, specials included, has a file
 	Downloading   bool // any episode with a file is being fetched
-	Frontier      bool // a regular episode aired after the last assigned one
+	Frontier      bool // a regular episode aired after the last one with a file or a play
 	Missing       *MissingRun
 	DefaultSeason *int
 }
 
 // SummarizeShow derives the title page's season summaries and availability
 // from a library show's visible seasons (without season 0 while specials are
-// off), in any order.
+// off), in any order. A season's ready counts episodes with a file, watched
+// ones too; missing, needs_review and upcoming leave watched ones out.
 func SummarizeShow(seasons []SeasonFacts, today string) ShowSummary {
 	ordered := orderSeasons(seasons)
 
@@ -53,9 +56,10 @@ func SummarizeShow(seasons []SeasonFacts, today string) ShowSummary {
 			EpisodesTotal: len(season.Episodes),
 		}
 		for _, ep := range season.Episodes {
-			switch EpisodeStateOf(ep.HasFile, ep.Downloading, ep.UnderReview, ep.AirDate, today) {
-			case EpisodeReady, EpisodeDownloading, EpisodeWatched:
+			if ep.HasFile {
 				s.Ready++
+			}
+			switch EpisodeStateOf(ep.Watched, ep.HasFile, ep.Downloading, ep.UnderReview, ep.AirDate, today) {
 			case EpisodeNeedsReview:
 				s.NeedsReview++
 			case EpisodeMissing:
@@ -89,11 +93,11 @@ func SummarizeShow(seasons []SeasonFacts, today string) ShowSummary {
 }
 
 // FirstMissingRun finds the frontier: aired regular episodes after the last
-// one with a file (all of them when none has a file). Specials never count,
-// nor do gaps before the last episode with a file. It's about files: an
-// episode under review still belongs to it. It returns whether the
-// frontier is non-empty and its first run of consecutive aired episodes
-// within one season.
+// one with a file or a play (all of them when there's none). Specials never
+// count, nor do gaps before that episode. It's about files: an episode
+// under review still belongs to it. It returns whether the frontier is
+// non-empty and its first run of consecutive aired episodes within one
+// season.
 func FirstMissingRun(seasons []SeasonFacts, today string) (frontier bool, run *MissingRun) {
 	type position struct {
 		season int
@@ -113,7 +117,7 @@ func FirstMissingRun(seasons []SeasonFacts, today string) (frontier bool, run *M
 
 	last := -1
 	for i, p := range regular {
-		if p.ep.HasFile {
+		if p.ep.HasFile || p.ep.Watched {
 			last = i
 		}
 	}
@@ -145,9 +149,10 @@ func FirstMissingRun(seasons []SeasonFacts, today string) (frontier bool, run *M
 	}
 }
 
-// DefaultSeason is the season a show's page opens on: the frontier's, else
-// the latest regular season with a file, else the first regular season, else
-// specials. Nil when the show has no seasons.
+// DefaultSeason is the season a show's page opens on, unless Trakt names a
+// next episode in a season the page lists (ShowTitle prefers that one): the
+// frontier's, else the latest regular season with a file, else the first
+// regular season, else specials. Nil when the show has no seasons.
 func DefaultSeason(seasons []SeasonFacts, missing *MissingRun) *int {
 	if missing != nil {
 		return intPtr(missing.SeasonNumber)

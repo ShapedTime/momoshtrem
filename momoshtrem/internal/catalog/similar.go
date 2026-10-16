@@ -47,31 +47,42 @@ func (s *Service) similar(ctx context.Context, mediaType string, recommendations
 		})
 	}
 
+	inLibrary, err := s.LibraryStates(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to annotate similar titles: %w", err)
+	}
+	for i := range titles {
+		titles[i].Library = inLibrary[TitleRef{titles[i].MediaType, titles[i].TMDBID}]
+	}
+	return titles, nil
+}
+
+// TitleRef is a title by TMDB id: movie or tv.
+type TitleRef struct {
+	MediaType string
+	TMDBID    int
+}
+
+// LibraryStates is where each of these titles is in the library, as a
+// title card shows it ("More like this", the watchlist); titles that
+// aren't in it have no entry. One query for all of them.
+func (s *Service) LibraryStates(ctx context.Context, ids library.TMDBIDs) (map[TitleRef]*SimilarLibrary, error) {
 	rows, _, err := s.store.LibraryItems(ctx, library.LibraryQuery{
 		Today:       s.today(),
 		Downloading: s.torrentView().downloadingFiles(),
 		OnlyTMDB:    &ids,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to annotate similar titles: %w", err)
+		return nil, err
 	}
-	type key struct {
-		mediaType string
-		tmdbID    int
-	}
-	inLibrary := make(map[key]library.LibraryItem, len(rows))
+	states := make(map[TitleRef]*SimilarLibrary, len(rows))
 	for _, row := range rows {
-		inLibrary[key{row.MediaType, row.TMDBID}] = row
-	}
-	for i := range titles {
-		if row, ok := inLibrary[key{titles[i].MediaType, titles[i].TMDBID}]; ok {
-			titles[i].Library = &SimilarLibrary{
-				LibraryID:         row.ID,
-				AvailabilityStage: Stage(row.Stage),
-				EpisodesTotal:     copyInt(row.EpisodesTotal),
-				EpisodesReady:     copyInt(row.EpisodesReady),
-			}
+		states[TitleRef{row.MediaType, row.TMDBID}] = &SimilarLibrary{
+			LibraryID:         row.ID,
+			AvailabilityStage: Stage(row.Stage),
+			EpisodesTotal:     copyInt(row.EpisodesTotal),
+			EpisodesReady:     copyInt(row.EpisodesReady),
 		}
 	}
-	return titles, nil
+	return states, nil
 }

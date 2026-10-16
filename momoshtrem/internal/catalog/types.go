@@ -40,18 +40,38 @@ const (
 	TorrentPaused TorrentState = "paused"
 )
 
-// WatchState comes from Trakt (B5); always null until then.
+// WatchState is what Trakt (B5) knows about a movie; a title's is null
+// when it knows nothing (PLAN §6 "Watch state rules").
 type WatchState struct {
-	WatchedAt *time.Time     `json:"watched_at"`
-	Plays     int            `json:"plays"`
-	Rating    *int           `json:"rating"`
-	Progress  *WatchProgress `json:"progress,omitempty"`
+	WatchedAt *time.Time `json:"watched_at"` // the last play; a show: its last watched episode
+	Plays     int        `json:"plays"`      // a show: the sum of its episodes' plays
+	Rating    *int       `json:"rating"`
 }
 
-// WatchProgress is a show's episodes watched of aired.
+// ShowWatchState is a show's: a movie's, plus Trakt's progress and the
+// episode Up next names.
+type ShowWatchState struct {
+	WatchState
+	// Progress is left out until Trakt's progress for the show is in.
+	Progress    *WatchProgress `json:"progress,omitempty"`
+	NextEpisode *NextEpisode   `json:"next_episode"` // null when there's none
+}
+
+// WatchProgress is a show's regular episodes watched of aired.
 type WatchProgress struct {
 	Completed int `json:"completed"`
 	Aired     int `json:"aired"`
+}
+
+// NextEpisode is an episode to watch next: in the library's numbering and
+// with its absolute number, name and air date when the library lists it,
+// else as Trakt names it.
+type NextEpisode struct {
+	Season         int     `json:"season"`
+	Episode        int     `json:"episode"`
+	AbsoluteNumber *int    `json:"absolute_number"`
+	Name           *string `json:"name"`
+	AirDate        *string `json:"air_date"`
 }
 
 // DownloadProgress is what's being fetched for a title.
@@ -76,7 +96,7 @@ type TitleTorrent struct {
 }
 
 // MissingRun is the first run of the frontier: aired, unassigned regular
-// episodes after the last assigned one, within one season.
+// episodes after the last one with a file or a play, within one season.
 type MissingRun struct {
 	SeasonNumber int  `json:"season_number"`
 	From         int  `json:"from"` // in-season episode numbers
@@ -172,15 +192,15 @@ type TitleBase struct {
 	TrailerYouTubeKey     *string           `json:"trailer_youtube_key"`
 	Similar               []SimilarTitle    `json:"similar"`
 	Library               TitleLibraryState `json:"library"`
-	WatchState            *WatchState       `json:"watch_state"`
 	RecommendationReason  *string           `json:"recommendation_reason"`
 }
 
 // MovieTitle is GET /titles/movie/{tmdb_id}.
 type MovieTitle struct {
 	TitleBase
-	Runtime   *int     `json:"runtime"`
-	Directors []string `json:"directors"`
+	WatchState *WatchState `json:"watch_state"`
+	Runtime    *int        `json:"runtime"`
+	Directors  []string    `json:"directors"`
 }
 
 // SeasonSummary is one season on a show's title page. For a show that isn't
@@ -200,6 +220,7 @@ type SeasonSummary struct {
 // ShowTitle is GET /titles/tv/{tmdb_id}.
 type ShowTitle struct {
 	TitleBase
+	WatchState      *ShowWatchState `json:"watch_state"`
 	Status          *string         `json:"status"`
 	IsAnime         bool            `json:"is_anime"`
 	EpisodeOrdering string          `json:"episode_ordering"`
@@ -226,7 +247,7 @@ type EpisodeSummary struct {
 	StillPath      *string        `json:"still_path"`
 	Runtime        *int           `json:"runtime"`
 	EpisodeType    *string        `json:"episode_type"`
-	State          EpisodeState   `json:"state"`
+	State          EpisodeState   `json:"state"`       // watched wins; the fields below still describe the file
 	Pct            *int           `json:"pct"`         // while downloading
 	WebDAVPath     *string        `json:"webdav_path"` // while it has a file
 	Source         *string        `json:"source"`      // the file's: torrent or hdrezka; null without one
@@ -293,7 +314,7 @@ type LibraryCounts struct {
 	All         int `json:"all"`
 	Movie       int `json:"movie"`
 	TV          int `json:"tv"`
-	Watching    int `json:"watching"` // 0 until B5
+	Watching    int `json:"watching"` // shows started on Trakt, not finished, dropped or hidden
 	Ready       int `json:"ready"`
 	Incomplete  int `json:"incomplete"`
 	NeedsReview int `json:"needs_review"`

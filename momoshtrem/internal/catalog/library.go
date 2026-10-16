@@ -28,7 +28,7 @@ const (
 	StatusReady       = "ready"        // availability_stage ready
 	StatusIncomplete  = "incomplete"   // anything else: needs a torrent or downloading
 	StatusNeedsReview = "needs_review" // files under mapping review (needs_review > 0)
-	StatusWatching    = "watching"     // B5: empty until then
+	StatusWatching    = "watching"     // shows started on Trakt, not finished, dropped or hidden
 )
 
 // LibraryParams are GET /library's query parameters.
@@ -92,7 +92,7 @@ func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, e
 	tv := s.torrentView()
 	listing, err := s.store.ListLibrary(ctx, library.LibraryQuery{
 		MediaType:   p.MediaType,
-		Status:      p.Status, // watching matches nothing until B5
+		Status:      p.Status,
 		Sort:        p.Sort,
 		Search:      p.Query,
 		Limit:       p.PageSize,
@@ -111,8 +111,8 @@ func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, e
 		Total:    listing.Total,
 		Page:     p.Page,
 		PageSize: p.PageSize,
-		Counts: LibraryCounts{All: c.All, Movie: c.Movies, TV: c.Shows, Ready: c.Ready, Incomplete: c.Incomplete,
-			NeedsReview: c.NeedsReview},
+		Counts: LibraryCounts{All: c.All, Movie: c.Movies, TV: c.Shows, Watching: c.Watching, Ready: c.Ready,
+			Incomplete: c.Incomplete, NeedsReview: c.NeedsReview},
 		Summary: LibrarySummary{Total: listing.Summary.Total, SizeBytes: listing.Summary.SizeBytes, Ready: listing.Summary.Ready},
 	}
 	streaming := s.streamingTitles(ctx, len(listing.Items))
@@ -158,9 +158,11 @@ func (s *Service) libraryItem(row library.LibraryItem, tv *torrentView) LibraryI
 		AvailabilityStage: Stage(row.Stage),
 		EpisodesTotal:     copyInt(row.EpisodesTotal),
 		EpisodesReady:     copyInt(row.EpisodesReady),
+		EpisodesWatched:   copyInt(row.EpisodesWatched),
 		NeedsReview:       row.NeedsReview,
 		SizeBytes:         row.SizeBytes,
 		AddedAt:           row.CreatedAt,
+		LastWatchedAt:     row.LastWatchedAt,
 		Runtime:           positive(row.Runtime),
 		Resolution:        strPtr(row.Resolution),
 	}
@@ -185,9 +187,6 @@ func (s *Service) libraryItem(row library.LibraryItem, tv *torrentView) LibraryI
 	if m := row.Missing; m != nil {
 		item.Missing = &MissingRun{SeasonNumber: m.SeasonNumber, From: m.From, To: m.To,
 			AbsoluteFrom: copyInt(m.AbsoluteFrom), AbsoluteTo: copyInt(m.AbsoluteTo), Count: m.Count}
-	}
-	if row.MediaType == "tv" {
-		item.EpisodesWatched = intPtr(0) // B5 fills it in
 	}
 	return item
 }

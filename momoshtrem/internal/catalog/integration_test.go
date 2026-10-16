@@ -219,6 +219,18 @@ func (it *integration) stream(itemType library.ItemType, titleID, itemID int64, 
 	})
 }
 
+// watched records a Trakt play of an episode (episodeTMDB 0: Trakt has no
+// TMDB id for it).
+func (it *integration) watched(showTMDB, season, episode, episodeTMDB int) {
+	it.t.Helper()
+	it.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
+		VALUES ($1, $2, $3, NULLIF($4, 0), 1, NOW())`, showTMDB, season, episode, episodeTMDB)
+	it.t.Cleanup(func() {
+		_, _ = it.db.Exec(`DELETE FROM trakt_watched_episodes WHERE show_tmdb_id = $1 AND season = $2 AND episode = $3`,
+			showTMDB, season, episode)
+	})
+}
+
 func (it *integration) queries(fn func()) int {
 	before := it.counter.n.Load()
 	fn()
@@ -244,6 +256,10 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 	}
 	other := it.show(otherShowID, "Other "+it.tag)
 	it.season(other, 1, 3, "2020-01-03")
+	// Trakt's plays: E13 of the show, and the movie.
+	it.watched(showID, 1, 13, 0)
+	it.exec(`INSERT INTO trakt_watched_movies (tmdb_id, plays, last_watched_at) VALUES ($1, 1, NOW())`, movieID)
+	t.Cleanup(func() { _, _ = it.db.Exec(`DELETE FROM trakt_watched_movies WHERE tmdb_id = $1`, movieID) })
 
 	arcsID := "arcs-" + it.tag
 	var firstArc []tmdb.GroupEpisode // S01E01–24: 80% of the season, so arcs win
@@ -301,14 +317,16 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 	}
 
 	// Warm: the budgets of PLAN §6. The mapping review (#5) adds one
-	// query to the title pages and seasons; /library reads it in its one.
+	// query to the title pages and seasons, the watch state (B5) one to the
+	// title pages; /library reads both in its one, seasons the plays in
+	// theirs.
 	budgets := []struct {
 		name string
 		max  int
 		fn   func() error
 	}{
-		{"movie title", 5, func() error { _, err := it.svc.MovieTitle(ctx, movieID); return err }},
-		{"show title", 6, func() error { _, err := it.svc.ShowTitle(ctx, showID); return err }},
+		{"movie title", 6, func() error { _, err := it.svc.MovieTitle(ctx, movieID); return err }},
+		{"show title", 7, func() error { _, err := it.svc.ShowTitle(ctx, showID); return err }},
 		{"long season (arcs)", 4, func() error { _, err := it.svc.Season(ctx, showID, 1); return err }},
 		{"short season", 2, func() error { _, err := it.svc.Season(ctx, showID, 2); return err }},
 		{"library", 1, func() error {
@@ -321,6 +339,10 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 		}},
 		{"library watching", 1, func() error {
 			_, err := it.svc.Library(ctx, LibraryParams{Status: StatusWatching})
+			return err
+		}},
+		{"library by last watched", 1, func() error {
+			_, err := it.svc.Library(ctx, LibraryParams{Query: it.tag, Sort: "last_watched"})
 			return err
 		}},
 		{"library lookup", 1, func() error {
@@ -356,10 +378,20 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 		*e.WebDAVPath != "/TV Shows/Show "+it.tag+" (2023)/Season 01/Show "+it.tag+" - S01E01 - Episode 1.mkv" {
 		t.Errorf("E1 = %+v", e)
 	}
+	// E13 is watched: the frontier starts after it.
+	if e := season.Episodes[12]; e.State != EpisodeWatched || e.WebDAVPath != nil {
+		t.Errorf("E13 = %+v", e)
+	}
 	lib := showTitle.Library
-	if lib.AvailabilityStage != StageNeedsTorrent || lib.Missing == nil || lib.Missing.From != 13 || lib.Missing.To != 30 ||
-		*lib.Missing.AbsoluteFrom != 113 || *lib.EpisodesTotal != 38 || *lib.EpisodesReady != 12 {
+	if lib.AvailabilityStage != StageNeedsTorrent || lib.Missing == nil || lib.Missing.From != 14 || lib.Missing.To != 30 ||
+		*lib.Missing.AbsoluteFrom != 114 || *lib.EpisodesTotal != 38 || *lib.EpisodesReady != 12 {
 		t.Errorf("show library = %+v, missing %+v", lib, lib.Missing)
+	}
+	if ws := showTitle.WatchState; ws == nil || ws.Plays != 1 || ws.WatchedAt == nil || ws.Progress != nil || ws.NextEpisode != nil {
+		t.Errorf("show watch state = %+v", ws)
+	}
+	if ws := movieTitle.WatchState; ws == nil || ws.Plays != 1 {
+		t.Errorf("movie watch state = %+v", ws)
 	}
 	if len(showTitle.Similar) != 2 || showTitle.Similar[0].Library == nil || showTitle.Similar[0].Library.AvailabilityStage != StageNeedsTorrent ||
 		showTitle.Similar[1].Library != nil {
@@ -382,7 +414,8 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 				t.Errorf("movie item = %+v", item)
 			}
 		case "tv":
-			if !reflect.DeepEqual(item.Missing, lib.Missing) || !reflect.DeepEqual(item.WebDAVURL, lib.WebDAVURL) || item.Runtime != nil {
+			if !reflect.DeepEqual(item.Missing, lib.Missing) || !reflect.DeepEqual(item.WebDAVURL, lib.WebDAVURL) || item.Runtime != nil ||
+				*item.EpisodesWatched != 1 || item.LastWatchedAt == nil {
 				t.Errorf("show item = %+v, missing %+v", item, item.Missing)
 			}
 		}
@@ -454,6 +487,33 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			it.stream(library.ItemTypeEpisode, s.ID, ids[1], 1)
 			it.assign(library.ItemTypeEpisode, ids[2], hash+"-md", "E02.mkv")
 		}, map[string]torrent.FileProgress{"E02.mkv": {Length: 10, BytesCompleted: 3}}, "-md", streamSize + 1000, "downloading 2/2"},
+		// Plays cover episodes like files (B5): the frontier starts after
+		// the last episode with either.
+		{"watched, no files", func(s *library.Show) {
+			it.season(s, 1, 4, "2020-01-03")
+			it.watched(s.TMDBID, 1, 1, 0)
+			it.watched(s.TMDBID, 1, 2, 0)
+		}, nil, "", 0, "needs_torrent 0/4"},
+		{"watched after the last file", func(s *library.Show) {
+			ids := it.season(s, 1, 4, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, ids[1], hash+"-w", "E01.mkv")
+			it.watched(s.TMDBID, 1, 3, 0)
+		}, nil, "", 1000, "needs_torrent 1/4"},
+		{"watched up to the end", func(s *library.Show) {
+			ids := it.season(s, 1, 3, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, ids[1], hash+"-e", "E01.mkv")
+			it.watched(s.TMDBID, 1, 2, 0)
+			it.watched(s.TMDBID, 1, 3, 0)
+		}, nil, "", 1000, "ready 1/3"},
+		// Trakt numbers E2 as S3E7: TMDB's episode id finds it; a play
+		// with E3's number and another id isn't E3's.
+		{"watched by TMDB id", func(s *library.Show) {
+			ids := it.season(s, 1, 3, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, ids[1], hash+"-i", "E01.mkv")
+			it.exec(`UPDATE episodes SET tmdb_episode_id = $2 + episode_number WHERE id = ANY($1)`, []int64{ids[2], ids[3]}, s.TMDBID%100000*10)
+			it.watched(s.TMDBID, 3, 7, s.TMDBID%100000*10+2)
+			it.watched(s.TMDBID, 1, 3, 1)
+		}, nil, "", 1000, "needs_torrent 1/3"},
 	}
 
 	routes := map[string]any{}

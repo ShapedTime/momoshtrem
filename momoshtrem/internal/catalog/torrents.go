@@ -107,6 +107,23 @@ func (v *torrentView) filesProgress(refs []library.FileRef) (done, length int64)
 	return done, length
 }
 
+// Downloads tells, for one request, which assigned files the torrent
+// client is fetching, asking about each torrent once, as the title pages
+// do. All in memory.
+type Downloads struct{ tv *torrentView }
+
+// Downloads starts one request's view of the torrent client.
+func (s *Service) Downloads() *Downloads {
+	return &Downloads{tv: s.torrentView()}
+}
+
+// Progress reports whether an assigned file is being fetched and how far
+// along it is, in whole percent. An HDRezka stream is never downloading.
+func (d *Downloads) Progress(a *library.TorrentAssignment) (downloading bool, percent int) {
+	downloading, done, length, _ := d.tv.fileProgress(a)
+	return downloading, pct(done, length)
+}
+
 // pct is done/length in whole percent, rounded down so a file is only ever
 // 100 once it's complete.
 func pct(done, length int64) int {
