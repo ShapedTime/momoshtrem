@@ -453,7 +453,7 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 // slugify makes a slug: lowercase letters and digits joined by hyphens.
 func slugify(s string) string {
-	s = nonSlug.ReplaceAllString(normalizeTitle(s), "-")
+	s = nonSlug.ReplaceAllString(recommend.NormalizeTitle(s), "-")
 	s = strings.Trim(s, "-")
 	if len(s) > slugMaxChars {
 		cut := s[:slugMaxChars]

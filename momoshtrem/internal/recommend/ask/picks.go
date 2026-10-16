@@ -47,6 +47,14 @@ var showPicksSchema = compactSchema(`{
 						"description": "The title's TMDB id, as a tool answered it.",
 						"type": "integer"
 					},
+					"title": {
+						"description": "The title as TMDB names it: the server checks the id against it.",
+						"type": "string"
+					},
+					"year": {
+						"description": "Its release (or first air) year, as TMDB has it: the server checks the id against it too. 0 when unsure.",
+						"type": "integer"
+					},
 					"match_tag": {
 						"description": "What it matches, up to 32 characters: \"Mystery + workplace · lighter\".",
 						"type": "string"
@@ -56,7 +64,7 @@ var showPicksSchema = compactSchema(`{
 						"type": "string"
 					}
 				},
-				"required": ["media_type", "tmdb_id", "match_tag", "reason"],
+				"required": ["media_type", "tmdb_id", "title", "year", "match_tag", "reason"],
 				"additionalProperties": false
 			}
 		},
@@ -72,13 +80,16 @@ var showPicksSchema = compactSchema(`{
 
 const showPicksDescription = "Show the user your answer: the intro, your picks and refinement chips. It's the only way titles reach them. " +
 	"Each pick is checked and appears as a card at once; one that's watched, started, rated, dropped, hidden, turned down, " +
-	"unknown to TMDB, already shown or past the 10th is dropped. The answer lists what was shown and what was dropped and why."
+	"unknown to TMDB, named by another title's id, already shown or past the 10th is dropped. " +
+	"The answer lists what was shown and what was dropped and why."
 
 type picksInput struct {
 	Intro string `json:"intro"`
 	Items []struct {
 		MediaType string `json:"media_type"`
 		TMDBID    int    `json:"tmdb_id"`
+		Title     string `json:"title"`
+		Year      int    `json:"year"`
 		MatchTag  string `json:"match_tag"`
 		Reason    string `json:"reason"`
 	} `json:"items"`
@@ -150,6 +161,8 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 	}
 	type pick struct {
 		ref              library.TitleRef
+		title            string
+		year             int
 		matchTag, reason string
 	}
 	var picks []pick
@@ -166,7 +179,7 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 			drop(it.MediaType, it.TMDBID, dropDuplicate)
 		default:
 			seen[ref] = true
-			picks = append(picks, pick{ref: ref, matchTag: clip(it.MatchTag, recommend.MatchTagMaxChars),
+			picks = append(picks, pick{ref: ref, title: it.Title, year: it.Year, matchTag: clip(it.MatchTag, recommend.MatchTagMaxChars),
 				reason: clip(it.Reason, recommend.ReasonMaxChars)})
 		}
 	}
@@ -185,11 +198,10 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 			drop(p.ref.MediaType, p.ref.TMDBID, dropFull)
 			continue
 		}
-		if why := l.excluded(p.ref); why != "" {
-			drop(p.ref.MediaType, p.ref.TMDBID, why)
-			continue
-		}
-		meta, err := metaOf(ctx, t.s.d.TMDB, p.ref, today)
+		// The name first: a remembered id that happens to be watched would
+		// otherwise drop as "watched", and the model would think the title
+		// it named is.
+		meta, names, err := metaOf(ctx, t.s.d.TMDB, p.ref, today)
 		switch {
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
@@ -199,6 +211,15 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 		case err != nil:
 			t.s.log.Warn("Ask: TMDB didn't describe a pick", "media_type", p.ref.MediaType, "tmdb_id", p.ref.TMDBID, "error", err)
 			drop(p.ref.MediaType, p.ref.TMDBID, dropNoAnswer)
+			continue
+		}
+		if year := deref(meta.Year); !recommend.SameTitle(p.title, names...) || !recommend.SameYear(p.year, year) {
+			// An id remembered for another title: its card would show that one
+			drop(p.ref.MediaType, p.ref.TMDBID, recommend.Mismatch(p.title, p.year, meta.Title, year))
+			continue
+		}
+		if why := l.excluded(p.ref); why != "" {
+			drop(p.ref.MediaType, p.ref.TMDBID, why)
 			continue
 		}
 		item := viewItem{MediaType: p.ref.MediaType, TMDBID: p.ref.TMDBID, MatchTag: p.matchTag, Reason: p.reason, Meta: meta}
@@ -221,6 +242,13 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 		res.Next = "Dropped picks weren't shown. Call show_picks again with replacements and an empty intro if you like, then end your turn with a short closing line."
 	}
 	return tools.Encode(res)
+}
+
+func deref(n *int) int {
+	if n == nil {
+		return 0
+	}
+	return *n
 }
 
 // cleanRefinements keeps up to 5 distinct, non-empty chips of a few words.
