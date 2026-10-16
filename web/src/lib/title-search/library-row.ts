@@ -69,7 +69,8 @@ export function libraryRowSub(item: LibraryItem): string {
       return missing > 0 ? `${plural(missing, 'episode')} missing` : 'Some episodes have no torrent';
     }
     case 'ready':
-      if (item.media_type === 'tv') return watchLine(item);
+      // The watch line once Trakt has plays; without them (or without Trakt) what's ready, never "Not started"
+      if (item.media_type === 'tv') return (item.episodes_watched ?? 0) > 0 ? watchLine(item) : `${plural(ready, 'episode')} ready`;
       return [item.resolution, item.size_bytes > 0 ? librarySize(item.size_bytes) : null].filter(Boolean).join(' · ');
   }
 }

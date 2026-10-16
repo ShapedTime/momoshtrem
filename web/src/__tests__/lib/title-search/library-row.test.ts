@@ -61,6 +61,8 @@ describe('pills, lines and status words', () => {
   it('says what matters under the title', () => {
     expect(libraryRowSub(readyMovie)).toBe('2160p · 18.4 GB');
     expect(libraryRowSub(readyShow)).toBe('Watched all');
+    expect(libraryRowSub({ ...readyShow, episodes_watched: 26 })).toBe('26 of 38 watched');
+    expect(libraryRowSub({ ...readyShow, episodes_watched: 0 })).toBe('38 episodes ready');
     expect(libraryRowSub(partialShow)).toBe('10 episodes missing');
     expect(libraryRowSub(reviewShow)).toBe('28 of 38 ready · 2 files to check');
     expect(libraryRowSub(libraryItem({ needs_review: 1, review_job_id: 7 }))).toBe('1 file to check');

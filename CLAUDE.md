@@ -95,6 +95,8 @@ AppleTV/Infuse ─────────────────────�
 
 The v2 target architecture is in PLAN.md §4.
 
+**For You** (`/`): Trakt (read-only, synced every 30 min) drives Up next, New episodes and the watchlist, each card with what it needs next (Play in Infuse, Find, Add…); without Trakt it falls back to trending.
+
 **Flow**: Browse TMDB → Add to library → Search torrents (the search sheet, `?sheet=torrent`; momoshtrem queries Jackett and ranks releases by the quality profile) → Assign torrent (a mapping job: rules, then AI for unsure files; review at `/mapping/{id}` unless all high) → Stream via WebDAV (Infuse)
 
 **Key design**: momoshtrem is library-first. The VFS structure is driven by the database (movies, shows, episodes), not by torrent contents. Migrations are embedded from `momoshtrem/internal/library/migrations/`. The root `momoshtrem/migrations/` folder is a legacy SQLite schema.
@@ -129,9 +131,13 @@ POST /api/search/torrents/resolve          # A release without a magnet: the ser
 POST /api/search/torrents/inspect          # Inspect: a dry-run mapping job for a release or magnet (202 {job_id})
 GET|PUT /api/settings/quality-profile      # The quality profile search ranks by
 GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
+GET  /api/integrations/trakt               # Trakt (read-only): state off|pending|connected|reauth, the live device code, sync progress, counts, settings
+POST /api/integrations/trakt/connect|sync  # Device-code connect (the backend polls Trakt); sync 202 (joins a running one)
+PUT  /api/integrations/trakt/settings      # use_ratings, show_watchlist, include_paused (kept across a disconnect)
+DELETE /api/integrations/trakt             # Disconnect: revoke the token, purge everything imported
 GET  /api/me/up-next|new-episodes?days=|watchlist?type=|history   # From what Trakt imported, with the library's files; empty without Trakt, but new episodes of library shows
 ```
-Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)").
+Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)"; Trakt, `/me` and watch state: "Trakt (B5)" and "Watch state rules").
 
 ### Jackett Torznab API (port 9117)
 Only momoshtrem calls it (`internal/torznab/`): the indexer list, then one search per indexer:
@@ -199,7 +205,8 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `src/components/discover/` + `src/lib/discover/` - Discover (`/discover`; `/movies` and `/tv-shows` redirect): filters in the URL (nuqs, `url.ts`), the genre table, mood presets (`moods.ts`), TMDB params (`tmdb-query.ts`); web route `src/app/api/discover/`
 - `src/components/title-search/` + `src/lib/title-search/` - Search (`/search`) and the ⌘K palette's data: ranking (`rank.ts`), library rows, palette actions, recent searches; web route `src/app/api/title-search/` (TMDB movie, tv and person searches)
 - `src/components/activity/` + `src/lib/activity/` - Activity (`/activity`, `/activity/{hash}`; `/torrents` redirects): summary strip and sparkline, sections by state, torrent cards, the detail with health in plain words (`health.ts`), files and the Advanced piece map; offline keeps the last known data
-- `src/components/settings/` - Settings: Quality profile, Playback, System status (`status-model.ts`, Jackett's indexers)
+- `src/components/for-you/` + `src/lib/for-you/` - For You (`/`): its states (`state.ts`: first time, Trakt off, first sync, personal), the hero's deterministic picks (`hero.ts`; #9's `hero_picks` plug into `HomeHero`), the Up next, New episodes and watchlist rails; `components/ui/EpisodeCard.tsx` with one action per availability (`episode-card.ts`)
+- `src/components/settings/` - Settings: Trakt (`TraktSection.tsx`, `trakt/`: off, device code, waiting, connected; `lib/settings/trakt.ts`; `hooks/useTraktIntegration.ts` polls while pending or syncing, `useTraktActions.ts`), Quality profile, Playback, System status (`status-model.ts`, Jackett's indexers)
 - `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
 - `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
 - `src/lib/api/` - Server-side clients (momoshtrem, tmdb)
@@ -219,8 +226,10 @@ HDREZKA_ENABLED=...           # Optional: HDRezka as a second source (default fa
 HDREZKA_URL=...               # Optional: HDRezka mirror (default https://rezka.ag)
 DATABASE_URL=...              # Postgres (momoshtrem)
 TORRENT_LISTEN_PORT=...       # Optional: the torrent client's port (blank keeps 42069; 0 picks a free one)
+TRAKT_CLIENT_ID=...           # Optional: Trakt, read-only (an API app, redirect URI urn:ietf:wg:oauth:2.0:oob); TRAKT_CLIENT_SECRET is optional, new apps get none
+SECRET_KEY=...                # Encrypts Trakt's tokens at rest (openssl rand -hex 32); Trakt stays off without it, and changing it means connecting again
 ```
 
-v2 adds more (Trakt, Anthropic, backend token); see PLAN.md §4.
+v2 adds more (Anthropic, backend token, CORS, the WebDAV public URL); see PLAN.md §4.
 
 Keep in mind that you're not working in the actual server but rather in a local development environment.
