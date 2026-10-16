@@ -229,7 +229,7 @@ describe('a new job', () => {
     const { job_id } = await searchApi.inspect({ release_id: 'rel-0', media_type: 'tv', tmdb_id: FRIEREN });
     await statuses(job_id, 4);
     const detail = await assignmentApi.job(job_id);
-    expect(detail.job).toMatchObject({ dry_run: true, status: 'needs_review', torrent: { name: 'Frieren.Beyond.Journeys.End.S01E29.2160p.WEB-DL.DV.H.265-SubsPlease' } });
+    expect(detail.job).toMatchObject({ dry_run: true, status: 'needs_review', torrent: { name: '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]' } });
     await expect(assignmentApi.apply(job_id)).rejects.toMatchObject({ status: 409, code: 'dry_run' });
     expect((await assignmentApi.jobs()).items.map((job) => job.id)).not.toContain(job_id);
     expect((await titlesApi.get('tv', FRIEREN)).library).toMatchObject({ needs_review: 2, review_job_id: 101 });

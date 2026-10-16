@@ -7,6 +7,7 @@ import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { openLegacySearch } from '@/hooks/useLegacySearch';
 import type { Title } from '@/lib/api/contract';
 import { seasonQuery, titleQuery } from '@/lib/api/endpoints';
+import { TORRENT_SHEET_LIVE } from '@/lib/search/live';
 import { getSheet } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { contextMediaType, legacyScope, type SourceContext, sourceHeading } from '@/lib/source/context';
@@ -29,15 +30,15 @@ export function useSourceTitle(context: SourceContext) {
 
 /**
  * Switch the source sheet to another tab. A registered sibling swaps in on the
- * same params (Back still closes it). Until #6 registers `torrent`, Torrents
- * closes the sheet and opens the legacy search for the same context, once
- * the sheet is gone (a sheet traps focus).
+ * same params (Back still closes it). Until `TORRENT_SHEET_LIVE` (#95),
+ * Torrents closes the sheet and opens the legacy search for the same context,
+ * once the sheet is gone (a sheet traps focus).
  */
 export function useSwitchSource(context: SourceContext, close: () => void, title: Title | undefined) {
   const sheets = useSheet();
   return useCallback(
     (tab: SourceTab) => {
-      if (getSheet(tab)) {
+      if (getSheet(tab) && (tab !== 'torrent' || TORRENT_SHEET_LIVE)) {
         sheets.swap(tab);
         return;
       }

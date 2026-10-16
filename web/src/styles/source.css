@@ -49,4 +49,31 @@
   .source-sheet .sheet-foot { align-items: center; }
   .hd-foot-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hd-foot-summary .progress { width: 100%; }
+
+  /* ---- Torrents tab (#92): torrent search ------------------------------------
+     Ported from design-cinematic/css/screens/torrent.css. Cards are .release. */
+  .ts-status { display: flex; flex-direction: column; gap: 2px; }
+  .ts-sub { margin-top: var(--sp-2); }
+  .ts-pager { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 0 var(--sp-6); }
+  .ts-pager .btn { min-width: 200px; }
+
+  /* Searching: Noir's eyes, each indexer's progress, skeleton cards */
+  .ts-searching { display: flex; flex-direction: column; gap: var(--sp-5); }
+  .ts-eyes { display: grid; place-items: center; flex-shrink: 0; width: 56px; height: 36px; border-radius: 50%; background: radial-gradient(closest-side, rgb(242 179 61 / 0.1), transparent); }
+  .ts-indexers { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2); border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--line-1); }
+  .ts-indexers li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-2); font-size: var(--t-small); }
+
+  /* Actions: one row on phone, Add at its natural width and the magnet pushed right;
+     a 132 px column on desktop, the magnet with its word */
+  .ts-release .actions { flex-wrap: wrap; }
+  .ts-release .actions .btn { flex: 0 0 auto; }
+  .ts-magnet { color: var(--text-2); }
+  .ts-magnet .lbl { display: none; }
+  @media (min-width: 1024px) {
+    .ts-release { grid-template-columns: minmax(0, 1fr) 132px; }
+    .ts-release > .actions { width: 132px; }
+    .ts-release .actions .spacer { display: none; }
+    .ts-magnet { width: auto; align-self: stretch; padding: 0 12px; }
+    .ts-magnet .lbl { display: inline; font-weight: var(--w-medium); }
+  }
 }

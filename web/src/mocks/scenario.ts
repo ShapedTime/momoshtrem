@@ -21,6 +21,11 @@
  * - `library-reviewed`: /library answers with nothing under mapping review.
  * - `library-error`: /library answers 500.
  * - `library-loading`: /library never answers (the loading state).
+ * - `search-partial`: torrent search's last indexer times out until a Retry (`refresh=1`).
+ * - `search-none`: torrent search finds nothing; every indexer answers.
+ * - `search-slow`: torrent search answers `complete: false` with pending indexers, and one more
+ *   indexer answers each second (about three polls) until it's complete.
+ * - `search-down`: torrent search answers 503 `unavailable` (Jackett isn't set up).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -39,7 +44,11 @@ export type MockScenario =
   | 'library-empty'
   | 'library-reviewed'
   | 'library-error'
-  | 'library-loading';
+  | 'library-loading'
+  | 'search-partial'
+  | 'search-none'
+  | 'search-slow'
+  | 'search-down';
 
 let override: MockScenario | null = null;
 
