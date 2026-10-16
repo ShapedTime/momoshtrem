@@ -29,6 +29,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
+	"github.com/shapedtime/momoshtrem/internal/search"
 	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/status"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
@@ -419,6 +420,22 @@ func main() {
 		jackettClient = torznab.New(cfg.Jackett.URL, cfg.Jackett.APIKey)
 		statusOpts.Jackett = status.JackettProber(jackettClient)
 		slog.Info("Jackett Torznab client configured")
+	}
+	// Torrent search (#6): Jackett's indexers, ranked by the quality
+	// profile. It also resolves Inspect's release ids.
+	if jackettClient != nil {
+		searchService := search.New(search.Deps{
+			Titles: service.NewTitleContexts(service.TitleContextDeps{
+				Titles: library.NewCatalogRepository(db),
+				Shows:  showRepo,
+				TMDB:   cachedTMDB,
+			}),
+			Jackett:  jackettClient,
+			Profiles: settingsRepo,
+		})
+		apiOpts.Search = searchService
+		apiOpts.Releases = searchService
+		slog.Info("Torrent search configured")
 	}
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
