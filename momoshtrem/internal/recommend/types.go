@@ -332,7 +332,7 @@ type TextEvent struct {
 
 // TurnUsage is what one turn cost.
 type TurnUsage struct {
-	InputTokens  int64   `json:"input_tokens"`
+	InputTokens  int64   `json:"input_tokens"` // every prompt token, cache reads and writes included
 	OutputTokens int64   `json:"output_tokens"`
 	WebSearches  int     `json:"web_searches"`
 	CostUSD      float64 `json:"cost_usd"`
