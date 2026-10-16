@@ -40,7 +40,7 @@ Each of these was verified by hand on the Apple TV.
 | D3 | **The lab mirrors production's client config.** It uses `torrent.ClientConfigFor` (H2), with overrides only for loopback, port, DHT, trackers, uTP and logger. Never `atorrent.TestingConfig`: it sets `MaxAllocPeerRequestDataPerConn=5` and `KeepAliveTimeout=1ms`. Production is `CGO_ENABLED=0`, so it runs anacrolix's pure-Go uTP and never links libutp. `-tags disable_libutp` keeps the lab's cgo and `-race` builds on that same code. Over loopback the lab still sets `DisableUTP` and runs TCP only. That is a known difference from production, which the realism tier covers. |
 | D4 | **One subprocess per scenario repetition.** slog's default logger, the MIME table, the `sync.Pool`s and `DefaultServeMux` are process-wide. A subprocess gives a clean goroutine baseline and contains deadlocks: on a hard timeout the runner sends SIGQUIT and keeps the goroutine dump. |
 | D5 | **Counts are the regression signal, timings are judged only by A/B.** Exact and count metrics are deterministic and can be gated. Timing metrics depend on the machine: they get a verdict only from an interleaved A/B on one machine, with repetitions and a significance test. No timing baseline is committed. |
-| D6 | **Known issues are expected failures.** A check that fails because of a known bug (§3) reports `xfail` and doesn't block. When a fix lands, it flips to `xpass` and the report says so. |
+| D6 | **Known issues are expected failures.** A check that fails because of a known bug (§3) reports `xfail` and doesn't block. When a fix lands, it flips to `xpass` and the report says so. A known issue explains a failure only when the failure carries its signature (a #195 stall is a timed-out read at a wanted, incomplete piece with the seeder connected; an F12 lag ends within the read timeout), and only at the rate it's known for. An intermittent issue (#195) that fires on every repetition, or on more than its rate (25% by default), is a **fail**: with one repetition, one firing is every repetition. A deterministic suspect (F2, F12, …) fires on every repetition by nature, so its entry says so and relies on its signature to stay narrow. The registry is `internal/streamlab/known`. |
 | D7 | **The tool must catch the bugs we already had.** Scratch branches that revert 356e74d (cold start), 9de9c67 (stalls) and 0d364a2 (goroutine leak) must each be flagged by `ab`. |
 | D8 | **Race detection is a separate pass.** `streamlab check` builds the lab with `-race` and runs a seeded stress tier. Race builds never produce timing verdicts. |
 | D9 | **Production is read-only.** Agents only issue GETs to `127.0.0.1` through the user's SSH tunnel to the loopback metrics port (ops PLAN D8). They never call `/api` mutations, restart anything, change config or deploy. Turning tracing on in the VM's `.env` is the user's job. |
@@ -98,9 +98,11 @@ momoshtrem/internal/streamlab/
   client/    WebDAV primitives (Propfind, Head, Probe, Play, Seek, Pause, Reconnect, Parallel), one
              Transport per connection, one User-Agent per simulated device
   player/    buffer model: TTFB, time to playable, seek latency, stalls, rebuffer ratio, integrity
-  scenario/  Go-defined scenarios {Name, Tier, Doc, Media, Swarm, Stack, Script, Checks, Guards}
+  scenario/  Go-defined scenarios {Name, Tier, Doc, Media, Swarm, Stack, Script, Checks, Guards},
+             --set params, a seeded RNG; Run runs one repetition in-process; the gate catalog
   observe/   samplers, piece-arrival timeline, slog capture (--diagnose), mutex/block profiles, watchdog
-  checks/    integrity, HTTP, quiescence, priority invariants, known-issue registry
+  checks/    integrity, HTTP, quiescence, priority invariants
+  known/     the known-issue registry (D6): signatures, rates, xfail/xpass
   report/    streamlab.report/v1 JSON + report.md; streamlab.compare/v1
   runner/    subprocess per rep, warm-up, ABAB interleave, pinned GOMAXPROCS, timeouts, .streamlab/
   capture/   prod pull, timeline, replay format
@@ -135,6 +137,7 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 | `probe-burst`: season PROPFIND and sniffs | F1, F3 |
 | `parallel-ranges` | efd4c62 |
 | `dual-reader-close` | F6 |
+| `dual-reader-open`: A's window, then a probe opens | F13 |
 | `pause-resume` across the idle threshold | ffda214 |
 | `next-episode` | 3907536 |
 | `slow-swarm` (stalls expected), `seeder-loss`, `corrupt-piece` | |
@@ -172,7 +175,9 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 
 ## 6. Reports and verdicts
 
-**`report.json`** (`streamlab.report/v1`) contains:
+**Layout.** A run writes `.streamlab/runs/<id>/` at the repo root (or `--out`): `index.json` (`streamlab.index/v1`) and `index.md`, one row per scenario; per scenario, `report.json` and `report.md`, and a folder per repetition (`warmup-1/`, `rep-1/`, …) with the child's `rep.json`, its `child.log`, `goroutines.txt` after a hard timeout, and both clients' status at every timed-out read (`failure-N.txt`). `run` exits 0 when every scenario passes (xfail included), 1 when one fails or a repetition timed out or crashed, 3 on a tool or environment error.
+
+**`report.json`** (`streamlab.report/v1`) is one scenario over its repetitions. It contains:
 - **tool:** version and git (commit, dirty, branch)
 - **env:** Go version, cgo, race, GOMAXPROCS, CPU, uTP, and whether the MIME table resolves `.mkv`/`.mp4`
 - **config:** the effective config's fingerprint
