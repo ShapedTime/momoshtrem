@@ -1,6 +1,7 @@
 package swarm_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -36,6 +37,8 @@ type transfer struct {
 	stored      bool
 	startPaused bool  // the activity manager's start_paused
 	uploadRate  int64 // the seeder's cap, bytes per second; 0 is unlimited
+	// readTimeout bounds each read; 0 is labReadTimeout.
+	readTimeout time.Duration
 }
 
 func (tr transfer) run(t *testing.T) {
@@ -53,7 +56,7 @@ func (tr transfer) run(t *testing.T) {
 	}
 	t.Cleanup(func() { seeder.Close() })
 
-	l := newLeecher(t, tr.startPaused)
+	l := newLeecher(t, tr.startPaused, cmp.Or(tr.readTimeout, labReadTimeout))
 	hash := mi.HashInfoBytes().HexString()
 	if tr.stored {
 		if err := l.store.Save(hash, mi); err != nil {
@@ -165,16 +168,17 @@ func (c *checker) read(off int64, n int) {
 	c.checked += int64(n)
 }
 
-// knownStallIssue tracks reads that stall with one connected seeder.
+// knownStallIssue tracks reads that stall with one connected seeder:
+// anacrolix v1.60.0's connection writer loses a wakeup
+// (anacrolix/torrent#1070).
 const knownStallIssue = "#195"
 
 // knownStall reports whether a read that failed with err, stuck at the
-// file offset off, is the known stall (knownStallIssue): it timed out while
-// the leecher was connected to the seeder and wanted the piece at off at
-// priority Now. The momoshtrem side did its part, and anacrolix's
-// connection didn't move the data. A read whose piece isn't wanted (a cold
-// start that never raises priorities, a torrent left paused) isn't this:
-// it fails the test.
+// file offset off, is the known stall (knownStallIssue). That means it timed
+// out while the leecher was connected to the seeder, and the piece at off
+// was wanted: anacrolix's effective priority Now, which counts its own
+// reader and is None while downloads are disallowed. A torrent left idle or
+// paused, or with no seeder connected, fails the test.
 //
 // It's an expected failure (PLAN D6) until the issue is fixed; S4's
 // known-issue registry (#175) replaces this.
@@ -194,6 +198,11 @@ func (c *checker) sequential(from, to int64, chunk int) {
 	}
 }
 
+// smokeReadTimeout bounds the smoke tier's reads. They take under a second
+// even under -race on a loaded machine, and a #195 stall lasts about a
+// minute, so it only sets how long a skipped run takes.
+const smokeReadTimeout = 5 * time.Second
+
 // TestTransfer is the smoke tier: small torrents, always run. It covers
 // both ways a torrent loads, both start_paused settings, a single file and
 // a pack, and a rate-limited seeder.
@@ -209,14 +218,16 @@ func TestTransfer(t *testing.T) {
 				stored:      true,
 				startPaused: true,
 				uploadRate:  16 << 20,
+				readTimeout: smokeReadTimeout,
 			},
 		},
 		{
 			name: "metadata from peers, pack",
 			tr: transfer{
 				// Odd sizes: files start and end inside pieces.
-				spec: media.EpisodePack("Show", 1, 3, 2, 256<<10, 1536<<10+123, media.MP4),
-				file: 1,
+				spec:        media.EpisodePack("Show", 1, 3, 2, 256<<10, 1536<<10+123, media.MP4),
+				file:        1,
+				readTimeout: smokeReadTimeout,
 			},
 		},
 	}

@@ -20,7 +20,8 @@ import (
 // The lab's timeouts. Production waits up to 60 s for metadata and 120 s
 // per read; they only bound a stall, and shorter ones end a stalled test
 // sooner. A healthy read on loopback takes well under a second, even
-// under -race on a loaded machine.
+// under -race on a loaded machine. The smoke tier's reads are smaller
+// still (smokeReadTimeout).
 const (
 	labAddTimeout  = 30 * time.Second
 	labReadTimeout = 20 * time.Second
@@ -38,10 +39,13 @@ type leecher struct {
 	store     *torrent.MetainfoStore
 	tracker   *streaming.ReaderTracker
 	streaming streaming.Config
+	// readTimeout bounds each read, as torrent.read_timeout does.
+	readTimeout time.Duration
 }
 
-// newLeecher builds a leecher on config.DefaultConfig(), in a temp folder.
-func newLeecher(t *testing.T, startPaused bool) *leecher {
+// newLeecher builds a leecher on config.DefaultConfig(), in a temp folder,
+// with readTimeout in place of torrent.read_timeout.
+func newLeecher(t *testing.T, startPaused bool, readTimeout time.Duration) *leecher {
 	t.Helper()
 	cfg := config.DefaultConfig()
 	cfg.Torrent.MetadataFolder = t.TempDir()
@@ -77,7 +81,7 @@ func newLeecher(t *testing.T, startPaused bool) *leecher {
 
 	speeds := torrent.NewSpeedSampler()
 	store := torrent.NewMetainfoStore(filepath.Join(dir, "metainfo"))
-	svc := torrent.NewService(client, am, labAddTimeout, labReadTimeout,
+	svc := torrent.NewService(client, am, labAddTimeout, readTimeout,
 		torrent.WithMetainfoStore(store),
 		torrent.WithPieceStorage(pieces),
 		torrent.WithSpeedSampler(speeds),
@@ -97,12 +101,13 @@ func newLeecher(t *testing.T, startPaused bool) *leecher {
 		sc = streaming.DefaultConfig()
 	}
 	return &leecher{
-		client:    client,
-		svc:       svc,
-		am:        am,
-		store:     store,
-		tracker:   streaming.NewReaderTracker(),
-		streaming: sc,
+		client:      client,
+		svc:         svc,
+		am:          am,
+		store:       store,
+		tracker:     streaming.NewReaderTracker(),
+		streaming:   sc,
+		readTimeout: readTimeout,
 	}
 }
 
@@ -131,7 +136,7 @@ func (l *leecher) open(t *testing.T, magnet, filePath string) (*vfs.TorrentFile,
 		handle,
 		path.Base(filePath),
 		info.InfoHash,
-		labReadTimeout,
+		l.readTimeout,
 		l.am.MarkActive,
 		l.am.WaitForActivation,
 		l.streaming,
