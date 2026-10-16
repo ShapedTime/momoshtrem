@@ -154,7 +154,12 @@ func (s *service) add(hash, magnetURI string) (*TorrentInfo, error) {
 
 	t, err := s.addSpec(spec)
 	if err != nil {
-		s.log.Error("failed to add magnet", "hash", hash, "error", err)
+		s.log.Error("failed to add magnet", "hash", hash, "from_store", stored != nil, "error", err)
+		if stored != nil {
+			// The client rejected the stored info dict: fetch it from peers
+			// next time.
+			s.forgetMetainfo(hash)
+		}
 		return nil, err
 	}
 

@@ -728,7 +728,7 @@ QualityProfile {
 - **`DELETE /torrents/{hash}?delete_data=true|false`** → `204` (#96). `delete_data` defaults to `false`; any other value is `400 bad_request`.
   - It answers `404` only when nothing knows the hash: the torrent isn't loaded, no active torrent assignment uses it, and no open job has it (dry runs don't count).
   - One transaction cancels its open jobs (dry runs too), deactivates its active assignments and deletes its `source = 'torrent'` subtitles. The rows stay, inactive, so history is kept.
-  - The torrent is dropped from the client. Readers still open on its files fail, and its stored metainfo is deleted.
+  - The torrent is dropped from the client. It first waits for an add of the torrent in flight, at most `add_timeout`, so the answer can come late. Readers still open on its files fail, and its stored metainfo is deleted.
   - With `delete_data=true`, every piece is marked not complete, which deletes its file from the cache. The pieces come from the live info dict, else the stored metainfo. Partial pieces are left to the cache's LRU.
   - When the torrent is neither loaded nor stored, the metainfo is fetched again from its newest magnet in the background, within `add_timeout`. Its data is then deleted, unless something uses the torrent again by then. Without peers, a log line says the data is left to the LRU.
   - Then the WebDAV tree is rebuilt (`InvalidateTree`).

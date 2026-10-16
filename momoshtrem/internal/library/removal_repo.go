@@ -60,7 +60,7 @@ func (r *AssignmentJobRepository) ForgetTorrent(ctx context.Context, infoHash st
 			SELECT magnet_uri, created_at FROM torrent_assignments WHERE info_hash = $1 AND kind = 'torrent'
 			UNION ALL
 			SELECT magnet_uri, created_at FROM assignment_jobs WHERE info_hash = $1
-		) m ORDER BY created_at DESC LIMIT 1
+		) m ORDER BY created_at DESC NULLS LAST LIMIT 1
 	`, infoHash).Scan(&out.MagnetURI)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("failed to find the torrent's magnet: %w", err)
@@ -182,7 +182,7 @@ func deleteTitle(ctx context.Context, db *DB, d titleDelete, id int64) (*TitleDe
 			WHERE item_type = $1 AND item_id = ANY($2::bigint[]) AND kind = 'torrent'
 			UNION ALL
 			SELECT info_hash, magnet_uri, created_at FROM assignment_jobs WHERE `+d.jobKey+` = $3
-		) t ORDER BY info_hash, created_at DESC
+		) t ORDER BY info_hash, created_at DESC NULLS LAST
 	`, d.itemType, out.ItemIDs, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the title's torrents: %w", err)
