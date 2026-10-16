@@ -115,6 +115,14 @@ test.describe('Settings › AI & picks', () => {
     await expect(runNow(page)).toBeEnabled();
   });
 
+  test('For You’s “Change schedule” opens this section', async ({ page }) => {
+    await signIn(page, '/');
+    await page.getByRole('link', { name: 'Change schedule' }).click();
+    await page.waitForURL((url) => url.pathname === '/settings' && url.searchParams.get('section') === 'ai');
+    await expect(page.getByRole('heading', { name: 'AI & picks', level: 2 })).toBeVisible();
+    await expect(segment(page, 'Nightly')).toBeVisible();
+  });
+
   test('Run now’s Watch goes to For You', async ({ page }) => {
     await openSection(page);
     await runNow(page).click();
