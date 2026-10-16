@@ -73,22 +73,30 @@ func TestMovieTitle_Golden(t *testing.T) {
 }
 
 func TestMovieTitle_TorrentStates(t *testing.T) {
+	const duneFile = "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv"
 	tests := []struct {
 		name        string
 		loaded      *fakeTorrent
+		paused      bool
 		wantStage   Stage
 		wantState   TorrentState
 		wantSeeders *int
 		wantPct     int
+		wantSpeed   int64
 	}{
-		{"not loaded", nil, StageReady, TorrentNotLoaded, nil, -1},
-		{"loaded and idle", &fakeTorrent{active: false, seeders: 3}, StageReady, TorrentIdle, intPtr(3), -1},
+		{"not loaded", nil, false, StageReady, TorrentNotLoaded, nil, -1, 0},
+		{"loaded and idle", &fakeTorrent{active: false, seeders: 3}, false, StageReady, TorrentIdle, intPtr(3), -1, 0},
 		{"active, file complete", &fakeTorrent{active: true, seeders: 5, files: map[string]torrent.FileProgress{
-			"Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv": {Length: 100, BytesCompleted: 100}}},
-			StageReady, TorrentActive, intPtr(5), -1},
-		{"active, file partial", &fakeTorrent{active: true, seeders: 9, files: map[string]torrent.FileProgress{
-			"Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv": {Length: 1000, BytesCompleted: 429}}},
-			StageDownloading, TorrentActive, intPtr(9), 42},
+			duneFile: {Length: 100, BytesCompleted: 100}}},
+			false, StageReady, TorrentActive, intPtr(5), -1, 0},
+		{"active, file partial", &fakeTorrent{active: true, seeders: 9, speedBps: 2_500_000, files: map[string]torrent.FileProgress{
+			duneFile: {Length: 1000, BytesCompleted: 429}}},
+			false, StageDownloading, TorrentActive, intPtr(9), 42, 2_500_000},
+		{"paused, not loaded", nil, true, StageReady, TorrentPaused, nil, -1, 0},
+		// A paused torrent's network is off, so the client reports it inactive.
+		{"paused, loaded with a partial file", &fakeTorrent{active: false, seeders: 4, files: map[string]torrent.FileProgress{
+			duneFile: {Length: 1000, BytesCompleted: 429}}},
+			true, StageReady, TorrentPaused, intPtr(4), -1, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -97,6 +105,7 @@ func TestMovieTitle_TorrentStates(t *testing.T) {
 			if tt.loaded != nil {
 				f.torrents.loaded[duneHash] = *tt.loaded
 			}
+			f.torrents.paused = map[string]bool{duneHash: tt.paused}
 			title, err := f.svc.MovieTitle(context.Background(), duneTMDB)
 			if err != nil {
 				t.Fatal(err)
@@ -109,7 +118,7 @@ func TestMovieTitle_TorrentStates(t *testing.T) {
 				t.Errorf("download = %+v, want nil", lib.Download)
 			}
 			if tt.wantPct >= 0 && (lib.Download == nil || lib.Download.Pct != tt.wantPct || lib.Download.ETASeconds != nil ||
-				lib.Download.SpeedBps != 0 || lib.Download.Seeders != *tt.wantSeeders) {
+				lib.Download.SpeedBps != tt.wantSpeed || lib.Download.Seeders != *tt.wantSeeders) {
 				t.Errorf("download = %+v, want %d%%", lib.Download, tt.wantPct)
 			}
 		})
@@ -231,6 +240,42 @@ func TestShowTitle_Golden(t *testing.T) {
 	}
 	if title.EpisodeOrdering != "absolute" || len(title.Similar) != 2 || title.Similar[0].Library.LibraryID != 4 {
 		t.Errorf("title = %+v", title)
+	}
+}
+
+// A show's download speed is its fetching torrents' speeds added up, each
+// torrent once however many of its files are fetching; a paused torrent
+// isn't fetching.
+func TestShowTitle_DownloadSpeed(t *testing.T) {
+	const otherHash = "0123456789abcdef0123456789abcdef01234567"
+	f := newFixture()
+	e25 := &f.store.seasons[3][1].Episodes[24]
+	e25.Assignment.InfoHash, e25.Assignment.FilePath = otherHash, "Other/Frieren.S01E25.mkv"
+	f.torrents.loaded[frierenHash] = fakeTorrent{active: true, seeders: 41, speedBps: 1_000_000, files: map[string]torrent.FileProgress{
+		"Frieren S01/Frieren.S01E26.mkv": {Length: 1_000, BytesCompleted: 100},
+		"Frieren S01/Frieren.S01E27.mkv": {Length: 1_000, BytesCompleted: 1_000},
+		"Frieren S01/Frieren.S01E28.mkv": {Length: 1_000, BytesCompleted: 420},
+	}}
+	f.torrents.loaded[otherHash] = fakeTorrent{active: true, seeders: 7, speedBps: 500_000, files: map[string]torrent.FileProgress{
+		"Other/Frieren.S01E25.mkv": {Length: 1_000, BytesCompleted: 0},
+	}}
+
+	title, err := f.svc.ShowTitle(context.Background(), frierenTMDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := title.Library.Download; d == nil || d.SpeedBps != 1_500_000 || d.Pct != 17 || d.Seeders != 41 || d.ETASeconds != nil {
+		t.Fatalf("download = %+v, want 1.5 MB/s over both torrents, 17%%", d)
+	}
+
+	f.torrents.paused = map[string]bool{otherHash: true}
+	f.torrents.loaded[otherHash] = fakeTorrent{active: false, files: f.torrents.loaded[otherHash].files}
+	title, err = f.svc.ShowTitle(context.Background(), frierenTMDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := title.Library.Download; d == nil || d.SpeedBps != 1_000_000 || d.Pct != 26 {
+		t.Fatalf("download = %+v, want only Frieren's torrent at 1 MB/s, 26%%", d)
 	}
 }
 

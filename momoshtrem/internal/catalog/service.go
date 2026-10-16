@@ -62,6 +62,8 @@ type Torrents interface {
 	GetStatus(infoHash string) (*torrent.TorrentStatus, error)
 	FilesProgress(infoHash string) (map[string]torrent.FileProgress, error)
 	IsActive(infoHash string) bool
+	// PausedAt reports whether the user paused the torrent, loaded or not.
+	PausedAt(infoHash string) (time.Time, bool)
 }
 
 var _ Torrents = (torrent.Service)(nil)

@@ -48,6 +48,7 @@ The service refuses to start without a database URL, with a port outside 1–655
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. |
 | `SECRET_KEY` | `security.secret_key` | Encrypts Trakt tokens at rest. |
 | `METRICS_ENABLED`, `METRICS_PORT` | `metrics.*` | Prometheus endpoint. |
+| `TORRENT_LISTEN_PORT` | `torrent.listen_port` | BitTorrent port, TCP and uTP. Default `42069`; `0` picks a free port, so two instances can run side by side. |
 
 Optional integrations that aren't configured are disabled, and `GET /api/status` reports them as `configured: false`.
 
@@ -145,6 +146,15 @@ Apply writes the assignments in one transaction and rebuilds the WebDAV tree. A 
 - **AI settings** are the `ai` key of `app_settings`, with defaults: the classifier on, `claude-haiku-5-5`, auto-apply at high confidence, no monthly budget. #9 serves the endpoints to change them.
 - **Accuracy** is measured on the corpus in `internal/identify/testdata/`: `go test ./internal/identify` checks the gates (≥ 95% exact, zero wrong `high`). `go run ./cmd/classifier-eval` runs the golden torrents through the rules and the AI and reports accuracy, cost and latency. Its AI modes cost cents; `-modes rules` and `-dry-run` are free.
 
+## Torrent activity
+
+What the torrents are doing, for the Activity screen (`internal/activity`; the contract is in [PLAN §6 "Torrents and activity (B6)"](../redesign/PLAN.md)).
+
+- **`GET /api/torrents`** lists every torrent the library knows (active assignments and open mapping jobs), loaded or not, plus loaded torrents nothing references. Torrents stream on demand and load on their first WebDAV read, so one that isn't loaded is `idle` with null progress, and there's no ETA.
+- **`GET /api/torrents/summary`** has the total speeds, the last minute of them, how many torrents are in each state, and the disk under `metadata_folder` with the piece cache's fill.
+- **Speeds** come from a sampler that reads each loaded torrent's byte counters every 2 s and smooths them.
+- **`POST /api/torrents/{hash}/pause`** and **`/resume`**, and **`/pause-all`** and **`/resume-all`**. A pause is sticky: it's kept in `app_settings` (key `torrents`) across restarts, reads don't wake the torrent, and a torrent that isn't loaded is paused when it loads. It goes with the torrent: deleting or releasing a torrent clears it, and startup prunes the pauses of torrents the library no longer knows.
+
 ## Removing torrents and titles
 
 The deletes clean up after themselves (`internal/service/removal.go`; the contract is in [PLAN §6 "Torrents and activity (B6)"](../redesign/PLAN.md)).
@@ -157,7 +167,7 @@ Each torrent's metainfo is kept in `{metadata_folder}/metainfo/<hash>.torrent` w
 
 ## Tests
 
-`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service` and `internal/subtitle`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service`, `internal/subtitle` and `internal/activity`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine

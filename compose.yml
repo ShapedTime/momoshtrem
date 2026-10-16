@@ -107,6 +107,7 @@ services:
       - TRAKT_CLIENT_ID=${TRAKT_CLIENT_ID:-}
       - TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET:-}
       - SECRET_KEY=${SECRET_KEY:-}
+      - TORRENT_LISTEN_PORT=${TORRENT_LISTEN_PORT:-}
     depends_on:
       postgres:
         condition: service_healthy

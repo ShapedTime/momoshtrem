@@ -13,7 +13,7 @@ import (
 var envVars = []string{
 	"BACKEND_API_TOKEN", "CORS_ALLOWED_ORIGINS", "WEBDAV_PUBLIC_URL",
 	"WEBDAV_AUTH_ENABLED", "WEBDAV_USERNAME", "WEBDAV_PASSWORD",
-	"DATABASE_URL", "METRICS_ENABLED", "METRICS_PORT",
+	"DATABASE_URL", "METRICS_ENABLED", "METRICS_PORT", "TORRENT_LISTEN_PORT",
 	"TMDB_API_KEY", "TMDB_LANGUAGE", "TMDB_RPS", "JACKETT_URL", "JACKETT_API_KEY", "ANTHROPIC_API_KEY",
 	"HDREZKA_ENABLED", "HDREZKA_URL",
 	"TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "SECRET_KEY",
@@ -256,6 +256,51 @@ func TestLoad_PortRanges(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("Load: want an error naming %s, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestLoad_TorrentListenPort(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		env     string // TORRENT_LISTEN_PORT
+		want    int
+		wantErr string // "" means valid
+	}{
+		{"default", "", "", 42069, ""},
+		{"file", "torrent:\n  listen_port: 51413\n", "", 51413, ""},
+		{"zero in file picks a free port", "torrent:\n  listen_port: 0\n", "", 0, ""},
+		{"env wins over file", "torrent:\n  listen_port: 51413\n", "6881", 6881, ""},
+		{"zero in env", "", "0", 0, ""},
+		{"blank env keeps the file value", "torrent:\n  listen_port: 51413\n", " ", 51413, ""},
+		{"env not a number", "", "any", 0, "TORRENT_LISTEN_PORT"},
+		{"env negative", "", "-1", 0, "TORRENT_LISTEN_PORT"},
+		{"env too high", "", "65536", 0, "TORRENT_LISTEN_PORT"},
+		{"file too high", "torrent:\n  listen_port: 70000\n", "", 0, "torrent.listen_port"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			t.Setenv("TORRENT_LISTEN_PORT", tt.env)
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, tt.file)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: want an error naming %s, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Torrent.ListenPort != tt.want {
+				t.Errorf("Torrent.ListenPort = %d, want %d", cfg.Torrent.ListenPort, tt.want)
 			}
 		})
 	}

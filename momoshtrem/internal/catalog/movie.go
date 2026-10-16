@@ -127,7 +127,7 @@ func (s *Service) movieLibrary(movie *library.Movie, tv *torrentView) TitleLibra
 	state.WebDAVPath = strPtr(vfs.MovieFilePath(movie.Title, movie.Year, a.FilePath))
 	state.WebDAVURL = s.webdavURL(state.WebDAVPath)
 	if downloading {
-		state.Download = &DownloadProgress{Pct: pct(done, length), Seeders: seeders}
+		state.Download = &DownloadProgress{Pct: pct(done, length), SpeedBps: tv.state(a.InfoHash).speedBps, Seeders: seeders}
 	}
 	if !a.IsTorrent() {
 		state.Stream = s.titleStream(a) // torrent stays null
@@ -136,12 +136,16 @@ func (s *Service) movieLibrary(movie *library.Movie, tv *torrentView) TitleLibra
 
 	torrentState := TorrentNotLoaded
 	var torrentSeeders *int
-	if st := tv.state(a.InfoHash); st.loaded {
+	st := tv.state(a.InfoHash)
+	if st.loaded {
 		torrentState = TorrentIdle
 		if st.active {
 			torrentState = TorrentActive
 		}
 		torrentSeeders = intPtr(st.seeders)
+	}
+	if st.paused {
+		torrentState = TorrentPaused
 	}
 	state.Torrent = &TitleTorrent{
 		InfoHash:    a.InfoHash,

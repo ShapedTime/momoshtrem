@@ -76,6 +76,9 @@ type Options struct {
 	// answers 404 "search again" for a release_id; a magnet_uri still
 	// works.
 	Releases ReleaseResolver
+	// Activity lists the torrents, sums them up, and pauses and resumes
+	// them. Nil makes those routes return 503.
+	Activity Activity
 }
 
 // NewServer creates a new API server
@@ -188,13 +191,8 @@ func (s *Server) setupRoutes() {
 	// Episodes - only unassign, assignment is done via show-level API
 	api.DELETE("/episodes/:id/assign", s.unassignEpisodeTorrent)
 
-	// Torrents - torrent management
-	api.GET("/torrents", s.listTorrents)
-	api.GET("/torrents/:hash", s.getTorrent)
-	api.DELETE("/torrents/:hash", s.deleteTorrent)
-	api.POST("/torrents/:hash/pause", s.pauseTorrent)
-	api.POST("/torrents/:hash/resume", s.resumeTorrent)
-	api.GET("/torrents/:hash/debug", s.getTorrentDebug)
+	// Torrents: the list, summary, pauses, deletes, legacy status and debug
+	s.registerTorrentRoutes(api)
 
 	// Subtitles: item-scoped under /movies/:id and /episodes/:id
 	s.registerSubtitleRoutes(api)

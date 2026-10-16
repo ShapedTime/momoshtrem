@@ -70,6 +70,9 @@ type TorrentConfig struct {
 	StartPaused          bool   `yaml:"start_paused"`
 	DropDuplicatePeerIds bool   `yaml:"drop_duplicate_peer_ids"` // Prevent duplicate peer connections
 	MaxUnverifiedMB      int64  `yaml:"max_unverified_mb"`       // Cap in-flight unverified data (MB, 0=unlimited)
+	// ListenPort is the BitTorrent port (TCP and uTP). 0 picks a free one,
+	// so two instances can run side by side.
+	ListenPort int `yaml:"listen_port"`
 }
 
 type TMDBConfig struct {
@@ -175,6 +178,7 @@ func DefaultConfig() *Config {
 			StartPaused:          true,
 			DropDuplicatePeerIds: true,
 			MaxUnverifiedMB:      8,
+			ListenPort:           42069,
 		},
 		TMDB: TMDBConfig{
 			Language: "en-US",
@@ -283,6 +287,11 @@ func applyEnv(cfg *Config) error {
 		return err
 	}
 
+	// Torrent client
+	if err := envPortOrZero("TORRENT_LISTEN_PORT", &cfg.Torrent.ListenPort); err != nil {
+		return err
+	}
+
 	// External services
 	envString("TMDB_API_KEY", &cfg.TMDB.APIKey)
 	envString("TMDB_LANGUAGE", &cfg.TMDB.Language)
@@ -335,6 +344,20 @@ func envPort(name string, dst *int) error {
 	port, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("invalid %s %q: want a port number between 1 and 65535", name, v)
+	}
+	*dst = port
+	return nil
+}
+
+// envPortOrZero is envPort that also takes 0 ("pick a free port").
+func envPortOrZero(name string, dst *int) error {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(v)
+	if err != nil || port < 0 || port > 65535 {
+		return fmt.Errorf("invalid %s %q: want a port number between 0 (any free port) and 65535", name, v)
 	}
 	*dst = port
 	return nil
@@ -406,6 +429,9 @@ func (c *Config) validate(needDatabase bool) error {
 		if err := checkPort("metrics.port", c.Metrics.Port); err != nil {
 			return err
 		}
+	}
+	if p := c.Torrent.ListenPort; p < 0 || p > 65535 {
+		return fmt.Errorf("invalid torrent.listen_port %d: want a port number between 0 (any free port) and 65535", p)
 	}
 
 	if c.TMDB.RPS < 1 {

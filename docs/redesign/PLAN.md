@@ -282,13 +282,14 @@ Migration numbers are reserved per task so parallel branches don't collide.
                                              // null for movies and while not in the library
     missing: {season_number, from, to, absolute_from, absolute_to, count} | null,   // shows: the first frontier run (below)
     torrent: {info_hash, release_name, file_name, size_bytes, resolution, source, added_at,
-              state: active|idle|not_loaded, seeders} | null,  // movies; seeders null unless loaded
+              state: active|idle|not_loaded|paused, seeders} | null,  // movies; seeders null unless loaded;
+                                             // paused (B6): the user paused it, loaded or not; it wins
     stream: {…} | null                       // movies playing from HDRezka; see "HDRezka (#63)"
   }
   SimilarTitle { media_type, tmdb_id, title, year, poster_path,
                  library: {library_id, availability_stage, episodes_total, episodes_ready} | null }
   ```
-  `download.eta_seconds` is null (torrents fetch on demand) and `speed_bps` is 0 until B6.
+  `download.eta_seconds` is null (torrents fetch on demand). `download.speed_bps` is the torrent's smoothed download speed (B6, #98); for a show, the speeds of the torrents its downloading episodes are in, each torrent once. A paused torrent is never downloading.
 - `GET /titles/tv/{tmdb_id}/seasons/{n}`: one season at a time, so 1,000-episode shows stay light. `404 not_in_library` for a show that isn't in the library; `404 not_found` for an unknown season (or season 0 while specials are off).
   ```
   { season_number, name, episodes: [EpisodeSummary], ranges: [EpisodeRange] }
@@ -749,10 +750,61 @@ QualityProfile {
 - `GET /settings/ai/usage`: month-to-date cost by feature.
 
 ### Torrents and activity (B6)
-- **Hashes.** Every `/torrents/{hash}` route accepts hex in either case, or base32 (32 characters). Anything else is `400 bad_request`.
+Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#98) and `service.RemovalService` (#96).
+
+- **Torrents stream on demand.** `AddTorrent` sets every piece to no priority; the prioritizer raises pieces only around open readers, and pieces live in the LRU file cache (`global_cache_size`, 4 GB by default), so progress can go down. A torrent loads on its first WebDAV open (or a mapping job), and nothing reloads at startup. So:
+  - a torrent the library knows but the client hasn't loaded is `idle`, with `loaded: false` and `complete`, `progress`, `bytes_completed`, `peers`, `seeders` and `last_active_at` all null;
+  - there's no ETA anywhere;
+  - background downloading is #77's.
+- **Hashes.** Responses carry 40-character lowercase hex. Every `/torrents/{hash}` route accepts hex in either case, or base32 (32 characters). Anything else is `400 bad_request`.
+- **Known torrents.** A torrent is known when the client has it loaded, or an active `kind = 'torrent'` assignment uses it, or an open job that isn't a dry run has it. `pause`, `resume` and `DELETE` answer `404` for anything else.
+- **`GET /torrents`** → `200 {items: TorrentListItem[]}`: every known torrent, and every loaded one nothing references (an Inspect dry run, a WebDAV listing) with `titles: []`. One query reads the library side (active torrent assignments and open non-dry-run jobs, with their titles), merged in memory with the client's loaded torrents.
+  ```
+  TorrentState = streaming | downloading | paused | idle     // the first rule that matches:
+    paused       the user paused it (loaded or not)
+    streaming    loaded, with a reader open on one of its files (#99: a streaming session)
+    downloading  loaded, its network on (the activity manager hasn't idled it), and complete ≠ true
+    idle         anything else
+  TorrentListItem {
+    info_hash, name, state, loaded,
+    complete: bool | null, progress: number | null, bytes_completed: number | null,   // null when not loaded
+    size_bytes: number | null,
+    download_bps, upload_bps,          // smoothed bytes per second; 0 when not loaded
+    peers: number | null, seeders: number | null,   // connected; null when not loaded
+    added_at,                          // earliest active assignment or open job; the load time for one nothing references
+    last_active_at: Timestamp | null,  // the last read, resume or load since the server started (the activity manager's, in memory); null when not loaded
+    titles: [TorrentTitle],            // by title, then year
+    open_job: {id, status} | null,     // the newest open, non-dry-run job
+    streaming: []                      // StreamingSession[]; #99 fills it
+  }
+  TorrentTitle { media_type, tmdb_id, library_id, title, year, poster_path, scope }
+  ```
+  - **Order:** by state (streaming, downloading, paused, idle), then `last_active_at` newest first (nulls last), then `added_at` newest first.
+  - **`name`:** the info dict's name when loaded, else the newest job's `torrent_name` (preferring a job that has seen the file list), else the magnet's `dn`, else the hash.
+  - **`size_bytes`:** the info dict's total when loaded, else that job's `size_bytes`, else the sum of its stored proposals, else null.
+  - **`scope`** names a show's episodes the torrent's active assignments fill; null for movies, and for a show only an open job links. Whole seasons are `"Season 1"` or `"Seasons 1–3"` (a run of whole seasons; all of season 0 is `"Specials"`); a run within a season is `"S01E29–E38"`, one episode `"S01E05"`; anything more is the first of those and how many other episodes, `"S01E01–E05 +2"`. A season is whole when every episode it has is there. Specials go last.
+- **`GET /torrents/summary`** → `200`:
+  ```
+  { download_bps, upload_bps,          // the sum of every loaded torrent's smoothed speed
+    peers,                             // connected, over the loaded torrents
+    history: {interval_seconds: 2, download_bps: number[], upload_bps: number[]},   // the last 60 s of totals, oldest first; fewer right after startup
+    counts: {streaming, downloading, paused, idle},
+    disk: {total_bytes, free_bytes, torrents_bytes, cache_limit_bytes} | null,      // statfs(metadata_folder); the file cache's fill and capacity; null when unreadable
+    streaming: [] }
+  ```
+- **Speeds.** Every 2 s a sampler reads each loaded torrent's data bytes read and written (`BytesReadData`, `BytesWrittenData`) and smooths each torrent's rate with an EWMA (5 s time constant). A torrent that's dropped falls out; one added again starts over. It keeps the last 30 totals for `history`.
+- **`POST /torrents/{hash}/pause`** and **`/resume`** → `200 TorrentListItem`, idempotent; `400` for a malformed hash, `404` for an unknown one.
+  - **Pause is sticky.** It's stored, so it survives restarts. The torrent's network goes off and reads don't wake it (the activity manager ignores them, and the VFS's wait for peers returns at once). On a torrent that isn't loaded it applies when it loads.
+  - **Resume** clears it. A loaded torrent's network comes back on, and it counts as just accessed, so it stays on until `idle_timeout`. One that isn't loaded stays unloaded.
+  - Pausing an already paused torrent keeps its first time; resuming one that isn't paused changes nothing.
+- **`POST /torrents/pause-all`** → `200 {count}`: pauses the streaming and downloading torrents only. **`POST /torrents/resume-all`** → `200 {count}`: resumes every paused torrent, loaded or not.
+- **Stored pauses.** `app_settings` key `torrents`, `{paused: {"<hash>": "<RFC 3339 time>"}}`. Every write is one atomic jsonb statement (an insert on conflict, `||`, `-` or `#-`), never a read-modify-write. They're loaded at startup, before anything loads a torrent, after the pauses of torrents the library doesn't know are pruned (see "Releasing" below). Without idle mode (`idle_enabled: false`) pauses still work: torrents stay active until paused.
+- **`GET /torrents/{hash}`** keeps the legacy status (`{info_hash, name, total_size, downloaded, progress, seeders, leechers, download_speed, upload_speed, is_paused}`, `404` when not loaded) until #99 replaces it with the detail. **`GET /torrents/{hash}/debug`** stays until #102.
+- **Static routes and hashes.** `summary`, `pause-all` and `resume-all` sit beside `/torrents/{hash}`; they're matched first, and `/torrents/summary/debug` is a malformed hash (`400`).
+- **The web app, until #102:** the legacy web route `GET /api/torrents` keeps answering the legacy `{torrents: [...]}` shape, adapted from these items (`is_paused` is true for `paused` and `idle`), and the legacy routes under `app/api/torrents/[hash]` shadow summary, pause, resume and the `*-all` routes. #102 retires `app/api/torrents/**`.
 - **`DELETE /torrents/{hash}?delete_data=true|false`** → `204` (#96). `delete_data` defaults to `false`; any other value is `400 bad_request`.
   - It answers `404` only when nothing knows the hash: the torrent isn't loaded, no active torrent assignment uses it, and no open job has it (dry runs don't count).
-  - One transaction cancels its open jobs (dry runs too), deactivates its active assignments and deletes its `source = 'torrent'` subtitles. The rows stay, inactive, so history is kept.
+  - One transaction cancels its open jobs (dry runs too), deactivates its active assignments, deletes its `source = 'torrent'` subtitles and clears its stored pause. The rows stay, inactive, so history is kept. The client's pause is cleared once it's dropped (#98).
   - The torrent is dropped from the client. It first waits for an add of the torrent in flight, at most `add_timeout`, so the answer can come late. Readers still open on its files fail, and its stored metainfo is deleted.
   - With `delete_data=true`, every piece is marked not complete, which deletes its file from the cache. The pieces come from the live info dict, else the stored metainfo. Partial pieces are left to the cache's LRU.
   - When the torrent is neither loaded nor stored, the metainfo is fetched again from its newest magnet in the background, within `add_timeout`. Its data is then deleted, unless something uses the torrent again by then. Without peers, a log line says the data is left to the LRU.
@@ -760,7 +812,8 @@ QualityProfile {
 - **Lifecycle** (`internal/torrent`).
   - Adds, metadata waits, drops and removals of one hash are serialised in the torrent service. Concurrent adds (a job, a WebDAV read) share one attempt, so a timeout in one can't drop a torrent another is adding.
   - When metadata arrives, the metainfo is stored in `{metadata_folder}/metainfo/<hash>.torrent`. An add loads it first, with no wait for peers.
-- **Releasing** a torrent (discard, title delete, unassign) drops it when `TorrentInUse` finds no active assignment and no open job using it.
+- **Releasing** a torrent (discard, title delete, unassign) drops it when `TorrentInUse` finds no active assignment and no open job using it. A release that drops it also clears its pause, stored and in the client, so it isn't paused when it's assigned again (title deletes and unassigns, in `RemovalService`). Releases elsewhere (a job discard) leave the stored pause to startup: before the pauses are restored, those of torrents the library doesn't know (no active torrent assignment, no open non-dry-run job) are pruned.
+- **BitTorrent port:** `torrent.listen_port` (`TORRENT_LISTEN_PORT`), 42069 by default; 0 picks a free port, so two instances can run side by side.
 
 ### System
 - `GET /status[?refresh=1]` (G2) returns:
@@ -787,7 +840,7 @@ QualityProfile {
     - `indexers` is omitted when Jackett isn't configured or isn't reachable;
     - there's no Jackett version and no "Open Jackett" link (Jackett is loopback-only).
   - The web app's own `GET /api/status` (F1) adds `web: {version}`. A backend 503 (database down) is passed through as 200 with the same body, so Settings can show which service is down. Only a backend that can't be reached becomes `503 {error: {code: "backend_unreachable"}, web, webdav: {reachable}}`, probing WebDAV directly (`WEBDAV_INTERNAL_URL`, default: the API host on port 36911) so the offline page can say whether Infuse still plays.
-- `GET /torrents` (B6) returns `{items}`. It merges torrents known from the DB but not loaded (`idle`) with live stats. It returns real `download_speed`/`upload_speed`, and each torrent links to its titles.
+- `GET /torrents` (B6) returns `{items}`, `GET /torrents/summary` the totals: see "Torrents and activity (B6)".
 
 ## 7. Phases and tasks
 
@@ -1028,6 +1081,12 @@ QualityProfile {
   - The per-hash lifecycle and stored metainfo in `internal/torrent`.
   - `torrent.NormalizeInfoHash`.
   - The sweep of SRT files the assignment writer orphans is #82's.
+- **Landed in #98 (B6b):**
+  - `internal/activity`: `GET /torrents` merging the library's torrents with the client's, `GET /torrents/summary`, pause, resume, pause all and resume all (§6 "Torrents and activity (B6)"). Routes in `internal/api/torrent_routes.go`.
+  - The speed sampler (`torrent.SpeedSampler`), real speeds in the torrent status and the title pages' `download.speed_bps`.
+  - Sticky pauses in the activity manager (`StatePaused`, `ErrPaused`), stored in `app_settings` key `torrents`; `torrent.state: paused` on title pages.
+  - `torrent.listen_port` / `TORRENT_LISTEN_PORT`.
+  - Next: streaming sessions, the torrent detail and Re-run mapping (#99), then the Activity page (#102).
 
 **B7 · Subtitles polish** (small; independent)
 - Owns `internal/subtitle`, `internal/opensubtitles` and `007_subtitles.sql`.

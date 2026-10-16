@@ -95,6 +95,9 @@ func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, er
 	torrentCfg.PeerID = string(cc.PeerID[:])
 	torrentCfg.DefaultStorage = cc.Storage
 
+	// BitTorrent port for TCP and uTP; 0 picks a free one.
+	torrentCfg.ListenPort = cfg.ListenPort
+
 	// Disable IPv6 for simpler networking
 	torrentCfg.DisableIPv6 = true
 
@@ -124,6 +127,7 @@ func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, er
 	}
 
 	log.Info("torrent client created",
+		"listen_port", client.LocalPort(),
 		"seeding", true,
 		"ipv6_disabled", true,
 		"drop_duplicate_peers", cfg.DropDuplicatePeerIds,

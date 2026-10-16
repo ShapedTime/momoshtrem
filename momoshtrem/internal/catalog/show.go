@@ -187,7 +187,7 @@ func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons
 			anyFile = anyFile || ep.Assignment != nil
 			downloading, done, length, seeders := tv.fileProgress(ep.Assignment)
 			if downloading && visible {
-				download.add(ep.Assignment, done, length, seeders)
+				download.add(ep.Assignment, done, length, seeders, tv.state(ep.Assignment.InfoHash).speedBps)
 			}
 			f.Episodes = append(f.Episodes, EpisodeFact{
 				Number:      ep.EpisodeNumber,
@@ -224,20 +224,23 @@ func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons
 // downloadTotals combines the files being fetched for a show.
 type downloadTotals struct {
 	files   map[library.FileRef]bool
+	speeds  map[string]int64 // per torrent: a torrent's speed counts once
 	done    int64
 	length  int64
 	seeders int
 }
 
-func (d *downloadTotals) add(a *library.TorrentAssignment, done, length int64, seeders int) {
+func (d *downloadTotals) add(a *library.TorrentAssignment, done, length int64, seeders int, speedBps int64) {
 	ref := library.FileRef{InfoHash: a.InfoHash, Path: a.FilePath}
 	if d.files[ref] {
 		return // a multi-episode file counts once
 	}
 	if d.files == nil {
 		d.files = map[library.FileRef]bool{}
+		d.speeds = map[string]int64{}
 	}
 	d.files[ref] = true
+	d.speeds[a.InfoHash] = speedBps
 	d.done += done
 	d.length += length
 	d.seeders = max(d.seeders, seeders)
@@ -247,7 +250,11 @@ func (d *downloadTotals) progress() *DownloadProgress {
 	if len(d.files) == 0 {
 		return nil
 	}
-	return &DownloadProgress{Pct: pct(d.done, d.length), Seeders: d.seeders}
+	var speed int64
+	for _, s := range d.speeds {
+		speed += s
+	}
+	return &DownloadProgress{Pct: pct(d.done, d.length), SpeedBps: speed, Seeders: d.seeders}
 }
 
 // tmdbSeasons lists the seasons TMDB knows, for a show that isn't in the

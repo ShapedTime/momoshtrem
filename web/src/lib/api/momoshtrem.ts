@@ -6,7 +6,8 @@ import type {
   RecentlyAiredResponse,
 } from '@/types/momoshtrem';
 import { parseMomoshtremError } from '@/types/momoshtrem';
-import type { TorrentStatus, TorrentListResponse } from '@/types/torrent';
+import type { TorrentListItem } from '@/lib/api/contract/torrents';
+import { legacyTorrentStatus, type TorrentStatus } from '@/types/torrent';
 import type { TorrentDebugInfo } from '@/types/torrent-debug';
 
 /** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
@@ -235,16 +236,18 @@ class MomoshtremClient {
   // ============================================================================
 
   /**
-   * Get all active torrents with their status.
+   * Every torrent the library knows, loaded or not, in the legacy shape:
+   * the backend answers {items: TorrentListItem[]} (B6), which the legacy
+   * /torrents page and the Activity badge read through this until #102.
    */
   async getTorrents(): Promise<TorrentStatus[]> {
-    const result = await this.request<TorrentListResponse>(
+    const result = await this.request<{ items: TorrentListItem[] }>(
       'GET',
       '/api/torrents',
       undefined,
       'get torrents'
     );
-    return result?.torrents || [];
+    return (result?.items ?? []).map(legacyTorrentStatus);
   }
 
   /**

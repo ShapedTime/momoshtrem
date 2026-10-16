@@ -3,6 +3,8 @@
  * Maps to momoshtrem /api/torrents API responses.
  */
 
+import type { TorrentListItem } from '@/lib/api/contract/torrents';
+
 /**
  * Torrent status from momoshtrem API.
  * Matches the TorrentResponse structure from the backend.
@@ -25,6 +27,28 @@ export interface TorrentStatus {
  */
 export interface TorrentListResponse {
   torrents: TorrentStatus[];
+}
+
+/**
+ * The legacy status of one of the backend's GET /api/torrents items (B6), so
+ * the legacy /torrents page and the Activity badge keep working until #102.
+ * What only the loaded client knows is 0 for a torrent that isn't loaded, and
+ * `is_paused` means "network off", as it did: paused or idle.
+ */
+export function legacyTorrentStatus(item: TorrentListItem): TorrentStatus {
+  const seeders = item.seeders ?? 0;
+  return {
+    info_hash: item.info_hash,
+    name: item.name,
+    total_size: item.size_bytes ?? 0,
+    downloaded: item.bytes_completed ?? 0,
+    progress: item.progress ?? 0,
+    seeders,
+    leechers: Math.max(0, (item.peers ?? 0) - seeders),
+    download_speed: item.download_bps,
+    upload_speed: item.upload_bps,
+    is_paused: item.state === 'paused' || item.state === 'idle',
+  };
 }
 
 /**

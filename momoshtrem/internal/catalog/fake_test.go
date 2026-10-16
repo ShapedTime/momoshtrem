@@ -242,15 +242,18 @@ func (f *fakeTMDB) EpisodeGroup(_ context.Context, id string) (*tmdb.EpisodeGrou
 	return nil, tmdb.ErrNotFound
 }
 
-// fakeTorrents is a torrent client with a few loaded torrents.
+// fakeTorrents is a torrent client with a few loaded torrents, and the
+// torrents the user paused (loaded or not).
 type fakeTorrents struct {
 	loaded map[string]fakeTorrent
+	paused map[string]bool
 }
 
 type fakeTorrent struct {
-	active  bool
-	seeders int
-	files   map[string]torrent.FileProgress
+	active   bool
+	seeders  int
+	speedBps int64
+	files    map[string]torrent.FileProgress
 }
 
 var _ Torrents = (*fakeTorrents)(nil)
@@ -268,7 +271,14 @@ func (f *fakeTorrents) GetStatus(hash string) (*torrent.TorrentStatus, error) {
 	if !ok {
 		return nil, torrent.ErrTorrentNotFound
 	}
-	return &torrent.TorrentStatus{InfoHash: hash, Seeders: t.seeders}, nil
+	return &torrent.TorrentStatus{InfoHash: hash, Seeders: t.seeders, DownloadSpeed: t.speedBps}, nil
+}
+
+func (f *fakeTorrents) PausedAt(hash string) (time.Time, bool) {
+	if f.paused[hash] {
+		return time.Unix(1_700_000_000, 0), true
+	}
+	return time.Time{}, false
 }
 
 func (f *fakeTorrents) FilesProgress(hash string) (map[string]torrent.FileProgress, error) {
