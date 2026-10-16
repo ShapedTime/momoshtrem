@@ -3,6 +3,9 @@ import type { IndexerReport, SearchMissingRun } from '@/lib/api/contract';
 import {
   addLabel,
   alsoSearched,
+  filteredEmptyTitle,
+  filtersMatchNothing,
+  hiddenByProfile,
   indexerList,
   indexerProgress,
   missingCopy,
@@ -12,9 +15,11 @@ import {
   pagerText,
   partialProblem,
   resultsHeading,
+  scopeNoun,
   searchingDetail,
   searchingTitle,
   searchProblem,
+  showResultsLabel,
   statusLine,
 } from '@/lib/search/copy';
 
@@ -173,5 +178,39 @@ describe('labels', () => {
     expect(resultsHeading(true, 'best')).toBe('Other results · sorted by best');
     expect(resultsHeading(false, 'seeders')).toBe('Results · sorted by seeders');
     expect(pagerText(25, 1043)).toBe('Showing 25 of 1,043');
+  });
+});
+
+describe('filtered to nothing (#93)', () => {
+  const sentence = (labels: string[], noun: Parameters<typeof filtersMatchNothing>[1]) =>
+    filtersMatchNothing(labels, noun)
+      .map((part) => (part.strong ? `**${part.text}**` : part.text))
+      .join('');
+
+  it('names the filters in bold, and what they match nothing for', () => {
+    expect(sentence(['2160p', 'Dolby Vision'], 'episode')).toBe('**2160p** and **Dolby Vision** together match nothing for this episode.');
+    expect(sentence(['2160p'], 'movie')).toBe('**2160p** matches nothing for this movie.');
+    expect(sentence(['720p', 'x265', '100+ seeders'], 'season')).toBe('**720p**, **x265** and **100+ seeders** together match nothing for this season.');
+  });
+
+  it('counts more than three instead of naming them', () => {
+    expect(sentence(['a', 'b', 'c', 'd'], 'show')).toBe('These 4 filters together match nothing for this show.');
+  });
+
+  it('follows the scope: episode, season, show (any), or the movie', () => {
+    expect([scopeNoun('episode'), scopeNoun('season'), scopeNoun('any'), scopeNoun(null)]).toEqual(['episode', 'season', 'show', 'movie']);
+  });
+
+  it('says how many the filters hide, and what the profile hid', () => {
+    expect(filteredEmptyTitle(27)).toBe('Your filters hide all 27 results');
+    expect(filteredEmptyTitle(1)).toBe('Your filters hide the only result');
+    expect(hiddenByProfile(4)).toBe('4 hidden by your quality profile');
+  });
+
+  it('labels the Filters sheet’s apply with the draft’s count', () => {
+    expect(showResultsLabel(27)).toBe('Show 27 results');
+    expect(showResultsLabel(1)).toBe('Show 1 result');
+    expect(showResultsLabel(0)).toBe('Show 0 results');
+    expect(showResultsLabel(undefined)).toBe('Show results');
   });
 });

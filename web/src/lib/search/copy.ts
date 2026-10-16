@@ -181,3 +181,44 @@ export const resultsHeading = (hasBest: boolean, sort: SearchSort) => `${hasBest
 
 /** "Showing 25 of 45". */
 export const pagerText = (shown: number, total: number) => `Showing ${formatNumber(shown)} of ${formatNumber(total)}`;
+
+// ---- Filters (#93) -------------------------------------------------------------------------
+
+/** What a search is about, for "match nothing for this episode": the scope's, or the movie. */
+export type ScopeNoun = 'episode' | 'season' | 'show' | 'movie';
+
+export const scopeNoun = (scope: SearchScope | null): ScopeNoun => (scope === null ? 'movie' : scope === 'any' ? 'show' : scope);
+
+/** "Your filters hide all 27 results". */
+export const filteredEmptyTitle = (total: number) =>
+  total === 1 ? 'Your filters hide the only result' : `Your filters hide all ${formatNumber(total)} results`;
+
+/** A run of a sentence, bold or not. */
+export interface CopyPart {
+  text: string;
+  strong?: boolean;
+}
+
+/**
+ * "**2160p** and **Dolby Vision** together match nothing for this episode."
+ * One filter "matches nothing"; more than three are counted instead of named
+ * (their chips name them).
+ */
+export function filtersMatchNothing(labels: string[], noun: ScopeNoun): CopyPart[] {
+  const tail = `nothing for this ${noun}.`;
+  if (labels.length === 0) return [{ text: `Your filters match ${tail}` }];
+  if (labels.length > 3) return [{ text: `These ${labels.length} filters together match ${tail}` }];
+  const parts: CopyPart[] = [];
+  labels.forEach((label, i) => {
+    if (i > 0) parts.push({ text: i === labels.length - 1 ? ' and ' : ', ' });
+    parts.push({ text: label, strong: true });
+  });
+  parts.push({ text: labels.length === 1 ? ` matches ${tail}` : ` together match ${tail}` });
+  return parts;
+}
+
+/** "4 hidden by your quality profile": avoid terms and the resolution cap (`hidden`). */
+export const hiddenByProfile = (hidden: number) => `${formatNumber(hidden)} hidden by your quality profile`;
+
+/** "Show 27 results" in the Filters sheet's foot; "Show results" until the count is in. */
+export const showResultsLabel = (total: number | undefined) => (total === undefined ? 'Show results' : `Show ${plural(total, 'result')}`);

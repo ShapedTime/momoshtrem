@@ -1,19 +1,25 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { Check, CircleAlert, Layers, LoaderCircle, MonitorPlay, Search, TriangleAlert } from 'lucide-react';
 import { CatEyes } from '@/components/brand';
-import { Banner, Button, EmptyState, Skeleton } from '@/components/ui';
+import { Banner, Button, EmptyState, FilterChip, Skeleton } from '@/components/ui';
 import type { IndexerReport, SearchMissingRun, SearchQuery, SearchScope } from '@/lib/api/contract';
 import {
+  filteredEmptyTitle,
+  filtersMatchNothing,
+  hiddenByProfile,
   indexerProgress,
   missingCopy,
   type NoResultsSuggestions,
   noResultsBody,
   noResultsTitle,
   partialProblem,
+  type ScopeNoun,
   type SearchProblem,
   searchingDetail,
   searchingTitle,
 } from '@/lib/search/copy';
+import { activeFilters, removeFilter, type SearchFilters } from '@/lib/search/filters';
 import { cx } from '@/lib/utils/cx';
 
 /** The torrent search's states around the results (HANDOFF §5.2). */
@@ -162,6 +168,8 @@ export function PackBanner({ missing, absolute, onSeasonPacks }: { missing: Sear
 interface NoResultsProps {
   q: string;
   indexers: number;
+  /** Found but dropped by the quality profile (`hidden`). */
+  hidden: number;
   suggestions: NoResultsSuggestions;
   onSearch: (q: string) => void;
   onScope: (scope: SearchScope) => void;
@@ -169,8 +177,11 @@ interface NoResultsProps {
   onTryHDRezka?: () => void;
 }
 
-/** Nothing in scope: say so, then ways to broaden (a shorter query, a wider scope, the original title, HDRezka). */
-export function NoResults({ q, indexers, suggestions, onSearch, onScope, onTryHDRezka }: NoResultsProps) {
+/**
+ * Nothing in scope: say so, then ways to broaden (a shorter query, a wider
+ * scope, the original title, HDRezka), and what the quality profile hid.
+ */
+export function NoResults({ q, indexers, hidden, suggestions, onSearch, onScope, onTryHDRezka }: NoResultsProps) {
   const { shorter, wider, original } = suggestions;
   return (
     <EmptyState
@@ -198,6 +209,7 @@ export function NoResults({ q, indexers, suggestions, onSearch, onScope, onTryHD
               <MonitorPlay size={17} aria-hidden="true" /> Try HDRezka
             </Button>
           )}
+          <HiddenNote hidden={hidden} />
         </div>
       }
     >
@@ -206,20 +218,62 @@ export function NoResults({ q, indexers, suggestions, onSearch, onScope, onTryHD
   );
 }
 
+/** "4 hidden by your quality profile · Quality settings": what the profile drops, and where to change it. */
+export function HiddenNote({ hidden }: { hidden: number }) {
+  if (hidden <= 0) return null;
+  return (
+    <p className="t-small text-fg-3">
+      {hiddenByProfile(hidden)} ·{' '}
+      <Link href="/settings?section=quality" className="text-accent-text underline-offset-2 hover:underline">
+        Quality settings
+      </Link>
+    </p>
+  );
+}
+
+interface FilteredEmptyProps {
+  /** In scope before the filters (`total_unfiltered`). */
+  total: number;
+  /** Dropped by the quality profile (`hidden`). */
+  hidden: number;
+  filters: SearchFilters;
+  noun: ScopeNoun;
+  onChange: (filters: SearchFilters) => void;
+}
+
 /**
- * Filters hide everything the scope found. A plain stand-in: #93 names the
- * filters, shows them as removable chips and keeps "Clear all".
+ * Filters hide everything the scope found (HANDOFF §5.2): name them ("**2160p**
+ * and **Dolby Vision** together match nothing for this episode"), each as a
+ * chip that removes it, and "Clear all filters".
  */
-export function FilteredEmpty({ total, onClear }: { total: number; onClear: () => void }) {
+export function FilteredEmpty({ total, hidden, filters, noun, onChange }: FilteredEmptyProps) {
+  const chips = activeFilters(filters);
   return (
     <EmptyState
-      cat="blank"
-      title={`Your filters hide all ${total} results`}
+      cat="peek"
+      title={filteredEmptyTitle(total)}
       actions={
-        <Button onClick={onClear}>
-          Clear all filters
-        </Button>
+        <div className="flex flex-col items-center gap-4">
+          <div className="fchips justify-center" role="group" aria-label="Active filters">
+            {chips.map((chip) => (
+              <FilterChip
+                key={`${chip.key}:${'value' in chip ? chip.value : ''}`}
+                pressed
+                onRemove={() => onChange(removeFilter(filters, chip))}
+              >
+                {chip.label}
+              </FilterChip>
+            ))}
+          </div>
+          <Button onClick={() => onChange({})}>Clear all filters</Button>
+          <HiddenNote hidden={hidden} />
+        </div>
       }
-    />
+    >
+      {filtersMatchNothing(
+        chips.map((chip) => chip.label),
+        noun
+      ).map((part, i) => (part.strong ? <strong key={i} className="font-semibold text-fg-1">{part.text}</strong> : part.text))}
+    </EmptyState>
   );
 }

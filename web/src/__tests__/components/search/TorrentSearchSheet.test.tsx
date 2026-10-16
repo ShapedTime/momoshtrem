@@ -4,6 +4,8 @@ import { TorrentSearchSheet } from '@/components/search/TorrentSearchSheet';
 import { ConfirmProvider, ToastProvider } from '@/components/ui';
 import type { MediaType } from '@/lib/api/contract';
 import { clearDraft } from '@/lib/search/session';
+import { jobDetail, newJob } from '@/mocks/fixtures/assignment';
+import { findTitle } from '@/mocks/fixtures/catalog';
 import { findMockRelease, searchFixture } from '@/mocks/fixtures/search';
 import { parseSearchParams, searchAnswer } from '@/mocks/fixtures/search-rules';
 import { QUALITY_PROFILE } from '@/mocks/fixtures/settings';
@@ -62,7 +64,21 @@ function fixtures(url: URL, method: string, body: unknown): Response {
     return entry?.resolves ? answer(200, entry.resolves) : answer(404, { error: { code: 'not_found', message: 'Expired' } });
   }
   if (method === 'POST' && /^\/api\/(shows|movies)\/\d+\/assign-torrent$/.test(url.pathname)) return answer(202, { job_id: 104 });
+  if (method === 'POST' && url.pathname === '/api/search/torrents/inspect') {
+    // A release without a magnet: its .torrent can't be fetched
+    const entry = findMockRelease((body as { release_id: string }).release_id);
+    if (entry?.resolves) return answer(502, { error: { code: 'torrent_unavailable', message: 'The indexer answered 500 for the .torrent file.' } });
+    return answer(202, { job_id: 900 });
+  }
+  if (url.pathname === '/api/assignment-jobs/900') return answer(200, frierenDryRun());
   return answer(404, { error: { code: 'not_found', message: `No fixture for ${url.pathname}` } });
+}
+
+/** Inspect's job: Frieren's batch as a classified dry run (fixtures/assignment.ts). */
+function frierenDryRun() {
+  const job = newJob({ id: 900, media_type: 'tv', tmdb_id: 209867, library_id: 1, magnet_uri: 'magnet:?xt=urn:btih:' + 'a'.repeat(40), info_hash: 'a'.repeat(40), dry_run: true, ai: true, now: 0 });
+  Object.assign(job, { walk: null, reached: 4, ai_files: job.first_run_files, status: 'needs_review' });
+  return jobDetail(job, { entry: findTitle('tv', 209867)!, ai_available: true, currentFile: () => null });
 }
 
 beforeAll(() => {
@@ -212,5 +228,103 @@ describe('TorrentSearchSheet', () => {
     expect(screen.getByRole('searchbox', { name: 'Search releases' })).toHaveValue('Frieren batch');
     expect(screen.getByRole('button', { name: 'Season pack' })).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => expect(searches().at(-1)?.query.get('q')).toBe('Frieren batch'));
+  });
+
+  it('filters from a quick chip and sorts from the Sort sheet, in the search’s params', async () => {
+    renderSheet(FRIEREN);
+    await screen.findByRole('article', { name: BATCH });
+    const chips = screen.getByRole('group', { name: 'Filter and sort' });
+    fireEvent.click(within(chips).getByRole('button', { name: /^2160p/ }));
+    await waitFor(() => expect(searches().at(-1)?.query.getAll('resolution')).toEqual(['2160p']));
+    expect(await screen.findByText('3 results · Nyaa, TorrentLeech, The Pirate Bay')).toBeInTheDocument();
+    expect(within(chips).getByRole('button', { name: /^2160p/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(chips).getByRole('button', { name: 'Filters, 1 on' })).toBeInTheDocument();
+
+    fireEvent.click(within(chips).getByRole('button', { name: 'Sort: Best' }));
+    const sort = await screen.findByRole('dialog', { name: 'Sort by' });
+    fireEvent.click(within(sort).getByRole('button', { name: /^Seeders/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sort by' })).not.toBeInTheDocument());
+    await waitFor(() => expect(searches().at(-1)?.query.get('sort')).toBe('seeders'));
+    expect(await screen.findByRole('heading', { name: 'Results · sorted by seeders' })).toBeInTheDocument();
+    expect(within(chips).getByRole('button', { name: 'Sort: Seeders' })).toBeInTheDocument();
+    expect(screen.queryByText(/Best match/)).not.toBeInTheDocument();
+  });
+
+  it('counts the Filters sheet’s draft with page_size=1, and applies it only on Show', async () => {
+    renderSheet(FRIEREN);
+    await screen.findByRole('article', { name: BATCH });
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Filters' });
+    expect(within(sheet).getByRole('button', { name: 'Show 27 results' })).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole('button', { name: /^Season \d/ }));
+    await waitFor(() => expect(within(sheet).getByRole('button', { name: 'Show 7 results' })).toBeInTheDocument());
+    const count = searches().at(-1);
+    expect(count?.query.get('page_size')).toBe('1');
+    expect(count?.query.getAll('pack')).toEqual(['season']);
+    // Nothing applied yet
+    expect(screen.getByText('27 results · Nyaa, TorrentLeech, The Pirate Bay')).toBeInTheDocument();
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Show 7 results' }));
+    expect(await screen.findByText('7 results · Nyaa, TorrentLeech, The Pirate Bay')).toBeInTheDocument();
+    expect(searches().at(-1)?.query.get('page_size')).toBe('25');
+  });
+
+  it('names the filters that hide everything; removing one brings results back', async () => {
+    renderSheet(FRIEREN);
+    await screen.findByRole('article', { name: BATCH });
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Filters' });
+    fireEvent.click(within(sheet).getByRole('button', { name: /^2160p/ }));
+    fireEvent.click(within(sheet).getByRole('button', { name: '100+' }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Show 0 results' }));
+    expect(await screen.findByRole('heading', { name: 'Your filters hide all 27 results' })).toBeInTheDocument();
+    expect(screen.getByText(/together match nothing for this episode/)).toHaveTextContent('2160p and 100+ seeders together match nothing for this episode.');
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Active filters' })).getByRole('button', { name: '100+ seeders' }));
+    expect(await screen.findByText('3 results · Nyaa, TorrentLeech, The Pirate Bay')).toBeInTheDocument();
+  });
+
+  it('inspects a release: the request, the dry run’s groups', async () => {
+    renderSheet(FRIEREN);
+    const best = await screen.findByRole('article', { name: BATCH });
+    fireEvent.click(within(best).getByRole('button', { name: 'Inspect' }));
+    const sheet = await screen.findByRole('dialog', { name: /^Inspect · nothing downloads yet/ });
+    await waitFor(() => expect(calls.some((call) => call.path === '/api/search/torrents/inspect')).toBe(true));
+    expect(calls.find((call) => call.path === '/api/search/torrents/inspect')?.body).toEqual({
+      media_type: 'tv',
+      tmdb_id: 209867,
+      release_id: 'rel-0',
+      hint: { season: 1, episode: 29 },
+    });
+    expect(await within(sheet).findByRole('heading', { name: 'Will map · 9 episodes' })).toBeInTheDocument();
+    expect(within(sheet).getByText('+ 5 more, all high confidence')).toBeInTheDocument();
+    expect(within(sheet).getByRole('heading', { name: 'You’ll review · 3 files' })).toBeInTheDocument();
+    expect(within(sheet).getByText('Asked AI about 3 tricky ones')).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: 'Add & review mapping' })).toHaveClass('btn-primary');
+    // Read-only: nothing writes to the dry run
+    expect(calls.filter((call) => call.path.startsWith('/api/assignment-jobs/900/'))).toEqual([]);
+  });
+
+  it('says why Inspect couldn’t start, inline, with Retry', async () => {
+    renderSheet(FRIEREN);
+    const fetchNeeded = await screen.findByRole('article', { name: /S01E29\.Lets\.Go\.Somewhere/ });
+    fireEvent.click(within(fetchNeeded).getByRole('button', { name: 'Inspect' }));
+    const sheet = await screen.findByRole('dialog', { name: /^Inspect/ });
+    const alert = await within(sheet).findByRole('alert');
+    expect(alert).toHaveTextContent('Couldn’t fetch the torrent');
+    expect(alert).toHaveTextContent('The indexer answered 500 for the .torrent file.');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(calls.filter((call) => call.path === '/api/search/torrents/inspect')).toHaveLength(2));
+  });
+
+  it('says what the quality profile hid when nothing else is left', async () => {
+    renderSheet('sheet=torrent&movie=1054867');
+    await screen.findByRole('article', { name: /CAMRip/ });
+    const field = screen.getByRole('searchbox', { name: 'Search releases' });
+    fireEvent.change(field, { target: { value: 'HDCAM' } });
+    fireEvent.submit(field);
+    expect(await screen.findByRole('heading', { name: 'No releases for “HDCAM”' })).toBeInTheDocument();
+    expect(screen.getByText(/1 hidden by your quality profile/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Quality settings' })).toHaveAttribute('href', '/settings?section=quality');
   });
 });
