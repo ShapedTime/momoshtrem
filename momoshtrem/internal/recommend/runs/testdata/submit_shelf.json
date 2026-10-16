@@ -1,0 +1,75 @@
+{
+  "name": "submit_shelf",
+  "description": "Save one shelf of For You. Call it once per shelf, as soon as that shelf is ready: the user watches the shelves come in (2 of 5). The server checks every title: it must exist on TMDB under the title you give, and not be watched, started, rated, hidden or dropped on Trakt, or turned down; the result lists what it dropped and why. A shelf left with fewer than 6 titles isn't saved. Submitting a slug again replaces that shelf, dropped titles and all: use it to replace them. At most 6 shelves.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "slug": {
+        "description": "A short id for the shelf, lowercase with hyphens (because-severance, new-this-month). Submitting the same slug again replaces the shelf.",
+        "type": "string"
+      },
+      "kind": {
+        "description": "because: titles that share what the user loved in one title, named in the heading; new: released, or back with a new season, in the last few weeks; anime; gems: lesser-known titles with strong ratings; coming_soon: premieres in the next few months; other: any other theme.",
+        "type": "string",
+        "enum": [
+          "because",
+          "new",
+          "anime",
+          "gems",
+          "coming_soon",
+          "other"
+        ]
+      },
+      "title": {
+        "description": "The shelf's heading, at most 60 characters: Because you loved Severance, New this month for you.",
+        "type": "string"
+      },
+      "subtitle": {
+        "description": "One short line under the heading, or empty for none.",
+        "type": "string"
+      },
+      "items": {
+        "description": "6–15 titles, best first.",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "media_type": {
+              "type": "string",
+              "enum": [
+                "movie",
+                "tv"
+              ]
+            },
+            "tmdb_id": {
+              "type": "integer"
+            },
+            "title": {
+              "description": "The title as TMDB names it: the server checks the id against it.",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Why this user will like it, in one line of at most 140 characters, grounded in their profile (a title they loved, a creator, a theme, a habit). No spoilers, no generic praise.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_type",
+            "tmdb_id",
+            "title",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "slug",
+      "kind",
+      "title",
+      "subtitle",
+      "items"
+    ],
+    "additionalProperties": false
+  }
+}

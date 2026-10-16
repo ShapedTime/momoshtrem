@@ -1,0 +1,52 @@
+{
+  "name": "submit_hero_picks",
+  "description": "Save Tonight's pick: 3–9 titles, strongest first, each with a kicker and a reason. For You shows three a day from this list, so it should hold up over several days. The server checks the titles as it does a shelf's; a call replaces the picks saved before.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "picks": {
+        "description": "3–9 titles, strongest first.",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "media_type": {
+              "type": "string",
+              "enum": [
+                "movie",
+                "tv"
+              ]
+            },
+            "tmdb_id": {
+              "type": "integer"
+            },
+            "title": {
+              "description": "The title as TMDB names it: the server checks the id against it.",
+              "type": "string"
+            },
+            "kicker": {
+              "description": "A short line above the title, at most 40 characters: A slow-burn mystery, From the makers of Dark.",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Why tonight, in one line of at most 140 characters, grounded in their profile.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_type",
+            "tmdb_id",
+            "title",
+            "kicker",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "picks"
+    ],
+    "additionalProperties": false
+  }
+}

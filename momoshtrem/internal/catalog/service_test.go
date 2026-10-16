@@ -737,6 +737,49 @@ func TestReleaseName(t *testing.T) {
 
 // Every JSON shape carries exactly the fields of the TypeScript contract
 // (web/src/lib/api/contract/titles.ts and library.ts).
+// fakeReasons answers the picks' reason for one title; err fails every
+// lookup.
+type fakeReasons struct {
+	err   error
+	asked []string
+}
+
+func (f *fakeReasons) RecommendationReason(_ context.Context, mediaType string, tmdbID int) (*string, error) {
+	f.asked = append(f.asked, mediaType)
+	if f.err != nil || tmdbID != duneTMDB {
+		return nil, f.err
+	}
+	reason := "Big, quiet science fiction like Arrival."
+	return &reason, nil
+}
+
+// recommendation_reason comes from the picks once they set it (#157);
+// null before, for a title they didn't pick, and when the lookup fails.
+func TestRecommendationReason(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	if movie, _ := f.svc.MovieTitle(ctx, duneTMDB); movie.RecommendationReason != nil {
+		t.Errorf("before SetReasons = %v", *movie.RecommendationReason)
+	}
+	reasons := &fakeReasons{}
+	f.svc.SetReasons(reasons)
+	movie, err := f.svc.MovieTitle(ctx, duneTMDB)
+	if err != nil || movie.RecommendationReason == nil || *movie.RecommendationReason != "Big, quiet science fiction like Arrival." {
+		t.Errorf("reason = %v, %v", movie.RecommendationReason, err)
+	}
+	show, err := f.svc.ShowTitle(ctx, frierenTMDB)
+	if err != nil || show.RecommendationReason != nil {
+		t.Errorf("show reason = %v, %v", show.RecommendationReason, err)
+	}
+	if !reflect.DeepEqual(reasons.asked, []string{"movie", "tv"}) {
+		t.Errorf("asked = %v", reasons.asked)
+	}
+	reasons.err = errors.New("db down")
+	if movie, err := f.svc.MovieTitle(ctx, duneTMDB); err != nil || movie.RecommendationReason != nil {
+		t.Errorf("a failed lookup = %v, %v; want the page with a null reason", movie, err)
+	}
+}
+
 func TestContractFields(t *testing.T) {
 	f := newFixture()
 	movie, err := f.svc.MovieTitle(context.Background(), duneTMDB)

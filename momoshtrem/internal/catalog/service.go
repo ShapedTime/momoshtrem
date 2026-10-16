@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/hdrezka"
@@ -91,6 +92,13 @@ type Sessions interface {
 
 var _ Sessions = (*sessions.Registry)(nil)
 
+// Reasons answers a title page's recommendation_reason: the newest
+// succeeded picks run's reason for the title, nil without one (#157). The
+// picks install it with SetReasons; catalog can't import them.
+type Reasons interface {
+	RecommendationReason(ctx context.Context, mediaType string, tmdbID int) (*string, error)
+}
+
 // Deps are the Service's dependencies. Torrents, Sessions, Colors and
 // Settings are optional.
 type Deps struct {
@@ -121,6 +129,7 @@ type Service struct {
 	hdrezkaURL string
 	now        func() time.Time
 	log        *slog.Logger
+	reasons    atomic.Pointer[Reasons] // nil until the picks set it
 }
 
 // New creates a Service.
@@ -145,6 +154,28 @@ func New(d Deps) *Service {
 		now:        now,
 		log:        slog.With("component", "catalog"),
 	}
+}
+
+// SetReasons installs the title pages' recommendation_reason (#157).
+func (s *Service) SetReasons(r Reasons) {
+	s.reasons.Store(&r)
+}
+
+// recommendationReason is a title's recommendation_reason; a failure
+// leaves it null (logged), never failing the page.
+func (s *Service) recommendationReason(ctx context.Context, mediaType string, tmdbID int) *string {
+	r := s.reasons.Load()
+	if r == nil || *r == nil {
+		return nil
+	}
+	reason, err := (*r).RecommendationReason(ctx, mediaType, tmdbID)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("Couldn't read the recommendation reason", "media_type", mediaType, "tmdb_id", tmdbID, "error", err)
+		}
+		return nil
+	}
+	return reason
 }
 
 // today is the date episodes count as aired by.

@@ -77,7 +77,8 @@ func main() {
 		fmt.Fprintf(out, "  %s  write TMDB metadata onto movies and shows added before it existed\n", backfillCommand)
 		fmt.Fprintf(out, "                     (%s -h for its flags)\n", backfillCommand)
 		fmt.Fprintf(out, "  %s      check that HDRezka resolves a title to a seekable MP4 from this host\n", probeCommand)
-		fmt.Fprintf(out, "                     (no database needed; %s -h for its flags)\n\nFlags:\n", probeCommand)
+		fmt.Fprintf(out, "                     (no database needed; %s -h for its flags)\n", probeCommand)
+		fmt.Fprintf(out, "  %s      run the picks once in the foreground; -dry-run counts its first request's tokens\n\nFlags:\n", recommendRunCommand)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -85,6 +86,7 @@ func main() {
 	command := flag.Arg(0)
 	var backfill backfillFlags
 	var probe probeFlags
+	var recommendRun recommendRunFlags
 	switch command {
 	case "":
 	case backfillCommand:
@@ -97,6 +99,12 @@ func main() {
 		var code int
 		var ok bool
 		if probe, code, ok = parseProbeFlags(flag.Args()[1:]); !ok {
+			os.Exit(code)
+		}
+	case recommendRunCommand:
+		var code int
+		var ok bool
+		if recommendRun, code, ok = parseRecommendRunFlags(flag.Args()[1:]); !ok {
 			os.Exit(code)
 		}
 	default:
@@ -149,6 +157,11 @@ func main() {
 	// server holds its bolt locks, so `docker compose run` must not touch it.
 	if command == backfillCommand {
 		code := runBackfill(cfg, db, backfill)
+		db.Close()
+		os.Exit(code)
+	}
+	if command == recommendRunCommand {
+		code := runRecommend(cfg, db, recommendRun)
 		db.Close()
 		os.Exit(code)
 	}

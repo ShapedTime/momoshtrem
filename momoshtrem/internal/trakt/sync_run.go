@@ -207,9 +207,20 @@ func (r *run) done(reconcile bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to encode the Trakt sync run: %w", err)
 	}
-	return r.s.store.FinishSync(r.ctx, r.gen, library.TraktSyncDone{
+	if err := r.s.store.FinishSync(r.ctx, r.gen, library.TraktSyncDone{
 		Activities: r.activities, At: now, Reconcile: reconcile, Run: raw,
-	})
+	}); err != nil {
+		return err
+	}
+	// Still syncing as far as Status says: the hook runs before the import
+	// reports idle.
+	r.s.mu.Lock()
+	onImported := r.s.onImported
+	r.s.mu.Unlock()
+	if r.plan.kind == SyncInitial && onImported != nil {
+		onImported(r.ctx)
+	}
+	return nil
 }
 
 func (r *run) setStep(step SyncStep) {

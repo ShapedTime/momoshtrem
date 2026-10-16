@@ -99,6 +99,17 @@ type Syncer struct {
 	seq       int     // the running sync's; StopSync moves it on
 	run       SyncRun // the running sync, else the last; zero: read the stored one
 	lastCheck time.Time
+
+	onImported func(context.Context) // SetOnImported
+}
+
+// SetOnImported installs a function called when an initial import has
+// stored everything, before the sync reports it idle: the picks queue
+// their first run there (#157), so For You finds it waiting.
+func (s *Syncer) SetOnImported(fn func(context.Context)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onImported = fn
 }
 
 // NewSyncer creates the sync. Plug it in with Auth.SetHooks(s.Hooks()),

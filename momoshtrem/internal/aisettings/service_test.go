@@ -181,3 +181,22 @@ func TestUsage(t *testing.T) {
 		t.Error("a usage error was lost")
 	}
 }
+
+// A successful update calls the change hook (the picks reschedule, #157);
+// a failed one doesn't.
+func TestSetOnChange(t *testing.T) {
+	store := &fakeSettings{settings: library.DefaultAISettings()}
+	s := New(store, &fakeUsage{}, true)
+	if _, err := s.UpdateAISettings(context.Background(), recommend.SettingsPatch{RecSchedule: ptr("weekly")}); err != nil {
+		t.Fatal(err) // no hook yet
+	}
+	changes := 0
+	s.SetOnChange(func() { changes++ })
+	if _, err := s.UpdateAISettings(context.Background(), recommend.SettingsPatch{RecSchedule: ptr("manual")}); err != nil || changes != 1 {
+		t.Errorf("update = %v, changes %d", err, changes)
+	}
+	store.err = errors.New("db down")
+	if _, err := s.UpdateAISettings(context.Background(), recommend.SettingsPatch{RecSchedule: ptr("nightly")}); err == nil || changes != 1 {
+		t.Errorf("failed update = %v, changes %d", err, changes)
+	}
+}

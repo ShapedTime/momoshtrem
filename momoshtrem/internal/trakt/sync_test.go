@@ -770,6 +770,41 @@ func TestSync_QueuedTriggerAndNudge(t *testing.T) {
 	}
 }
 
+// SetOnImported's hook (the picks' first run, #157) runs once the initial
+// import stored everything and before the sync reports it idle, so a
+// reader of the status never sees the import done without the run
+// queued; incremental syncs don't call it.
+func TestSync_OnImported(t *testing.T) {
+	se := newSyncEnv(t, newFakeClock())
+	var (
+		mu   sync.Mutex
+		seen []SyncRun
+	)
+	se.syncer.SetOnImported(func(ctx context.Context) {
+		st, err := se.syncer.Status(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		seen = append(seen, st.Run)
+		mu.Unlock()
+	})
+	st := se.syncNow()
+	wantRun(t, st.Run, SyncIdle, SyncInitial)
+	se.syncNow()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 {
+		t.Fatalf("hook called %d times, want once (the initial import)", len(seen))
+	}
+	if seen[0].Status != SyncSyncing || seen[0].Kind == nil || *seen[0].Kind != SyncInitial {
+		t.Errorf("status while the hook ran = %+v, want the import still syncing", seen[0])
+	}
+	if got := se.countRows("trakt_history"); got == 0 {
+		t.Error("the hook ran before the history was stored")
+	}
+}
+
 func TestSync_ConnectStartsTheInitialImport(t *testing.T) {
 	e := newEnv(t)
 	art := &fakeArtwork{steps: map[SyncStep]bool{}}
