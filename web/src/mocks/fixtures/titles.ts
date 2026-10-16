@@ -7,6 +7,7 @@ import type {
   MediaType,
   MissingRun,
   MovieTitle,
+  NextEpisode,
   SeasonDetail,
   SeasonSummary,
   ShowEpisodesSeason,
@@ -22,7 +23,18 @@ import type {
 } from '@/lib/api/contract';
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
 import { type CatalogEntry, findTitle, iso } from './catalog';
-import { absoluteNumbers, episodeIdFor, MOVIES, type MovieSeed, type SeasonSeed, SHOWS, type ShowSeed, type TitleSeed } from './title-seeds';
+import {
+  absoluteNumbers,
+  type EpisodeKey,
+  episodeIdFor,
+  MOVIES,
+  type MovieSeed,
+  type SeasonSeed,
+  seedEpisode,
+  SHOWS,
+  type ShowSeed,
+  type TitleSeed,
+} from './title-seeds';
 
 /**
  * Title and season answers built from the seeds (title-seeds.ts) and the
@@ -84,7 +96,7 @@ const showPath = (entry: CatalogEntry) => `/TV Shows/${folder(entry)}/`;
 const episodePath = (entry: CatalogEntry, season: number, episode: number, name: string, ext = '.mkv') =>
   `/TV Shows/${folder(entry)}/Season ${pad(season)}/${sanitize(entry.title)} - S${pad(season)}E${pad(episode)} - ${sanitize(name)}${ext}`;
 
-const webdavUrl = (path: string | null) => (path === null ? null : WEBDAV_PUBLIC_URL + path.split('/').map(encodeURIComponent).join('/'));
+export const webdavUrl = (path: string | null) => (path === null ? null : WEBDAV_PUBLIC_URL + path.split('/').map(encodeURIComponent).join('/'));
 
 // ---- Library ----------------------------------------------------------------
 
@@ -213,7 +225,8 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
       const episodes = season.episodes.map((seed): EpisodeSummary => {
         const id = episodeIdFor(show.key, season.n, seed.n);
         const state = episodeState(seed, id, row);
-        const stream = (state === 'ready' && row?.streamed.get(id)) || null;
+        // Watched wins the state; the file is still the stream's
+        const stream = ((state === 'ready' || state === 'watched') && row?.streamed.get(id)) || null;
         return {
           id,
           season_number: season.n,
@@ -458,6 +471,19 @@ function base(entry: CatalogEntry, seed: TitleSeed, library: MockLibrary) {
   };
 }
 
+/** A seeded episode as `watch_state.next_episode` names it; null when the show doesn't list it. */
+export function nextEpisodeOf(show: ShowSeed, key: EpisodeKey): NextEpisode | null {
+  const seed = seedEpisode(show, key);
+  if (!seed) return null;
+  return {
+    season: key[0],
+    episode: key[1],
+    absolute_number: absoluteNumbers(show).get(episodeIdFor(show.key, ...key)) ?? null,
+    name: seed.name,
+    air_date: seed.air_date,
+  };
+}
+
 /** GET /titles/{movie|tv}/{tmdb_id} for a catalog title, against the page's library. */
 export function buildTitle(mediaType: MediaType, tmdbId: number, library: MockLibrary = seedLibrary()): Title | undefined {
   const entry = findTitle(mediaType, tmdbId);
@@ -481,6 +507,7 @@ export function buildTitle(mediaType: MediaType, tmdbId: number, library: MockLi
   const titleBase = base(entry, show, library);
   const title: ShowTitle = {
     ...titleBase,
+    watch_state: show.watch_state && { ...show.watch_state, next_episode: show.next_up ? nextEpisodeOf(show, show.next_up) : null },
     media_type: 'tv',
     status: show.status,
     is_anime: Boolean(entry.is_anime),

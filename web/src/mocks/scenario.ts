@@ -39,6 +39,17 @@
  * - `torrents-offline`: /torrents and /torrents/summary answer 502 `backend_unreachable`, as the proxy does
  *   when momoshtrem is gone (Activity keeps what it had and says so).
  * - `torrents-quiet`: /torrents lists only the idle torrents and the summary has nothing streaming (Activity's empty state).
+ * - `trakt-off`: Trakt is set up but not connected: /me is empty (new episodes still list the library's). Connect works.
+ * - `trakt-unconfigured`: no Trakt app or SECRET_KEY: `configured: false`, and connect answers 503 `unavailable`.
+ * - `trakt-syncing`: connected, and the first import stays at its last step (`details`): history, ratings,
+ *   watchlist and Up next are in.
+ * - `trakt-sync-error`: connected, and the first import failed at the watchlist (history and ratings are in);
+ *   Sync now picks it up from there.
+ * - `trakt-reauth`: Trakt stopped accepting the tokens (`state: reauth`); the imported data is still there.
+ * - `trakt-denied`: off, and the device code is denied on the second read after a connect (`connect_error: denied`).
+ * - `first-time`: Trakt off and an empty library.
+ * - `up-next-empty`: connected and synced, with nothing up next.
+ * - `me-error`: every /me read answers 500.
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -70,7 +81,16 @@ export type MockScenario =
   | 'title-search-error'
   | 'title-search-loading'
   | 'torrents-offline'
-  | 'torrents-quiet';
+  | 'torrents-quiet'
+  | 'trakt-off'
+  | 'trakt-unconfigured'
+  | 'trakt-syncing'
+  | 'trakt-sync-error'
+  | 'trakt-reauth'
+  | 'trakt-denied'
+  | 'first-time'
+  | 'up-next-empty'
+  | 'me-error';
 
 let override: MockScenario | null = null;
 

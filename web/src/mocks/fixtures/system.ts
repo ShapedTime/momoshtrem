@@ -1,4 +1,6 @@
 import type { IndexerHealth, SystemStatus } from '@/lib/api/contract';
+import { traktStatus } from './trakt';
+
 export function systemStatus(): SystemStatus {
   return {
     // CI stamps the backend with the full commit SHA of its image
@@ -18,7 +20,8 @@ export function systemStatus(): SystemStatus {
       ],
     },
     tmdb: { configured: true, reachable: true, latency_ms: 112 },
-    trakt: { configured: true, connected: false },
+    // The page's Trakt account (fixtures/trakt.ts), so Settings and /status agree
+    trakt: traktStatus(),
     ai: { configured: true, mtd_cost_usd: 3.12 },
     opensubtitles: { configured: true },
     hdrezka: { configured: true, reachable: true, latency_ms: 340 },

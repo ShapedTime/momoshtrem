@@ -12,12 +12,26 @@ export type ClassifierMode = 'auto' | 'rules_only' | 'ai_always';
 /** TMDB marks mid-season and season finales; everything else is standard. */
 export type EpisodeType = 'standard' | 'mid_season' | 'finale';
 
+/** An episode to watch next (B5): `next_episode` of a show's watch state. */
+export interface NextEpisode {
+  season: number;
+  episode: number;
+  absolute_number: number | null;
+  name: string | null;
+  air_date: string | null;
+}
+
+/** From Trakt (B5); null when Trakt knows nothing about the title. */
 export interface WatchState {
+  /** The last play (a show: its last watched episode). */
   watched_at: Timestamp | null;
+  /** Shows: the sum of their episodes' plays. */
   plays: number;
   rating: number | null;
-  /** Shows: episodes watched of aired. */
+  /** Shows: regular episodes watched of aired. */
   progress?: { completed: number; aired: number };
+  /** Shows: the episode Up next names for it (whether or not Up next lists the show); null when there's none. */
+  next_episode?: NextEpisode | null;
 }
 
 export interface DownloadProgress {
@@ -74,7 +88,7 @@ export interface EpisodeStream {
   quality: string;
 }
 
-/** The first run of aired, unassigned regular episodes after the last assigned one. */
+/** The first run of the frontier: aired regular episodes after the last one with a file or watched. */
 export interface MissingRun {
   season_number: number;
   /** In-season episode numbers. */
@@ -170,8 +184,9 @@ export interface SeasonSummary {
   name: string;
   /** Every episode TMDB lists, upcoming ones included. */
   episodes_total: number;
-  /** Episodes with a file (ready, watched or downloading). */
+  /** Episodes with a file (ready, downloading, or watched with a file). */
   ready: number;
+  /** Aired, no file, not watched and not under review. */
   missing: number;
   needs_review: number;
   upcoming: number;
@@ -191,6 +206,7 @@ export interface EpisodeSummary {
   still_path: string | null;
   runtime: number | null;
   episode_type: EpisodeType | null;
+  /** `watched` (B5) wins over the others; `pct`, `webdav_path` and `source` still describe the file. */
   state: EpisodeState;
   pct: number | null;
   /** Only while the episode has a file. */
@@ -237,7 +253,7 @@ export interface ShowTitle extends TitleBase {
   episode_run_time: number | null;
   /** Specials (season 0) are listed last, and left out while `include_specials` is off. Episodes load per season. */
   seasons: SeasonSummary[];
-  /** The season to open: the frontier's, else the latest with a file, else the first regular one. */
+  /** The season to open: `watch_state.next_episode`'s, else the frontier's, else the latest with a file, else the first regular one. */
   default_season: number | null;
 }
 

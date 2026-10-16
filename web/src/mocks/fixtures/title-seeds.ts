@@ -20,6 +20,14 @@ import { iso } from './catalog';
  *
  * No episode is seeded `needs_review`: that state comes from the open mapping
  * jobs (fixtures/assignment.ts), for episodes that have no file.
+ *
+ * `watched` episodes are Trakt's plays (B5) and always have a file here.
+ * `next_up` is the episode Trakt's Up next names (fixtures/trakt.ts), one per
+ * availability: Frieren S01E27 ready, The Studio S01E10 downloading, One Piece
+ * #892 under review (a rewatch from Wano), Doctor Who S03E04 needs a torrent,
+ * Severance S02E10 airs next week (caught up: the calendar's), The Good Place
+ * not in the library (its five plays are Trakt's only). Bluey is unstarted: a
+ * watchlist start.
  */
 
 const DAY = 86_400_000;
@@ -39,6 +47,9 @@ export interface TitleSeed {
   /** In the seeded library. */
   library?: { id: number; added_days_ago: number };
 }
+
+/** A season and episode number. */
+export type EpisodeKey = [season: number, episode: number];
 
 export interface MovieSeed extends TitleSeed {
   torrent?: TitleTorrent;
@@ -77,6 +88,8 @@ export interface ShowSeed extends TitleSeed {
   seeders?: number;
   /** The release the episodes' files came from (one per show here; subtitles rank against it). */
   release?: string;
+  /** Trakt's next episode for the show (B5): `watch_state.next_episode` and its Up next card. */
+  next_up?: EpisodeKey;
   seasons: SeasonSeed[];
 }
 
@@ -144,6 +157,7 @@ export const SHOWS: Record<number, ShowSeed> = {
     trailer_youtube_key: null,
     recommendation_reason: 'Because you loved Mushishi: quiet, melancholic and kind.',
     watch_state: { watched_at: iso(3), plays: 26, rating: 10, progress: { completed: 26, aired: 38 } },
+    next_up: [1, 27],
     similar: [['tv', 37854], ['tv', 82728], ['tv', 66573]],
     library: { id: 1, added_days_ago: 120 },
     status: 'Returning Series',
@@ -170,7 +184,7 @@ export const SHOWS: Record<number, ShowSeed> = {
         episodes: amend(
           amend(
             [
-              ...run(FRIEREN_S1.slice(0, 28), '2023-09-29', 24, (n) => (n === 26 || n === 28 ? 'ready' : 'watched')),
+              ...run(FRIEREN_S1.slice(0, 28), '2023-09-29', 24, (n) => (n <= 26 ? 'watched' : 'ready')),
               // The second cour, after a long break: releases call it season 2.
               ...run(FRIEREN_S1.slice(28), '2026-01-16', 24, () => 'missing', { from: 29 }),
             ],
@@ -200,6 +214,8 @@ export const SHOWS: Record<number, ShowSeed> = {
     trailer_youtube_key: null,
     recommendation_reason: null,
     watch_state: { watched_at: iso(5), plays: 181, rating: 9, progress: { completed: 181, aired: 192 } },
+    // A rewatch (Trakt's progress was reset): Wano's first episode is next, and job 102 is mapping it
+    next_up: [21, 1],
     similar: [['tv', 209867], ['tv', 82728], ['tv', 57243]],
     library: { id: 2, added_days_ago: 400 },
     status: 'Returning Series',
@@ -269,7 +285,8 @@ export const SHOWS: Record<number, ShowSeed> = {
     crew: ['Russell T Davies'],
     trailer_youtube_key: null,
     recommendation_reason: null,
-    watch_state: { watched_at: iso(40), plays: 29, rating: 8, progress: { completed: 26, aired: 52 } },
+    watch_state: { watched_at: iso(40), plays: 32, rating: 8, progress: { completed: 29, aired: 52 } },
+    next_up: [3, 4],
     similar: [['tv', 66573], ['tv', 95396], ['tv', 209867]],
     library: { id: 3, added_days_ago: 300 },
     status: 'Ended',
@@ -298,7 +315,7 @@ export const SHOWS: Record<number, ShowSeed> = {
         name: `Series ${i + 1}`,
         episodes: amend(
           run(DOCTOR_WHO[i], start, 45, (n) => {
-            if (i < 2) return 'watched';
+            if (i < 2 || (i === 2 && n <= 3)) return 'watched';
             // A gap before the last file: it doesn't make the show need a torrent.
             if (i === 2 && n >= 4 && n <= 9) return 'missing';
             return 'ready';
@@ -331,7 +348,8 @@ export const SHOWS: Record<number, ShowSeed> = {
     crew: ['Dan Erickson'],
     trailer_youtube_key: null,
     recommendation_reason: null,
-    watch_state: { watched_at: iso(6), plays: 13, rating: 10, progress: { completed: 13, aired: 18 } },
+    watch_state: { watched_at: iso(6), plays: 18, rating: 10, progress: { completed: 18, aired: 18 } },
+    next_up: [2, 10],
     similar: [['tv', 247767], ['tv', 66573], ['tv', 57243]],
     library: { id: 4, added_days_ago: 600 },
     status: 'Returning Series',
@@ -362,7 +380,7 @@ export const SHOWS: Record<number, ShowSeed> = {
             name,
             air_date,
             runtime: 52,
-            state: n <= 4 ? 'watched' : n <= 9 ? 'ready' : 'upcoming',
+            state: n <= 9 ? 'watched' : 'upcoming',
             ...(n === 5 ? { overview: 'Mark’s reintegration speeds up while the innies prepare for a visit nobody planned.' } : {}),
             ...(n === 10 ? { episode_type: 'finale' as const } : {}),
           };
@@ -381,7 +399,8 @@ export const SHOWS: Record<number, ShowSeed> = {
     crew: ['Joe Brumm'],
     trailer_youtube_key: null,
     recommendation_reason: null,
-    watch_state: { watched_at: iso(1), plays: 143, rating: 10, progress: { completed: 143, aired: 153 } },
+    // Not started: on the Trakt watchlist, so Up next offers S01E01
+    watch_state: null,
     similar: [['tv', 209867], ['tv', 37854], ['tv', 66573]],
     library: { id: 5, added_days_ago: 200 },
     status: 'Returning Series',
@@ -389,9 +408,9 @@ export const SHOWS: Record<number, ShowSeed> = {
     end_year: null,
     episode_run_time: 7,
     seasons: [
-      { n: 1, name: 'Season 1', episodes: run(numbered(52), '2018-10-01', 7, () => 'watched') },
-      { n: 2, name: 'Season 2', episodes: run(numbered(52), '2020-03-17', 7, () => 'watched') },
-      { n: 3, name: 'Season 3', episodes: run(numbered(49), '2021-09-05', 7, (n) => (n < 40 ? 'watched' : 'ready')) },
+      { n: 1, name: 'Season 1', episodes: run(numbered(52), '2018-10-01', 7, () => 'ready') },
+      { n: 2, name: 'Season 2', episodes: run(numbered(52), '2020-03-17', 7, () => 'ready') },
+      { n: 3, name: 'Season 3', episodes: run(numbered(49), '2021-09-05', 7, () => 'ready') },
     ],
   },
   247767: {
@@ -410,7 +429,8 @@ export const SHOWS: Record<number, ShowSeed> = {
     crew: ['Seth Rogen', 'Evan Goldberg'],
     trailer_youtube_key: null,
     recommendation_reason: null,
-    watch_state: { watched_at: iso(2), plays: 6, rating: 8, progress: { completed: 6, aired: 10 } },
+    watch_state: { watched_at: iso(2), plays: 9, rating: 8, progress: { completed: 9, aired: 10 } },
+    next_up: [1, 10],
     similar: [['tv', 95396], ['tv', 66573]],
     library: { id: 6, added_days_ago: 30 },
     status: 'Returning Series',
@@ -424,7 +444,7 @@ export const SHOWS: Record<number, ShowSeed> = {
         name: 'Season 1',
         episodes: amend(
           run(['The Promotion', 'The Oner', 'The Note', 'The Missing Reel', 'The War', 'The Pediatric Oncologist', 'The Golden Globes',
-            'The Presentation', 'CinemaCon', 'The Pitch'], '2025-03-26', 30, (n) => (n <= 6 ? 'watched' : n <= 9 ? 'ready' : 'downloading')),
+            'The Presentation', 'CinemaCon', 'The Pitch'], '2025-03-26', 30, (n) => (n <= 9 ? 'watched' : 'downloading')),
           10,
           { pct: 37, episode_type: 'finale' }
         ),
@@ -448,7 +468,9 @@ export const SHOWS: Record<number, ShowSeed> = {
     crew: ['Michael Schur'],
     trailer_youtube_key: null,
     recommendation_reason: 'The same “what is this place, really?” mystery as Severance, played for laughs.',
-    watch_state: null,
+    // Started on Trakt (S01E01–E05), not in the library
+    watch_state: { watched_at: iso(9), plays: 5, rating: null, progress: { completed: 5, aired: 53 } },
+    next_up: [1, 6],
     similar: [['tv', 95396], ['tv', 247767], ['tv', 57243]],
     status: 'Ended',
     networks: ['NBC'],
@@ -577,4 +599,9 @@ export function absoluteNumbers(show: ShowSeed): Map<number, number> {
     for (const episode of season.episodes) numbers.set(episodeIdFor(show.key, season.n, episode.n), absolute++);
   }
   return numbers;
+}
+
+/** A seeded episode. */
+export function seedEpisode(show: ShowSeed, [season, episode]: EpisodeKey): EpisodeSeed | undefined {
+  return show.seasons.find((s) => s.n === season)?.episodes.find((e) => e.n === episode);
 }
