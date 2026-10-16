@@ -8,6 +8,9 @@ import { isRecord, jsonBody, latency } from './util';
 let ai: AiSettings = { ...AI_SETTINGS };
 let profile: QualityProfile = { ...QUALITY_PROFILE };
 
+const tidy = (list: string[]) =>
+  list.map((item) => item.trim()).filter((item, i, all) => all.findIndex((other) => other.toLowerCase() === item.toLowerCase()) === i);
+
 /** This page's AI settings (mapping jobs read `classifier_enabled` and `auto_apply_high_confidence`). */
 export const mockAiSettings = () => ai;
 
@@ -29,9 +32,11 @@ export const settingsHandlers = [
     await latency();
     const body = await jsonBody(request);
     if (!isRecord(body)) return HttpResponse.json<ApiErrorBody>({ error: { code: 'bad_request', message: 'Send the whole profile as JSON.' } }, { status: 400 });
-    const next = { ...QUALITY_PROFILE, ...body } as QualityProfile;
+    const sent = { ...QUALITY_PROFILE, ...body } as QualityProfile;
+    // Like the backend: lists trimmed and deduped (the first spelling stays) before the checks
+    const next = { ...sent, avoid_terms: tidy(sent.avoid_terms), preferred_groups: tidy(sent.preferred_groups) };
     const invalid: QualityFieldError | null =
-      scenario() === 'quality-invalid' ? { field: 'avoid_terms', message: 'Each term needs 1 to 30 characters.' } : validateQualityProfile(next);
+      scenario() === 'quality-invalid' ? { field: 'avoid_terms', message: 'avoid_terms must be 1–30 characters each' } : validateQualityProfile(next);
     if (invalid) return HttpResponse.json<ApiErrorBody>({ error: { code: 'validation_error', ...invalid } }, { status: 422 });
     profile = next;
     return HttpResponse.json(profile);

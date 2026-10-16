@@ -120,7 +120,7 @@ test.describe('Settings › Quality profile', () => {
     await expect(saveBar(page).getByRole('alert')).toHaveText('Check “Terms to avoid” above.');
     const input = page.getByRole('textbox', { name: 'Add to Terms to avoid' });
     await expect(input).toHaveAttribute('aria-invalid', 'true');
-    await expect(input).toHaveAccessibleDescription('Each term needs 1 to 30 characters.');
+    await expect(input).toHaveAccessibleDescription('avoid_terms must be 1–30 characters each');
     await expect(input).toBeInViewport();
     await expect(saveBar(page)).toBeVisible();
     await expectAccessibleAndContained(page);

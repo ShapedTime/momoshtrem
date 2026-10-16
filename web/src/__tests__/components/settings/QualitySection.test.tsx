@@ -95,14 +95,14 @@ describe('QualitySection', () => {
   });
 
   it('shows a 422 next to the field it names, and the bar points at it', async () => {
-    renderSection(() => answer(422, { error: { code: 'validation_error', message: 'Each term needs 1 to 30 characters.', field: 'avoid_terms' } }));
+    renderSection(() => answer(422, { error: { code: 'validation_error', message: 'avoid_terms must be 1–30 characters each', field: 'avoid_terms' } }));
     fireEvent.click(within(await screen.findByRole('group', { name: 'Preferred resolution' })).getByRole('button', { name: '1080p' }));
     fireEvent.click(within(bar()!).getByRole('button', { name: 'Save' }));
 
     expect(await within(bar()!).findByRole('alert')).toHaveTextContent('Check “Terms to avoid” above.');
     const input = screen.getByRole('textbox', { name: 'Add to Terms to avoid' });
     expect(input).toHaveAttribute('aria-invalid', 'true');
-    expect(input).toHaveAccessibleDescription('Each term needs 1 to 30 characters.');
+    expect(input).toHaveAccessibleDescription('avoid_terms must be 1–30 characters each');
 
     // Editing again clears it until the next save
     fireEvent.click(screen.getByRole('switch', { name: 'Prefer HDR' }));

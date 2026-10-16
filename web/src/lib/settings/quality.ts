@@ -116,33 +116,37 @@ export interface QualityFieldError {
   message: string;
 }
 
-function tagListError(field: TagListField, list: unknown): QualityFieldError | null {
-  if (!Array.isArray(list)) return { field, message: 'Send a list of words.' };
-  if (list.length > TAG_LIMITS.count) return { field, message: `At most ${TAG_LIMITS.count} entries.` };
-  const bad = list.find((item) => typeof item !== 'string' || item.trim().length === 0 || item.trim().length > TAG_LIMITS.length);
-  if (bad !== undefined) return { field, message: `Each entry needs 1 to ${TAG_LIMITS.length} characters.` };
+function tagListError(field: TagListField, noun: 'terms' | 'groups', list: string[]): QualityFieldError | null {
+  if (list.some((item) => item.trim().length === 0 || item.trim().length > TAG_LIMITS.length)) {
+    return { field, message: `${field} must be 1–${TAG_LIMITS.length} characters each` };
+  }
+  if (list.length > TAG_LIMITS.count) return { field, message: `${field} can have at most ${TAG_LIMITS.count} ${noun}` };
   return null;
 }
 
-/** The contract's PUT validation: the first bad field, or null. */
+/**
+ * The contract's 422 checks, worded as the backend words them (the mock PUT
+ * uses it): the first bad field, or null. Lists are checked as given; the
+ * backend trims and dedupes them first.
+ */
 export function validateQualityProfile(profile: QualityProfile): QualityFieldError | null {
   if (!PREFERRED_RESOLUTIONS.includes(profile.preferred_resolution)) {
-    return { field: 'preferred_resolution', message: 'Pick 720p, 1080p or 2160p.' };
+    return { field: 'preferred_resolution', message: 'preferred_resolution must be 720p, 1080p or 2160p' };
   }
   if (!MAX_RESOLUTIONS.includes(profile.max_resolution)) {
-    return { field: 'max_resolution', message: 'Pick 1080p, 2160p or No limit.' };
+    return { field: 'max_resolution', message: 'max_resolution must be 1080p, 2160p or null' };
   }
   if (!maxAllowed(profile.max_resolution, profile.preferred_resolution)) {
-    return { field: 'max_resolution', message: 'The maximum can’t be below the preferred resolution.' };
+    return { field: 'max_resolution', message: 'max_resolution must be at least preferred_resolution' };
   }
   const gb = profile.max_gb_per_hour;
-  if (typeof gb !== 'number' || gb < GB_PER_HOUR.min || gb > GB_PER_HOUR.max || !Number.isInteger(gb / GB_PER_HOUR.step)) {
-    return { field: 'max_gb_per_hour', message: `Pick ${GB_PER_HOUR.min} to ${GB_PER_HOUR.max} GB/h, in steps of ${GB_PER_HOUR.step}.` };
+  if (gb < GB_PER_HOUR.min || gb > GB_PER_HOUR.max) {
+    return { field: 'max_gb_per_hour', message: `max_gb_per_hour must be between ${GB_PER_HOUR.min} and ${GB_PER_HOUR.max}` };
   }
-  for (const field of ['prefer_x265', 'prefer_hdr', 'prefer_dolby_vision'] as const) {
-    if (typeof profile[field] !== 'boolean') return { field, message: 'Turn it on or off.' };
+  if (!Number.isInteger(gb / GB_PER_HOUR.step)) {
+    return { field: 'max_gb_per_hour', message: `max_gb_per_hour must be a multiple of ${GB_PER_HOUR.step}` };
   }
-  return tagListError('avoid_terms', profile.avoid_terms) ?? tagListError('preferred_groups', profile.preferred_groups);
+  return tagListError('avoid_terms', 'terms', profile.avoid_terms) ?? tagListError('preferred_groups', 'groups', profile.preferred_groups);
 }
 
 /** Whether two profiles are the same settings (the save bar shows while they differ). */
