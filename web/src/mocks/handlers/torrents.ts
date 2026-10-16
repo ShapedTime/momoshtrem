@@ -1,12 +1,14 @@
 import { http, HttpResponse } from 'msw';
-import type { TorrentDetail, TorrentListItem, TorrentsPauseCount, TorrentState } from '@/lib/api/contract';
-import { legacyTorrentStatus, type TorrentListResponse } from '@/types/torrent';
+import type { TorrentDetail, TorrentListItem, TorrentsPauseCount, TorrentsSummary, TorrentState } from '@/lib/api/contract';
 import { TORRENTS, torrentDetail, torrentsSummary } from '../fixtures/torrents';
+import { scenario } from '../scenario';
 import { apiError, latency, noContent, notFound } from './util';
 
 /**
  * Activity (PLAN §6 "Torrents and activity (B6)"). Pauses, resumes and deletes
- * last for the page (resetMockTorrents in tests).
+ * last for the page (resetMockTorrents in tests). Scenarios: `torrents-offline`,
+ * the list and the summary answer as the proxy does when the backend is gone;
+ * `torrents-quiet`, only the idle torrents and nothing streaming.
  */
 let torrents: TorrentListItem[] = structuredClone(TORRENTS);
 /** What a paused torrent was before, so a resume puts it back. */
@@ -40,17 +42,22 @@ function resume(t: TorrentListItem): void {
   beforePause.delete(t.info_hash);
 }
 
+const unreachable = () => apiError(502, 'backend_unreachable', 'momoshtrem isn’t answering.');
+const listed = () => (scenario() === 'torrents-quiet' ? torrents.filter((t) => t.state === 'idle') : torrents);
+
 export const torrentsHandlers = [
-  /**
-   * GET /api/torrents keeps answering the legacy {torrents} shape here: the
-   * legacy web route serves this path on the real stack (adapting the
-   * backend's items) and the legacy /torrents page and Activity badge read
-   * it, until #102 retires them.
-   */
-  http.get('*/api/torrents', () =>
-    HttpResponse.json<TorrentListResponse>({ torrents: torrents.map(legacyTorrentStatus) })),
+  http.get('*/api/torrents', () => {
+    if (scenario() === 'torrents-offline') return unreachable();
+    return HttpResponse.json({ items: listed() } satisfies { items: TorrentListItem[] });
+  }),
   // The static routes go before the :hash ones.
-  http.get('*/api/torrents/summary', () => HttpResponse.json(torrentsSummary(torrents))),
+  http.get('*/api/torrents/summary', () => {
+    if (scenario() === 'torrents-offline') return unreachable();
+    const summary = torrentsSummary(listed());
+    if (scenario() !== 'torrents-quiet') return HttpResponse.json(summary);
+    const still = summary.history.download_bps.map(() => 0);
+    return HttpResponse.json<TorrentsSummary>({ ...summary, streaming: [], upload_bps: 0, history: { ...summary.history, download_bps: still, upload_bps: still } });
+  }),
   http.post('*/api/torrents/pause-all', async () => {
     await latency();
     const targets = torrents.filter((t) => t.state === 'streaming' || t.state === 'downloading');

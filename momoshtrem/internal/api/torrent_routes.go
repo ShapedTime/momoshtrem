@@ -39,7 +39,6 @@ func (s *Server) registerTorrentRoutes(api *gin.RouterGroup) {
 	api.DELETE("/torrents/:hash", s.deleteTorrent)
 	api.POST("/torrents/:hash/pause", s.pauseTorrent)
 	api.POST("/torrents/:hash/resume", s.resumeTorrent)
-	api.GET("/torrents/:hash/debug", s.getTorrentDebug) // until #102
 }
 
 // activityReady answers 503 when no activity service is configured.

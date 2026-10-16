@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react';
+import { Play, RefreshCw } from 'lucide-react';
 import { ReplaceMenu } from '@/components/source/ReplaceMenu';
 import { Button, ButtonLink, Chip, ReleaseName, StatusPill } from '@/components/ui';
 import type { TitleTorrent } from '@/lib/api/contract';
@@ -7,8 +7,9 @@ import { formatBytes, formatNumber, formatShortDate } from '@/lib/title/format';
 import { releaseTags } from '@/lib/title/release';
 import { cx } from '@/lib/utils/cx';
 
-/** Loaded with seeders: healthy; loaded without: say so; otherwise it loads on the first read. */
+/** Paused (B6) wins; loaded with seeders: healthy; loaded without: say so; otherwise it loads on the first read. */
 function health(torrent: TitleTorrent): StatusKey {
+  if (torrent.state === 'paused') return 'paused';
   if (torrent.state !== 'active') return 'idle';
   return torrent.seeders ? 'healthy' : 'no_seeders';
 }
@@ -19,10 +20,13 @@ interface CurrentTorrentPanelProps {
   onReplace: () => void;
   /** With HDRezka set up, Replace becomes a menu: a torrent, or a stream (#63). */
   onStreamFromHDRezka?: () => void;
+  /** Resumes a paused torrent (offered only while `torrent.state` is `paused`). */
+  onResume?: () => void;
+  resuming?: boolean;
 }
 
 /** The release Infuse plays from, once a title is ready: name, attributes, facts, Replace. */
-export function CurrentTorrentPanel({ torrent, onReplace, onStreamFromHDRezka }: CurrentTorrentPanelProps) {
+export function CurrentTorrentPanel({ torrent, onReplace, onStreamFromHDRezka, onResume, resuming }: CurrentTorrentPanelProps) {
   const source = torrent.source?.toLowerCase() ?? '';
   const chips = [
     torrent.resolution && { label: torrent.resolution, hi: true },
@@ -30,8 +34,8 @@ export function CurrentTorrentPanel({ torrent, onReplace, onStreamFromHDRezka }:
     // "Remux" is already in a "BluRay REMUX" source
     ...releaseTags(torrent.release_name).filter((tag) => !source.includes(tag.label.toLowerCase())),
   ].filter((chip): chip is { label: string; hi: boolean } => Boolean(chip));
-  // The torrent's own page has files and stats once it's loaded; otherwise the list
-  const statsHref = torrent.state === 'not_loaded' ? '/torrents' : `/torrents/${torrent.info_hash}/debug`;
+  // Its page on Activity reads what's stored when it isn't loaded, and never loads it
+  const statsHref = `/activity/${torrent.info_hash}`;
 
   return (
     <section className="panel panel-pad flex flex-col gap-3" aria-labelledby="torrent-h">
@@ -75,6 +79,11 @@ export function CurrentTorrentPanel({ torrent, onReplace, onStreamFromHDRezka }:
         </div>
       </dl>
       <div className="flex flex-wrap gap-2">
+        {torrent.state === 'paused' && onResume && (
+          <Button size="sm" onClick={onResume} loading={resuming}>
+            <Play size={15} aria-hidden="true" /> Resume
+          </Button>
+        )}
         {onStreamFromHDRezka ? (
           <ReplaceMenu onFindTorrent={onReplace} onStreamFromHDRezka={onStreamFromHDRezka} />
         ) : (

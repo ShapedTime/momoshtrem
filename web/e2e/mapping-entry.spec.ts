@@ -104,13 +104,12 @@ test.describe('mapping entry points', () => {
   });
 
   test('Activity lists the open mappings, each linking to its review', async ({ page }) => {
-    await signIn(page, '/torrents');
+    await signIn(page, '/activity');
     const jobs = page.getByRole('region', { name: 'Episode mappings to check' });
     await expect(jobs.getByRole('listitem')).toHaveCount(3);
     await expect(jobs.getByRole('listitem').first()).toContainText('Doctor Who: 3 files to check');
     await expect(jobs).toContainText('Frieren: 2 files to check');
     await expect(jobs).toContainText('One Piece: 1 file to check');
-    // The legacy page around it is rebuilt in #7 (its torrent cards already scroll sideways at 320 px): check the banner
     await settle(page);
     await expectNoA11yViolations(page, { include: '.banner' });
     for (const width of [page.viewportSize()?.width ?? 390, 320]) {

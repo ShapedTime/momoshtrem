@@ -69,6 +69,11 @@ export const STATUS = {
   healthy: { tone: 'ready', label: 'Healthy', icon: Check },
   no_seeders: { tone: 'warning', label: 'No seeders', icon: TriangleAlert },
   added: { tone: 'ready', label: 'Added', icon: Check },
+  // Activity (#102): "Complete" only when every piece is on disk; trackers anacrolix doesn't report on
+  complete: { tone: 'ready', label: 'Complete', icon: Check },
+  few_peers: { tone: 'warning', label: 'Few peers', icon: TriangleAlert },
+  working: { tone: 'ready', label: 'Working', icon: Check },
+  status_unknown: { tone: 'neutral', label: 'Status unknown', icon: CircleDashed },
   // How well a subtitle fits the release (B7)
   match_exact: { tone: 'ready', label: 'Exact release', icon: Check },
   match_same_source: { tone: 'neutral', label: 'Same source', icon: Check },

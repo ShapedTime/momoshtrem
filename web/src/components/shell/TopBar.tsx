@@ -45,7 +45,7 @@ export function TopBar({ username, overArt, activeCount }: { username: string; o
           <Link key={item.id} href={item.href} aria-current={isCurrent(item, pathname) ? 'page' : undefined}>
             {item.label}
             {item.id === 'activity' && activeCount > 0 && (
-              <span className="badge" aria-label={`${activeCount} downloading`}>
+              <span className="badge" aria-label={`${activeCount} active`}>
                 {activeCount}
               </span>
             )}

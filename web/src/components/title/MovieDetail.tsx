@@ -71,7 +71,13 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
           {library.in_library && <NeedsReviewBanner movie count={library.needs_review} jobId={library.review_job_id} />}
           {/* Once it's ready, what Infuse plays from comes first (HANDOFF §5.3) */}
           {ready && library.torrent && (
-            <CurrentTorrentPanel torrent={library.torrent} onReplace={findTorrent} onStreamFromHDRezka={hdrezka ? streamFromHDRezka : undefined} />
+            <CurrentTorrentPanel
+              torrent={library.torrent}
+              onReplace={findTorrent}
+              onStreamFromHDRezka={hdrezka ? streamFromHDRezka : undefined}
+              onResume={() => library.torrent && actions.resumeTorrent(library.torrent.info_hash)}
+              resuming={actions.resumingTorrent}
+            />
           )}
           {ready && library.stream && (
             <CurrentStreamPanel stream={library.stream} onChange={hdrezka ? streamFromHDRezka : undefined} onReplaceWithTorrent={findTorrent} />

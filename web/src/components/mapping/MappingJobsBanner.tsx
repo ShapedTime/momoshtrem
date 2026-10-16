@@ -11,7 +11,7 @@ import { openJobLine, shortTitle } from '@/lib/mapping/review';
 const reviewHref = (job: AssignmentJob) => `/mapping/${job.id}`;
 
 /**
- * Open mapping jobs on Activity (#5, until #7 builds the page): one
+ * Open mapping jobs on Activity (#5): one
  * review-tone banner, or a compact list when there are several, each going
  * to its review. Nothing while there are none (or the list can't load).
  */

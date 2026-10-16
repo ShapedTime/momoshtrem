@@ -119,10 +119,6 @@ func TestTorrentRoutes(t *testing.T) {
 		{name: "resume, database down", method: http.MethodPost, path: "/api/torrents/" + hex + "/resume", err: errors.New("connection reset"),
 			wantStatus: http.StatusInternalServerError, wantCode: CodeInternalError, wantCall: "resume", wantHash: hex},
 
-		// /torrents/:hash routes still take a hash beside the static ones.
-		{name: "debug under summary is a hash", method: http.MethodGet, path: "/api/torrents/summary/debug",
-			wantStatus: http.StatusBadRequest, wantCode: CodeBadRequest},
-
 		// The detail: never the legacy status, never a load.
 		{name: "detail", method: http.MethodGet, path: "/api/torrents/" + hex,
 			wantStatus: http.StatusOK, wantCall: "detail", wantHash: hex,

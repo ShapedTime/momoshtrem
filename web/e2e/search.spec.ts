@@ -234,7 +234,7 @@ test.describe('command palette', () => {
     const actions = page.getByRole('group', { name: 'Actions' });
     await expect(actions.getByRole('option', { name: /^Review Frieren mapping/ })).toBeVisible();
     await expect(actions.getByRole('option', { name: /^Find Frieren episodes 29–38/ })).toContainText('10 episodes missing');
-    await expect(actions.getByRole('option', { name: /^Go to Activity/ })).toContainText('1 downloading · 1 streaming');
+    await expect(actions.getByRole('option', { name: /^Go to Activity/ })).toContainText('2 downloading · 1 streaming');
     await expect(actions.getByRole('option', { name: /^Go to Library/ })).toContainText(/\d+ titles/);
     await expect(actions.getByRole('option', { name: /^Infuse setup/ })).toContainText('Copy the WebDAV address');
     await expect(actions.getByRole('option', { name: /^Log out/ })).toBeVisible();

@@ -17,7 +17,7 @@ export function TabBar({ activeCount }: { activeCount: number }) {
             <Icon size={24} strokeWidth={current ? 2 : 1.6} aria-hidden="true" />
             <span>{item.label}</span>
             {item.id === 'activity' && activeCount > 0 && (
-              <span className="dot" aria-label={`${activeCount} downloading`}>
+              <span className="dot" aria-label={`${activeCount} active`}>
                 {activeCount}
               </span>
             )}

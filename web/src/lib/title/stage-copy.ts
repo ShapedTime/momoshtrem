@@ -59,7 +59,7 @@ export interface StageOptions {
 const ADD: StageButton = { label: 'Add to library', icon: 'plus', intent: 'add', variant: 'primary' };
 const FIND: StageButton = { label: 'Find a torrent', icon: 'search', intent: 'find', variant: 'primary' };
 const HDREZKA: StageButton = { label: 'Stream from HDRezka', icon: 'stream', intent: 'hdrezka', variant: 'secondary' };
-const VIEW_DOWNLOAD: StageButton = { label: 'View download', icon: 'activity', intent: 'view_download', variant: 'secondary', href: '/torrents' };
+const VIEW_DOWNLOAD: StageButton = { label: 'View download', icon: 'activity', intent: 'view_download', variant: 'secondary', href: '/activity' };
 const HOW_TO_PLAY: StageButton = { label: 'How to play in Infuse', icon: 'tv', intent: 'how_to_play', variant: 'primary' };
 const PLAY_IN_INFUSE: StageButton = { ...HOW_TO_PLAY, label: 'Play in Infuse' };
 

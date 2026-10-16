@@ -7,7 +7,6 @@ import type {
   TorrentsSummary,
   TorrentState,
 } from '@/lib/api/contract';
-import { legacyTorrentStatus, type TorrentStatus } from '@/types/torrent';
 import { iso } from './catalog';
 import { episodeIdFor, SHOWS } from './title-seeds';
 
@@ -18,6 +17,10 @@ const SEVERANCE_EPISODES = ['Hello, Ms. Cobel', 'Goodbye, Mrs. Selvig', 'Who Is 
 const SEVERANCE_EPISODE_BYTES = 4_830_000_000;
 const FRIEREN_BATCH_HASH = 'b7a3f1e9c2d4058a6e1f3c5b7d9a2e4f6081c3d5';
 const FRIEREN_BATCH = '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]';
+const BLUEY_HASH = 'e8d7c6b5a4938271605f4e3d2c1b0a9f8e7d6c5b';
+const BLUEY_RELEASE = 'Bluey.S03.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb';
+const BLUEY_EPISODES = 49;
+const BLUEY_BYTES = 21_700_000_000;
 
 /**
  * Infuse on the Apple TV playing Severance S02E05, 18:42 of 52:00. The torrent is
@@ -79,9 +82,10 @@ const NOT_LOADED = {
 
 /**
  * GET /torrents (PLAN §6 "Torrents and activity (B6)"), in the order the
- * backend sorts them: one torrent per state, plus idle ones that are loaded
- * and complete, loaded with nothing referencing them (an Inspect dry run),
- * known only to an open mapping job, and not loaded at all.
+ * backend sorts them: streaming, two downloading (Interstellar with few
+ * seeders), paused, then idle ones that are loaded and complete, loaded with
+ * nothing referencing them (an Inspect dry run), known only to an open mapping
+ * job, and not loaded at all.
  */
 export const TORRENTS: TorrentListItem[] = [
   {
@@ -125,6 +129,26 @@ export const TORRENTS: TorrentListItem[] = [
     streaming: [],
   },
   {
+    // Few seeders: slow, and the page says so
+    info_hash: 'c9d4a7b3e5f60718293a4b5c6d7e8f90a1b2c3d4',
+    name: 'Interstellar.2014.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-FGT',
+    state: 'downloading',
+    loaded: true,
+    complete: false,
+    progress: 0.42,
+    bytes_completed: 26_500_000_000,
+    size_bytes: 63_100_000_000,
+    download_bps: 2_300_000,
+    upload_bps: 80_000,
+    peers: 6,
+    seeders: 3,
+    added_at: iso(1),
+    last_active_at: iso(0),
+    titles: [{ media_type: 'movie', tmdb_id: 157336, library_id: 2, title: 'Interstellar', year: 2014, poster_path: null, scope: null }],
+    open_job: null,
+    streaming: [],
+  },
+  {
     info_hash: '5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80',
     name: 'One.Piece.1086-1100.1080p.WEB.x264-GROUP',
     state: 'paused',
@@ -163,21 +187,21 @@ export const TORRENTS: TorrentListItem[] = [
     streaming: [],
   },
   {
-    info_hash: 'c9d4a7b3e5f60718293a4b5c6d7e8f90a1b2c3d4',
-    name: 'Interstellar.2014.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-FGT',
+    info_hash: BLUEY_HASH,
+    name: BLUEY_RELEASE,
     state: 'idle',
     loaded: true,
     complete: true,
     progress: 1,
-    bytes_completed: 62_400_000_000,
-    size_bytes: 62_400_000_000,
+    bytes_completed: BLUEY_BYTES,
+    size_bytes: BLUEY_BYTES,
     download_bps: 0,
     upload_bps: 0,
     peers: 0,
     seeders: 0,
-    added_at: iso(1),
+    added_at: iso(200),
     last_active_at: iso(1),
-    titles: [{ media_type: 'movie', tmdb_id: 157336, library_id: 2, title: 'Interstellar', year: 2014, poster_path: null, scope: null }],
+    titles: [{ media_type: 'tv', tmdb_id: 82728, library_id: 5, title: 'Bluey', year: 2018, poster_path: null, scope: 'Season 3' }],
     open_job: null,
     streaming: [],
   },
@@ -248,6 +272,19 @@ function filesOf(t: TorrentListItem): TorrentDetailFile[] {
       ignored: null,
     }));
   }
+  if (t.info_hash === BLUEY_HASH) {
+    // A whole season: more files than the detail page lists at first
+    return Array.from({ length: BLUEY_EPISODES }, (_, i) => {
+      const label = `S03E${String(i + 1).padStart(2, '0')}`;
+      return {
+        path: `${BLUEY_RELEASE}/Bluey.${label}.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb.mkv`,
+        size_bytes: Math.round(BLUEY_BYTES / BLUEY_EPISODES),
+        progress,
+        plays_as: [{ media_type: 'tv', item_id: episodeIdFor(SHOWS[82728].key, 3, i + 1), season_number: 3, episode_number: i + 1, episode_name: null, label }],
+        ignored: null,
+      };
+    });
+  }
   if (t.info_hash === FRIEREN_BATCH_HASH) {
     // Not loaded and not applied yet (job 101 is in review): the job's list, nothing plays yet.
     const file = (label: string | number) => `${FRIEREN_BATCH}/[SubsPlease] Sousou no Frieren - ${label} (1080p).mkv`;
@@ -315,6 +352,3 @@ export function torrentDetail(t: TorrentListItem): TorrentDetail {
 }
 
 export const TORRENTS_SUMMARY: TorrentsSummary = torrentsSummary(TORRENTS);
-
-/** The legacy web route's shape (TorrentStatus), as lib/api/momoshtrem.ts adapts the items, until #102 moves to TORRENTS. */
-export const LEGACY_TORRENTS: TorrentStatus[] = TORRENTS.map(legacyTorrentStatus);

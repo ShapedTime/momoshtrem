@@ -1,7 +1,7 @@
 import { Captions, Globe, Link2, type LucideIcon, MonitorPlay, Search, Server, Sparkles, Tv } from 'lucide-react';
 import type { IndexerHealth, ProbeStatus, SystemStatus } from '@/lib/api/contract';
 import type { StatusKey } from '@/lib/status';
-import { formatBytes } from '@/types/torrent';
+import { formatBytes } from '@/lib/title/format';
 
 export type ServiceHealth = 'ok' | 'warning' | 'error' | 'off';
 

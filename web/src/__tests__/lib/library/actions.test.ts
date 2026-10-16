@@ -17,7 +17,7 @@ describe('libraryActions', () => {
     expect(kinds(actions)).toEqual(['open', 'review', 'find', 'copy', 'download', 'remove']);
     expect(actions[1]).toEqual({ kind: 'review', label: 'Review mapping', href: '/mapping/101', hint: '2 files' });
     expect(actions[2]).toEqual({ kind: 'find', label: 'Find missing episodes', hint: '10', target: { kind: 'page', href: '/tv/209867?season=1' } });
-    expect(actions[4]).toEqual({ kind: 'download', label: 'See download', href: '/torrents' });
+    expect(actions[4]).toEqual({ kind: 'download', label: 'See download', href: '/activity/h' });
   });
 
   it('opens the torrent sheet once it exists (#6)', () => {

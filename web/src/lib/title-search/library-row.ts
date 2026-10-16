@@ -112,7 +112,7 @@ export function libraryRowAction(item: LibraryItem, { torrentSheet }: { torrentS
     case 'ready':
       return { kind: 'play', label: 'Play' };
     case 'downloading':
-      return { kind: 'activity', label: 'Activity', href: activityHref() };
+      return { kind: 'activity', label: 'Activity', href: activityHref(item.download?.info_hash) };
     case 'needs_review':
       return { kind: 'review', label: 'Review', href: `/mapping/${item.review_job_id ?? ''}` };
     case 'partial':

@@ -8,7 +8,6 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
-	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -26,8 +25,6 @@ type Server struct {
 	subtitleService *subtitle.Service    // Optional: subtitle search/download service
 	subtitleItems   subtitleItemResolver // Loads movies and episodes for the subtitle routes
 	airDateSync     *airdate.SyncService // Optional: air date sync service
-
-	readerTracker *streaming.ReaderTracker // Optional: tracks active readers for debug endpoint
 
 	opts Options
 }
@@ -126,11 +123,6 @@ func (s *Server) SetSubtitleService(svc *subtitle.Service) {
 func (s *Server) SetAirDateSyncService(svc *airdate.SyncService) {
 	s.airDateSync = svc
 	slog.Info("Air date sync service configured")
-}
-
-// SetReaderTracker configures reader tracking for the debug endpoint.
-func (s *Server) SetReaderTracker(rt *streaming.ReaderTracker) {
-	s.readerTracker = rt
 }
 
 func (s *Server) setupMiddleware() {

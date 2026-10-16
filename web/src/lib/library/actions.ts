@@ -21,8 +21,11 @@ export type LibraryAction =
   | { kind: 'download'; label: string; href: string }
   | { kind: 'remove'; label: string };
 
-/** Where Activity lives (Torrents until #102 moves it). */
-export const activityHref = () => NAV.find((item) => item.id === 'activity')?.href ?? '/torrents';
+/** Activity, or one torrent's detail there. */
+export const activityHref = (infoHash?: string) => {
+  const base = NAV.find((item) => item.id === 'activity')?.href ?? '/activity';
+  return infoHash ? `${base}/${infoHash}` : base;
+};
 
 export function libraryActions(item: LibraryItem, { torrentSheet }: { torrentSheet: boolean }): LibraryAction[] {
   const page = titleHref(item.media_type, item.tmdb_id);
@@ -48,7 +51,7 @@ export function libraryActions(item: LibraryItem, { torrentSheet }: { torrentShe
     });
   }
   if (item.webdav_url) actions.push({ kind: 'copy', label: 'Copy WebDAV path', url: item.webdav_url });
-  if (item.download) actions.push({ kind: 'download', label: 'See download', href: activityHref() });
+  if (item.download) actions.push({ kind: 'download', label: 'See download', href: activityHref(item.download.info_hash) });
   actions.push({ kind: 'remove', label: 'Remove from library…' });
   return actions;
 }

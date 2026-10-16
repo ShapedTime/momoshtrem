@@ -49,7 +49,7 @@ describe('primaryActionFor: movies', () => {
       facts: ['9 seeders'],
       lead: 'You can start watching in Infuse now;',
       hint: 'it streams while it downloads.',
-      primary: { intent: 'view_download', href: '/torrents', variant: 'secondary' },
+      primary: { intent: 'view_download', href: '/activity', variant: 'secondary' },
       secondary: { label: 'How to play in Infuse', variant: 'ghost' },
     });
     expect(JSON.stringify(copy)).not.toMatch(/left|ETA|min/);

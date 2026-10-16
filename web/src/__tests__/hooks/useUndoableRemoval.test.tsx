@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider, useToast } from '@/components/ui';
-import { usePendingRemovals, useUndoableRemoval, UNDO_MS } from '@/hooks/useUndoableRemoval';
+import { UNCERTAIN_HOLD_MS, usePendingRemovals, useUndoableRemoval, UNDO_MS } from '@/hooks/useUndoableRemoval';
 import { addPendingRemoval, commitPendingRemoval, pendingRemovals, resetPendingRemovals, undoPendingRemoval } from '@/lib/undo/removals';
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -89,6 +89,20 @@ describe('useUndoableRemoval', () => {
     expect(result.current.pending.size).toBe(0);
     expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t remove Dune');
     expect(screen.getByRole('alert')).toHaveTextContent('Movie not found · It’s back where it was.');
+  });
+
+  it('keeps the item hidden when the failure may still succeed (a 504), then lets go after a while', async () => {
+    const { result } = setup();
+    const r = removal('torrent:abc');
+    const mayStillSucceed = jest.fn((error: unknown) => error instanceof Error && error.message === 'timeout');
+    act(() => result.current.remove({ ...r.removal, mayStillSucceed }));
+    act(() => jest.advanceTimersByTime(UNDO_MS));
+    await act(async () => r.settle().reject(new Error('timeout')));
+    expect(mayStillSucceed).toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Still removing Dune…');
+    expect(result.current.pending.has('torrent:abc')).toBe(true);
+    await act(async () => jest.advanceTimersByTime(UNCERTAIN_HOLD_MS));
+    expect(result.current.pending.size).toBe(0);
   });
 });
 

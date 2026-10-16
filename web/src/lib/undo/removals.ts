@@ -24,11 +24,21 @@ export interface PendingRemoval {
   keepalive?: () => void;
   /** Whatever a list needs to account for the hidden item (e.g. to adjust its counts). */
   payload?: unknown;
+  /**
+   * The commit failed in a way that may still succeed on the server (a 504: the
+   * proxy gave up waiting, the backend didn't). The item then stays hidden
+   * instead of coming back at once (`uncertain`).
+   */
+  mayStillSucceed?: (error: unknown) => boolean;
 }
 
 type Entry = { removal: PendingRemoval; state: 'waiting' | 'committing' };
 
-export type CommitResult = { result: 'committed' } | { result: 'failed'; error: unknown } | { result: 'skipped' };
+export type CommitResult =
+  | { result: 'committed' }
+  | { result: 'failed'; error: unknown }
+  | { result: 'uncertain'; error: unknown }
+  | { result: 'skipped' };
 
 const entries = new Map<string, Entry>();
 const listeners = new Set<() => void>();
@@ -69,9 +79,10 @@ export function undoPendingRemoval(key: string): boolean {
 }
 
 /**
- * The window closed: send the removal. On failure the item comes back. On
- * success it stays hidden until `releasePendingRemoval`, once the lists have
- * refetched without it. Skipped when it was undone or is already on its way.
+ * The window closed: send the removal. On failure the item comes back, unless
+ * `mayStillSucceed` says the server may still be at it (`uncertain`). On success
+ * (or uncertain) it stays hidden until `releasePendingRemoval`, once the lists
+ * have refetched without it. Skipped when it was undone or is already on its way.
  */
 export async function commitPendingRemoval(key: string): Promise<CommitResult> {
   const entry = entries.get(key);
@@ -81,6 +92,7 @@ export async function commitPendingRemoval(key: string): Promise<CommitResult> {
     await entry.removal.commit();
     return { result: 'committed' };
   } catch (error) {
+    if (entry.removal.mayStillSucceed?.(error)) return { result: 'uncertain', error };
     entries.delete(key);
     emit();
     return { result: 'failed', error };

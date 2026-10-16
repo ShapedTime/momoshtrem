@@ -7,11 +7,6 @@ import type { MediaType, Timestamp } from './common';
  * torrent loads on its first WebDAV read. So one the library knows but the
  * client hasn't loaded is `idle` with `loaded: false` and nulls, there's no
  * ETA, and progress can go down.
- *
- * Until #102 the legacy web route /api/torrents keeps answering the legacy
- * `{torrents}` shape (lib/api/momoshtrem.ts adapts the backend's items), and
- * the legacy routes under app/api/torrents/[hash] shadow summary, pause,
- * resume, the *-all routes and the detail (GET, a 405 there) on the real stack.
  */
 
 /** The first rule that matches: paused; streaming (loaded, a streaming session); downloading (loaded, network on, not complete); idle. */

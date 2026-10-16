@@ -68,7 +68,7 @@ test.describe('movie page', () => {
     await expect(downloading.getByRole('progressbar', { name: 'Interstellar download' })).toHaveAttribute('aria-valuenow', '42');
     await expect(downloading).toContainText('9 seeders. You can start watching in Infuse now; it streams while it downloads.');
     await expect(downloading).not.toContainText(/left|ETA/);
-    await expect(page.getByRole('link', { name: 'View download' })).toHaveAttribute('href', '/torrents');
+    await expect(page.getByRole('link', { name: 'View download' })).toHaveAttribute('href', '/activity');
     // The torrent and subtitles only move up once it's ready
     await expect(page.getByRole('heading', { name: 'Current torrent' })).toBeHidden();
     await expectAccessibleAndContained(page);
