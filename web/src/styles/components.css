@@ -260,6 +260,12 @@
   .pcard .reason { font-size: 12px; color: var(--text-2); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .pcard .status-line { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
   .pcard .feedback { display: flex; gap: 2px; margin-left: -8px; }
+  /* Recommendation feedback (#9; FeedbackRow): three 36 px buttons that narrow together on a 320 px
+     phone's poster rather than spill onto the next card, and the signal that's on, inline and in the "…" sheet */
+  .rec-feedback { display: grid; grid-template-columns: repeat(3, minmax(0, 36px)); gap: 2px; min-width: 0; }
+  .rec-feedback .btn { width: 100%; }
+  .rec-feedback .btn[aria-pressed="true"] { color: var(--accent-text); background: var(--accent-soft); }
+  .feedback-menu .menu-item[aria-pressed="true"], .feedback-menu .menu-item[aria-pressed="true"] > svg { color: var(--accent-text); }
   @media (min-width: 1024px) { .pcard .title { font-size: var(--t-body); } }
   /* Overflow action (#97): a 32 px glass "…" at the artwork's top right with a 44 px hit area.
      The pill keeps clear of it; on cards too narrow for both it moves to the artwork's bottom. */

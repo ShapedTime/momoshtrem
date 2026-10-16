@@ -3,13 +3,14 @@
 import Image from 'next/image';
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bookmark, Play, Star, Zap } from 'lucide-react';
+import { Bookmark, Ellipsis, Play, Star, Zap } from 'lucide-react';
 import { CatAvatar } from '@/components/brand';
+import { FeedbackSheet, type RecFeedbackControls, useRecFeedback } from '@/components/recommendations';
 import { infuseSetupParams } from '@/components/shell/InfuseSetupSheet';
 import { PhoneBar } from '@/components/shell/PhoneBar';
 import { useOverArt } from '@/components/shell/ShellContext';
 import { StageButton } from '@/components/title/StageButton';
-import { Button, ButtonLink, Skeleton } from '@/components/ui';
+import { Button, ButtonLink, IconButton, Skeleton } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import { useTitleActions } from '@/hooks/useTitle';
 import type { Title, UpNextItem } from '@/lib/api/contract';
@@ -118,6 +119,19 @@ function HeroPrimary({ title, episode }: { title: Title; episode: UpNextItem | u
   return <StageButton spec={primaryActionFor(title).primary} onAction={onAction} busy={actions.adding ? 'add' : null} />;
 }
 
+/** "…" on Noir's pick (home.js): the feedback sheet. */
+function HeroFeedback({ feedback, inLibrary }: { feedback: RecFeedbackControls; inLibrary: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <IconButton variant="glass" size="lg" aria-label={`Feedback on ${feedback.target.title}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <Ellipsis size={20} aria-hidden="true" />
+      </IconButton>
+      <FeedbackSheet open={open} onOpenChange={setOpen} feedback={feedback} inLibrary={inLibrary} />
+    </>
+  );
+}
+
 interface HomeHeroProps {
   /** For the phone bar's account menu (the hero draws its own bar over the art). */
   username: string;
@@ -139,6 +153,9 @@ export function HomeHero({ username, picks, upNext = [] }: HomeHeroProps) {
   const query = useQuery(titleQuery(pick.media_type, pick.tmdb_id));
   const parallax = useParallax();
   useOverArt(!query.isError);
+  const feedback = useRecFeedback({ media_type: pick.media_type, tmdb_id: pick.tmdb_id, title: query.data?.title ?? '', feedback: pick.feedback }, 'hero');
+  // Only Noir's picks take feedback here; dismissing one dims the hero until /home is read again
+  const noirs = pick.source === 'recommendation';
 
   // A title that won't load leaves no hero rather than a broken one
   if (query.isError) return null;
@@ -150,7 +167,7 @@ export function HomeHero({ username, picks, upNext = [] }: HomeHeroProps) {
   const text = pick.reason || title?.overview || '';
 
   return (
-    <section className="hero home-hero" style={ambient} aria-labelledby={headingId}>
+    <section className={cx('hero home-hero', noirs && feedback.dismissed && 'is-dismissed')} style={ambient} aria-labelledby={headingId}>
       <PhoneBar username={username} />
       <div className="hero-glow" aria-hidden="true" />
       <div className="hero-bg" ref={parallax} aria-hidden="true">
@@ -179,6 +196,7 @@ export function HomeHero({ username, picks, upNext = [] }: HomeHeroProps) {
                 <ButtonLink href={titleHref(title.media_type, title.tmdb_id)} variant="glass" size="lg">
                   Details
                 </ButtonLink>
+                {noirs && <HeroFeedback feedback={feedback} inLibrary={title.library.library_id !== null} />}
               </div>
             </>
           ) : (

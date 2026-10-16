@@ -1,5 +1,5 @@
 import type { UpNextItem, WatchlistItem } from '@/lib/api/contract';
-import { heroPicks, localDateKey, MAX_HERO_PICKS } from '@/lib/for-you/hero';
+import { forYouHeroPicks, heroPicks, localDateKey, MAX_HERO_PICKS, recommendationPicks } from '@/lib/for-you/hero';
 
 function upNext(tmdbId: number, availability: UpNextItem['availability']): UpNextItem {
   return {
@@ -77,5 +77,30 @@ describe('heroPicks', () => {
   it('keys the day on the local calendar', () => {
     expect(localDateKey(new Date(2026, 0, 5, 0, 30))).toBe('2026-01-05');
     expect(localDateKey(new Date(2026, 11, 31, 23, 59))).toBe('2026-12-31');
+  });
+});
+
+describe('Tonight’s pick (#155)', () => {
+  const noir = [
+    { media_type: 'movie' as const, tmdb_id: 666277, kicker: 'Tonight’s pick', reason: 'You gave Perfect Days a 9.', feedback: null },
+    { media_type: 'tv' as const, tmdb_id: 222766, kicker: 'New for you', reason: 'Vince Gilligan’s new one.', feedback: 'like' as const },
+    { media_type: 'movie' as const, tmdb_id: 693134, kicker: 'Ready in Infuse', reason: 'Already downloaded.', feedback: null },
+    { media_type: 'movie' as const, tmdb_id: 329865, kicker: 'Something quiet', reason: 'Big ideas.', feedback: null },
+  ];
+  const own = { upNext: [upNext(1000, 'ready')], watchlist: [], trending, date: '2026-10-16' };
+
+  it('Noir’s picks replace For You’s own, in the server’s order, as recommendations', () => {
+    const picks = forYouHeroPicks(noir, own);
+    expect(picks).toHaveLength(MAX_HERO_PICKS);
+    expect(picks.map((pick) => [pick.source, pick.tmdb_id, pick.kicker, pick.feedback])).toEqual([
+      ['recommendation', 666277, 'Tonight’s pick', null],
+      ['recommendation', 222766, 'New for you', 'like'],
+      ['recommendation', 693134, 'Ready in Infuse', null],
+    ]);
+    expect(recommendationPicks(noir.slice(0, 1))).toHaveLength(1);
+  });
+
+  it('without them, For You picks its own', () => {
+    expect(forYouHeroPicks([], own)).toEqual(heroPicks(own));
   });
 });

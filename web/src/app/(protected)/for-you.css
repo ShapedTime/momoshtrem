@@ -38,6 +38,27 @@
   @media (min-width: 1024px) { .home-hero + .home-body { margin-top: calc(var(--sp-6) * -1); position: relative; } }
   .rail-note { padding: var(--sp-4) var(--sp-5); border-radius: var(--r-lg); background: var(--surface-1); border: 1px solid var(--line-1); color: var(--text-2); }
 
+  /* ---- Noir's picks (#155) ------------------------------------------------- */
+  /* Feedback that hides Noir's pick dims it in place until /home is read again (as .pcard.is-dismissed) */
+  .home-hero.is-dismissed .hero-content > :not(.hero-pager), .home-hero.is-dismissed .hero-bg { opacity: 0.4; filter: grayscale(1); transition: opacity var(--d-slow), filter var(--d-slow); }
+
+  .refresh-banner { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); min-width: 0; }
+  .refresh-banner .grow { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+  .refresh-banner .grow strong { color: var(--text-1); font-weight: var(--w-semibold); }
+  .refresh-banner .eyes-sm { display: grid; place-items: center; width: 52px; height: 36px; border-radius: 18px; background: var(--ink-0); flex-shrink: 0; }
+
+  .picks-note { display: flex; align-items: flex-start; gap: var(--sp-2); color: var(--text-2); }
+  .picks-note > svg { flex-shrink: 0; margin-top: 2px; color: var(--st-warning); }
+
+  .ask-band { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: center; gap: var(--sp-6); padding: var(--sp-6); border-radius: var(--r-xl); background: radial-gradient(60% 140% at 0% 0%, rgb(242 179 61 / 0.12), transparent 70%), var(--surface-1); border: 1px solid var(--line-1); }
+  .ask-band .ask-entry { background: var(--ink-1); }
+  .ask-suggest { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+  .ask-suggest .fchip { max-width: 100%; }
+
+  .picks-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+  .picks-foot a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-3); }
+  .picks-foot a:hover { color: var(--text-1); }
+
   /* ---- Without Trakt: "Make this page yours" ------------------------------ */
   /* The glow sits behind the cat; below 1024 px it stays clear of the glass tab bar's labels */
   .connect-card {

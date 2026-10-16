@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiFetch, apiJson, ApiError, parseErrorBody, statusCode, toQuery } from '../client';
+import { apiFetch, apiJson, ApiError, isApiError, parseErrorBody, statusCode, toQuery } from '../client';
 import type {
   AskEvent,
   AskRequest,
@@ -41,13 +41,18 @@ export const recApi = {
 const ACTIVE_RUN: ReadonlyArray<RunSummary['status']> = ['queued', 'running'];
 export const isActiveRun = (run: Pick<RunSummary, 'status'> | null | undefined): boolean => Boolean(run && ACTIVE_RUN.includes(run.status));
 
-/** Polls every 3 s while a run is queued or running (the refreshing banner), never in a hidden tab. */
+/**
+ * Polls every 3 s while a run is queued or running (the refreshing banner), never in a hidden tab.
+ * /home always answers 200 once it's served (#157); a 503 `unavailable` before that won't change on
+ * a retry, so For You's hero doesn't wait out the retries.
+ */
 export const recommendationsHomeQuery = () =>
   queryOptions({
     queryKey: recKeys.home,
     queryFn: recApi.home,
     staleTime: 10 * 60_000,
     refetchInterval: (query) => (query.state.data?.active_run ? 3000 : false),
+    retry: (failureCount, error) => !(isApiError(error) && (error.status < 500 || error.status === 503)) && failureCount < 2,
   });
 
 export const recRunsQuery = (limit?: number) => queryOptions({ queryKey: recKeys.runs(limit), queryFn: () => recApi.runs(limit) });

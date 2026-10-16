@@ -2,12 +2,13 @@ import type { HeroPick, MediaType, UpNextItem, WatchlistItem } from '@/lib/api/c
 import { episodeCardCode } from './episode-card';
 
 /**
- * The For You hero's picks until #9's "Tonight's pick" exists (decided on
- * #8): at most three, stable for the day. First a ready Up next show, then
- * ready watchlist titles, then trending. Within each group the day decides
- * the order (a hash of the local date and the title), so a reload never
- * reshuffles them and tomorrow brings others. #9 hands its `hero_picks` to
- * the same hero as `source: 'recommendation'`.
+ * The For You hero's picks. Noir's "Tonight's pick" (`/recommendations/home`'s
+ * `hero_picks`, #155) comes first, as `source: 'recommendation'`. Without
+ * them, For You picks its own (decided on #8): at most three, stable for the
+ * day. First a ready Up next show, then ready watchlist titles, then
+ * trending. Within each group the day decides the order (a hash of the local
+ * date and the title), so a reload never reshuffles them and tomorrow brings
+ * others.
  */
 
 export const MAX_HERO_PICKS = 3;
@@ -93,4 +94,14 @@ export function heroPicks({ upNext, watchlist, trending, date }: HeroPickInput):
     add({ media_type: item.media_type, tmdb_id: item.tmdb_id, kicker: PICK_KICKER.trending, reason: '', feedback: null, source: 'trending' });
   }
   return picks;
+}
+
+/** Noir's picks for the hero (the server keeps them stable for its day), at most three. */
+export function recommendationPicks(picks: readonly HeroPick[]): ForYouPick[] {
+  return picks.slice(0, MAX_HERO_PICKS).map((pick) => ({ ...pick, source: 'recommendation' }));
+}
+
+/** Tonight's picks when Noir wrote some, else For You's own. */
+export function forYouHeroPicks(recommended: readonly HeroPick[], input: HeroPickInput): ForYouPick[] {
+  return recommended.length > 0 ? recommendationPicks(recommended) : heroPicks(input);
 }

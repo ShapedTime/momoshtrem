@@ -687,6 +687,7 @@ function startingRecs(from: MockScenario | null, now: number): MockRecs {
   const model = mockAiSettings().rec_model;
   switch (from) {
     case 'recs-none':
+    case 'for-you-no-hero':
       return { ...recs, runs: [] };
     case 'recs-first-run':
       return { ...recs, runs: [newRun(1, 'first_sync', model, DESIGN_RESULT, { hold: RUN_HOLD_TICK })], nextRunId: 2, feedback: new Map() };

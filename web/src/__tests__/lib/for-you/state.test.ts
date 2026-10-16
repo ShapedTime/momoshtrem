@@ -1,5 +1,5 @@
-import type { TraktIntegration, TraktSync } from '@/lib/api/contract';
-import { firstSyncDetail, firstSyncSteps, forYouState, importedSoFar, traktLinked } from '@/lib/for-you/state';
+import type { RecommendationsHome, RunProgress, TraktIntegration, TraktSync } from '@/lib/api/contract';
+import { firstPicksRun, firstSyncDetail, firstSyncSteps, forYouState, importedSoFar, traktLinked, writingShelvesStep } from '@/lib/for-you/state';
 
 const PROGRESS = { plays: 2184, plays_total: 2184, ratings: 312, watchlist: 41, shows: 6 };
 
@@ -91,5 +91,53 @@ describe('the first sync', () => {
     expect(importedSoFar({ ...PROGRESS, ratings: 0, watchlist: 0 })).toBe('2,184 plays');
     expect(importedSoFar({ ...PROGRESS, plays: 0, ratings: 0, watchlist: 0 })).toBeNull();
     expect(firstSyncDetail(sync({ status: 'syncing', kind: 'initial', step: 'history', progress: { ...PROGRESS, plays: 0, ratings: 0, watchlist: 0 } }))).toMatch(/^Reading your history/);
+  });
+});
+
+describe('Noir’s first shelves (#155)', () => {
+  const firstRun: RunProgress = {
+    id: 1,
+    kind: 'first_sync',
+    status: 'running',
+    model: 'claude-opus-5-5',
+    started_at: '2026-10-16T14:00:00Z',
+    finished_at: null,
+    cost_usd: 0.1,
+    skip_reason: null,
+    error: null,
+    steps: [{ step: 'write', state: 'active', detail: '2 of 5 shelves' }],
+    shelves_done: 2,
+    shelves_target: 5,
+  };
+  const home = (overrides: Partial<RecommendationsHome> = {}): RecommendationsHome => ({
+    configured: true,
+    enabled: true,
+    run: null,
+    active_run: firstRun,
+    hero_picks: [],
+    shelves: [],
+    ...overrides,
+  });
+
+  it('the first-sync run while there are no picks yet', () => {
+    expect(firstPicksRun(home())).toBe(firstRun);
+    expect(firstPicksRun(undefined)).toBeNull();
+    // A refresh over existing picks shows the refreshing banner instead
+    expect(firstPicksRun(home({ run: { ...firstRun, id: 0, kind: 'scheduled', status: 'succeeded' } }))).toBeNull();
+    expect(firstPicksRun(home({ active_run: { ...firstRun, kind: 'manual' } }))).toBeNull();
+    expect(firstPicksRun(home({ active_run: null }))).toBeNull();
+    expect(firstPicksRun(home({ enabled: false }))).toBeNull();
+  });
+
+  it('keeps For You on the first sync while Noir writes, once the import is done', () => {
+    expect(forYouState({ trakt: trakt(), libraryTotal: 3, writingFirstPicks: true })).toBe('first_sync');
+    expect(forYouState({ trakt: off, libraryTotal: 3, writingFirstPicks: true })).toBe('trakt_off');
+  });
+
+  it('adds "Writing your shelves" with the count, and says it’s building your picks', () => {
+    expect(writingShelvesStep(firstRun)).toEqual({ label: 'Writing your shelves', detail: '2 of 5', state: 'active' });
+    expect(writingShelvesStep({ shelves_done: 0, shelves_target: 0 }).detail).toBeNull();
+    expect(firstSyncDetail(sync(), true)).toBe('Imported 2,184 plays, 312 ratings and 41 watchlist items. Building your picks…');
+    expect(firstSyncDetail(sync({ progress: { ...PROGRESS, plays: 0, ratings: 0, watchlist: 0 } }), true)).toBe('Building your picks…');
   });
 });

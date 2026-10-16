@@ -627,9 +627,48 @@ test.describe('for you', () => {
     await signIn(page, '/');
     await page.locator('section.home-hero h2.t-display-xl').waitFor();
     await page.getByRole('region', { name: 'Your Trakt watchlist' }).locator('article.pcard').first().waitFor();
-    await page.getByRole('region', { name: 'Trending this week' }).locator('article.pcard').first().waitFor();
+    await page.getByRole('region', { name: 'Coming soon' }).locator('article.pcard').first().waitFor();
     await settle(page);
     await shoot(page, testInfo, 'home/default', { fullPage: true });
+  });
+
+  test('refreshing', async ({ page }, testInfo) => {
+    await scenario(page, 'recs-refreshing');
+    await signIn(page, '/');
+    await page.locator('section.home-hero h2.t-display-xl').waitFor();
+    await page.getByText('Refreshing your picks').waitFor();
+    await page.getByRole('region', { name: 'Coming soon' }).locator('article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/refreshing', { fullPage: true });
+  });
+
+  test('dismissed', async ({ page }, testInfo) => {
+    await signIn(page, '/');
+    const shelf = page.getByRole('region', { name: 'Because you loved Severance' });
+    const andor = shelf.locator('article.pcard').filter({ hasText: 'Andor' });
+    await shelf.scrollIntoViewIfNeeded();
+    await andor.getByRole('button', { name: 'Less like this' }).click();
+    await page.getByText('Got it, fewer like this').waitFor();
+    await page.waitForTimeout(800);
+    await shoot(page, testInfo, 'home/dismissed');
+  });
+
+  test('feedback sheet', async ({ page }, testInfo) => {
+    await signIn(page, '/');
+    const silo = page.getByRole('region', { name: 'Because you loved Severance' }).locator('article.pcard').filter({ hasText: 'Silo' });
+    await silo.getByRole('button', { name: 'More feedback' }).click();
+    await page.getByRole('dialog', { name: 'Silo' }).getByText('Tune your picks').waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'home/feedback');
+  });
+
+  test('first run', async ({ page }, testInfo) => {
+    await scenario(page, 'recs-first-run');
+    await signIn(page, '/');
+    await page.getByText('Writing your shelves').waitFor();
+    await page.getByRole('region', { name: 'Up next' }).locator('article.lcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/first-run', { fullPage: true });
   });
 
   test('trakt off', async ({ page }, testInfo) => {
