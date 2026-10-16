@@ -165,6 +165,9 @@ type Caps struct {
 	CostUSD float64
 	// ToolCalls is how many custom tool calls it may make.
 	ToolCalls int
+	// WebSearches is how many web searches its calls may make in all, as
+	// usage counts them (max_uses bounds one call only).
+	WebSearches int64
 }
 
 func (c Caps) reached(res *Result) error {
@@ -177,6 +180,8 @@ func (c Caps) reached(res *Result) error {
 		return &CapError{Cap: CapCost}
 	case c.ToolCalls > 0 && res.ToolCalls >= c.ToolCalls:
 		return &CapError{Cap: CapToolCalls}
+	case c.WebSearches > 0 && res.Usage.WebSearches >= c.WebSearches:
+		return &CapError{Cap: CapWebSearches}
 	}
 	return nil
 }

@@ -62,9 +62,10 @@ type Service struct {
 	now        func() time.Time
 	log        *slog.Logger
 
-	mu   sync.RWMutex
-	recs RecsReporter
-	ask  AskReporter
+	mu       sync.RWMutex
+	recs     RecsReporter
+	ask      AskReporter
+	onChange func()
 }
 
 // New serves the settings and the usage; configured says whether
@@ -81,6 +82,14 @@ func (s *Service) SetRecs(r RecsReporter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recs = r
+}
+
+// SetOnChange installs a function called after each successful update:
+// the picks' scheduler plans again at once (#157).
+func (s *Service) SetOnChange(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onChange = fn
 }
 
 // SetAsk installs Ask's reporter (#158).
@@ -114,6 +123,12 @@ func (s *Service) UpdateAISettings(ctx context.Context, p recommend.SettingsPatc
 	})
 	if err != nil {
 		return recommend.Settings{}, err
+	}
+	s.mu.RLock()
+	onChange := s.onChange
+	s.mu.RUnlock()
+	if onChange != nil {
+		onChange()
 	}
 	return toWire(settings), nil
 }

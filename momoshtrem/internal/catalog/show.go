@@ -69,6 +69,7 @@ func (s *Service) ShowTitle(ctx context.Context, tmdbID int) (*ShowTitle, error)
 			return nil, err
 		}
 	}
+	title.RecommendationReason = s.recommendationReason(ctx, "tv", tmdbID)
 	title.BackdropDominantColor = color()
 	return title, nil
 }

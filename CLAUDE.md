@@ -63,6 +63,7 @@ cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
 cd momoshtrem && go vet ./... && go test ./...
 docker compose run --rm momoshtrem backfill-metadata [--dry-run]   # fill TMDB metadata for titles added before #4 (never renames WebDAV paths)
 docker compose run --rm --no-deps momoshtrem hdrezka-probe [-translator 238] [-season 1 -episode 1] <query>   # check HDRezka resolves to a seekable MP4 from this host (no database; exit 1 on failure)
+docker compose run --rm momoshtrem recommend-run [-dry-run]   # one picks run in the foreground (costs cents: prints the shelves and the cost); -dry-run builds its first request and counts its tokens (free)
 # Episode-mapping eval on the corpus's golden torrents: accuracy, cost and latency per mode.
 # The AI modes (auto, ai_always) call Claude and cost cents; -modes rules and -dry-run (request sizes only) are free
 cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-modes rules,auto,ai_always] [-cases id,…] [-dry-run] [-v]

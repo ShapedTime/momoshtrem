@@ -61,6 +61,7 @@ func (s *Service) MovieTitle(ctx context.Context, tmdbID int) (*MovieTitle, erro
 			return nil, err
 		}
 	}
+	title.RecommendationReason = s.recommendationReason(ctx, "movie", tmdbID)
 	title.BackdropDominantColor = color()
 	return title, nil
 }
