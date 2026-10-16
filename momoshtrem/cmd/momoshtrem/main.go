@@ -30,6 +30,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/search"
+	"github.com/shapedtime/momoshtrem/internal/secret"
 	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/status"
@@ -38,6 +39,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/torznab"
+	"github.com/shapedtime/momoshtrem/internal/trakt"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 	"github.com/shapedtime/momoshtrem/internal/webdav"
 )
@@ -369,7 +371,6 @@ func main() {
 			Username:    cfg.Server.WebDAVAuth.Username,
 		},
 		ActiveReaders:           sessionRegistry.Count,
-		TraktConfigured:         cfg.Trakt.ClientID != "" && cfg.Trakt.ClientSecret != "",
 		AIConfigured:            cfg.AI.AnthropicAPIKey != "",
 		AICost:                  aiStore.MonthToDateCost,
 		OpenSubtitlesConfigured: cfg.OpenSubtitles.APIKey != "",
@@ -443,6 +444,35 @@ func main() {
 		apiOpts.Search = searchService
 		apiOpts.Releases = searchService
 		slog.Info("Torrent search configured")
+	}
+	// Trakt (B5, read-only): the device-code connect and its tokens,
+	// sealed with SECRET_KEY. It's configured with TRAKT_CLIENT_ID,
+	// TRAKT_CLIENT_SECRET and a SECRET_KEY of 64 hex characters (or at
+	// least 32); without them the state is off and connect answers 503.
+	var traktClient *trakt.Client
+	var traktBox *secret.Box
+	if cfg.Trakt.ClientID != "" && cfg.Trakt.ClientSecret != "" {
+		if box, err := secret.New(cfg.Security.SecretKey); err != nil {
+			slog.Warn("Trakt disabled: SECRET_KEY can't encrypt its tokens", "error", err)
+		} else {
+			traktClient = trakt.NewClient(cfg.Trakt.ClientID, cfg.Trakt.ClientSecret, version)
+			traktBox = box
+		}
+	}
+	traktAuth := trakt.NewAuth(trakt.AuthDeps{
+		Client:   traktClient,
+		Box:      traktBox,
+		Store:    library.NewTraktAuthRepository(db),
+		Settings: settingsRepo,
+	})
+	if err := traktAuth.Load(context.Background()); err != nil {
+		slog.Error("Failed to read the Trakt connection; trying again on first use", "error", err)
+	}
+	statusOpts.TraktConfigured = traktAuth.Configured()
+	statusOpts.TraktConnected = traktAuth.Connected
+	apiOpts.Trakt = traktAuth
+	if traktAuth.Configured() {
+		slog.Info("Trakt configured", "connected", traktAuth.Connected())
 	}
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
@@ -638,6 +668,9 @@ func main() {
 	// Stop the assignment workers before the torrent service they use; a
 	// job in flight resumes on the next start.
 	jobService.Close()
+
+	// Stop polling a pending Trakt device code
+	traktAuth.Close()
 
 	// Close torrent service
 	if err := torrentService.Close(); err != nil {

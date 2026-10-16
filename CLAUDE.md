@@ -178,6 +178,8 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `internal/activity/` - Torrents and activity (PLAN §6 B6): the DB's known torrents merged with live state (`rules.go`: state order, titles, scope), the summary (speeds, counts, disk), pause and resume, the detail that never loads a torrent
 - `internal/sessions/` - Streaming sessions for every source: reads grouped by client, User-Agent and file, sniff reads skipped, client and device from the User-Agent (`useragent.go`), rate, position and buffer ahead; `request.go` carries the WebDAV request into `LibraryFS.Open`
 - `internal/streaming/prioritizer.go` - Piece prioritization (torrents stream on demand: pieces only around readers, kept in an LRU file cache)
+- `internal/secret/` - AES-256-GCM box for secrets at rest under `SECRET_KEY` (64 hex chars, or ≥ 32 chars hashed)
+- `internal/trakt/` - Trakt, read-only (PLAN §6 B5): `client.go` (auth and API hosts, rate limits, 429/5xx retries, `Paginate`), `auth.go` the connection (device-code connect, sealed rotating tokens, `Token`/`Invalidate`/`Get`, reauth, disconnect, `Hooks` for the sync); `trakttest/` a fake Trakt; `library/trakt_auth_repo.go` stores and purges
 
 **web (Next.js, `web/`):**
 - `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)

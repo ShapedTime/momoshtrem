@@ -61,7 +61,11 @@ type Options struct {
 	TMDB    Prober       // nil when TMDB_API_KEY is unset
 	HDRezka Prober       // nil when HDREZKA_ENABLED is off
 
-	TraktConfigured         bool
+	// TraktConfigured: Trakt's client id and secret and a valid SECRET_KEY.
+	TraktConfigured bool
+	// TraktConnected reports whether Trakt's state is connected (B5), live
+	// rather than cached. Optional.
+	TraktConnected          func() bool
 	AIConfigured            bool
 	OpenSubtitlesConfigured bool
 	// AICost is what the AI features have cost this month (ai_usage).
@@ -131,7 +135,8 @@ type IndexerStatus struct {
 	Error  string  `json:"error,omitempty"`
 }
 
-// TraktStatus reports the Trakt integration. Connected is filled in by B5.
+// TraktStatus reports the Trakt integration: configured (client id and
+// secret and a valid SECRET_KEY) and connected (the state is connected).
 type TraktStatus struct {
 	Configured bool `json:"configured"`
 	Connected  bool `json:"connected"`
@@ -224,6 +229,9 @@ func (s *Service) Report(ctx context.Context, refresh bool) Report {
 // withLiveFields fills values that are cheap and should never be stale.
 func (s *Service) withLiveFields(r Report) Report {
 	r.UptimeSeconds = int64(s.now().Sub(s.opts.StartedAt).Seconds())
+	if s.opts.TraktConnected != nil {
+		r.Trakt.Connected = s.opts.TraktConnected()
+	}
 	if s.opts.ActiveReaders != nil {
 		n := s.opts.ActiveReaders()
 		r.WebDAV.ActiveReaders = &n
