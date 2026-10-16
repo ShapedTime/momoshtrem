@@ -194,7 +194,7 @@ export type InspectRequest = {
   hint?: Pick<AssignHint, 'season' | 'episode'>;
 } & ({ release_id: string } | { magnet_uri: string });
 
-/** GET/PUT /settings/quality-profile. PUT takes the whole profile; 422 names a bad field. */
+/** GET/PUT /settings/quality-profile. PUT takes the whole profile; a 422 names the bad field in `error.field`. */
 export interface QualityProfile {
   /** Default "1080p". */
   preferred_resolution: '720p' | '1080p' | '2160p';

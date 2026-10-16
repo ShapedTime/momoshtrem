@@ -10,7 +10,7 @@ export interface SettingsSection {
   description: string;
 }
 
-/** Settings sections (screens/settings). Trakt, AI and Quality get their content in #8, #9 and #6. */
+/** Settings sections (screens/settings). Trakt and AI get their content in #8 and #9. */
 export const SECTIONS: SettingsSection[] = [
   { id: 'trakt', label: 'Trakt', group: 'Integrations', icon: Link2, description: 'Your watch history powers Up next and personal picks.' },
   { id: 'ai', label: 'AI & picks', group: 'Preferences', icon: Sparkles, description: 'When Noir writes your picks, which model it uses, and what it may spend.' },

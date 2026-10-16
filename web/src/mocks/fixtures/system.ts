@@ -1,4 +1,4 @@
-import type { SystemStatus } from '@/lib/api/contract';
+import type { IndexerHealth, SystemStatus } from '@/lib/api/contract';
 export function systemStatus(): SystemStatus {
   return {
     // CI stamps the backend with the full commit SHA of its image
@@ -23,4 +23,14 @@ export function systemStatus(): SystemStatus {
     opensubtitles: { configured: true },
     hdrezka: { configured: true, reachable: true, latency_ms: 340 },
   };
+}
+
+/** The `indexers-degraded` scenario: The Pirate Bay times out (for 2 h) and RuTracker fails (for 5 min). */
+export function degradedIndexers(now = Date.now()): IndexerHealth[] {
+  return [
+    { name: 'Nyaa', status: 'ok', ms: 210, since: null },
+    { name: 'TorrentLeech', status: 'ok', ms: 340, since: null },
+    { name: 'The Pirate Bay', status: 'timeout', ms: 8000, since: new Date(now - 2 * 3_600_000).toISOString(), error: 'timed out' },
+    { name: 'RuTracker', status: 'error', ms: 95, since: new Date(now - 5 * 60_000).toISOString(), error: 'jackett error: Login failed' },
+  ];
 }

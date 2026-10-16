@@ -1,0 +1,92 @@
+/* ==========================================================================
+   Settings (screens/settings): cards and rows, the quality profile's preview,
+   range and tags, the indexer list and the save bar. Ported from
+   docs/redesign/design-cinematic/css/screens/settings.css. The React parts
+   live in components/settings. Tokens only.
+   ========================================================================== */
+
+@layer components {
+  /* ---- Cards and rows ------------------------------------------------------ */
+  .set-card { display: flex; flex-direction: column; }
+  .set-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) var(--sp-4) var(--sp-1); min-height: 52px; }
+  .set-card-sub { padding: 0 var(--sp-4) var(--sp-3); }
+  @media (min-width: 640px) {
+    .set-card-head { padding: var(--sp-5) var(--sp-5) var(--sp-1); }
+    .set-card-sub { padding: 0 var(--sp-5) var(--sp-3); }
+  }
+
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-4); min-height: 64px; }
+  .set-row + .set-row { border-top: 1px solid var(--line-1); }
+  .set-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .set-row-label { font-weight: var(--w-medium); color: var(--text-1); }
+  .set-row-ctl { flex-shrink: 0; }
+  .set-row--stack { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+  .set-row--stack .set-row-ctl { flex-shrink: 1; }
+  @media (min-width: 640px) { .set-row { padding: var(--sp-4) var(--sp-5); } }
+  @media (min-width: 1024px) {
+    .set-row--stack:not(:has(.set-range)) { flex-direction: row; align-items: center; }
+  }
+
+  /* ---- Quality: preview, range, tags ---------------------------------------- */
+  .set-preview {
+    position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--sp-2)); z-index: var(--z-raised);
+    display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-lg); border: 1px solid var(--accent-line);
+    background: linear-gradient(90deg, rgb(242 179 61 / 0.1), rgb(242 179 61 / 0.03)), var(--glass-bg-strong);
+    backdrop-filter: blur(var(--blur-md));
+  }
+  @media (min-width: 1024px) { .set-preview { top: calc(var(--topbar-h) + var(--sp-3)); } }
+  .set-preview > svg { color: var(--accent-text); flex-shrink: 0; }
+  .set-preview strong { font-size: var(--t-body-l); font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
+
+  .set-range { display: flex; align-items: center; gap: var(--sp-4); }
+  .set-range output { min-width: 64px; text-align: right; font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
+  .set-range input[type="range"] { flex: 1; min-width: 0; height: 44px; appearance: none; -webkit-appearance: none; background: transparent; margin: 0; cursor: pointer; }
+  .set-range input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--accent) var(--v), var(--surface-4) var(--v)); }
+  .set-range input[type="range"]::-moz-range-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--accent) var(--v), var(--surface-4) var(--v)); }
+  .set-range input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%; background: var(--text-1); box-shadow: 0 2px 8px rgb(0 0 0 / 0.5), 0 0 0 4px rgb(242 179 61 / 0.25); }
+  .set-range input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: var(--text-1); box-shadow: 0 2px 8px rgb(0 0 0 / 0.5), 0 0 0 4px rgb(242 179 61 / 0.25); }
+  .set-range input[type="range"]:focus-visible { box-shadow: none; }
+  .set-range input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focus-ring); }
+  .set-range input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: var(--focus-ring); }
+  .set-range-scale { position: relative; height: 14px; margin-right: 80px; margin-top: -10px; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .set-range-scale span { position: absolute; top: 0; left: calc(12px + (100% - 24px) * var(--at)); transform: translateX(-50%); }
+
+  .set-tags { display: flex; flex-direction: column; gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-4); }
+  @media (min-width: 640px) { .set-tags { padding: 0 var(--sp-5) var(--sp-5); } }
+  .set-tags .field { max-width: 360px; }
+  .set-tag {
+    display: inline-flex; align-items: center; gap: 2px; height: 32px; max-width: 100%; padding: 0 2px 0 10px;
+    border-radius: var(--r-pill); background: var(--surface-3); border: 1px solid var(--line-2);
+    font-size: var(--t-small); font-weight: var(--w-medium); font-family: var(--font-mono);
+  }
+  .set-tag > span { min-width: 0; overflow-wrap: anywhere; }
+  .set-tag button { position: relative; flex-shrink: 0; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; color: var(--text-3); }
+  .set-tag button::after { content: ""; position: absolute; inset: -9px -6px; }
+  .set-tag button:hover { background: var(--surface-4); color: var(--text-1); }
+
+  /* ---- Status: Jackett's indexers ---------------------------------------- */
+  .set-indexers { display: flex; flex-direction: column; margin-top: var(--sp-2); border-radius: var(--r-md); background: var(--surface-2); padding: 4px var(--sp-3); }
+  .set-indexers li { display: flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 4px 0; font-size: var(--t-small); }
+  .set-indexers li + li { border-top: 1px solid var(--line-1); }
+  .set-indexers li.is-warn { align-items: flex-start; padding: var(--sp-2) 0; }
+  .set-indexers li > svg { flex-shrink: 0; }
+  .set-indexers li.is-warn > svg { margin-top: 3px; }
+
+  /* ---- Save bar: phone above the tab bar, desktop bottom-centre ------------- */
+  .set-savebar {
+    position: fixed; z-index: var(--z-sticky); left: var(--sp-2); right: var(--sp-2);
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-2));
+    display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+    border-radius: var(--r-lg); border: 1px solid var(--line-2); box-shadow: var(--e-3);
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(var(--blur-lg)) saturate(170%);
+    animation: toast-in var(--d-slow) var(--ease-out);
+  }
+  .set-savebar > .grow { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  @media (min-width: 1024px) {
+    .set-savebar { left: 50%; right: auto; bottom: var(--sp-6); transform: translateX(-50%); width: min(640px, calc(100% - 48px)); animation-name: fade-in; }
+  }
+  /* Room below the last card, so the bar never covers it */
+  .main:has(.set-savebar) { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 100px); }
+}

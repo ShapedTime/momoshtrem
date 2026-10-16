@@ -5,18 +5,27 @@ import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useSignOut } from '@/components/shell/signOut';
+import { qualityProfileQuery } from '@/lib/api/endpoints/search';
 import { statusQuery } from '@/lib/api/endpoints/system';
-import type { SystemStatus } from '@/lib/api/contract';
+import type { QualityProfile, SystemStatus } from '@/lib/api/contract';
+import { qualitySummary } from '@/lib/settings/quality';
 import { cx } from '@/lib/utils/cx';
 import { PlaceholderSection } from './PlaceholderSection';
 import { PlaybackSection } from './PlaybackSection';
+import { QualitySection } from './QualitySection';
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections';
 import { StatusSection } from './StatusSection';
 import { serviceRows, summarize, versionLabel } from './status-model';
 
 const GROUPS = ['Integrations', 'Preferences', 'Playback', 'System'] as const;
 
-function navSummary(id: SectionId, status: SystemStatus | undefined, statusFailed: boolean): { text: string; attention?: boolean } {
+function navSummary(
+  id: SectionId,
+  status: SystemStatus | undefined,
+  statusFailed: boolean,
+  quality: QualityProfile | undefined
+): { text: string; attention?: boolean } {
+  if (id === 'quality') return { text: quality ? qualitySummary(quality) : '' };
   if (id === 'status') {
     if (statusFailed) return { text: 'Can’t reach the server', attention: true };
     if (!status) return { text: 'Checking…' };
@@ -29,8 +38,6 @@ function navSummary(id: SectionId, status: SystemStatus | undefined, statusFaile
       return { text: status.trakt.connected ? 'Connected' : 'Not connected' };
     case 'ai':
       return { text: status.ai.configured ? (status.ai.mtd_cost_usd !== null ? `$${status.ai.mtd_cost_usd.toFixed(2)} this month` : 'Key configured') : 'Off' };
-    case 'quality':
-      return { text: 'Coming soon' };
     case 'playback':
       return { text: 'WebDAV ready' };
   }
@@ -48,6 +55,7 @@ export function SettingsView() {
   const active = section ?? DEFAULT_SECTION;
   const current = SECTIONS.find((s) => s.id === active)!;
   const { data: status, isError } = useQuery(statusQuery());
+  const { data: quality } = useQuery(qualityProfileQuery());
 
   return (
     <div className="page py-6 lg:py-8">
@@ -61,7 +69,7 @@ export function SettingsView() {
               <ul className="overflow-hidden rounded-lg border border-line-1 bg-surface-1 max-lg:divide-y max-lg:divide-line-1 lg:border-0 lg:bg-transparent">
                 {SECTIONS.filter((s) => s.group === group).map((s) => {
                   const Icon = s.icon;
-                  const summary = navSummary(s.id, status, isError);
+                  const summary = navSummary(s.id, status, isError, quality);
                   const isActive = s.id === active;
                   return (
                     <li key={s.id}>
@@ -118,7 +126,15 @@ export function SettingsView() {
             </h2>
             <p className="text-fg-2">{current.description}</p>
           </header>
-          {active === 'playback' ? <PlaybackSection /> : active === 'status' ? <StatusSection /> : <PlaceholderSection id={active} />}
+          {active === 'playback' ? (
+            <PlaybackSection />
+          ) : active === 'status' ? (
+            <StatusSection />
+          ) : active === 'quality' ? (
+            <QualitySection />
+          ) : (
+            <PlaceholderSection id={active} />
+          )}
         </section>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import type { BackendUnreachableBody, SystemStatus } from '@/lib/api/contract';
-import { systemStatus } from '../fixtures/system';
+import { degradedIndexers, systemStatus } from '../fixtures/system';
 import { scenario } from '../scenario';
 import { latency } from './util';
 
@@ -24,6 +24,8 @@ export const systemHandlers = [
       };
       return HttpResponse.json(body, { status: 503 });
     }
-    return HttpResponse.json<SystemStatus>({ ...systemStatus(), ...hdrezkaStatus(), web: { version: '2.0.0' } });
+    const status = systemStatus();
+    if (scenario() === 'indexers-degraded') status.jackett.indexers = degradedIndexers(Date.parse(status.checked_at));
+    return HttpResponse.json<SystemStatus>({ ...status, ...hdrezkaStatus(), web: { version: '2.0.0' } });
   }),
 ];

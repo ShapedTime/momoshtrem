@@ -7,16 +7,19 @@
 import { LOGIN_ROUTE } from '@/config/auth';
 import type { ApiErrorBody } from './contract/common';
 
-/** Error from an /api call: HTTP status plus the contract's {code, message}. */
+/** Error from an /api call: HTTP status plus the contract's {code, message, field?}. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The field a 422 is about, when the endpoint names one. */
+  readonly field?: string;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, field?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.field = field;
   }
 }
 
@@ -25,13 +28,17 @@ export function isApiError(error: unknown): error is ApiError {
 }
 
 /** Read both error shapes: `{error: {code, message}}` (PLAN §6) and legacy `{error: "message"}`. */
-export function parseErrorBody(body: unknown): { code?: string; message?: string } {
+export function parseErrorBody(body: unknown): { code?: string; message?: string; field?: string } {
   if (!body || typeof body !== 'object' || !('error' in body)) return {};
   const error = (body as { error: unknown }).error;
   if (typeof error === 'string') return { message: error };
   if (error && typeof error === 'object') {
-    const { code, message } = error as Partial<ApiErrorBody['error']>;
-    return { code: typeof code === 'string' ? code : undefined, message: typeof message === 'string' ? message : undefined };
+    const { code, message, field } = error as Partial<ApiErrorBody['error']>;
+    return {
+      code: typeof code === 'string' ? code : undefined,
+      message: typeof message === 'string' ? message : undefined,
+      field: typeof field === 'string' ? field : undefined,
+    };
   }
   return {};
 }
@@ -82,8 +89,8 @@ export async function apiJson<T>(input: string, init?: RequestInit & { json?: un
   if (response.status === 204) return undefined as T;
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const { code, message } = parseErrorBody(body);
-    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? `Request failed (${response.status})`);
+    const { code, message, field } = parseErrorBody(body);
+    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? `Request failed (${response.status})`, field);
   }
   return body as T;
 }

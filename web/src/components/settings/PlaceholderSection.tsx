@@ -10,10 +10,6 @@ const COPY: Partial<Record<SectionId, { title: string; body: string }>> = {
     title: 'AI picks are on their way',
     body: 'Noir will write nightly picks from your history and answer “Ask momoshtrem”, within a monthly budget you set.',
   },
-  quality: {
-    title: 'Quality profiles are on their way',
-    body: 'Tell torrent search which resolutions, codecs and sizes count as the best match.',
-  },
 };
 
 /** Sections whose features haven't shipped yet say so plainly. */

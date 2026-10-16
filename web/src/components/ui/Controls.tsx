@@ -94,6 +94,8 @@ export interface SegmentOption<T extends string> {
   label: ReactNode;
   /** Accessible name when `label` is an icon. */
   ariaLabel?: string;
+  /** A mode that doesn't apply right now (e.g. a maximum below the preferred value). */
+  disabled?: boolean;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -101,19 +103,27 @@ interface SegmentedControlProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   'aria-label': string;
+  /** Help or an error about the choice. */
+  'aria-describedby'?: string;
   block?: boolean;
   className?: string;
 }
 
 export function SegmentedControl<T extends string>({ options, value, onChange, block, className, ...rest }: SegmentedControlProps<T>) {
   return (
-    <div role="group" aria-label={rest['aria-label']} className={cx('seg', block ? 'seg--block' : 'w-fit', className)}>
+    <div
+      role="group"
+      aria-label={rest['aria-label']}
+      aria-describedby={rest['aria-describedby']}
+      className={cx('seg', block ? 'seg--block' : 'w-fit', className)}
+    >
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
           aria-pressed={option.value === value}
           aria-label={option.ariaLabel}
+          disabled={option.disabled}
           onClick={() => onChange(option.value)}
         >
           {option.label}
