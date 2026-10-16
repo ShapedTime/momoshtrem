@@ -178,6 +178,7 @@ export interface AskStep {
 export type AskErrorCode = 'refused' | 'limit_reached' | 'upstream' | 'internal';
 
 export interface AskTurnUsage {
+  /** Every prompt token, cache reads and writes included. */
   input_tokens: number;
   output_tokens: number;
   web_searches: number;
