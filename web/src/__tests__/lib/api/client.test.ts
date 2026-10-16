@@ -70,6 +70,15 @@ describe('apiJson', () => {
     await expect(apiJson('/api/titles/tv/1')).rejects.toMatchObject({ status: 404, code: 'not_found', message: 'No such title' });
   });
 
+  it('carries a 429’s resets_at (the AI budget, Ask’s daily limit)', async () => {
+    respond(429, { error: { code: 'budget_exceeded', message: 'This month’s AI budget is used up.', resets_at: '2026-11-01T00:00:00+01:00' } });
+    await expect(apiJson('/api/recommendations/refresh', { method: 'POST' })).rejects.toMatchObject({
+      status: 429,
+      code: 'budget_exceeded',
+      resetsAt: '2026-11-01T00:00:00+01:00',
+    });
+  });
+
   it('reads the legacy {error: "message"} shape too', async () => {
     respond(500, { error: 'Failed to fetch movies' });
     await expect(apiJson('/api/library/movies')).rejects.toMatchObject({ status: 500, code: 'internal_error', message: 'Failed to fetch movies' });

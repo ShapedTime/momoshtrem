@@ -7,19 +7,22 @@
 import { LOGIN_ROUTE } from '@/config/auth';
 import type { ApiErrorBody } from './contract/common';
 
-/** Error from an /api call: HTTP status plus the contract's {code, message, field?}. */
+/** Error from an /api call: HTTP status plus the contract's {code, message, field?, resets_at?}. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   /** The field a 422 is about, when the endpoint names one. */
   readonly field?: string;
+  /** `resets_at`: when a 429's limit lifts (the AI budget, Ask's daily limit). */
+  readonly resetsAt?: string;
 
-  constructor(status: number, code: string, message: string, field?: string) {
+  constructor(status: number, code: string, message: string, field?: string, resetsAt?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.field = field;
+    this.resetsAt = resetsAt;
   }
 }
 
@@ -28,16 +31,17 @@ export function isApiError(error: unknown): error is ApiError {
 }
 
 /** Read both error shapes: `{error: {code, message}}` (PLAN §6) and legacy `{error: "message"}`. */
-export function parseErrorBody(body: unknown): { code?: string; message?: string; field?: string } {
+export function parseErrorBody(body: unknown): { code?: string; message?: string; field?: string; resetsAt?: string } {
   if (!body || typeof body !== 'object' || !('error' in body)) return {};
   const error = (body as { error: unknown }).error;
   if (typeof error === 'string') return { message: error };
   if (error && typeof error === 'object') {
-    const { code, message, field } = error as Partial<ApiErrorBody['error']>;
+    const { code, message, field, resets_at } = error as Partial<ApiErrorBody['error']>;
     return {
       code: typeof code === 'string' ? code : undefined,
       message: typeof message === 'string' ? message : undefined,
       field: typeof field === 'string' ? field : undefined,
+      resetsAt: typeof resets_at === 'string' ? resets_at : undefined,
     };
   }
   return {};
@@ -89,8 +93,8 @@ export async function apiJson<T>(input: string, init?: RequestInit & { json?: un
   if (response.status === 204) return undefined as T;
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const { code, message, field } = parseErrorBody(body);
-    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? `Request failed (${response.status})`, field);
+    const { code, message, field, resetsAt } = parseErrorBody(body);
+    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? `Request failed (${response.status})`, field, resetsAt);
   }
   return body as T;
 }
@@ -99,7 +103,7 @@ export async function apiJson<T>(input: string, init?: RequestInit & { json?: un
  * Same derivation as the backend's internal/api/errors.go, plus 502
  * `bad_gateway`, the web proxy's own code.
  */
-function statusCode(status: number): string {
+export function statusCode(status: number): string {
   switch (status) {
     case 400:
       return 'bad_request';

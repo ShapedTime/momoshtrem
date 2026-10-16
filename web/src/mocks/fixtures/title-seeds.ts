@@ -44,7 +44,6 @@ export interface TitleSeed {
   /** Directors (movies) or creators (shows). */
   crew: string[];
   trailer_youtube_key: string | null;
-  recommendation_reason: string | null;
   watch_state: WatchState | null;
   similar: Array<[MediaType, number]>;
   /** In the seeded library. */
@@ -160,7 +159,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     ),
     crew: ['Keiichirō Saitō'],
     trailer_youtube_key: null,
-    recommendation_reason: 'Because you loved Mushishi: quiet, melancholic and kind.',
     watch_state: { watched_at: iso(3), plays: 26, rating: 10, progress: { completed: 26, aired: 38 } },
     next_up: [1, 27],
     similar: [['tv', 37854], ['tv', 82728], ['tv', 66573]],
@@ -217,7 +215,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     ),
     crew: ['Eiichiro Oda'],
     trailer_youtube_key: null,
-    recommendation_reason: null,
     watch_state: { watched_at: iso(5), plays: 181, rating: 9, progress: { completed: 181, aired: 192 } },
     // A rewatch (Trakt's progress was reset): Wano's first episode is next, and job 102 is mapping it
     next_up: [21, 1],
@@ -289,7 +286,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     ),
     crew: ['Russell T Davies'],
     trailer_youtube_key: null,
-    recommendation_reason: null,
     watch_state: { watched_at: iso(40), plays: 32, rating: 8, progress: { completed: 29, aired: 52 } },
     next_up: [3, 4],
     similar: [['tv', 66573], ['tv', 95396], ['tv', 209867]],
@@ -352,7 +348,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     ),
     crew: ['Dan Erickson'],
     trailer_youtube_key: null,
-    recommendation_reason: null,
     watch_state: { watched_at: iso(6), plays: 18, rating: 10, progress: { completed: 18, aired: 18 } },
     next_up: [2, 10],
     similar: [['tv', 247767], ['tv', 66573], ['tv', 57243]],
@@ -403,7 +398,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     cast: cast(['Dave McCormack', 'Bandit (voice)'], ['Melanie Zanetti', 'Chilli (voice)']),
     crew: ['Joe Brumm'],
     trailer_youtube_key: null,
-    recommendation_reason: null,
     // Not started: on the Trakt watchlist, so Up next offers S01E01
     watch_state: null,
     similar: [['tv', 209867], ['tv', 37854], ['tv', 66573]],
@@ -433,7 +427,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     ),
     crew: ['Seth Rogen', 'Evan Goldberg'],
     trailer_youtube_key: null,
-    recommendation_reason: null,
     watch_state: { watched_at: iso(2), plays: 9, rating: 8, progress: { completed: 9, aired: 10 } },
     next_up: [1, 10],
     similar: [['tv', 95396], ['tv', 66573]],
@@ -472,7 +465,6 @@ export const SHOWS: Record<number, ShowSeed> = {
     ),
     crew: ['Michael Schur'],
     trailer_youtube_key: null,
-    recommendation_reason: 'The same “what is this place, really?” mystery as Severance, played for laughs.',
     // Started on Trakt (S01E01–E05), not in the library
     watch_state: { watched_at: iso(9), plays: 5, rating: null, progress: { completed: 5, aired: 53 } },
     next_up: [1, 6],
@@ -512,7 +504,6 @@ export const MOVIES: Record<number, MovieSeed> = {
     ),
     crew: ['Denis Villeneuve'],
     trailer_youtube_key: 'Way9Dexny3w',
-    recommendation_reason: null,
     watch_state: { watched_at: iso(3), plays: 1, rating: 9 },
     similar: [['movie', 157336], ['movie', 1054867], ['movie', 666277]],
     library: { id: 1, added_days_ago: 12 },
@@ -541,7 +532,6 @@ export const MOVIES: Record<number, MovieSeed> = {
     ),
     crew: ['Christopher Nolan'],
     trailer_youtube_key: 'zSWdZVtXT7E',
-    recommendation_reason: null,
     watch_state: { watched_at: iso(900), plays: 3, rating: 10 },
     similar: [['movie', 693134], ['movie', 1054867], ['movie', 666277]],
     library: { id: 2, added_days_ago: 1 },
@@ -571,7 +561,6 @@ export const MOVIES: Record<number, MovieSeed> = {
     ),
     crew: ['Paul Thomas Anderson'],
     trailer_youtube_key: null,
-    recommendation_reason: null,
     watch_state: null,
     similar: [['movie', 693134], ['movie', 157336]],
     library: { id: 3, added_days_ago: 2 },
@@ -584,7 +573,6 @@ export const MOVIES: Record<number, MovieSeed> = {
     cast: cast(['Greta Lee', 'Nora'], ['Teo Yoo', 'Hae Sung'], ['John Magaro', 'Arthur']),
     crew: ['Celine Song'],
     trailer_youtube_key: null,
-    recommendation_reason: 'Quiet, warm and under two hours.',
     watch_state: null,
     similar: [['movie', 1054867], ['movie', 157336]],
   },

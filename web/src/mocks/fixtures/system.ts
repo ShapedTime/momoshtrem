@@ -1,4 +1,6 @@
 import type { IndexerHealth, SystemStatus } from '@/lib/api/contract';
+import { aiMonthToDate } from './recommendations';
+import { aiConfigured } from './settings';
 import { traktStatus } from './trakt';
 
 export function systemStatus(): SystemStatus {
@@ -22,7 +24,8 @@ export function systemStatus(): SystemStatus {
     tmdb: { configured: true, reachable: true, latency_ms: 112 },
     // The page's Trakt account (fixtures/trakt.ts), so Settings and /status agree
     trakt: traktStatus(),
-    ai: { configured: true, mtd_cost_usd: 3.12 },
+    // The page's AI spend (fixtures/recommendations.ts), so Settings and /status agree
+    ai: { configured: aiConfigured(), mtd_cost_usd: aiMonthToDate() },
     opensubtitles: { configured: true },
     hdrezka: { configured: true, reachable: true, latency_ms: 340 },
   };

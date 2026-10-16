@@ -37,6 +37,8 @@ import {
   type ShowSeed,
   type TitleSeed,
 } from './title-seeds';
+// recommendations.ts builds titles for its cards: functions only, so the cycle is safe
+import { recommendationReason } from './recommendations';
 import { traktImported } from './trakt';
 
 /**
@@ -498,7 +500,7 @@ function base(entry: CatalogEntry, seed: TitleSeed, library: MockLibrary) {
     similar: similarTitles(seed, library),
     library: libraryState(entry, library),
     watch_state: watchState(seed),
-    recommendation_reason: seed.recommendation_reason,
+    recommendation_reason: recommendationReason(entry.media_type, entry.tmdb_id),
   };
 }
 
