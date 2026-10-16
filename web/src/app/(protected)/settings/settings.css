@@ -1,7 +1,8 @@
 /* ==========================================================================
    Settings (screens/settings): cards and rows, Trakt's screens (connect,
-   device code, waiting, connected), the quality profile's preview, range
-   and tags, the indexer list and the save bar. Ported from
+   device code, waiting, connected), AI & picks' model cards and spend,
+   the quality profile's preview, range and tags, the indexer list and the
+   save bar. Ported from
    docs/redesign/design-cinematic/css/screens/settings.css. The React parts
    live in components/settings. Tokens only.
    ========================================================================== */
@@ -25,11 +26,15 @@
   .set-row--stack .set-row-ctl { flex-shrink: 1; }
   @media (min-width: 640px) { .set-row { padding: var(--sp-4) var(--sp-5); } }
   @media (min-width: 1024px) {
-    .set-row--stack:not(:has(.set-range)) { flex-direction: row; align-items: center; }
+    .set-row--stack:not(:has(.set-models, .set-range)) { flex-direction: row; align-items: center; }
   }
 
   /* A banner's words share the icon's line on phone too; its action wraps below */
   .set-content .banner > .grow { flex: 1 1 200px; }
+
+  /* A banner or a run's progress inside a card, under its title */
+  .set-card-note { padding: var(--sp-2) var(--sp-4); }
+  @media (min-width: 640px) { .set-card-note { padding: var(--sp-2) var(--sp-5); } }
 
   .set-card-foot { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-1); }
   @media (min-width: 640px) { .set-card-foot { padding: var(--sp-3) var(--sp-5); } }
@@ -89,6 +94,43 @@
   @media (min-width: 640px) { .set-counts > div { padding: var(--sp-4) var(--sp-5); } }
   .set-quiet-zone { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-4) var(--sp-1); flex-wrap: wrap; }
   .set-quiet-zone > div { flex: 1 1 260px; min-width: 0; }
+
+  /* ---- AI & picks: the run, the model cards, the spend ----------------------- */
+  .set-run { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--accent-line); background: var(--surface-2); }
+
+  .set-models { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+  @media (min-width: 640px) { .set-models { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .set-model { position: relative; cursor: pointer; }
+  .set-model input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .set-model .box {
+    display: flex; flex-direction: column; gap: 4px; height: 100%; padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--surface-2);
+    transition: border-color var(--d-fast), background-color var(--d-fast);
+  }
+  .set-model .box strong { font-weight: var(--w-semibold); color: var(--text-1); }
+  .set-model input:checked + .box { border-color: var(--accent); background: linear-gradient(180deg, rgb(242 179 61 / 0.08), transparent), var(--surface-2); box-shadow: 0 0 0 1px var(--accent); }
+  .set-model input:focus-visible + .box { box-shadow: var(--focus-ring); }
+  .set-model.is-disabled { cursor: not-allowed; opacity: 0.55; }
+  .set-model.is-disabled input { cursor: not-allowed; }
+
+  .set-spend { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-4); border-bottom: 1px solid var(--line-1); }
+  @media (min-width: 640px) { .set-spend { padding: var(--sp-2) var(--sp-5) var(--sp-5); } }
+  .set-spend .big { font-size: 2rem; font-weight: var(--w-semibold); letter-spacing: -0.03em; color: var(--text-1); }
+  .set-spend-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+  .set-spend-bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; background: var(--surface-3); overflow: hidden; }
+  .set-spend-bar i { display: block; height: 100%; flex-shrink: 0; }
+  .set-spend-bar i:last-child { border-radius: 0 3px 3px 0; }
+  /* One hue for one budget, each feature a step lighter (alphas checked for contrast and separation) */
+  .set-spend-recs { background: var(--accent); }
+  .set-spend-ask { background: rgb(242 179 61 / 0.7); }
+  .set-spend-classifier { background: rgb(242 179 61 / 0.42); }
+  .set-spend-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); font-size: var(--t-small); color: var(--text-2); }
+  .set-spend-legend li { display: inline-flex; align-items: center; gap: 6px; }
+  .set-spend-legend i { width: 10px; height: 10px; border-radius: 2px; }
+  .set-spend-legend span { color: var(--text-1); font-weight: var(--w-medium); }
+  .set-money { position: relative; width: 132px; }
+  .set-money > span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-3); pointer-events: none; }
+  .set-money .input { padding-left: 26px; font-variant-numeric: tabular-nums; }
 
   /* ---- Quality: preview, range, tags ---------------------------------------- */
   .set-preview {

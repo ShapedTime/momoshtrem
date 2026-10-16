@@ -3,14 +3,24 @@ import { CircleAlert } from 'lucide-react';
 import { Panel } from '@/components/ui';
 import { cx } from '@/lib/utils/cx';
 
+interface SettingsCardProps {
+  id: string;
+  title: string;
+  description?: ReactNode;
+  /** A quiet action beside the title, e.g. AI & picks' "Run now". */
+  aside?: ReactNode;
+  children: ReactNode;
+}
+
 /** A titled settings card (screens/settings): rows or free content below the title. */
-export function SettingsCard({ id, title, description, children }: { id: string; title: string; description?: ReactNode; children: ReactNode }) {
+export function SettingsCard({ id, title, description, aside, children }: SettingsCardProps) {
   return (
     <Panel as="section" aria-labelledby={`${id}-h`} className="set-card">
       <header className="set-card-head">
         <h3 id={`${id}-h`} className="t-title-3">
           {title}
         </h3>
+        {aside}
       </header>
       {description && <p className="t-small set-card-sub text-fg-3">{description}</p>}
       {children}
