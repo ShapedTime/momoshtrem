@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="http://jackett.test/" rel="self" type="application/rss+xml" />
+    <title>The Pirate Bay</title>
+    <description>The Pirate Bay (TPB) is the galaxy’s most resilient Public BitTorrent site</description>
+    <link>https://thepiratebay.org/</link>
+    <language>en-US</language>
+    <category>search</category>
+    <item>
+      <title>Frieren.Beyond.Journeys.End.S02E06.1080p.CR.WEBRip.10bits.x265-Rapta</title>
+      <guid>magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Frieren.Beyond.Journeys.End.S02E06.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82281264</comments>
+      <pubDate>Fri, 27 Feb 2026 23:17:59 +0000</pubDate>
+      <size>227876798</size>
+      <files>1</files>
+      <description>Uploader: RaptaGzus&lt;br&gt;Frieren.Beyond.Journeys.End.S02E06.1080p.CR.WEBRip.10bits.x265-Rapta</description>
+      <link>magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Frieren.Beyond.Journeys.End.S02E06.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Frieren.Beyond.Journeys.End.S02E06.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="227876798" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="180" />
+      <torznab:attr name="peers" value="187" />
+      <torznab:attr name="infohash" value="1F1AD4AC357B893B17C7A3554F292775B6F816F6" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Frieren.Beyond.Journeys.End.S02E06.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren.Beyond.Journeys.End.S02E07.1080p.CR.WEBRip.10bits.x265-Rapta</title>
+      <guid>magnet:?xt=urn:btih:ECF11941A728BA324AEB92026E7C0DA6AF0D85BD&amp;dn=Frieren.Beyond.Journeys.End.S02E07.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82358826</comments>
+      <pubDate>Fri, 06 Mar 2026 21:41:13 +0000</pubDate>
+      <size>246899855</size>
+      <files>1</files>
+      <description>Uploader: RaptaGzus&lt;br&gt;Frieren.Beyond.Journeys.End.S02E07.1080p.CR.WEBRip.10bits.x265-Rapta</description>
+      <link>magnet:?xt=urn:btih:ECF11941A728BA324AEB92026E7C0DA6AF0D85BD&amp;dn=Frieren.Beyond.Journeys.End.S02E07.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:ECF11941A728BA324AEB92026E7C0DA6AF0D85BD&amp;dn=Frieren.Beyond.Journeys.End.S02E07.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="246899855" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="149" />
+      <torznab:attr name="peers" value="159" />
+      <torznab:attr name="infohash" value="ECF11941A728BA324AEB92026E7C0DA6AF0D85BD" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:ECF11941A728BA324AEB92026E7C0DA6AF0D85BD&amp;dn=Frieren.Beyond.Journeys.End.S02E07.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren.Beyond.Journeys.End.S02E01.1080p.CR.WEBRip.10bits.x265-Rapta</title>
+      <guid>magnet:?xt=urn:btih:E5A74AEAC34FF51E50B10548B6ADC7F782986147&amp;dn=Frieren.Beyond.Journeys.End.S02E01.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=81844933</comments>
+      <pubDate>Sun, 18 Jan 2026 11:03:31 +0000</pubDate>
+      <size>317663600</size>
+      <files>1</files>
+      <description>Uploader: RaptaGzus&lt;br&gt;Frieren.Beyond.Journeys.End.S02E01.1080p.CR.WEBRip.10bits.x265-Rapta</description>
+      <link>magnet:?xt=urn:btih:E5A74AEAC34FF51E50B10548B6ADC7F782986147&amp;dn=Frieren.Beyond.Journeys.End.S02E01.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:E5A74AEAC34FF51E50B10548B6ADC7F782986147&amp;dn=Frieren.Beyond.Journeys.End.S02E01.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="317663600" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="121" />
+      <torznab:attr name="peers" value="124" />
+      <torznab:attr name="infohash" value="E5A74AEAC34FF51E50B10548B6ADC7F782986147" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:E5A74AEAC34FF51E50B10548B6ADC7F782986147&amp;dn=Frieren.Beyond.Journeys.End.S02E01.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren.Beyond.Journeys.End.S02E05.1080p.CR.WEBRip.10bits.x265-Rapta</title>
+      <guid>magnet:?xt=urn:btih:9024D8FD8F6C7B10A107EFC183B4848F03821B0E&amp;dn=Frieren.Beyond.Journeys.End.S02E05.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82128699</comments>
+      <pubDate>Fri, 13 Feb 2026 22:05:43 +0000</pubDate>
+      <size>310422251</size>
+      <files>1</files>
+      <description>Uploader: RaptaGzus&lt;br&gt;Frieren.Beyond.Journeys.End.S02E05.1080p.CR.WEBRip.10bits.x265-Rapta</description>
+      <link>magnet:?xt=urn:btih:9024D8FD8F6C7B10A107EFC183B4848F03821B0E&amp;dn=Frieren.Beyond.Journeys.End.S02E05.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:9024D8FD8F6C7B10A107EFC183B4848F03821B0E&amp;dn=Frieren.Beyond.Journeys.End.S02E05.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="310422251" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="117" />
+      <torznab:attr name="peers" value="117" />
+      <torznab:attr name="infohash" value="9024D8FD8F6C7B10A107EFC183B4848F03821B0E" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:9024D8FD8F6C7B10A107EFC183B4848F03821B0E&amp;dn=Frieren.Beyond.Journeys.End.S02E05.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren.Beyond.Journeys.End.S02E09.1080p.CR.WEBRip.10bits.x265-Rapta</title>
+      <guid>magnet:?xt=urn:btih:76D8027D16AD18D8E391528EABCE8A0ED2E4EA21&amp;dn=Frieren.Beyond.Journeys.End.S02E09.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82511670</comments>
+      <pubDate>Fri, 20 Mar 2026 20:55:43 +0000</pubDate>
+      <size>319510055</size>
+      <files>1</files>
+      <description>Uploader: RaptaGzus&lt;br&gt;Frieren.Beyond.Journeys.End.S02E09.1080p.CR.WEBRip.10bits.x265-Rapta</description>
+      <link>magnet:?xt=urn:btih:76D8027D16AD18D8E391528EABCE8A0ED2E4EA21&amp;dn=Frieren.Beyond.Journeys.End.S02E09.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:76D8027D16AD18D8E391528EABCE8A0ED2E4EA21&amp;dn=Frieren.Beyond.Journeys.End.S02E09.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="319510055" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="105" />
+      <torznab:attr name="peers" value="113" />
+      <torznab:attr name="infohash" value="76D8027D16AD18D8E391528EABCE8A0ED2E4EA21" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:76D8027D16AD18D8E391528EABCE8A0ED2E4EA21&amp;dn=Frieren.Beyond.Journeys.End.S02E09.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren Beyond Journeys End S02E08 A Magnificent End 1080p CR WEB-DL DDP2 0</title>
+      <guid>magnet:?xt=urn:btih:99011918CBB5E1C77E4BE20A59F43F0CE6026C62&amp;dn=Frieren+Beyond+Journeys+End+S02E08+A+Magnificent+End+1080p+CR+WEB-DL+DDP2+0&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82431804</comments>
+      <pubDate>Fri, 13 Mar 2026 15:38:09 +0000</pubDate>
+      <size>1504420136</size>
+      <files>3</files>
+      <description>Uploader: TvTeam&lt;br&gt;Frieren Beyond Journeys End S02E08 A Magnificent End 1080p CR WEB-DL DDP2 0</description>
+      <link>magnet:?xt=urn:btih:99011918CBB5E1C77E4BE20A59F43F0CE6026C62&amp;dn=Frieren+Beyond+Journeys+End+S02E08+A+Magnificent+End+1080p+CR+WEB-DL+DDP2+0&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:99011918CBB5E1C77E4BE20A59F43F0CE6026C62&amp;dn=Frieren+Beyond+Journeys+End+S02E08+A+Magnificent+End+1080p+CR+WEB-DL+DDP2+0&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="1504420136" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="seeders" value="103" />
+      <torznab:attr name="peers" value="104" />
+      <torznab:attr name="infohash" value="99011918CBB5E1C77E4BE20A59F43F0CE6026C62" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:99011918CBB5E1C77E4BE20A59F43F0CE6026C62&amp;dn=Frieren+Beyond+Journeys+End+S02E08+A+Magnificent+End+1080p+CR+WEB-DL+DDP2+0&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren Beyond Journeys End S02E04 1080p WEB H264-SENSEI</title>
+      <guid>magnet:?xt=urn:btih:35A84B834D1B56D69999B15E5D3E39E7E32D98CF&amp;dn=Frieren+Beyond+Journeys+End+S02E04+1080p+WEB+H264-SENSEI&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82052011</comments>
+      <pubDate>Fri, 06 Feb 2026 16:05:02 +0000</pubDate>
+      <size>1469247671</size>
+      <files>0</files>
+      <description>Uploader: jajaja&lt;br&gt;Frieren Beyond Journeys End S02E04 1080p WEB H264-SENSEI</description>
+      <link>magnet:?xt=urn:btih:35A84B834D1B56D69999B15E5D3E39E7E32D98CF&amp;dn=Frieren+Beyond+Journeys+End+S02E04+1080p+WEB+H264-SENSEI&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:35A84B834D1B56D69999B15E5D3E39E7E32D98CF&amp;dn=Frieren+Beyond+Journeys+End+S02E04+1080p+WEB+H264-SENSEI&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="1469247671" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="98" />
+      <torznab:attr name="peers" value="103" />
+      <torznab:attr name="infohash" value="35A84B834D1B56D69999B15E5D3E39E7E32D98CF" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:35A84B834D1B56D69999B15E5D3E39E7E32D98CF&amp;dn=Frieren+Beyond+Journeys+End+S02E04+1080p+WEB+H264-SENSEI&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Frieren.Beyond.Journeys.End.S02E10.1080p.CR.WEBRip.10bits.x265-Rapta</title>
+      <guid>magnet:?xt=urn:btih:D0778D2C9D981E8168345B1B04AFFE2C67FF5750&amp;dn=Frieren.Beyond.Journeys.End.S02E10.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82591022</comments>
+      <pubDate>Fri, 27 Mar 2026 22:45:51 +0000</pubDate>
+      <size>245054260</size>
+      <files>1</files>
+      <description>Uploader: RaptaGzus&lt;br&gt;Frieren.Beyond.Journeys.End.S02E10.1080p.CR.WEBRip.10bits.x265-Rapta</description>
+      <link>magnet:?xt=urn:btih:D0778D2C9D981E8168345B1B04AFFE2C67FF5750&amp;dn=Frieren.Beyond.Journeys.End.S02E10.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>5040</category>
+      <category>100208</category>
+      <enclosure url="magnet:?xt=urn:btih:D0778D2C9D981E8168345B1B04AFFE2C67FF5750&amp;dn=Frieren.Beyond.Journeys.End.S02E10.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="245054260" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="category" value="100208" />
+      <torznab:attr name="imdb" value="22248376" />
+      <torznab:attr name="imdbid" value="tt22248376" />
+      <torznab:attr name="seeders" value="96" />
+      <torznab:attr name="peers" value="96" />
+      <torznab:attr name="infohash" value="D0778D2C9D981E8168345B1B04AFFE2C67FF5750" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:D0778D2C9D981E8168345B1B04AFFE2C67FF5750&amp;dn=Frieren.Beyond.Journeys.End.S02E10.1080p.CR.WEBRip.10bits.x265-Rapta&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="http://jackett.test/" rel="self" type="application/rss+xml" />
+    <title>TheRARBG</title>
+    <description>TheRARBG is a Public site inspired by RARBG.to for MOVIES / TV / GENERAL</description>
+    <link>https://therarbg.to/</link>
+    <language>en-US</language>
+    <category>search</category>
+    <item>
+      <title>Interstellar.IMAX.2014.2160p.HDR10.BRRip.OPUS7.1.AV1.BluBit</title>
+      <guid>magnet:?xt=urn:btih:CDDBDC6633DCB64AEFC22F772B2C97A07C33679E&amp;dn=Interstellar.IMAX.2014.2160p.HDR10.BRRip.OPUS7.1.AV1.BluBit&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="therarbg">TheRARBG</jackettindexer>
+      <type>public</type>
+      <comments>https://therarbg.to/post-detail/97f347/interstellar.imax.2014.2160p.hdr10.brrip.opus7.1.av1.blubit/</comments>
+      <pubDate>Sun, 23 Aug 2026 11:32:46 +0000</pubDate>
+      <size>6012954214</size>
+      <description />
+      <link>magnet:?xt=urn:btih:CDDBDC6633DCB64AEFC22F772B2C97A07C33679E&amp;dn=Interstellar.IMAX.2014.2160p.HDR10.BRRip.OPUS7.1.AV1.BluBit&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>2000</category>
+      <category>100467</category>
+      <enclosure url="magnet:?xt=urn:btih:CDDBDC6633DCB64AEFC22F772B2C97A07C33679E&amp;dn=Interstellar.IMAX.2014.2160p.HDR10.BRRip.OPUS7.1.AV1.BluBit&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="6012954214" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="category" value="100467" />
+      <torznab:attr name="imdb" value="0816692" />
+      <torznab:attr name="imdbid" value="tt0816692" />
+      <torznab:attr name="seeders" value="9" />
+      <torznab:attr name="peers" value="28" />
+      <torznab:attr name="coverurl" value="http://jackett.test/img/therarbg/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=poster" />
+      <torznab:attr name="infohash" value="CDDBDC6633DCB64AEFC22F772B2C97A07C33679E" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:CDDBDC6633DCB64AEFC22F772B2C97A07C33679E&amp;dn=Interstellar.IMAX.2014.2160p.HDR10.BRRip.OPUS7.1.AV1.BluBit&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Interstellar (2014) BluRay - 1080p - x264 - [Tamil + Eng] - (DD+2.0 - 224Kbps) - 2.5GB - ESub</title>
+      <guid>magnet:?xt=urn:btih:5852FA30D4A6CC90BA85389E3658D4760996753A&amp;dn=Interstellar+(2014)+BluRay+-+1080p+-+x264+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+2.5GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="therarbg">TheRARBG</jackettindexer>
+      <type>public</type>
+      <comments>https://therarbg.to/post-detail/97cbac/interstellar-(2014)-bluray---1080p---x264---[tamil-+-eng]---(dd+2.0---224kbps)---2.5gb---esub/</comments>
+      <pubDate>Mon, 17 Aug 2026 03:44:12 +0000</pubDate>
+      <size>2748779069</size>
+      <description />
+      <link>magnet:?xt=urn:btih:5852FA30D4A6CC90BA85389E3658D4760996753A&amp;dn=Interstellar+(2014)+BluRay+-+1080p+-+x264+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+2.5GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>2000</category>
+      <category>100467</category>
+      <enclosure url="magnet:?xt=urn:btih:5852FA30D4A6CC90BA85389E3658D4760996753A&amp;dn=Interstellar+(2014)+BluRay+-+1080p+-+x264+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+2.5GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="2748779069" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="category" value="100467" />
+      <torznab:attr name="imdb" value="0816692" />
+      <torznab:attr name="imdbid" value="tt0816692" />
+      <torznab:attr name="seeders" value="78" />
+      <torznab:attr name="peers" value="101" />
+      <torznab:attr name="coverurl" value="http://jackett.test/img/therarbg/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=poster" />
+      <torznab:attr name="infohash" value="5852FA30D4A6CC90BA85389E3658D4760996753A" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:5852FA30D4A6CC90BA85389E3658D4760996753A&amp;dn=Interstellar+(2014)+BluRay+-+1080p+-+x264+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+2.5GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Interstellar (2014) BR-Rip - x264 - [Tamil Dub] - (AAC 2.0) - 650MB - ESub</title>
+      <guid>magnet:?xt=urn:btih:B72FB7DF020DC0C93B76C297ABF1ADDBD0E4FDFA&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="therarbg">TheRARBG</jackettindexer>
+      <type>public</type>
+      <comments>https://therarbg.to/post-detail/97cc2a/interstellar-(2014)-br-rip---x264---[tamil-dub]---(aac-2.0)---650mb---esub/</comments>
+      <pubDate>Sun, 16 Aug 2026 18:29:24 +0000</pubDate>
+      <size>694304112</size>
+      <description />
+      <link>magnet:?xt=urn:btih:B72FB7DF020DC0C93B76C297ABF1ADDBD0E4FDFA&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>2000</category>
+      <category>100467</category>
+      <enclosure url="magnet:?xt=urn:btih:B72FB7DF020DC0C93B76C297ABF1ADDBD0E4FDFA&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="694304112" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="category" value="100467" />
+      <torznab:attr name="imdb" value="0816692" />
+      <torznab:attr name="imdbid" value="tt0816692" />
+      <torznab:attr name="seeders" value="18" />
+      <torznab:attr name="peers" value="36" />
+      <torznab:attr name="coverurl" value="http://jackett.test/img/therarbg/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=poster" />
+      <torznab:attr name="infohash" value="B72FB7DF020DC0C93B76C297ABF1ADDBD0E4FDFA" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:B72FB7DF020DC0C93B76C297ABF1ADDBD0E4FDFA&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Interstellar (2014) BR-Rip - x264 - [Tamil Dub] - (AAC 2.0) - 650MB - ESub</title>
+      <guid>magnet:?xt=urn:btih:9C1D04CEC7FD99F892EB6C57D45376B8DC2CA9B7&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="therarbg">TheRARBG</jackettindexer>
+      <type>public</type>
+      <comments>https://therarbg.to/post-detail/97c267/interstellar-(2014)-br-rip---x264---[tamil-dub]---(aac-2.0)---650mb---esub/</comments>
+      <pubDate>Sat, 15 Aug 2026 18:01:56 +0000</pubDate>
+      <size>694304112</size>
+      <description />
+      <link>magnet:?xt=urn:btih:9C1D04CEC7FD99F892EB6C57D45376B8DC2CA9B7&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>2000</category>
+      <category>100467</category>
+      <enclosure url="magnet:?xt=urn:btih:9C1D04CEC7FD99F892EB6C57D45376B8DC2CA9B7&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="694304112" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="category" value="100467" />
+      <torznab:attr name="imdb" value="0816692" />
+      <torznab:attr name="imdbid" value="tt0816692" />
+      <torznab:attr name="seeders" value="0" />
+      <torznab:attr name="peers" value="5" />
+      <torznab:attr name="coverurl" value="http://jackett.test/img/therarbg/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=poster" />
+      <torznab:attr name="infohash" value="9C1D04CEC7FD99F892EB6C57D45376B8DC2CA9B7" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:9C1D04CEC7FD99F892EB6C57D45376B8DC2CA9B7&amp;dn=Interstellar+(2014)+BR-Rip+-+x264+-+%5BTamil+Dub%5D+-+(AAC+2.0)+-+650MB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Interstellar (2014) BluRay - 4K SDR - 2160p HQ - HEVC - [Tamil + Eng] - (DD+2.0 - 224Kbps) - 7.4GB - ESub</title>
+      <guid>magnet:?xt=urn:btih:0C5209438E8BAAB2D5F51F1AE87B6B20F6EBD7BD&amp;dn=Interstellar+(2014)+BluRay+-+4K+SDR+-+2160p+HQ+-+HEVC+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+7.4GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="therarbg">TheRARBG</jackettindexer>
+      <type>public</type>
+      <comments>https://therarbg.to/post-detail/97c252/interstellar-(2014)-bluray---4k-sdr---2160p-hq---hevc---[tamil-+-eng]---(dd+2.0---224kbps)---7.4gb---esub/</comments>
+      <pubDate>Sat, 15 Aug 2026 17:58:01 +0000</pubDate>
+      <size>8053063680</size>
+      <description />
+      <link>magnet:?xt=urn:btih:0C5209438E8BAAB2D5F51F1AE87B6B20F6EBD7BD&amp;dn=Interstellar+(2014)+BluRay+-+4K+SDR+-+2160p+HQ+-+HEVC+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+7.4GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>2000</category>
+      <category>100467</category>
+      <enclosure url="magnet:?xt=urn:btih:0C5209438E8BAAB2D5F51F1AE87B6B20F6EBD7BD&amp;dn=Interstellar+(2014)+BluRay+-+4K+SDR+-+2160p+HQ+-+HEVC+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+7.4GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="8053063680" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="category" value="100467" />
+      <torznab:attr name="imdb" value="0816692" />
+      <torznab:attr name="imdbid" value="tt0816692" />
+      <torznab:attr name="seeders" value="17" />
+      <torznab:attr name="peers" value="27" />
+      <torznab:attr name="coverurl" value="http://jackett.test/img/therarbg/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=poster" />
+      <torznab:attr name="infohash" value="0C5209438E8BAAB2D5F51F1AE87B6B20F6EBD7BD" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:0C5209438E8BAAB2D5F51F1AE87B6B20F6EBD7BD&amp;dn=Interstellar+(2014)+BluRay+-+4K+SDR+-+2160p+HQ+-+HEVC+-+%5BTamil+%2B+Eng%5D+-+(DD%2B2.0+-+224Kbps)+-+7.4GB+-+ESub&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Interstellar 2014 IMAX UHD BluRay 2160p HDR10 DV HEVC DTS-HD MA 5.1 x265-E</title>
+      <guid>magnet:?xt=urn:btih:CC0AAB92EFEFFF11714A53ACBB1DEC714C4271F9&amp;dn=Interstellar+2014+IMAX+UHD+BluRay+2160p+HDR10+DV+HEVC+DTS-HD+MA+5.1+x265-E&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</guid>
+      <jackettindexer id="therarbg">TheRARBG</jackettindexer>
+      <type>public</type>
+      <comments>https://therarbg.to/post-detail/97c5b4/interstellar-2014-imax-uhd-bluray-2160p-hdr10-dv-hevc-dts-hd-ma-5.1-x265-e/</comments>
+      <pubDate>Sat, 15 Aug 2026 12:24:24 +0000</pubDate>
+      <size>39621073305</size>
+      <description />
+      <link>magnet:?xt=urn:btih:CC0AAB92EFEFFF11714A53ACBB1DEC714C4271F9&amp;dn=Interstellar+2014+IMAX+UHD+BluRay+2160p+HDR10+DV+HEVC+DTS-HD+MA+5.1+x265-E&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce</link>
+      <category>2000</category>
+      <category>100467</category>
+      <enclosure url="magnet:?xt=urn:btih:CC0AAB92EFEFFF11714A53ACBB1DEC714C4271F9&amp;dn=Interstellar+2014+IMAX+UHD+BluRay+2160p+HDR10+DV+HEVC+DTS-HD+MA+5.1+x265-E&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" length="39621073305" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2000" />
+      <torznab:attr name="category" value="100467" />
+      <torznab:attr name="imdb" value="0816692" />
+      <torznab:attr name="imdbid" value="tt0816692" />
+      <torznab:attr name="seeders" value="28" />
+      <torznab:attr name="peers" value="58" />
+      <torznab:attr name="coverurl" value="http://jackett.test/img/therarbg/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=poster" />
+      <torznab:attr name="infohash" value="CC0AAB92EFEFFF11714A53ACBB1DEC714C4271F9" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:CC0AAB92EFEFFF11714A53ACBB1DEC714C4271F9&amp;dn=Interstellar+2014+IMAX+UHD+BluRay+2160p+HDR10+DV+HEVC+DTS-HD+MA+5.1+x265-E&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+  </channel>
+</rss>

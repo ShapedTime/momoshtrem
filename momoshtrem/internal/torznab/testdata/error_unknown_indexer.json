@@ -1,0 +1,5 @@
+{
+  "result": "error",
+  "error": "Unknown indexer: nosuchindexer",
+  "stacktrace": "   at Jackett.Common.Services.IndexerManagerService.GetWebIndexer(String name) in ./Jackett.Common/Services/IndexerManagerService.cs:line 328"
+}

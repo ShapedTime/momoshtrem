@@ -63,6 +63,16 @@ func countingProber(err error, calls *atomic.Int32) Prober {
 	}
 }
 
+// jackettProbe turns p into a Jackett probe that lists indexers on success.
+func jackettProbe(p Prober, indexers ...IndexerStatus) JackettProbe {
+	return func(ctx context.Context) ([]IndexerStatus, error) {
+		if err := p(ctx); err != nil {
+			return nil, err
+		}
+		return indexers, nil
+	}
+}
+
 func TestReport_AllConfigured(t *testing.T) {
 	clock := newFakeClock()
 	started := clock.Now().Add(-90 * time.Second)
@@ -78,7 +88,7 @@ func TestReport_AllConfigured(t *testing.T) {
 			AuthEnabled: true, Username: "infuse",
 		},
 		ActiveReaders:           func() int { return readers },
-		Jackett:                 countingProber(nil, &jackettCalls),
+		Jackett:                 jackettProbe(countingProber(nil, &jackettCalls), IndexerStatus{Name: "EZTV", Status: "unknown"}),
 		TMDB:                    countingProber(errors.New("TMDB rejected the API key (HTTP 401)"), &tmdbCalls),
 		HDRezka:                 func(context.Context) error { return errors.New("HDRezka asks for a browser check") },
 		TraktConfigured:         true,
@@ -107,7 +117,8 @@ func TestReport_AllConfigured(t *testing.T) {
 	if r.WebDAV.ActiveReaders == nil || *r.WebDAV.ActiveReaders != 2 {
 		t.Errorf("active_readers = %v, want 2", r.WebDAV.ActiveReaders)
 	}
-	if !r.Jackett.Configured || !r.Jackett.Reachable || r.Jackett.LatencyMS == nil || r.Jackett.Error != "" {
+	if !r.Jackett.Configured || !r.Jackett.Reachable || r.Jackett.LatencyMS == nil || r.Jackett.Error != "" ||
+		len(r.Jackett.Indexers) != 1 || r.Jackett.Indexers[0].Name != "EZTV" {
 		t.Errorf("jackett = %+v", r.Jackett)
 	}
 	if !r.TMDB.Configured || r.TMDB.Reachable || r.TMDB.LatencyMS != nil || !strings.Contains(r.TMDB.Error, "401") {
@@ -195,6 +206,9 @@ func TestReport_Unconfigured(t *testing.T) {
 	if _, ok := section("jackett")["latency_ms"]; ok {
 		t.Error("jackett.latency_ms should be omitted when not probed")
 	}
+	if _, ok := section("jackett")["indexers"]; ok {
+		t.Error("jackett.indexers should be omitted when Jackett isn't configured")
+	}
 	if h := section("hdrezka"); h["configured"] != false || h["reachable"] != false {
 		t.Errorf("hdrezka = %v", h)
 	}
@@ -203,6 +217,55 @@ func TestReport_Unconfigured(t *testing.T) {
 	}
 	if _, ok := section("webdav")["username"]; ok {
 		t.Error("webdav.username should be omitted when auth is disabled")
+	}
+}
+
+// jackett.indexers matches PLAN §6 "System": present only with a
+// reachable Jackett; ms and since are null when unknown, error only when
+// failing.
+func TestReport_JackettIndexersJSON(t *testing.T) {
+	ms, since := int64(8000), "2026-10-16T10:00:00Z"
+	tests := []struct {
+		name  string
+		probe JackettProbe
+		want  string // the jackett section without latency_ms; "" skips the comparison
+	}{
+		{
+			name: "reachable",
+			probe: jackettProbe(func(context.Context) error { return nil },
+				IndexerStatus{Name: "The Pirate Bay", Status: "unknown"},
+				IndexerStatus{Name: "1337x", Status: "timeout", MS: &ms, Since: &since, Error: "timed out after 8s"}),
+			want: `{"configured":true,"reachable":true,"indexers":[` +
+				`{"name":"The Pirate Bay","status":"unknown","ms":null,"since":null},` +
+				`{"name":"1337x","status":"timeout","ms":8000,"since":"2026-10-16T10:00:00Z","error":"timed out after 8s"}]}`,
+		},
+		{
+			name:  "reachable with no indexers",
+			probe: jackettProbe(func(context.Context) error { return nil }),
+			want:  `{"configured":true,"reachable":true,"indexers":[]}`,
+		},
+		{
+			name:  "unreachable",
+			probe: jackettProbe(func(context.Context) error { return errors.New("jackett error: Invalid API Key") }),
+			want:  `{"configured":true,"reachable":false,"error":"jackett error: Invalid API Key"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewService(Options{DB: &fakeDB{}, Jackett: tt.probe}).Report(context.Background(), false)
+			r.Jackett.LatencyMS = nil
+			raw, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var top map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &top); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(top["jackett"]); got != tt.want {
+				t.Errorf("jackett =\n%s\nwant\n%s", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -245,7 +308,7 @@ func TestReport_ProbesTimeOutConcurrently(t *testing.T) {
 	const timeout = 100 * time.Millisecond
 	svc := NewService(Options{
 		DB:           &fakeDB{block: true},
-		Jackett:      blocked,
+		Jackett:      jackettProbe(blocked),
 		TMDB:         blocked,
 		ProbeTimeout: timeout,
 	})
@@ -254,7 +317,7 @@ func TestReport_ProbesTimeOutConcurrently(t *testing.T) {
 	r := svc.Report(context.Background(), false)
 	elapsed := time.Since(start)
 
-	for name, p := range map[string]ProbeStatus{"jackett": r.Jackett, "tmdb": r.TMDB} {
+	for name, p := range map[string]ProbeStatus{"jackett": r.Jackett.ProbeStatus, "tmdb": r.TMDB} {
 		if !p.Configured || p.Reachable || !strings.Contains(p.Error, "timed out") {
 			t.Errorf("%s = %+v, want a timeout error", name, p)
 		}
@@ -276,7 +339,7 @@ func TestReport_CachingAndRefreshThrottle(t *testing.T) {
 	var jackettCalls atomic.Int32
 	svc := NewService(Options{
 		DB:      db,
-		Jackett: countingProber(nil, &jackettCalls),
+		Jackett: jackettProbe(countingProber(nil, &jackettCalls)),
 		Now:     clock.Now,
 	})
 	ctx := context.Background()
@@ -379,7 +442,7 @@ func TestReport_ConcurrentCallersShareOneCheck(t *testing.T) {
 		<-release
 		return nil
 	}
-	svc := NewService(Options{DB: &fakeDB{}, Jackett: slow})
+	svc := NewService(Options{DB: &fakeDB{}, Jackett: jackettProbe(slow)})
 
 	const n = 20
 	var wg sync.WaitGroup

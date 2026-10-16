@@ -20,7 +20,7 @@ func TestGetStatus(t *testing.T) {
 		{"refresh flag", healthyReport(), "?refresh=1", http.StatusOK, 1},
 		{"probe failure is still 200", func() status.Report {
 			r := healthyReport()
-			r.Jackett = status.ProbeStatus{Configured: true, Error: "timed out after 3s"}
+			r.Jackett = status.JackettStatus{ProbeStatus: status.ProbeStatus{Configured: true, Error: "timed out after 3s"}}
 			return r
 		}(), "", http.StatusOK, 0},
 		{"db down is 503", status.Report{DB: status.DBStatus{Error: "database unreachable"}}, "", http.StatusServiceUnavailable, 0},

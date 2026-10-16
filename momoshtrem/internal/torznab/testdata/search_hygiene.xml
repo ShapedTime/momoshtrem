@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-edited from search_thepiratebay.xml to cover the edge cases a short
+     recording doesn't: entity-encoded titles, adult categories, peers below
+     seeders, a size only on the enclosure, a /dl/ link with no magnet, an
+     info hash with no magnet, and a base32 btih. -->
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="http://jackett.test/" rel="self" type="application/rss+xml" />
+    <title>The Pirate Bay</title>
+    <description>The Pirate Bay (TPB) is the galaxy’s most resilient Public BitTorrent site</description>
+    <link>https://thepiratebay.org/</link>
+    <language>en-US</language>
+    <category>search</category>
+    <item>
+      <title>[Erai-raws] Sousou no Frieren &amp;hearts; Journey&amp;#039;s End - 01 [1080p] &amp;amp; Extras</title>
+      <guid>magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Sousou+no+Frieren+01&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=82281264</comments>
+      <pubDate>Fri, 27 Feb 2026 23:17:59 +0000</pubDate>
+      <size>227876798</size>
+      <link>magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Sousou+no+Frieren+01&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce</link>
+      <category>5070</category>
+      <enclosure url="magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Sousou+no+Frieren+01&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce" length="227876798" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5070" />
+      <torznab:attr name="seeders" value="10" />
+      <torznab:attr name="peers" value="4" />
+      <torznab:attr name="infohash" value="1F1AD4AC357B893B17C7A3554F292775B6F816F6" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:1F1AD4AC357B893B17C7A3554F292775B6F816F6&amp;dn=Sousou+no+Frieren+01&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce" />
+    </item>
+    <item>
+      <title>Adult release that must never show up</title>
+      <guid>magnet:?xt=urn:btih:ECF11941A728BA324AEB92026E7C0DA6AF0D85BD&amp;dn=adult</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <pubDate>Fri, 06 Mar 2026 21:41:13 +0000</pubDate>
+      <size>246899855</size>
+      <link>magnet:?xt=urn:btih:ECF11941A728BA324AEB92026E7C0DA6AF0D85BD&amp;dn=adult</link>
+      <category>6000</category>
+      <category>6010</category>
+      <torznab:attr name="category" value="6000" />
+      <torznab:attr name="category" value="6010" />
+      <torznab:attr name="seeders" value="50" />
+      <torznab:attr name="peers" value="60" />
+    </item>
+    <item>
+      <title>Another adult release filed under TV too</title>
+      <guid>adult-tv-mixed</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <pubDate>Fri, 06 Mar 2026 21:41:13 +0000</pubDate>
+      <size>1000</size>
+      <link>magnet:?xt=urn:btih:0000000000000000000000000000000000000001&amp;dn=adult2</link>
+      <category>5000</category>
+      <category>6060</category>
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="category" value="6060" />
+      <torznab:attr name="seeders" value="5" />
+      <torznab:attr name="peers" value="5" />
+    </item>
+    <item>
+      <title>Frieren Beyond Journeys End S01E01 REPACK 1080p CR WEB-DL DUAL DDP2 0 H 264</title>
+      <guid>https://torrentgalaxy.one/post-detail/860ac2/frieren-beyond-journeys-end-s01e01-repack-1080p-cr-web-dl-dual-ddp2-0-h-264/</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <pubDate>Wed, 18 Jun 2025 00:23:40 +0000</pubDate>
+      <link>http://jackett.test/dl/thepiratebay/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=Frieren+S01E01</link>
+      <category>5000</category>
+      <enclosure url="http://jackett.test/dl/thepiratebay/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=Frieren+S01E01" length="1717986918" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="seeders" value="35" />
+      <torznab:attr name="peers" value="40" />
+    </item>
+    <item>
+      <title>Frieren S01E02 1080p WEB H264</title>
+      <guid>frieren-s01e02-infohash-only</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <pubDate>not a date</pubDate>
+      <link>http://jackett.test/dl/thepiratebay/?jackett_apikey=APIKEY&amp;path=REDACTED&amp;file=Frieren+S01E02</link>
+      <category>5000</category>
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="size" value="1500000000" />
+      <torznab:attr name="seeders" value="7" />
+      <torznab:attr name="peers" value="9" />
+      <torznab:attr name="infohash" value="ABCDEF0123456789ABCDEF0123456789ABCDEF01" />
+    </item>
+    <item>
+      <title>Frieren S01E03 1080p WEB H264</title>
+      <guid>frieren-s01e03-base32</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <pubDate>Mon, 02 Oct 2023 15:00:00 +0000</pubDate>
+      <size>1400000000</size>
+      <link>magnet:?xt=urn:btih:L5NR4LYMHKHE3G32NROU4PZKDMGJ3DT7&amp;dn=Frieren+S01E03</link>
+      <category>5000</category>
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="seeders" value="3" />
+    </item>
+  </channel>
+</rss>
