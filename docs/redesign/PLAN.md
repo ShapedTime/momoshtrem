@@ -1369,6 +1369,8 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 | `unavailable` | "Can't keep this file" (HDRezka, or a pure-v2 torrent) |
 
 - **Expiry** reads "Kept until watched", "Kept until Nov 16", or "Kept until watched · by Nov 16". With neither, it's "Kept".
+  - A smart pick reads "Smart pick · until watched · by Oct 31".
+  - A title's `Keep` has no `resumes_at`, so there `waiting_for_window` reads "Waits for its window".
 - **Activity.** Cards take Kept and Smart pills from `holds` and progress and ETA from `wanted`, and say a waiting state with the copy above. An idle torrent whose downloads are done reads "On disk".
 
 **The Keep sheet** ("Download & keep"):
@@ -1379,7 +1381,12 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 - It shows the size needed against the space left, from `GET /downloads/estimate`: "Needs 14.2 GB · 61 GB left for kept downloads". When the estimate doesn't fit, it says so before the Keep is sent, with the 409's copy.
 - On `409 storage_full`: "Not enough space: needs X, Y left. Free some kept downloads or raise the limit in Settings › Storage." It links to Settings › Storage.
 - On `422 not_downloadable`: "This plays from HDRezka, so it can't be kept on disk. Pick a torrent for it to keep it."
+- The default choice goes out as a POST without `until_watched` and `expires_at`, so the server applies `kept.default_*`. Any other choice is sent as a duration from now.
 - Existing keeps offer Change duration and Stop keeping.
+  - Change duration starts with nothing picked, and a pick is a duration from now.
+  - Stop keeping is confirmed on title pages: "Stop keeping Interstellar?", "It's no longer held on disk. What's downloaded stays as cache and plays until it's cleared to make room."
+  - On a smart pick it's "Dismiss the smart pick for …?", and the sheet's main action is "Keep it".
+- An episode that its season's or show's keep holds opens that keep ("Season 2 is kept until watched · by Nov 16, so this episode is too.").
 
 **Settings › Storage** (P7, #205: `components/settings/StorageSection.tsx` and `storage/`, the rules in `lib/settings/storage.ts`):
 - The bar is "Kept · Smart · Cache · Other files · Free", with a marker at the limit. "Other files" is what's neither free nor the cache (`disk.total_bytes − disk.free_bytes −` the cache's fill, so on a real disk it includes the blocks the filesystem reserves), and the bar adds up to the disk.

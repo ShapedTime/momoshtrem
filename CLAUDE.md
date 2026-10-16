@@ -226,8 +226,8 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 **web (Next.js, `web/`):**
 - `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)
 - `src/components/shell/` - App shell: top bar, tab bar, account menu, ⌘K palette, URL-driven sheets
-- `src/components/title/` - Movie and show pages: hero, primary panel and action dock, subtitles, episodes (`show/`: season tabs, rows, long-season tools, show settings and episode sheets)
-- `src/lib/title/` - Pure title helpers: stage copy (`primaryActionFor`), formats, facts, episodes (`parseJump`, ranges, next-up)
+- `src/components/title/` - Movie and show pages: hero, primary panel and action dock, subtitles, episodes (`show/`: season tabs, rows, long-season tools, show settings and episode sheets), Download & keep (`KeepSheet` at `?sheet=keep`, `KeepStatus`; `hooks/useKeep.ts`)
+- `src/lib/title/` - Pure title helpers: stage copy (`primaryActionFor`), formats, facts, episodes (`parseJump`, ranges, next-up), keep copy (`keep.ts`, shared with Activity) and the Keep sheet's rules (`keep-sheet.ts`)
 - `src/components/mapping/` + `src/app/(protected)/mapping/[id]/` - Mapping review (`/mapping/{job_id}`): progress steps, grouped rows, the episode picker (desktop pane, phone sheet), sticky Apply foot, Applied state
 - `src/lib/mapping/` - Pure mapping-review rules: counts, conflicts, ranges, short file names, foot state (`review.ts`) and picker search and tags (`picker.ts`)
 - `src/components/source/` - The source sheet's shared head (Torrents · HDRezka tabs) and the Replace menu; `src/lib/source/context.ts` reads and builds its URL params (`movie=<tmdb>`, or `show=<tmdb>` with `season` / `se`)

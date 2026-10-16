@@ -38,7 +38,8 @@ function KeepSeasonButton({ keep, scope, onKeep }: SeasonKeep) {
   return (
     <Button size="sm" onClick={onKeep} aria-haspopup="dialog">
       <Pin size={15} aria-hidden="true" /> {keepExpiryLabel(keep).replace(/^Kept/, `${whose} kept`)}
-      <span className="sr-only">{scope === 'show' ? ': change or stop keeping the show' : ': change or stop keeping this season'}</span>
+      {/* Read after a space (the sr-only span is a block), so it starts a new phrase */}
+      <span className="sr-only">{scope === 'show' ? '– change or stop keeping the show' : '– change or stop keeping this season'}</span>
     </Button>
   );
 }

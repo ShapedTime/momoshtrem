@@ -60,6 +60,8 @@ test.describe('mapping entry points', () => {
   });
 
   test('a movie: two cuts go to the review, where you use one, and it’s ready in Infuse', async ({ page }) => {
+    // Nothing keeps it (a fresh install), so the file it gets streams on demand: ready, not downloading (#77)
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'downloads-empty'));
     await signIn(page, '/movie/1054867');
     await page.getByRole('button', { name: 'Find a torrent' }).click();
     const search = page.getByRole('dialog', { name: new RegExp(`^Find a source · ${OBAA}`) });
@@ -100,7 +102,7 @@ test.describe('mapping entry points', () => {
     await expectAccessibleAndContained(page);
 
     await page.getByRole('link', { name: `Back to ${OBAA}` }).click();
-    await expect(panel(page, 'Downloading')).toContainText('Step 3 of 4');
+    await expect(panel(page, 'Ready in Infuse')).toContainText('Step 4 of 4');
   });
 
   test('Activity lists the open mappings, each linking to its review', async ({ page }) => {
