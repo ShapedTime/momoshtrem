@@ -282,6 +282,13 @@ func (am *ActivityManager) setPaused(hash string, t networked) {
 	am.log.Info("torrent paused - network disabled", "hash", hash)
 }
 
+// SetCheckInterval sets how often the idle check runs: 30 s unless set. The
+// streamlab lab shortens it to see torrents idle. Call it before Start; d
+// must be positive.
+func (am *ActivityManager) SetCheckInterval(d time.Duration) {
+	am.checkInterval = d
+}
+
 // Start begins the background idle check goroutine.
 func (am *ActivityManager) Start() {
 	am.log.Info("activity manager started",
