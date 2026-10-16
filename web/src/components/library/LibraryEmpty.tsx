@@ -5,6 +5,7 @@ import { NAV } from '@/lib/nav';
 
 const discoverHref = NAV.find((item) => item.id === 'discover')?.href ?? '/discover';
 const searchHref = NAV.find((item) => item.id === 'search')?.href ?? '/search';
+const traktSettingsHref = '/settings?section=trakt';
 
 /** Nothing in the library yet (library.js state `empty`). */
 export function LibraryFirstEmpty() {
@@ -29,8 +30,17 @@ export function LibraryFirstEmpty() {
   );
 }
 
+interface LibraryFilteredEmptyProps {
+  q: string;
+  filter: LibraryFilter;
+  /** Trakt is linked: without it nothing is ever under Watching. */
+  trakt: boolean;
+  onClearSearch: () => void;
+  onShowAll: () => void;
+}
+
 /** The filters or the search match nothing (library.js `resultsHTML`). */
-export function LibraryFilteredEmpty({ q, filter, onClearSearch, onShowAll }: { q: string; filter: LibraryFilter; onClearSearch: () => void; onShowAll: () => void }) {
+export function LibraryFilteredEmpty({ q, filter, trakt, onClearSearch, onShowAll }: LibraryFilteredEmptyProps) {
   const query = q.trim();
   if (query) {
     return (
@@ -57,6 +67,24 @@ export function LibraryFilteredEmpty({ q, filter, onClearSearch, onShowAll }: { 
       Show all titles
     </Button>
   );
+  if (filter === 'watching' && !trakt) {
+    return (
+      <EmptyState
+        title="Connect Trakt to see what you’re watching"
+        className="lib-empty"
+        actions={
+          <>
+            <ButtonLink href={traktSettingsHref} variant="primary">
+              Connect Trakt
+            </ButtonLink>
+            {showAll}
+          </>
+        }
+      >
+        Infuse scrobbles your plays to Trakt. Once it’s connected, the shows you’re partway through show up here.
+      </EmptyState>
+    );
+  }
   if (filter === 'review') {
     return (
       <EmptyState title="Nothing needs review" className="lib-empty" badge={<Check size={16} strokeWidth={2.6} />} actions={showAll}>

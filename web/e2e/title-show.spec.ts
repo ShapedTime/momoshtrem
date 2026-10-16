@@ -6,7 +6,10 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
  * The show page (PLAN F2) against the MSW mocks: Frieren needs episodes
  * 29–38 and mapping job 101 has files to review (S01E35 among them), Doctor
  * Who has named specials and job 103 (a conflict), The Good Place isn't in
- * the library and One Piece uses absolute numbers.
+ * the library and One Piece uses absolute numbers. The mock Trakt account
+ * (B5) has watched Frieren 1–26 (Up next S01E27), Doctor Who to S03E03 (Up
+ * next S03E04), The Good Place 1–5 without files, and is rewatching One
+ * Piece from Wano (#892, under review); `trakt-off` takes all of it away.
  */
 
 const FRIEREN = 'Frieren: Beyond Journey’s End';
@@ -23,9 +26,10 @@ async function expectAccessibleAndContained(page: Page) {
 
 const seasons = (page: Page) => page.getByRole('tablist', { name: 'Seasons' });
 const toast = (page: Page, text: string) => page.getByRole('status').filter({ hasText: text });
+const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
 
 test.describe('show page', () => {
-  test('Frieren: seasons with Specials last, the review banner and the next missing episode', async ({ page }) => {
+  test('Frieren: seasons with Specials last, the review banner and Up next from Trakt', async ({ page }) => {
     await signIn(page, '/tv/209867');
     await expect(page.getByRole('heading', { name: FRIEREN, level: 1 })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Episodes 29–38 have no torrent' })).toBeVisible();
@@ -39,14 +43,19 @@ test.describe('show page', () => {
 
     // Episodes 1–26 are all watched: one row until you ask for them
     const list = page.getByRole('list', { name: 'Season 1 episodes' });
+    await expect(page.getByRole('button', { name: 'Show episodes 1–26 (all watched)' })).toBeVisible();
     await expect(list.getByRole('listitem')).toHaveCount(12);
-    await expect(page.getByRole('group', { name: 'Episode ranges' }).getByRole('button', { name: /29–38/ })).toHaveAttribute('aria-pressed', 'true');
+    // Up next is the episode Trakt names (S01E27, ready), not the frontier (E29)
+    await expect(page.getByRole('group', { name: 'Episode ranges' }).getByRole('button', { name: '21–28' })).toHaveAttribute('aria-pressed', 'true');
     const next = list.locator('.eprow.is-next');
+    await expect(next).toHaveCount(1);
     await expect(next).toContainText('Up next');
-    await expect(next).toContainText('Let’s Go Somewhere We Can’t Reach');
+    await expect(next).toContainText('An Ordinary Mage');
+    await expect(next).toContainText('Ready');
     // Absolute numbers that match the in-season ones aren't repeated
-    await expect(next).toContainText('S01E29');
-    await expect(next).not.toContainText('#29');
+    await expect(next).toContainText('S01E27');
+    await expect(next).not.toContainText('#27');
+    await expect(page.getByRole('region', { name: 'On Trakt' })).toContainText('26 of 38 episodes watched');
     await expect(list.getByRole('link', { name: 'Review the mapping for S01E35' })).toHaveAttribute('href', '/mapping/101');
     await expectAccessibleAndContained(page);
 
@@ -155,6 +164,58 @@ test.describe('show page', () => {
     await expect(page).toHaveURL(/[?&]sheet=episode&.*se=S01E28/);
   });
 
+  test('Doctor Who opens on Trakt’s next episode: watched rows, then Up next', async ({ page }) => {
+    await signIn(page, '/tv/57243');
+    await expect(seasons(page).getByRole('tab', { name: /Series 3/ })).toHaveAttribute('aria-selected', 'true');
+    const list = page.getByRole('list', { name: 'Series 3 episodes' });
+    await expect(list.getByRole('listitem')).toHaveCount(13);
+    // Watched rows keep their file: the pill, and the file's actions
+    for (const n of [1, 2, 3]) {
+      const row = list.locator(`#ep-${n}`);
+      await expect(row).toHaveClass(/is-watched/);
+      await expect(row).toContainText('Watched');
+      await expect(row.getByRole('button', { name: `S03E0${n} options: how to play, subtitles, replace, remove` })).toBeVisible();
+    }
+    const next = list.locator('.eprow.is-next');
+    await expect(next).toHaveCount(1);
+    await expect(next).toHaveAttribute('id', 'ep-4');
+    await expect(next).toContainText('Up next');
+    await expect(next).toContainText('Daleks in Manhattan (1)');
+    await expect(next.getByRole('button', { name: 'Find a torrent for S03E04' })).toBeVisible();
+    // Aired ordering: no absolute numbers
+    await expect(next).not.toContainText('#');
+    await expectAccessibleAndContained(page);
+
+    // A watched episode's sheet still plays its file
+    await list.getByRole('button', { name: /^S03E01 options/ }).click();
+    const sheet = page.getByRole('dialog', { name: 'Smith and Jones' });
+    await expect(sheet.getByText('Watched', { exact: true })).toBeVisible();
+    await expect(sheet.getByLabel('WebDAV path of this episode')).toContainText('S03E01');
+    await expect(sheet.getByRole('button', { name: 'Remove file from episode' })).toBeVisible();
+  });
+
+  test('Trakt off: nothing is watched, and Up next falls back to the frontier', async ({ page }) => {
+    await scenario(page, 'trakt-off');
+    await signIn(page, '/tv/209867');
+    await expect(page.getByRole('heading', { name: FRIEREN, level: 1 })).toBeVisible();
+    const list = page.getByRole('list', { name: 'Season 1 episodes' });
+    await expect(list.getByRole('listitem')).toHaveCount(38);
+    await expect(page.getByRole('button', { name: /Show episodes/ })).toHaveCount(0);
+    await expect(list.locator('.eprow.is-watched')).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Episode ranges' }).getByRole('button', { name: /29–38/ })).toHaveAttribute('aria-pressed', 'true');
+    const next = list.locator('.eprow.is-next');
+    await expect(next).toHaveCount(1);
+    await expect(next).toContainText('Let’s Go Somewhere We Can’t Reach');
+    await expect(next).toContainText('S01E29');
+    await expect(page.getByRole('region', { name: 'On Trakt' })).toHaveCount(0);
+    await expect(page.locator('.trakt-line')).toHaveCount(0);
+    await expectAccessibleAndContained(page);
+
+    // Doctor Who opens on its latest season with a file again
+    await page.goto('/tv/57243');
+    await expect(seasons(page).getByRole('tab', { name: /Series 4/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
   test('Doctor Who opens on its specials with ?season=0', async ({ page }) => {
     await signIn(page, '/tv/57243?season=0');
     await expect(seasons(page).getByRole('tab', { name: /Specials/ })).toHaveAttribute('aria-selected', 'true');
@@ -179,15 +240,44 @@ test.describe('show page', () => {
     await page.getByRole('button', { name: 'Add to library' }).click();
     await expect(toast(page, 'Added to library')).toBeVisible();
     await expect(page.getByRole('region', { name: 'In your library · no episodes yet' })).toBeVisible();
-    await expect(page.getByRole('list', { name: 'Season 1 episodes' }).getByRole('listitem')).toHaveCount(13);
+    const list = page.getByRole('list', { name: 'Season 1 episodes' });
+    await expect(list.getByRole('listitem')).toHaveCount(13);
     await expect(page.getByRole('button', { name: 'Find season pack' })).toBeVisible();
+
+    // Trakt's plays of S01E01–E05 have no file: watched rows all the same, and Up next after them
+    await expect(list.locator('.eprow.is-watched')).toHaveCount(5);
+    await expect(list.locator('#ep-3')).toContainText('Watched');
+    const next = list.locator('.eprow.is-next');
+    await expect(next).toHaveAttribute('id', 'ep-6');
+    await expect(next.getByRole('button', { name: 'Find a torrent for S01E06' })).toBeVisible();
+    await expectAccessibleAndContained(page);
+    await list.getByRole('button', { name: 'S01E03 options: find a torrent' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Tahani Al-Jamil' });
+    await expect(sheet).toContainText('Trakt has it as watched, but there’s no file for it here.');
+    await expect(sheet.getByRole('button', { name: 'Find a torrent for S01E03' })).toBeVisible();
+    await expect(sheet.getByLabel('WebDAV path of this episode')).toHaveCount(0);
+    // axe reads colours mid-fade as low contrast: let the sheet finish opening
+    await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity));
+    await expectNoA11yViolations(page);
   });
 
-  test('One Piece labels episodes with absolute numbers', async ({ page }) => {
+  test('One Piece labels episodes with absolute numbers, and opens on Trakt’s rewatch at Wano', async ({ page }) => {
     await signIn(page, '/tv/37854');
     await expect(seasons(page).getByRole('tab')).toHaveText([/^Wano Country/, /^Egghead/, /^Specials/]);
-    await expect(seasons(page).getByRole('tab', { name: /Egghead/ })).toHaveAttribute('aria-selected', 'true');
+    // Up next is Wano's first episode (#892), which mapping job 102 is reviewing
+    await expect(seasons(page).getByRole('tab', { name: /Wano Country/ })).toHaveAttribute('aria-selected', 'true');
+    const wano = page.getByRole('list', { name: 'Wano Country episodes' });
+    const next = wano.locator('.eprow.is-next');
+    await expect(next).toHaveAttribute('id', 'ep-1');
+    await expect(next).toContainText('Up next');
+    await expect(next).toContainText('#892 · S21E01');
+    await expect(next.getByRole('link', { name: 'Review the mapping for S21E01' })).toHaveAttribute('href', '/mapping/102');
+    await expect(page.getByRole('group', { name: 'Episode ranges' }).getByRole('button', { name: /^Wano: Act 1/ })).toHaveAttribute('aria-pressed', 'true');
+
+    await seasons(page).getByRole('tab', { name: /Egghead/ }).click();
+    await expect(page).toHaveURL(/[?&]season=22/);
     const list = page.getByRole('list', { name: 'Egghead episodes' });
+    await expect(list.locator('.eprow.is-next')).toHaveCount(0);
     await expect(list.locator('#ep-26')).toContainText('#1111 · S22E26');
     await expect(list.locator('#ep-37')).toContainText(/Airs/);
     await expect(page.getByText('Absolute numbering · 192 episodes')).toBeVisible();
@@ -206,7 +296,7 @@ test.describe('show page', () => {
   });
 
   test('jump to episode: an absolute number lands on its row, in another season too', async ({ page }) => {
-    await signIn(page, '/tv/37854');
+    await signIn(page, '/tv/37854?season=22');
     const jump = page.getByRole('textbox', { name: 'Jump to episode number' });
     await jump.fill('1100');
     await jump.press('Enter');
@@ -235,7 +325,7 @@ test.describe('show page', () => {
   });
 
   test('Enter right after a jump to another season never reloads the page', async ({ page }) => {
-    await signIn(page, '/tv/37854');
+    await signIn(page, '/tv/37854?season=22');
     // A full reload (a native form submit) would wipe this
     await page.evaluate(() => Object.assign(window, { stillHere: true }));
     const jump = page.getByRole('textbox', { name: 'Jump to episode number' });

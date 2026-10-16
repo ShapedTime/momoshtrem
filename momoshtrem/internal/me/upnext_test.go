@@ -249,6 +249,7 @@ func TestUpNext_Cards(t *testing.T) {
 		Assignment: &library.TorrentAssignment{InfoHash: "fetching", FilePath: "Show/E01.mkv", MatchSource: "rules"}}}
 	abs := 31
 	mates.Episode.AbsoluteNumber = &abs
+	mates.Show.EpisodeOrdering = library.OrderingAbsolute
 	items := runUpNext([]library.UpNextCandidate{fetching, review, outside},
 		libraryShows{1: mates, 2: listed("2020-01-01", underReview(77))}, defaults)
 	if len(items) != 3 {
@@ -283,6 +284,35 @@ func TestUpNext_Cards(t *testing.T) {
 		t.Errorf("Trakt's episode = %+v, show %+v", e, o.Show)
 	}
 }
+
+// Absolute numbers follow the title page's rule: only a library show with
+// absolute ordering has them, so Doctor Who's S03E04 never reads "#30".
+func TestEpisodeRef_AbsoluteNumber(t *testing.T) {
+	ordered := func(ordering library.EpisodeOrdering) library.KeyedEpisode {
+		k := listed("2020-01-01")
+		abs := 30
+		k.Episode.AbsoluteNumber = &abs
+		k.Show.EpisodeOrdering = ordering
+		return k
+	}
+	for _, tc := range []struct {
+		name string
+		k    library.KeyedEpisode
+		want *int
+	}{
+		{"absolute ordering", ordered(library.OrderingAbsolute), intPtr(30)},
+		{"aired ordering", ordered(library.OrderingAired), nil},
+		{"episode group ordering", ordered(library.OrderingEpisodeGroup), nil},
+		{"not in the library", library.KeyedEpisode{}, nil},
+	} {
+		got := episodeRef(tc.k, traktEpisode{name: "Trakt's name"}).AbsoluteNumber
+		if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+			t.Errorf("%s: absolute_number = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func intPtr(n int) *int { return &n }
 
 func deref(s *string) string {
 	if s == nil {

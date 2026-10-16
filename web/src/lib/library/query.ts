@@ -70,6 +70,16 @@ export function parseLibrarySearch(search: URLSearchParams): ParsedLibrarySearch
 
 const isReady = (item: LibraryItem) => item.availability_stage === 'ready';
 
+/**
+ * Watching (PLAN §6): a show with some of its episodes watched, not all.
+ * The backend also leaves out shows dropped or hidden on Trakt, which items
+ * don't say.
+ */
+export function isWatching(item: Pick<LibraryItem, 'media_type' | 'episodes_watched' | 'episodes_total'>): boolean {
+  const watched = item.episodes_watched ?? 0;
+  return item.media_type === 'tv' && watched > 0 && watched < (item.episodes_total ?? 0);
+}
+
 function matchesStatus(item: LibraryItem, status: LibraryStatusFilter | undefined): boolean {
   switch (status) {
     case undefined:
@@ -81,7 +91,7 @@ function matchesStatus(item: LibraryItem, status: LibraryStatusFilter | undefine
     case 'needs_review':
       return item.needs_review > 0;
     case 'watching':
-      return false; // no watch history until B5
+      return isWatching(item);
   }
 }
 
@@ -89,12 +99,22 @@ function matchesStatus(item: LibraryItem, status: LibraryStatusFilter | undefine
 const byAdded = (a: LibraryItem, b: LibraryItem) =>
   b.added_at.localeCompare(a.added_at) || a.media_type.localeCompare(b.media_type) || a.id - b.id;
 
+/** `last_watched_at DESC NULLS LAST`, then as added. */
+function byLastWatched(a: LibraryItem, b: LibraryItem): number {
+  if (a.last_watched_at !== b.last_watched_at) {
+    if (a.last_watched_at === null) return 1;
+    if (b.last_watched_at === null) return -1;
+    const order = Date.parse(b.last_watched_at) - Date.parse(a.last_watched_at);
+    if (order !== 0) return order;
+  }
+  return byAdded(a, b);
+}
+
 const SORTERS: Record<LibrarySort, (a: LibraryItem, b: LibraryItem) => number> = {
   added: byAdded,
   title: (a, b) =>
     a.title.toLowerCase().localeCompare(b.title.toLowerCase()) || (a.year ?? 0) - (b.year ?? 0) || a.media_type.localeCompare(b.media_type) || a.id - b.id,
-  // Orders like added until B5 knows what was watched
-  last_watched: byAdded,
+  last_watched: byLastWatched,
   size: (a, b) => b.size_bytes - a.size_bytes || byAdded(a, b),
 };
 
@@ -109,7 +129,7 @@ export function libraryCounts(items: LibraryItem[]): LibraryCounts {
     all: items.length,
     movie: items.filter((item) => item.media_type === 'movie').length,
     tv: items.filter((item) => item.media_type === 'tv').length,
-    watching: 0,
+    watching: items.filter(isWatching).length,
     ready: items.filter(isReady).length,
     incomplete: items.filter((item) => !isReady(item)).length,
     needs_review: items.filter((item) => item.needs_review > 0).length,

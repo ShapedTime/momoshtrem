@@ -44,15 +44,26 @@ export function selectedSeason(param: string | null, show: Pick<ShowTitle, 'seas
   return show.default_season ?? show.seasons[0]?.season_number ?? null;
 }
 
+type NextUpShow = Pick<ShowTitle, 'library' | 'watch_state' | 'seasons'>;
+
 /**
- * The row marked "Up next": the first episode of the frontier (the aired run
- * after the last file), when it's in this season. Null otherwise; once
- * Trakt (#8) knows what was watched this can point at the next unwatched one.
+ * The show's "Up next" (PLAN §6 "Watch state rules"): the episode Trakt
+ * names (`watch_state.next_episode`, in the library's numbering) when the
+ * title lists its season, else the first episode of the frontier (the aired
+ * run after the last file or play); null when there's neither.
  */
-export function nextUpEpisodeId(show: Pick<ShowTitle, 'library'>, seasonNumber: number, episodes: EpisodeSummary[]): number | null {
+export function nextUpEpisode(show: NextUpShow): { season: number; episode: number } | null {
+  const next = show.watch_state?.next_episode;
+  if (next && show.seasons.some((season) => season.season_number === next.season)) return { season: next.season, episode: next.episode };
   const missing = show.library.missing;
-  if (!missing || missing.season_number !== seasonNumber) return null;
-  return episodes.find((episode) => episode.episode_number === missing.from)?.id ?? null;
+  return missing ? { season: missing.season_number, episode: missing.from } : null;
+}
+
+/** The row marked "Up next" (`nextUpEpisode`), when it's in this season; null otherwise. */
+export function nextUpEpisodeId(show: NextUpShow, seasonNumber: number, episodes: EpisodeSummary[]): number | null {
+  const next = nextUpEpisode(show);
+  if (!next || next.season !== seasonNumber) return null;
+  return episodes.find((episode) => episode.episode_number === next.episode)?.id ?? null;
 }
 
 /** "28 of 38 ready", or "Absolute numbering · 1,124 episodes · 1,088 ready" when the numbers run across seasons. */
@@ -96,20 +107,21 @@ export function rangeIndexFor(ranges: EpisodeRange[], episodeNumber: number): nu
   return index < 0 ? null : index;
 }
 
-/** The chip pressed when a season opens: the one holding the frontier (which is also the next-up row). */
-export function defaultRangeIndex(ranges: EpisodeRange[], show: Pick<ShowTitle, 'library'>, seasonNumber: number): number | null {
-  const missing = show.library.missing;
-  return missing && missing.season_number === seasonNumber ? rangeIndexFor(ranges, missing.from) : null;
+/** The chip pressed when a season opens: the one holding the next-up row (Trakt's next episode, else the frontier). */
+export function defaultRangeIndex(ranges: EpisodeRange[], show: NextUpShow, seasonNumber: number): number | null {
+  const next = nextUpEpisode(show);
+  return next && next.season === seasonNumber ? rangeIndexFor(ranges, next.episode) : null;
 }
 
 /**
  * Leading episodes that are all watched, collapsed into one row: only in
  * seasons over 20 episodes, for a run of at least 10, and never the whole
- * season (then there's nothing else to look at).
+ * season (then there's nothing else to look at). The run stops before the
+ * next-up row, so a rewatch's next episode never hides in it.
  */
-export function earlierWatched(episodes: EpisodeSummary[]): { count: number; from: number; to: number } | null {
+export function earlierWatched(episodes: EpisodeSummary[], nextUpId: number | null = null): { count: number; from: number; to: number } | null {
   if (episodes.length <= LONG_SEASON) return null;
-  const run = episodes.findIndex((episode) => episode.state !== 'watched');
+  const run = episodes.findIndex((episode) => episode.state !== 'watched' || episode.id === nextUpId);
   if (run < 10) return null;
   return { count: run, from: episodes[0].episode_number, to: episodes[run - 1].episode_number };
 }

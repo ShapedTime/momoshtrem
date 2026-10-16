@@ -22,13 +22,21 @@ export function LibraryListHead() {
   );
 }
 
+interface LibraryRowProps {
+  item: LibraryItem;
+  onRemove: (item: LibraryItem) => void;
+  /** Trakt is linked: without it nothing says what was watched, so Watched and Last watched stay blank. */
+  trakt: boolean;
+}
+
 /**
  * A library title in the list (library.js `listRow`): thumbnail, title and
  * kind, status with its pills, watched, size, last watched and ⋮.
  */
-export function LibraryRow({ item, onRemove }: { item: LibraryItem; onRemove: (item: LibraryItem) => void }) {
+export function LibraryRow({ item, onRemove, trakt }: LibraryRowProps) {
   const href = titleHref(item.media_type, item.tmdb_id);
   const watched = watchedPct(item);
+  const watch = watchLine(item, { trakt });
   const last = lastWatchedLabel(item);
   const showDownload = item.media_type === 'tv' && item.download !== null && !item.streaming;
   const pills = item.needs_review > 0 || item.streaming || showDownload;
@@ -57,11 +65,17 @@ export function LibraryRow({ item, onRemove }: { item: LibraryItem; onRemove: (i
         )}
       </div>
       <div className="lrow-watch">
-        {watchLine(item) && <span className="t-small text-fg-2">{watchLine(item)}</span>}
+        {watch && <span className="t-small text-fg-2">{watch}</span>}
         {watched > 0 && <Progress value={watched} tone="watched" label={`${item.title}: ${watched}% watched`} />}
       </div>
       <span className="lrow-size">{librarySize(item.size_bytes)}</span>
-      <span className="lrow-last">{last ?? <span className="text-fg-3">Never</span>}</span>
+      <span className="lrow-last">
+        {last ?? (
+          <span className="text-fg-3" aria-hidden={!trakt || undefined}>
+            {trakt ? 'Never' : '—'}
+          </span>
+        )}
+      </span>
       <LibraryItemMenu item={item} onRemove={onRemove} variant="row" />
     </li>
   );

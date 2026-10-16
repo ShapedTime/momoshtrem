@@ -178,8 +178,10 @@ type traktEpisode struct {
 	firstAired      *time.Time // the calendar's
 }
 
-// episodeRef is the card's episode: its numbers, absolute number, name and
-// still are the library's when the library lists it, else Trakt's.
+// episodeRef is the card's episode: its numbers, name and still are the
+// library's when the library lists it, else Trakt's. The absolute number is
+// set only for a library show with absolute ordering, the rule the title
+// page labels its rows by ("#1124 · S22E39"); otherwise it's null.
 func episodeRef(k library.KeyedEpisode, t traktEpisode) EpisodeRef {
 	ref := EpisodeRef{
 		NextEpisode: catalog.NextEpisode{Season: k.Key.Season, Episode: k.Key.Episode, Name: strPtr(t.name),
@@ -189,7 +191,7 @@ func episodeRef(k library.KeyedEpisode, t traktEpisode) EpisodeRef {
 	}
 	if ep := k.Episode; ep != nil {
 		ref.Season, ref.Episode = k.SeasonNumber, ep.EpisodeNumber
-		if ep.AbsoluteNumber != nil {
+		if ep.AbsoluteNumber != nil && k.Show != nil && k.Show.EpisodeOrdering == library.OrderingAbsolute {
 			n := *ep.AbsoluteNumber
 			ref.AbsoluteNumber = &n
 		}

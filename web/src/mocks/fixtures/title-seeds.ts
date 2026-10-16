@@ -21,7 +21,10 @@ import { iso } from './catalog';
  * No episode is seeded `needs_review`: that state comes from the open mapping
  * jobs (fixtures/assignment.ts), for episodes that have no file.
  *
- * `watched` episodes are Trakt's plays (B5) and always have a file here.
+ * `watched` episodes are Trakt's plays (B5) of episodes with a file;
+ * `trakt_plays` are plays of episodes without one (The Good Place's
+ * S01E01–E05, once it's added). Without Trakt's history neither is watched
+ * (fixtures/titles.ts): a `watched` seed is then just ready.
  * `next_up` is the episode Trakt's Up next names (fixtures/trakt.ts), one per
  * availability: Frieren S01E27 ready, The Studio S01E10 downloading, One Piece
  * #892 under review (a rewatch from Wano), Doctor Who S03E04 needs a torrent,
@@ -90,6 +93,8 @@ export interface ShowSeed extends TitleSeed {
   release?: string;
   /** Trakt's next episode for the show (B5): `watch_state.next_episode` and its Up next card. */
   next_up?: EpisodeKey;
+  /** Trakt's plays of episodes the library has no file for (`watched` seeds have one). */
+  trakt_plays?: EpisodeKey[];
   seasons: SeasonSeed[];
 }
 
@@ -471,6 +476,7 @@ export const SHOWS: Record<number, ShowSeed> = {
     // Started on Trakt (S01E01–E05), not in the library
     watch_state: { watched_at: iso(9), plays: 5, rating: null, progress: { completed: 5, aired: 53 } },
     next_up: [1, 6],
+    trakt_plays: [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5]],
     similar: [['tv', 95396], ['tv', 247767], ['tv', 57243]],
     status: 'Ended',
     networks: ['NBC'],
@@ -604,4 +610,9 @@ export function absoluteNumbers(show: ShowSeed): Map<number, number> {
 /** A seeded episode. */
 export function seedEpisode(show: ShowSeed, [season, episode]: EpisodeKey): EpisodeSeed | undefined {
   return show.seasons.find((s) => s.n === season)?.episodes.find((e) => e.n === episode);
+}
+
+/** Trakt has a play of the episode: a `watched` seed (it has a file), or one of the show's `trakt_plays`. */
+export function hasPlay(show: ShowSeed, season: number, episode: Pick<EpisodeSeed, 'n' | 'state'>): boolean {
+  return episode.state === 'watched' || Boolean(show.trakt_plays?.some(([s, e]) => s === season && e === episode.n));
 }

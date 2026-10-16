@@ -45,6 +45,8 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
   const find = () => sheets.open('torrent', showSourceParams(show.tmdb_id, scope));
   const streamFromHDRezka = () => sheets.open('hdrezka', showSourceParams(show.tmdb_id, scope));
   const source = sourceLine(episode);
+  // Watched wins the state (B5): the file, when there is one, still plays
+  const watched = episode.state === 'watched';
   const facts = [episode.runtime ? `${episode.runtime} min` : null, episode.air_date ? formatDate(episode.air_date) : null].filter(Boolean);
 
   return (
@@ -94,15 +96,19 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
       ) : episode.state === 'upcoming' ? (
         <p className="text-fg-2">It hasn’t aired yet. Find a torrent once it’s out.</p>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={find}>
-            <Search size={16} aria-hidden="true" /> Find a torrent for {code}
-          </Button>
-          {hdrezka && (
-            <Button onClick={streamFromHDRezka}>
-              <MonitorPlay size={16} aria-hidden="true" /> Stream from HDRezka
+        <div className="flex flex-col gap-3">
+          {watched && <p className="text-fg-2">Trakt has it as watched, but there’s no file for it here. Find one to watch it again in Infuse.</p>}
+          <div className="flex flex-wrap gap-2">
+            {/* Watched: finding it again isn't the next thing to do, so it's not the amber button */}
+            <Button variant={watched ? 'secondary' : 'primary'} onClick={find}>
+              <Search size={16} aria-hidden="true" /> Find a torrent for {code}
             </Button>
-          )}
+            {hdrezka && (
+              <Button onClick={streamFromHDRezka}>
+                <MonitorPlay size={16} aria-hidden="true" /> Stream from HDRezka
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </div>

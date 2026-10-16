@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Play, Trash2 } from 'lucide-react';
 import { useConfirm, useToast } from '@/components/ui';
 import type { MediaType, Title } from '@/lib/api/contract';
-import { libraryKeys, subtitleKeys, titleKeys, titleQuery, titlesApi, torrentKeys, torrentsApi } from '@/lib/api/endpoints';
+import { libraryKeys, subtitleKeys, titleKeys, titleQuery, titlesApi, torrentKeys, torrentsApi, traktKeys } from '@/lib/api/endpoints';
 import { removeConsequence } from '@/lib/title/facts';
 
 /** How often a downloading title refreshes its progress (paused in hidden tabs). */
@@ -25,7 +25,8 @@ export function useTitle(mediaType: MediaType, tmdbId: number) {
 /**
  * Add, refresh and remove for a title page, with toasts. Each refetches the
  * title pages and the library before it settles, so the panel moves to its
- * next stage as the button stops spinning.
+ * next stage as the button stops spinning. Adding and removing refetch /me
+ * too: For You's cards say whether the show is in the library.
  */
 export function useTitleActions(title: Title) {
   const queryClient = useQueryClient();
@@ -34,17 +35,18 @@ export function useTitleActions(title: Title) {
   const { media_type: mediaType, tmdb_id: tmdbId, title: name } = title;
   const libraryId = title.library.library_id;
 
-  const refetch = () =>
+  const refetch = ({ me = false } = {}) =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: titleKeys.all }),
       queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
+      me && queryClient.invalidateQueries({ queryKey: traktKeys.me }),
     ]);
   const failed = (verb: string) => (error: Error) => toast({ tone: 'error', title: `Couldn’t ${verb} ${name}`, body: error.message });
 
   const add = useMutation({
     mutationFn: () => (mediaType === 'movie' ? titlesApi.addMovie(tmdbId) : titlesApi.addShow(tmdbId)),
     onSuccess: async () => {
-      await refetch();
+      await refetch({ me: true });
       toast({ tone: 'ready', title: 'Added to library', body: `${name} · next, find a torrent` });
     },
     onError: failed('add'),
@@ -62,7 +64,7 @@ export function useTitleActions(title: Title) {
   const remove = useMutation({
     mutationFn: (id: number) => (mediaType === 'movie' ? titlesApi.removeMovie(id) : titlesApi.removeShow(id)),
     onSuccess: async () => {
-      await refetch();
+      await refetch({ me: true });
       toast({ tone: 'info', icon: Trash2, title: `Removed ${name}`, body: 'It’s no longer in your library or Infuse.' });
     },
     onError: failed('remove'),

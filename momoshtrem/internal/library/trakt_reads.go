@@ -222,8 +222,8 @@ type TraktEpisodeKey struct {
 // KeyedEpisode is what the library knows about a TraktEpisodeKey.
 type KeyedEpisode struct {
 	Key TraktEpisodeKey
-	// Show has its ID, TMDB ID, title, year (its WebDAV folder) and
-	// artwork; nil when the show isn't in the library.
+	// Show has its ID, TMDB ID, title, year (its WebDAV folder), artwork
+	// and episode ordering; nil when the show isn't in the library.
 	Show *Show
 	// SeasonNumber and Episode are the library episode the matching rule
 	// finds, with its active Assignment; Episode is nil when the library
@@ -261,7 +261,7 @@ func (r *CatalogRepository) EpisodesByKeys(ctx context.Context, keys []TraktEpis
 			FROM review_files rf CROSS JOIN LATERAL unnest(rf.episode_ids) AS c(episode_id)
 			GROUP BY c.episode_id
 		)
-		SELECT k.n, s.id, s.title, s.year, COALESCE(s.poster_path, ''), COALESCE(s.backdrop_path, ''),
+		SELECT k.n, s.id, s.title, s.year, COALESCE(s.poster_path, ''), COALESCE(s.backdrop_path, ''), COALESCE(s.episode_ordering, ''),
 		       COALESCE(le.season_number, 0), `+episodeColumns+`, `+assignmentColumns+`, re.job_id, mates.list
 		FROM keys k
 		LEFT JOIN shows s ON s.tmdb_id = k.show_tmdb_id
@@ -291,6 +291,7 @@ func (r *CatalogRepository) EpisodesByKeys(ctx context.Context, keys []TraktEpis
 			showID, showYear sql.NullInt64
 			showTitle        sql.NullString
 			poster, backdrop string
+			ordering         string
 			ke               KeyedEpisode
 			ep               Episode
 			reviewJob        sql.NullInt64
@@ -298,7 +299,7 @@ func (r *CatalogRepository) EpisodesByKeys(ctx context.Context, keys []TraktEpis
 		)
 		epDest, epFinish := episodeScanDest(&ep)
 		taDest, taFinish := assignmentDest(ItemTypeEpisode)
-		dest := append([]any{&n, &showID, &showTitle, &showYear, &poster, &backdrop, &ke.SeasonNumber}, epDest...)
+		dest := append([]any{&n, &showID, &showTitle, &showYear, &poster, &backdrop, &ordering, &ke.SeasonNumber}, epDest...)
 		dest = append(append(dest, taDest...), &reviewJob, &mates)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("failed to scan Trakt episode: %w", err)
@@ -306,7 +307,7 @@ func (r *CatalogRepository) EpisodesByKeys(ctx context.Context, keys []TraktEpis
 		ke.Key = keys[n-1]
 		if showID.Valid {
 			ke.Show = &Show{ID: showID.Int64, TMDBID: ke.Key.ShowTMDBID, Title: showTitle.String, Year: int(showYear.Int64),
-				PosterPath: poster, BackdropPath: backdrop}
+				PosterPath: poster, BackdropPath: backdrop, EpisodeOrdering: EpisodeOrdering(ordering)}
 		}
 		if epFinish() {
 			ep.Assignment = taFinish(ep.ID)

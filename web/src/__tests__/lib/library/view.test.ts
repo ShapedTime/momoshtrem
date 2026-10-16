@@ -28,7 +28,7 @@ describe('the view state in the URL', () => {
 describe('withoutPending', () => {
   const page = {
     total: 9,
-    counts: { all: 9, movie: 3, tv: 6, watching: 0, ready: 5, incomplete: 4, needs_review: 3 },
+    counts: { all: 9, movie: 3, tv: 6, watching: 4, ready: 5, incomplete: 4, needs_review: 3 },
     summary: { total: 9, size_bytes: 700_000_000_000, ready: 5 },
   };
 
@@ -36,14 +36,15 @@ describe('withoutPending', () => {
     const removed = libraryItem({ availability_stage: 'downloading', size_bytes: 63_000_000_000 });
     expect(withoutPending(page, [removed], DEFAULT_VIEW)).toEqual({
       total: 8,
-      counts: { all: 8, movie: 2, tv: 6, watching: 0, ready: 5, incomplete: 3, needs_review: 3 },
+      counts: { all: 8, movie: 2, tv: 6, watching: 4, ready: 5, incomplete: 3, needs_review: 3 },
       summary: { total: 8, size_bytes: 637_000_000_000, ready: 5 },
     });
   });
 
   it('leaves the total alone when the title isn’t under the filter, and the counts when it doesn’t match the search', () => {
-    const show = libraryShow({ needs_review: 2 });
-    expect(withoutPending(page, [show], { ...DEFAULT_VIEW, filter: 'movies' })).toMatchObject({ total: 9, counts: { tv: 5, needs_review: 2 } });
+    const show = libraryShow({ needs_review: 2 }); // 26 of 38 watched
+    expect(withoutPending(page, [show], { ...DEFAULT_VIEW, filter: 'movies' })).toMatchObject({ total: 9, counts: { tv: 5, watching: 3, needs_review: 2 } });
+    expect(withoutPending(page, [show], { ...DEFAULT_VIEW, filter: 'watching' })).toMatchObject({ total: 8 });
     expect(withoutPending(page, [show], { ...DEFAULT_VIEW, q: 'dune' })).toMatchObject({ total: 9, counts: { all: 9 }, summary: { total: 8 } });
   });
 

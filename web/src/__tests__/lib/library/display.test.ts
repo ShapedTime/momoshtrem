@@ -52,6 +52,12 @@ describe('watch line and bar', () => {
     expect(watchLine(libraryShow({ episodes_total: 1124, episodes_watched: 1071 }))).toBe('1,071 of 1,124 watched');
   });
 
+  it('has no line for a show while Trakt isn’t linked (it would read “Not started”)', () => {
+    expect(watchLine(libraryShow({ episodes_watched: 0 }), { trakt: false })).toBe('');
+    expect(watchLine(libraryItem(), { trakt: false })).toBe('2h 46m');
+    expect(watchLine(libraryItem({ last_watched_at: '2026-10-01T20:00:00Z' }), { trakt: false })).toBe('Watched');
+  });
+
   it('shows a movie watched, else its runtime', () => {
     expect(watchLine(libraryItem())).toBe('2h 46m');
     expect(watchedPct(libraryItem())).toBe(0);

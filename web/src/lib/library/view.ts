@@ -1,5 +1,5 @@
 import type { LibraryCounts, LibraryItem, LibraryPage, LibraryParams, LibrarySort } from '@/lib/api/contract';
-import { matchesQuery } from './query';
+import { isWatching, matchesQuery } from './query';
 
 /**
  * The Library page's view state, kept in the URL (`filter`, `sort`, `view`,
@@ -34,8 +34,7 @@ export const FILTERS: FilterDefinition[] = [
   { value: 'all', label: 'All', count: (c) => c.all, params: {}, matches: () => true },
   { value: 'movies', label: 'Movies', count: (c) => c.movie, params: { type: 'movie' }, matches: (i) => i.media_type === 'movie' },
   { value: 'shows', label: 'Shows', count: (c) => c.tv, params: { type: 'tv' }, matches: (i) => i.media_type === 'tv' },
-  // Until B5 (#8) nothing is being watched
-  { value: 'watching', label: 'Watching', count: (c) => c.watching, params: { status: 'watching' }, matches: () => false },
+  { value: 'watching', label: 'Watching', count: (c) => c.watching, params: { status: 'watching' }, matches: isWatching },
   { value: 'ready', label: 'Ready', count: (c) => c.ready, params: { status: 'ready' }, matches: ready },
   { value: 'incomplete', label: 'Incomplete', count: (c) => c.incomplete, params: { status: 'incomplete' }, matches: (i) => !ready(i) },
   { value: 'review', label: 'Needs review', count: (c) => c.needs_review, params: { status: 'needs_review' }, matches: (i) => i.needs_review > 0 },
@@ -96,7 +95,7 @@ export function withoutPending(page: Pick<LibraryPage, 'counts' | 'summary' | 't
     if (ready(item)) summary.ready -= 1;
     if (!matchesQuery(item, state.q)) continue;
     for (const filter of FILTERS) {
-      if (filter.value !== 'all' && filter.value !== 'watching' && filter.matches(item)) {
+      if (filter.value !== 'all' && filter.matches(item)) {
         const key = COUNT_KEYS[filter.value];
         counts[key] -= 1;
       }
@@ -109,9 +108,10 @@ export function withoutPending(page: Pick<LibraryPage, 'counts' | 'summary' | 't
   return { counts: floor(counts), summary: floor(summary), total: Math.max(0, total) };
 }
 
-const COUNT_KEYS: Record<Exclude<LibraryFilter, 'all' | 'watching'>, keyof LibraryCounts> = {
+const COUNT_KEYS: Record<Exclude<LibraryFilter, 'all'>, keyof LibraryCounts> = {
   movies: 'movie',
   shows: 'tv',
+  watching: 'watching',
   ready: 'ready',
   incomplete: 'incomplete',
   review: 'needs_review',

@@ -11,13 +11,13 @@ import { cx } from '@/lib/utils/cx';
 export interface EpisodeRowProps {
   episode: EpisodeSummary;
   ordering: EpisodeOrdering;
-  /** The first episode of the frontier: amber rule and "Up next". */
+  /** Up next (Trakt's next episode, else the frontier's first): amber rule and "Up next". */
   isNext?: boolean;
   /** Mapping review for a needs-review episode (#5); without it the row opens the episode sheet. */
   reviewHref?: string | null;
   /** Missing: find a torrent for this episode. */
   onFind: (episode: EpisodeSummary) => void;
-  /** Has a file: the episode sheet (how to play, subtitles, replace, remove). */
+  /** The episode sheet: with a file, how to play, subtitles, replace and remove; watched without one, find a torrent. */
   onOpen: (episode: EpisodeSummary) => void;
   /** "With stills" density: a 16:9 still instead of the number (92 px rows). */
   rich?: boolean;
@@ -72,8 +72,10 @@ export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFi
     // Nothing to do until it airs; keep the pills lined up
     action = <span className="w-9 shrink-0" aria-hidden="true" />;
   } else {
+    // Watched wins the state (B5), so a watched row may or may not have a file
+    const options = episode.webdav_path ? 'how to play, subtitles, replace, remove' : 'find a torrent';
     action = (
-      <IconButton size="sm" aria-label={`${code} options: how to play, subtitles, replace, remove`} onClick={() => onOpen(episode)}>
+      <IconButton size="sm" aria-label={`${code} options: ${options}`} onClick={() => onOpen(episode)}>
         <EllipsisVertical size={17} aria-hidden="true" />
       </IconButton>
     );

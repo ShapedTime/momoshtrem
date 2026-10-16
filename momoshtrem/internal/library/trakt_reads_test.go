@@ -506,6 +506,10 @@ func TestEpisodesByKeys(t *testing.T) {
 	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
 
 	show := seed.show("Mike", true)
+	// The cards label absolute numbers by it (internal/me)
+	if _, err := db.Exec(`UPDATE shows SET episode_ordering = 'absolute' WHERE id = $1`, show.ID); err != nil {
+		t.Fatal(err)
+	}
 	eps := seed.episodes(show, 1, aired, aired, aired, aired)
 	for _, n := range []int{1, 2} { // a two-episode file a job mapped
 		if _, err := db.Exec(`
@@ -528,8 +532,8 @@ func TestEpisodesByKeys(t *testing.T) {
 		t.Fatalf("found = %+v, %v", found, err)
 	}
 	e1, e3, e9, other := found[0], found[1], found[2], found[3]
-	if e1.Show == nil || e1.Show.ID != show.ID || e1.Show.Title != "Mike" || e1.SeasonNumber != 1 || e1.Episode == nil ||
-		e1.Episode.Assignment == nil || e1.Episode.Assignment.FilePath != "Mike/E01E02.mkv" || e1.ReviewJobID != nil {
+	if e1.Show == nil || e1.Show.ID != show.ID || e1.Show.Title != "Mike" || e1.Show.EpisodeOrdering != OrderingAbsolute ||
+		e1.SeasonNumber != 1 || e1.Episode == nil || e1.Episode.Assignment == nil || e1.Episode.Assignment.FilePath != "Mike/E01E02.mkv" || e1.ReviewJobID != nil {
 		t.Errorf("E1 = %+v", e1)
 	}
 	if len(e1.FileMates) != 1 || e1.FileMates[0].EpisodeNumber != 2 || !e1.FileMates[0].Assignment.Groupable() {
