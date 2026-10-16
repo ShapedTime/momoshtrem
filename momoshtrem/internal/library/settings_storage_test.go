@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -127,8 +128,11 @@ func TestDecodeStorageSettings_Normalizes(t *testing.T) {
 	if err != nil || got.Kept.DefaultDays != nil || got.Background.Windows == nil || len(got.Background.Windows) != 0 || got.LimitSet {
 		t.Errorf("nulls = %+v, %v", got, err)
 	}
-	if _, err := decodeStorageSettings([]byte(`"storage"`)); err == nil {
-		t.Error("a document that isn't an object decoded")
+	for _, doc := range []string{`"storage"`, `[1, 2]`, `null`, `{"smart": {"episodes_ahead": "3"}}`, `{"limit_bytes": "lots"}`} {
+		got, err := decodeStorageSettings([]byte(doc))
+		if !errors.Is(err, ErrInvalidStorageSettings) || !reflect.DeepEqual(got, DefaultStorageSettings()) {
+			t.Errorf("decode(%s) = %+v, %v; want the defaults and ErrInvalidStorageSettings", doc, got, err)
+		}
 	}
 }
 
@@ -234,6 +238,34 @@ func TestSettingsRepository_StorageSettings(t *testing.T) {
 		got = update(t, StorageSettingsPatch{SetLimit: true})
 		if got.LimitBytes != nil || !got.LimitSet {
 			t.Errorf("null limit = %+v, want auto and set", got)
+		}
+	})
+
+	t.Run("a document that doesn't decode: the error, and Replace repairs it", func(t *testing.T) {
+		reset(t)
+		if err := repo.Set(ctx, StorageSettingsKey, json.RawMessage(`{"limit_bytes": 5, "smart": {"episodes_ahead": "3", "enabled": true}}`)); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := repo.StorageSettings(ctx); !errors.Is(err, ErrInvalidStorageSettings) || !reflect.DeepEqual(got, DefaultStorageSettings()) {
+			t.Fatalf("StorageSettings = %+v, %v", got, err)
+		}
+		// A merge keeps the bad field: why a PUT over it replaces instead.
+		if _, err := repo.UpdateStorageSettings(ctx, StorageSettingsPatch{Kept: KeptSettingsPatch{DefaultUntilWatched: boolPtr(false)}}); !errors.Is(err, ErrInvalidStorageSettings) {
+			t.Errorf("merge over a bad field = %v", err)
+		}
+		got, err := repo.ReplaceStorageSettings(ctx, StorageSettingsPatch{Kept: KeptSettingsPatch{DefaultUntilWatched: boolPtr(false)}})
+		want := DefaultStorageSettings()
+		want.Kept.DefaultUntilWatched = false
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("Replace = %+v, %v; want %+v", got, err, want)
+		}
+		if again := read(t); !reflect.DeepEqual(again, want) || again.LimitSet {
+			t.Errorf("read back = %+v: the limit stays unset, config.yaml still applies", again)
+		}
+		// With the limit in the patch, it's set.
+		got, err = repo.ReplaceStorageSettings(ctx, StorageSettingsPatch{SetLimit: true})
+		if err != nil || !got.LimitSet || got.LimitBytes != nil || !read(t).LimitSet {
+			t.Errorf("Replace with a null limit = %+v, %v", got, err)
 		}
 	})
 

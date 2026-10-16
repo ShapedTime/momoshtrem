@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -76,32 +77,56 @@ func (d *fakeDisk) set(total, free float64, err error) {
 	d.total, d.free, d.err = gib(total), gib(free), err
 }
 
-// fakeSettings keeps the document in memory.
+// fakeSettings keeps the document in memory. broken is a stored document
+// that doesn't decode: reads fail, a merge keeps it broken, and only a
+// replace repairs it.
 type fakeSettings struct {
-	mu       sync.Mutex
-	settings library.StorageSettings
-	readErr  error
-	updates  int
+	mu        sync.Mutex
+	settings  library.StorageSettings
+	readErr   error
+	broken    bool
+	readDelay time.Duration // widens the race between a PUT's read and its write
+	updates   int
+	replaces  int
 }
 
 func newFakeSettings() *fakeSettings {
 	return &fakeSettings{settings: library.DefaultStorageSettings()}
 }
 
+var errBrokenDocument = fmt.Errorf("%w: json: cannot unmarshal string into Go struct field", library.ErrInvalidStorageSettings)
+
 func (f *fakeSettings) StorageSettings(context.Context) (library.StorageSettings, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.readErr != nil {
-		return library.DefaultStorageSettings(), f.readErr
+	settings, readErr, broken, delay := f.settings, f.readErr, f.broken, f.readDelay
+	f.mu.Unlock()
+	time.Sleep(delay)
+	switch {
+	case readErr != nil:
+		return library.DefaultStorageSettings(), readErr
+	case broken:
+		return library.DefaultStorageSettings(), errBrokenDocument
 	}
-	return f.settings, nil
+	return settings, nil
 }
 
 func (f *fakeSettings) UpdateStorageSettings(_ context.Context, p library.StorageSettingsPatch) (library.StorageSettings, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updates++
+	if f.broken {
+		return library.DefaultStorageSettings(), errBrokenDocument
+	}
 	f.settings = p.Apply(f.settings)
+	return f.settings, nil
+}
+
+func (f *fakeSettings) ReplaceStorageSettings(_ context.Context, p library.StorageSettingsPatch) (library.StorageSettings, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.replaces++
+	f.broken = false
+	f.settings = p.Apply(library.DefaultStorageSettings())
 	return f.settings, nil
 }
 
@@ -513,4 +538,88 @@ func TestGovernor_UpdateStorage(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A stored document that doesn't decode (a hand edit) never makes GET or
+// PUT fail: they go on with the defaults, and a PUT replaces it with the
+// defaults and its fields.
+func TestGovernor_BrokenDocument(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, nil)
+	h.settings.settings = withLimit(ptr(gib(20))) // what the broken document can't say
+	h.settings.broken = true
+	h.start(t)
+	h.wantCap(t, gib(150)) // the defaults: auto
+
+	r, err := h.g.Storage(ctx)
+	if err != nil || r.Source != SourceAuto || r.LimitEffectiveBytes != gib(150) || r.Smart.EpisodesAhead != 2 {
+		t.Fatalf("GET = %+v, %v; want the defaults", r, err)
+	}
+	if _, l, err := h.g.Limits(ctx); err != nil || l.LimitBytes != gib(150) {
+		t.Errorf("Limits = %+v, %v", l, err)
+	}
+
+	r, err = h.g.UpdateStorage(ctx, library.StorageSettingsPatch{Smart: library.SmartSettingsPatch{EpisodesAhead: ptr(4)}})
+	if err != nil {
+		t.Fatalf("PUT over a broken document: %v", err)
+	}
+	if h.settings.replaces != 1 || h.settings.updates != 0 {
+		t.Errorf("replaces %d, updates %d: want the document replaced, not merged", h.settings.replaces, h.settings.updates)
+	}
+	if r.Smart.EpisodesAhead != 4 || r.Source != SourceAuto || r.Kept.DefaultDays == nil || *r.Kept.DefaultDays != 30 {
+		t.Errorf("after the repair = %+v", r)
+	}
+	// Repaired: the next PUT merges.
+	if _, err := h.g.UpdateStorage(ctx, library.StorageSettingsPatch{Smart: library.SmartSettingsPatch{Enabled: ptr(true)}}); err != nil {
+		t.Fatal(err)
+	}
+	if h.settings.replaces != 1 || h.settings.updates != 1 || !h.settings.settings.Smart.Enabled || h.settings.settings.Smart.EpisodesAhead != 4 {
+		t.Errorf("after the next PUT: replaces %d, updates %d, %+v", h.settings.replaces, h.settings.updates, h.settings.settings.Smart)
+	}
+
+	// A failure to read is still an error.
+	h.settings.failReads(errors.New("db down"))
+	if _, err := h.g.Storage(ctx); err == nil {
+		t.Error("GET without the database succeeded")
+	}
+}
+
+// PUTs run one at a time: two that each fit alone, but not together, can't
+// both pass their checks against the same read.
+func TestGovernor_ConcurrentPUTs(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, nil)
+	h.start(t)
+	h.settings.mu.Lock()
+	h.settings.readDelay = 20 * time.Millisecond
+	h.settings.mu.Unlock()
+	// Room: 150 − 20 = 130 GiB. Kept 120 fits alone (smart's default
+	// shrinks); smart 30 fits beside kept's default 75; together they don't.
+	patches := []library.StorageSettingsPatch{
+		{Kept: library.KeptSettingsPatch{SetMaxBytes: true, MaxBytes: ptr(gib(120))}},
+		{Smart: library.SmartSettingsPatch{SetMaxBytes: true, MaxBytes: ptr(gib(30))}},
+	}
+	errs := make([]error, len(patches))
+	var wg sync.WaitGroup
+	for i, p := range patches {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = h.g.UpdateStorage(ctx, p)
+		}()
+	}
+	wg.Wait()
+	failed := 0
+	for _, err := range errs {
+		var field *FieldError
+		if errors.As(err, &field) {
+			failed++
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := h.settings.settings
+	if failed != 1 || (s.Kept.MaxBytes != nil && s.Smart.MaxBytes != nil) {
+		t.Errorf("%d of 2 PUTs refused (%v); stored kept %v, smart %v: want exactly one through", failed, errs, s.Kept.MaxBytes, s.Smart.MaxBytes)
+	}
 }

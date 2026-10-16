@@ -37,10 +37,12 @@ func (e *CommittedError) Error() string {
 }
 
 // ParsePatch reads a PUT /settings/storage body: only the fields sent
-// change, and the nested objects merge. Unknown and read-only fields (the
-// GET shape's) are ignored. It answers ErrNotAnObject, or a *FieldError for
-// the first value of the wrong type or out of range; the checks that
-// depend on the disk are UpdateStorage's.
+// change, and the nested objects merge. Unknown fields are ignored. Don't
+// send the GET shape back as it is: GET answers limit_bytes null while the
+// limit comes from config.yaml, and a PUT of null is auto. Send limit_bytes
+// only when the limit control changes. It answers ErrNotAnObject, or a
+// *FieldError for the first value of the wrong type or out of range; the
+// checks that depend on the disk are UpdateStorage's.
 func ParsePatch(raw []byte) (library.StorageSettingsPatch, error) {
 	var p library.StorageSettingsPatch
 	top, ok := object(raw)
@@ -173,22 +175,47 @@ func windowsField(raw json.RawMessage) ([]library.DownloadWindow, *FieldError) {
 }
 
 // checkLimits is the PUT's checks that depend on the disk and the limit:
-// next are the limits the patched settings would have.
-func checkLimits(p library.StorageSettingsPatch, next Limits) *FieldError {
+// merged is the settings with the patch applied, next their limits. A PUT
+// that sends the limit or a cap must leave every explicit cap fitting,
+// whether it was stored before or sent now, so the answer doesn't depend
+// on the order of PUTs. The error names the field the PUT sent: the cap
+// that doesn't fit, else the one that squeezed it. Defaults always fit.
+func checkLimits(p library.StorageSettingsPatch, merged library.StorageSettings, next Limits) *FieldError {
 	if p.SetLimit && p.LimitBytes != nil {
 		if v := *p.LimitBytes; v < MinBytes || (next.MaxBytes > 0 && v > next.MaxBytes) {
 			return &FieldError{Field: "limit_bytes", Message: fmt.Sprintf(
 				"limit_bytes must be from %s to %s (90%% of the disk), or null for auto", formatGB(MinBytes), formatGB(next.MaxBytes))}
 		}
 	}
-	room := next.LimitBytes - next.ReserveBytes
-	if p.Kept.SetMaxBytes && p.Kept.MaxBytes != nil && *p.Kept.MaxBytes > room {
-		return &FieldError{Field: "kept.max_bytes", Message: fmt.Sprintf(
-			"kept.max_bytes can be at most %s: the limit less the streaming reserve", formatGB(room))}
+	sentLimit, sentKept, sentSmart := p.SetLimit, p.Kept.SetMaxBytes, p.Smart.SetMaxBytes
+	if !sentLimit && !sentKept && !sentSmart {
+		return nil
 	}
-	if p.Smart.SetMaxBytes && p.Smart.MaxBytes != nil && *p.Smart.MaxBytes > room-next.KeptMaxBytes {
-		return &FieldError{Field: "smart.max_bytes", Message: fmt.Sprintf(
-			"smart.max_bytes can be at most %s: what kept downloads and the streaming reserve leave of the limit", formatGB(room-next.KeptMaxBytes))}
+	room := next.LimitBytes - next.ReserveBytes
+	if kept := merged.Kept.MaxBytes; kept != nil && *kept > room {
+		switch {
+		case sentKept:
+			return &FieldError{Field: "kept.max_bytes", Message: fmt.Sprintf(
+				"kept.max_bytes can be at most %s: the limit less the streaming reserve", formatGB(room))}
+		case sentLimit:
+			return &FieldError{Field: "limit_bytes", Message: fmt.Sprintf(
+				"This limit leaves kept downloads %s, below their cap of %s: lower kept.max_bytes too", formatGB(room), formatGB(*kept))}
+		}
+		// Only smart sent: kept leaves it nothing, checked below.
+	}
+	left := room - next.KeptMaxBytes
+	if smart := merged.Smart.MaxBytes; smart != nil && *smart > left {
+		switch {
+		case sentSmart:
+			return &FieldError{Field: "smart.max_bytes", Message: fmt.Sprintf(
+				"smart.max_bytes can be at most %s: what kept downloads and the streaming reserve leave of the limit", formatGB(left))}
+		case sentKept:
+			return &FieldError{Field: "kept.max_bytes", Message: fmt.Sprintf(
+				"This kept cap leaves smart downloads %s, below their cap of %s: lower smart.max_bytes too, or set it to null", formatGB(left), formatGB(*smart))}
+		default:
+			return &FieldError{Field: "limit_bytes", Message: fmt.Sprintf(
+				"This limit leaves smart downloads %s, below their cap of %s: lower smart.max_bytes too", formatGB(left), formatGB(*smart))}
+		}
 	}
 	return nil
 }

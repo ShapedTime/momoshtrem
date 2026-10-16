@@ -154,8 +154,27 @@ func TestStorage_Integration(t *testing.T) {
 	check(t, got, map[string]string{"source": `"setting"`, "committed_kept_bytes": `75161927680`})
 
 	// The Repository reads the same document.
-	stored, err := library.NewSettingsRepository(db).StorageSettings(context.Background())
+	repo := library.NewSettingsRepository(db)
+	stored, err := repo.StorageSettings(context.Background())
 	if err != nil || !stored.LimitSet || *stored.LimitBytes != 150*gib || *stored.Kept.MaxBytes != 80*gib || stored.Smart.EpisodesAhead != 4 {
 		t.Errorf("stored = %+v, %v", stored, err)
+	}
+
+	// A hand-edited document that doesn't decode: GET serves the defaults
+	// (config.yaml's limit again), and a PUT replaces it.
+	g.SetDownloads(nil)
+	for _, doc := range []string{`[1, 2]`, `{"limit_bytes": 1, "smart": {"episodes_ahead": "3"}}`} {
+		if err := repo.Set(context.Background(), library.StorageSettingsKey, json.RawMessage(doc)); err != nil {
+			t.Fatal(err)
+		}
+		got = get(t, "GET", "")
+		check(t, got, map[string]string{"source": `"config"`, "limit_bytes": `null`,
+			"smart": `{"enabled":false,"episodes_ahead":2,"max_bytes":null,"effective_max_bytes":8455716864}`})
+		got = get(t, "PUT", `{"smart":{"enabled":true}}`)
+		check(t, got, map[string]string{"source": `"config"`,
+			"smart": `{"enabled":true,"episodes_ahead":2,"max_bytes":null,"effective_max_bytes":8455716864}`})
+		if repaired, err := repo.StorageSettings(context.Background()); err != nil || !repaired.Smart.Enabled || repaired.LimitSet {
+			t.Errorf("after the PUT over %s: %+v, %v", doc, repaired, err)
+		}
 	}
 }

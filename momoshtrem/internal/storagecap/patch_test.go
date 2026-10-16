@@ -31,7 +31,7 @@ func TestParsePatch(t *testing.T) {
 		}
 	})
 
-	t.Run("only what's sent; the GET shape's read-only fields are ignored", func(t *testing.T) {
+	t.Run("only what's sent; fields PUT doesn't take are ignored", func(t *testing.T) {
 		got, err := ParsePatch([]byte(`{"source": "auto", "effective_bytes": 1, "disk": {"total_bytes": 1},
 			"kept": {"effective_max_bytes": 5}, "smart": {}, "background": {"windows": []}, "unknown": true}`))
 		if err != nil {
@@ -132,25 +132,73 @@ func TestCheckLimits(t *testing.T) {
 		{"smart up to what kept leaves", `{"smart": {"max_bytes": 59055800320}}`, ""},
 		{"smart over it", `{"smart": {"max_bytes": 59055800321}}`, "smart.max_bytes"},
 		{"smart checked against the new kept cap", `{"kept": {"max_bytes": 128849018880}, "smart": {"max_bytes": 10737418241}}`, "smart.max_bytes"},
-		{"a kept cap that leaves smart less shrinks smart: not an error", `{"kept": {"max_bytes": 128849018880}}`, ""},
+		{"a kept cap that leaves a default smart less shrinks smart: not an error", `{"kept": {"max_bytes": 128849018880}}`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p, err := ParsePatch([]byte(tt.patch))
-			if err != nil {
-				t.Fatal(err)
-			}
-			in := vm
-			in.Settings = p.Apply(vm.Settings)
-			got := checkLimits(p, Resolve(in))
-			switch {
-			case tt.field == "" && got != nil:
-				t.Errorf("checkLimits = %v, want valid", got)
-			case tt.field != "" && (got == nil || got.Field != tt.field):
-				t.Errorf("checkLimits = %v, want a FieldError on %s", got, tt.field)
+			if got := checkPatch(t, vm.Settings, tt.patch); !fieldIs(got, tt.field) {
+				t.Errorf("checkLimits = %v, want %q", got, tt.field)
 			}
 		})
 	}
+}
+
+// Caps stored by an earlier PUT count as much as the ones sent: the answer
+// doesn't depend on the order of PUTs. On the VM's disk the room is 130 GiB.
+func TestCheckLimits_StoredCaps(t *testing.T) {
+	stored := func(kept, smart *int64) library.StorageSettings {
+		s := library.DefaultStorageSettings()
+		s.Kept.MaxBytes, s.Smart.MaxBytes = kept, smart
+		return s
+	}
+	smart30, kept120 := stored(nil, ptr(gib(30))), stored(ptr(gib(120)), nil)
+	tests := []struct {
+		name   string
+		stored library.StorageSettings
+		patch  string
+		field  string
+	}{
+		{"smart 30 stored, then kept 120: kept squeezes smart", smart30, `{"kept": {"max_bytes": 128849018880}}`, "kept.max_bytes"},
+		{"kept 120 stored, then smart 30: the same answer", kept120, `{"smart": {"max_bytes": 32212254720}}`, "smart.max_bytes"},
+		{"both at once", library.DefaultStorageSettings(), `{"kept": {"max_bytes": 128849018880}, "smart": {"max_bytes": 32212254720}}`, "smart.max_bytes"},
+		{"kept 120 stored, then smart 10: fits", kept120, `{"smart": {"max_bytes": 10737418240}}`, ""},
+		{"smart 30 stored, kept back to the default: fits", smart30, `{"kept": {"max_bytes": null}}`, ""},
+		{"kept 120 stored, a lower limit squeezes it", kept120, `{"limit_bytes": 107374182400}`, "limit_bytes"},
+		{"smart 30 stored, a lower limit squeezes it", smart30, `{"limit_bytes": 53687091200}`, "limit_bytes"},
+		{"the limit and the cap together", kept120, `{"limit_bytes": 107374182400, "kept": {"max_bytes": 53687091200}}`, ""},
+		{"a PUT that sends no limit or cap isn't checked", stored(ptr(gib(500)), nil), `{"smart": {"enabled": true}}`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkPatch(t, tt.stored, tt.patch)
+			if !fieldIs(got, tt.field) {
+				t.Errorf("checkLimits = %v, want %q", got, tt.field)
+			}
+			if got != nil && got.Message == "" {
+				t.Error("no message")
+			}
+		})
+	}
+}
+
+// checkPatch runs a PUT body's limit checks over stored, on the VM's disk.
+func checkPatch(t *testing.T, stored library.StorageSettings, body string) *FieldError {
+	t.Helper()
+	p, err := ParsePatch([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := vm
+	in.Settings = p.Apply(stored)
+	return checkLimits(p, in.Settings, Resolve(in))
+}
+
+// fieldIs: no error for "", else an error on field.
+func fieldIs(err *FieldError, field string) bool {
+	if field == "" {
+		return err == nil
+	}
+	return err != nil && err.Field == field
 }
 
 func TestFormatGB(t *testing.T) {

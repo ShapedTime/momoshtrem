@@ -3,9 +3,15 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 )
+
+// ErrInvalidStorageSettings is a stored "storage" document that doesn't
+// decode (not an object, or a field of the wrong type): a hand edit. Its
+// readers go on with the defaults, and ReplaceStorageSettings repairs it.
+var ErrInvalidStorageSettings = errors.New("the stored storage settings don't decode")
 
 // StorageSettingsKey is the app_settings key of the storage settings (#77,
 // PLAN §6 "Storage (#77)"): the piece cache's limit, and the caps and
@@ -257,7 +263,8 @@ func cloneInt64(v *int64) *int64 {
 
 // StorageSettings reads the storage settings over their defaults: a field
 // the stored document doesn't have keeps its default. A document that isn't
-// the settings gives the defaults and the error.
+// the settings gives the defaults and an error matching
+// ErrInvalidStorageSettings.
 func (r *SettingsRepository) StorageSettings(ctx context.Context) (StorageSettings, error) {
 	raw, found, err := r.Get(ctx, StorageSettingsKey)
 	if err != nil || !found {
@@ -305,6 +312,26 @@ func (r *SettingsRepository) UpdateStorageSettings(ctx context.Context, patch St
 	return decodeStorageSettings(raw)
 }
 
+// ReplaceStorageSettings replaces the document with the defaults and the
+// fields patch sets, and answers them: how a PUT repairs a document that
+// doesn't decode, where merging would keep its bad fields. Values are the
+// caller's to check.
+func (r *SettingsRepository) ReplaceStorageSettings(ctx context.Context, patch StorageSettingsPatch) (StorageSettings, error) {
+	settings := patch.Apply(DefaultStorageSettings())
+	doc := map[string]any{"kept": settings.Kept, "smart": settings.Smart, "background": settings.Background}
+	if settings.LimitSet {
+		doc["limit_bytes"] = settings.LimitBytes
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return DefaultStorageSettings(), fmt.Errorf("failed to encode setting %q: %w", StorageSettingsKey, err)
+	}
+	if err := r.Set(ctx, StorageSettingsKey, raw); err != nil {
+		return DefaultStorageSettings(), err
+	}
+	return decodeStorageSettings(raw)
+}
+
 func decodeStorageSettings(raw []byte) (StorageSettings, error) {
 	settings := DefaultStorageSettings()
 	// Unmarshal only overwrites the fields present in raw, nested ones
@@ -314,8 +341,11 @@ func decodeStorageSettings(raw []byte) (StorageSettings, error) {
 	if err == nil {
 		err = json.Unmarshal(raw, &settings)
 	}
+	if err == nil && keys == nil {
+		err = errors.New("null")
+	}
 	if err != nil {
-		return DefaultStorageSettings(), fmt.Errorf("failed to decode setting %q: %w", StorageSettingsKey, err)
+		return DefaultStorageSettings(), fmt.Errorf("%w (setting %q): %w", ErrInvalidStorageSettings, StorageSettingsKey, err)
 	}
 	_, settings.LimitSet = keys["limit_bytes"]
 	settings.normalize()

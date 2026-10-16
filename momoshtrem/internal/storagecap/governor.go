@@ -2,6 +2,7 @@ package storagecap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -53,8 +54,14 @@ var _ Cache = CacheFuncs{}
 
 // Settings stores the "storage" document (*library.SettingsRepository).
 type Settings interface {
+	// StorageSettings answers the defaults and an error matching
+	// library.ErrInvalidStorageSettings for a document that doesn't decode.
 	StorageSettings(ctx context.Context) (library.StorageSettings, error)
+	// UpdateStorageSettings merges the patch into the document.
 	UpdateStorageSettings(ctx context.Context, patch library.StorageSettingsPatch) (library.StorageSettings, error)
+	// ReplaceStorageSettings writes the defaults with the patch over a
+	// document that doesn't decode.
+	ReplaceStorageSettings(ctx context.Context, patch library.StorageSettingsPatch) (library.StorageSettings, error)
 }
 
 var _ Settings = (*library.SettingsRepository)(nil)
@@ -116,7 +123,12 @@ type Governor struct {
 
 	wake chan struct{} // a PUT changed the settings: apply now
 
+	// updates serialises PUTs, so each one is checked against the settings
+	// it's merged into.
+	updates sync.Mutex
+
 	mu        sync.Mutex
+	broken    bool  // the stored document doesn't decode (logged once)
 	cache     Cache // set by Start
 	downloads Downloads
 	onChange  func()
@@ -166,12 +178,36 @@ func (g *Governor) SetOnChange(fn func()) {
 	g.onChange = fn
 }
 
+// readSettings reads the storage settings. A stored document that doesn't
+// decode reads as the defaults, broken true, with a warning when that
+// starts; err is only a failure to read.
+func (g *Governor) readSettings(ctx context.Context) (settings library.StorageSettings, broken bool, err error) {
+	settings, err = g.d.Settings.StorageSettings(ctx)
+	broken = errors.Is(err, library.ErrInvalidStorageSettings)
+	if broken || err == nil {
+		g.mu.Lock()
+		changed := g.broken != broken
+		g.broken = broken
+		g.mu.Unlock()
+		switch {
+		case changed && broken:
+			g.log.Warn("The stored storage settings don't decode; using the defaults until a PUT /settings/storage replaces them", "error", err)
+		case changed:
+			g.log.Info("The stored storage settings decode again")
+		}
+	}
+	if broken {
+		return library.DefaultStorageSettings(), true, nil
+	}
+	return settings, false, err
+}
+
 // StartupLimit is the limit to open the cache with (torrent.InitStorage):
 // the setting, config.yaml or auto. The floor needs the cache's fill, so
 // Start's first pass applies it. Without the settings it goes on with the
 // defaults (config.yaml, else auto); without the disk, auto is 4 GiB.
 func (g *Governor) StartupLimit(ctx context.Context) Limits {
-	settings, err := g.d.Settings.StorageSettings(ctx)
+	settings, _, err := g.readSettings(ctx)
 	if err != nil {
 		g.log.Warn("Couldn't read the storage settings; sizing the cache from config.yaml or the disk", "error", err)
 	}
@@ -244,7 +280,7 @@ func (g *Governor) pass(ctx context.Context) {
 	if cache == nil {
 		return
 	}
-	settings, err := g.d.Settings.StorageSettings(ctx)
+	settings, _, err := g.readSettings(ctx)
 	g.mu.Lock()
 	switch {
 	case err == nil:
@@ -353,7 +389,7 @@ func (g *Governor) disk() (Disk, error) {
 // Limits are the limits now, with the settings they come from: for the
 // downloads (#77 P4), which never call back into Downloads from here.
 func (g *Governor) Limits(ctx context.Context) (library.StorageSettings, Limits, error) {
-	settings, err := g.d.Settings.StorageSettings(ctx)
+	settings, _, err := g.readSettings(ctx)
 	if err != nil {
 		return settings, Limits{}, err
 	}
@@ -372,9 +408,10 @@ func (g *Governor) inputs(settings library.StorageSettings) (Inputs, error) {
 	return Inputs{Settings: settings, ConfigBytes: g.d.ConfigBytes, Disk: disk, FilledBytes: g.cacheInfo().Filled}, nil
 }
 
-// Storage is GET /settings/storage.
+// Storage is GET /settings/storage. A stored document that doesn't decode
+// answers the defaults (logged).
 func (g *Governor) Storage(ctx context.Context) (*Report, error) {
-	settings, err := g.d.Settings.StorageSettings(ctx)
+	settings, _, err := g.readSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -392,9 +429,13 @@ func (g *Governor) Storage(ctx context.Context) (*Report, error) {
 // UpdateStorage is PUT /settings/storage: it checks the patch against the
 // disk and the downloads, stores it, wakes the Governor and answers the
 // new report. A bad value is a *FieldError and a cap below what kept
-// downloads hold a *CommittedError; neither changes anything.
+// downloads hold a *CommittedError; neither changes anything. PUTs run one
+// at a time, each checked against the settings it changes. Over a stored
+// document that doesn't decode, the defaults with the patch replace it.
 func (g *Governor) UpdateStorage(ctx context.Context, patch library.StorageSettingsPatch) (*Report, error) {
-	current, err := g.d.Settings.StorageSettings(ctx)
+	g.updates.Lock()
+	defer g.updates.Unlock()
+	current, broken, err := g.readSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +446,7 @@ func (g *Governor) UpdateStorage(ctx context.Context, patch library.StorageSetti
 	before := Resolve(in)
 	in.Settings = patch.Apply(current)
 	after := Resolve(in)
-	if err := checkLimits(patch, after); err != nil {
+	if err := checkLimits(patch, in.Settings, after); err != nil {
 		return nil, err
 	}
 	usage, err := g.currentDownloads().DownloadUsage(ctx)
@@ -417,9 +458,19 @@ func (g *Governor) UpdateStorage(ctx context.Context, patch library.StorageSetti
 	if after.KeptMaxBytes < usage.CommittedKeptBytes && after.KeptMaxBytes < before.KeptMaxBytes {
 		return nil, &CommittedError{CommittedKeptBytes: usage.CommittedKeptBytes, KeptMaxBytes: after.KeptMaxBytes}
 	}
-	saved, err := g.d.Settings.UpdateStorageSettings(ctx, patch)
+	store := g.d.Settings.UpdateStorageSettings
+	if broken {
+		store = g.d.Settings.ReplaceStorageSettings
+	}
+	saved, err := store(ctx, patch)
 	if err != nil {
 		return nil, err
+	}
+	if broken {
+		g.log.Info("Replaced the stored storage settings with the defaults and this PUT")
+		g.mu.Lock()
+		g.broken = false
+		g.mu.Unlock()
 	}
 	g.Wake()
 	g.mu.Lock()

@@ -64,7 +64,8 @@ func (s *Server) getStorage(c *gin.Context) {
 
 // PUT /settings/storage with any of limit_bytes, kept, smart and background
 // → 200 Report. Only the fields sent change and the nested objects merge;
-// unknown and read-only fields are ignored. A body that isn't a JSON object
+// unknown fields are ignored. limit_bytes goes only when the limit control
+// changes: GET's null may mean config.yaml (source). A body that isn't a JSON object
 // is 400, a bad value 422 naming the field, a kept cap below what kept
 // downloads want 409 limit_below_committed.
 func (s *Server) putStorage(c *gin.Context) {
