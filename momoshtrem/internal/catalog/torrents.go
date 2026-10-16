@@ -20,7 +20,7 @@ type torrentView struct {
 type torrentSnapshot struct {
 	loaded   bool
 	active   bool
-	paused   bool  // the user paused it, loaded or not; never active
+	paused   bool // the user paused it, loaded or not; never active
 	seeders  int
 	speedBps int64 // download speed, smoothed
 	files    map[string]torrent.FileProgress

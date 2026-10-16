@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
@@ -140,6 +142,7 @@ func newRemovalEnv(t *testing.T) *removalEnv {
 		Torrents:    e.client,
 		Subtitles:   subtitle.NewService(nil, subtitle.NewRepository(je.db.DB), e.dir),
 		Tree:        e.tree,
+		Pauses:      library.NewSettingsRepository(je.db),
 	})
 	return e
 }
@@ -528,6 +531,59 @@ func TestDeleteShow(t *testing.T) {
 
 	if err := e.svc.DeleteShow(e.ctx, showID, false); !errors.Is(err, library.ErrShowNotFound) {
 		t.Errorf("second delete: err = %v, want ErrShowNotFound", err)
+	}
+}
+
+// A release that drops a torrent clears its pause, stored and in the
+// client, so it isn't paused when it's assigned again; a torrent still in
+// use keeps its pause.
+func TestRelease_ClearsPauses(t *testing.T) {
+	e := newRemovalEnv(t)
+	settings := library.NewSettingsRepository(e.db)
+	dune := e.movie("Dune", 2021)
+	other := e.movie("Blade Runner", 1982)
+	_, eps := e.show("Frieren", [][3]any{{1, 1, "One"}})
+	e.assign(library.ItemTypeMovie, dune, hashA, "Dune.mkv", true)
+	e.assign(library.ItemTypeMovie, dune, hashB, "Shared/Dune.mkv", false)
+	e.assign(library.ItemTypeMovie, other, hashB, "Shared/BR.mkv", true) // B stays in use
+	e.assign(library.ItemTypeEpisode, eps["S01E01"], hashC, "Frieren/E01.mkv", true)
+	e.client.loaded[hashA], e.client.loaded[hashB], e.client.loaded[hashC] = true, true, true
+	at := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	if err := settings.PauseTorrents(e.ctx, map[string]time.Time{hashA: at, hashB: at, hashC: at}); err != nil {
+		t.Fatal(err)
+	}
+	stored := func() []string {
+		t.Helper()
+		pauses, err := settings.TorrentPauses(e.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.Sorted(maps.Keys(pauses))
+	}
+
+	// A title delete releases A (dropped: pause cleared) but not B (in use).
+	if err := e.svc.DeleteMovie(e.ctx, dune, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); !slices.Equal(got, []string{hashB, hashC}) {
+		t.Errorf("stored pauses after the movie delete = %v, want B's and C's", got)
+	}
+	if !slices.Equal(e.client.resumed, []string{hashA}) {
+		t.Errorf("client resumes = %v, want A's pause cleared", e.client.resumed)
+	}
+
+	// Unassigning the last episode on C releases it too.
+	if err := e.svc.UnassignEpisode(e.ctx, eps["S01E01"]); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); !slices.Equal(got, []string{hashB}) {
+		t.Errorf("stored pauses after the unassign = %v, want only B's", got)
+	}
+	if !slices.Equal(e.client.resumed, []string{hashA, hashC}) {
+		t.Errorf("client resumes = %v, want A's and C's", e.client.resumed)
+	}
+	if got := e.client.removals(); !slices.Equal(got, []removal{{hashA, false}, {hashC, false}}) {
+		t.Errorf("removals = %v", got)
 	}
 }
 

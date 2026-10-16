@@ -137,12 +137,27 @@ func TestActivity_AssignedTorrentsWithNothingLoaded(t *testing.T) {
 	if item, err := svc.Pause(f.ctx, strings.ToUpper(showHash)); err != nil || item.State != activity.StatePaused {
 		t.Fatalf("Pause = %+v, %v", item, err)
 	}
+	// Meanwhile a job on another torrent was paused, then discarded: the
+	// library doesn't know that torrent any more, so the restart prunes its
+	// pause instead of applying it.
+	discarded := strings.Repeat("c", 40)
+	f.exec(`INSERT INTO assignment_jobs (media_type, tmdb_id, show_id, info_hash, magnet_uri, torrent_name, status)
+		VALUES ('tv', 209867, $1, $2, $3, 'Discarded', 'cancelled')`, show, discarded, "magnet:?xt=urn:btih:"+discarded)
+	if err := f.settings.PauseTorrents(f.ctx, map[string]time.Time{discarded: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 	svc, client := f.activityOver()
 	if err := svc.RestorePauses(f.ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := client.PausedAt(showHash); !ok {
 		t.Fatal("the pause didn't survive the restart")
+	}
+	if _, ok := client.PausedAt(discarded); ok {
+		t.Error("the discarded torrent came back paused")
+	}
+	if stored, err := f.settings.TorrentPauses(f.ctx); err != nil || len(stored) != 1 || stored[showHash].IsZero() {
+		t.Errorf("stored pauses after the restart = %v, %v; want only the known torrent's", stored, err)
 	}
 	if items, _ := svc.List(f.ctx); items[0].InfoHash != showHash || items[0].State != activity.StatePaused {
 		t.Errorf("after the restart: %+v, want the show's torrent paused first", items)

@@ -100,7 +100,7 @@ func TestTorrentRoutes(t *testing.T) {
 		{name: "pause unknown", method: http.MethodPost, path: "/api/torrents/" + hex + "/pause", err: torrent.ErrTorrentNotFound,
 			wantStatus: http.StatusNotFound, wantCode: CodeNotFound, wantCall: "pause", wantHash: hex},
 		{name: "resume, invalid hash from the service", method: http.MethodPost, path: "/api/torrents/" + hex + "/resume",
-			err: fmt.Errorf("%w: %q", torrent.ErrInvalidInfoHash, "x"),
+			err:        fmt.Errorf("%w: %q", torrent.ErrInvalidInfoHash, "x"),
 			wantStatus: http.StatusBadRequest, wantCode: CodeBadRequest, wantCall: "resume", wantHash: hex},
 		{name: "resume, database down", method: http.MethodPost, path: "/api/torrents/" + hex + "/resume", err: errors.New("connection reset"),
 			wantStatus: http.StatusInternalServerError, wantCode: CodeInternalError, wantCall: "resume", wantHash: hex},

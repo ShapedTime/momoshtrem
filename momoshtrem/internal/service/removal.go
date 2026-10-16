@@ -41,8 +41,16 @@ type RemovalTree interface {
 	InvalidateFileHandles(infoHash string)
 }
 
-// RemovalDeps are a RemovalService's dependencies. Torrents, Subtitles and
-// Tree are optional.
+// PauseClearer clears stored torrent pauses (app_settings key "torrents").
+// *library.SettingsRepository implements it.
+type PauseClearer interface {
+	ResumeTorrents(ctx context.Context, hashes []string) error
+}
+
+var _ PauseClearer = (*library.SettingsRepository)(nil)
+
+// RemovalDeps are a RemovalService's dependencies. Torrents, Subtitles,
+// Tree and Pauses are optional.
 type RemovalDeps struct {
 	Jobs        *library.AssignmentJobRepository
 	Movies      *library.MovieRepository
@@ -51,6 +59,9 @@ type RemovalDeps struct {
 	Torrents    RemovalTorrents
 	Subtitles   SubtitleCleaner
 	Tree        RemovalTree
+	// Pauses clears a released torrent's stored pause; nil keeps it (it's
+	// pruned at the next startup).
+	Pauses PauseClearer
 }
 
 // RemovalService deletes torrents and titles and unassigns files, and
@@ -68,6 +79,7 @@ type RemovalService struct {
 	torrents    RemovalTorrents
 	subtitles   SubtitleCleaner
 	tree        RemovalTree
+	pauses      PauseClearer
 	log         *slog.Logger
 
 	// background counts best-effort data deletes still running.
@@ -84,6 +96,7 @@ func NewRemovalService(d RemovalDeps) *RemovalService {
 		torrents:    d.Torrents,
 		subtitles:   d.Subtitles,
 		tree:        d.Tree,
+		pauses:      d.Pauses,
 		log:         slog.With("component", "removals"),
 	}
 }
@@ -130,14 +143,25 @@ func (s *RemovalService) DeleteTorrent(ctx context.Context, infoHash string, del
 		"pause_cleared", forgotten.Unpaused > 0,
 	)
 	s.drop(library.TorrentRef{InfoHash: hash, MagnetURI: forgotten.MagnetURI}, deleteData)
-	if s.torrents != nil {
-		// It's dropped, so this only clears the pause: nothing wakes.
-		if err := s.torrents.Resume(hash); err != nil {
-			s.log.Warn("Failed to clear a deleted torrent's pause", "info_hash", hash, "error", err)
-		}
-	}
+	s.forgetPause(ctx, hash, false) // ForgetTorrent cleared the stored one
 	s.invalidateTree()
 	return nil
+}
+
+// forgetPause clears the pause of a torrent nothing uses any more, so it
+// isn't paused if it's assigned again: the client's, and the stored one
+// when stored is set. It's dropped by then, so nothing wakes.
+func (s *RemovalService) forgetPause(ctx context.Context, hash string, stored bool) {
+	if stored && s.pauses != nil {
+		if err := s.pauses.ResumeTorrents(ctx, []string{hash}); err != nil {
+			s.log.Warn("Failed to clear a released torrent's stored pause; the next start prunes it", "info_hash", hash, "error", err)
+		}
+	}
+	if s.torrents != nil {
+		if err := s.torrents.Resume(hash); err != nil {
+			s.log.Warn("Failed to clear a torrent's pause", "info_hash", hash, "error", err)
+		}
+	}
 }
 
 // DeleteMovie deletes a movie: its assignments are deactivated, its jobs
@@ -245,7 +269,9 @@ func (s *RemovalService) unassign(ctx context.Context, itemType library.ItemType
 }
 
 // releaseUnused drops each torrent that no active assignment or open job
-// uses any more, with its data when deleteData is set.
+// uses any more, with its data when deleteData is set, and clears its
+// pause (stored and in the client), so it isn't paused if it's assigned
+// again.
 func (s *RemovalService) releaseUnused(ctx context.Context, refs []library.TorrentRef, deleteData bool) {
 	if s.torrents == nil {
 		return
@@ -259,15 +285,19 @@ func (s *RemovalService) releaseUnused(ctx context.Context, refs []library.Torre
 		if used {
 			continue
 		}
-		s.drop(ref, deleteData)
+		if s.drop(ref, deleteData) {
+			s.forgetPause(ctx, ref.InfoHash, true)
+		}
 	}
 }
 
 // drop removes the torrent from the client. With deleteData, a torrent
 // that's neither loaded nor stored has its data deleted in the background.
-func (s *RemovalService) drop(ref library.TorrentRef, deleteData bool) {
+// It reports whether the torrent is gone from the client: removed, or it
+// wasn't there.
+func (s *RemovalService) drop(ref library.TorrentRef, deleteData bool) bool {
 	if s.torrents == nil {
-		return
+		return false
 	}
 	if s.tree != nil {
 		s.tree.InvalidateFileHandles(ref.InfoHash)
@@ -281,7 +311,9 @@ func (s *RemovalService) drop(ref library.TorrentRef, deleteData bool) {
 		}
 	default:
 		s.log.Warn("Failed to remove a torrent", "info_hash", ref.InfoHash, "error", err)
+		return false
 	}
+	return true
 }
 
 // deleteDataLater deletes the data of a torrent whose metainfo isn't

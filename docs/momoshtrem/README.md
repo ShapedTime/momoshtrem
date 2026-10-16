@@ -153,7 +153,7 @@ What the torrents are doing, for the Activity screen (`internal/activity`; the c
 - **`GET /api/torrents`** lists every torrent the library knows (active assignments and open mapping jobs), loaded or not, plus loaded torrents nothing references. Torrents stream on demand and load on their first WebDAV read, so one that isn't loaded is `idle` with null progress, and there's no ETA.
 - **`GET /api/torrents/summary`** has the total speeds, the last minute of them, how many torrents are in each state, and the disk under `metadata_folder` with the piece cache's fill.
 - **Speeds** come from a sampler that reads each loaded torrent's byte counters every 2 s and smooths them.
-- **`POST /api/torrents/{hash}/pause`** and **`/resume`**, and **`/pause-all`** and **`/resume-all`**. A pause is sticky: it's kept in `app_settings` (key `torrents`) across restarts, reads don't wake the torrent, and a torrent that isn't loaded is paused when it loads.
+- **`POST /api/torrents/{hash}/pause`** and **`/resume`**, and **`/pause-all`** and **`/resume-all`**. A pause is sticky: it's kept in `app_settings` (key `torrents`) across restarts, reads don't wake the torrent, and a torrent that isn't loaded is paused when it loads. It goes with the torrent: deleting or releasing a torrent clears it, and startup prunes the pauses of torrents the library no longer knows.
 
 ## Removing torrents and titles
 

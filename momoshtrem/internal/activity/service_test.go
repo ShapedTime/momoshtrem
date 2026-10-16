@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -451,12 +452,26 @@ func TestPauseAllAndResumeAll(t *testing.T) {
 
 func TestRestorePauses(t *testing.T) {
 	e := newEnv()
-	e.store.paused = map[string]time.Time{dune: at(1)}
+	e.torrents.paused = map[string]time.Time{}
+	upperFrieren := strings.ToUpper(frieren) // stored by hand
+	e.store.paused = map[string]time.Time{dune: at(1), upperFrieren: at(2), hash('9'): at(3), inspect: at(4), "junk": at(5)}
 	if err := e.svc.RestorePauses(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.torrents.paused[dune]; !ok {
-		t.Errorf("client pauses = %v", e.torrents.paused)
+	// The library knows dune and frieren; inspect is only loaded (a dry run,
+	// gone after a restart), 999… and junk nothing knows: pruned.
+	if got := slices.Sorted(maps.Keys(e.torrents.paused)); !slices.Equal(got, []string{upperFrieren, dune}) {
+		t.Errorf("client pauses = %v, want dune's and frieren's", got)
+	}
+	if got := slices.Sorted(maps.Keys(e.store.paused)); !slices.Equal(got, []string{upperFrieren, dune}) {
+		t.Errorf("stored pauses = %v, want the unknown ones pruned", got)
+	}
+
+	// Nothing stored: nothing to read from the library.
+	e.store.paused = map[string]time.Time{}
+	e.lib.known = nil
+	if err := e.svc.RestorePauses(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	e.store.err = errors.New("connection reset")
 	if err := e.svc.RestorePauses(context.Background()); err == nil {

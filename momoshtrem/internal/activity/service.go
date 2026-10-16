@@ -143,11 +143,42 @@ func New(d Deps) *Service {
 }
 
 // RestorePauses applies the stored pauses to the client. Run it at
-// startup, before anything loads a torrent.
+// startup, before anything loads a torrent. It first prunes the pauses of
+// torrents the library doesn't know (no active torrent assignment, no open
+// non-dry-run job): a job discard, or any other release, leaves the
+// torrent unused, and it shouldn't come back paused when it's assigned
+// again. Nothing is loaded yet, so only the library counts.
 func (s *Service) RestorePauses(ctx context.Context) error {
 	pauses, err := s.pauses.TorrentPauses(ctx)
 	if err != nil {
 		return err
+	}
+	if len(pauses) == 0 {
+		return nil
+	}
+	known, err := s.library.KnownTorrents(ctx, "")
+	if err != nil {
+		return err
+	}
+	inLibrary := make(map[string]bool, len(known))
+	for _, k := range known {
+		inLibrary[k.InfoHash] = true
+	}
+	var stale []string
+	for hash := range pauses {
+		if !inLibrary[torrent.NormalizeInfoHash(hash)] {
+			stale = append(stale, hash)
+		}
+	}
+	if len(stale) > 0 {
+		slices.Sort(stale)
+		if err := s.pauses.ResumeTorrents(ctx, stale); err != nil {
+			return err
+		}
+		for _, hash := range stale {
+			delete(pauses, hash)
+		}
+		s.log.Info("Pruned the pauses of torrents the library doesn't know", "count", len(stale))
 	}
 	s.torrents.RestorePauses(pauses)
 	return nil

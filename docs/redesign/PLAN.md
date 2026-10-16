@@ -798,7 +798,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - **Resume** clears it. A loaded torrent's network comes back on, and it counts as just accessed, so it stays on until `idle_timeout`. One that isn't loaded stays unloaded.
   - Pausing an already paused torrent keeps its first time; resuming one that isn't paused changes nothing.
 - **`POST /torrents/pause-all`** → `200 {count}`: pauses the streaming and downloading torrents only. **`POST /torrents/resume-all`** → `200 {count}`: resumes every paused torrent, loaded or not.
-- **Stored pauses.** `app_settings` key `torrents`, `{paused: {"<hash>": "<RFC 3339 time>"}}`. Every write is one atomic jsonb statement (an insert on conflict, `||`, `-` or `#-`), never a read-modify-write. They're loaded at startup, before anything loads a torrent. Without idle mode (`idle_enabled: false`) pauses still work: torrents stay active until paused.
+- **Stored pauses.** `app_settings` key `torrents`, `{paused: {"<hash>": "<RFC 3339 time>"}}`. Every write is one atomic jsonb statement (an insert on conflict, `||`, `-` or `#-`), never a read-modify-write. They're loaded at startup, before anything loads a torrent, after the pauses of torrents the library doesn't know are pruned (see "Releasing" below). Without idle mode (`idle_enabled: false`) pauses still work: torrents stay active until paused.
 - **`GET /torrents/{hash}`** keeps the legacy status (`{info_hash, name, total_size, downloaded, progress, seeders, leechers, download_speed, upload_speed, is_paused}`, `404` when not loaded) until #99 replaces it with the detail. **`GET /torrents/{hash}/debug`** stays until #102.
 - **Static routes and hashes.** `summary`, `pause-all` and `resume-all` sit beside `/torrents/{hash}`; they're matched first, and `/torrents/summary/debug` is a malformed hash (`400`).
 - **The web app, until #102:** the legacy web route `GET /api/torrents` keeps answering the legacy `{torrents: [...]}` shape, adapted from these items (`is_paused` is true for `paused` and `idle`), and the legacy routes under `app/api/torrents/[hash]` shadow summary, pause, resume and the `*-all` routes. #102 retires `app/api/torrents/**`.
@@ -812,7 +812,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
 - **Lifecycle** (`internal/torrent`).
   - Adds, metadata waits, drops and removals of one hash are serialised in the torrent service. Concurrent adds (a job, a WebDAV read) share one attempt, so a timeout in one can't drop a torrent another is adding.
   - When metadata arrives, the metainfo is stored in `{metadata_folder}/metainfo/<hash>.torrent`. An add loads it first, with no wait for peers.
-- **Releasing** a torrent (discard, title delete, unassign) drops it when `TorrentInUse` finds no active assignment and no open job using it. A release keeps the torrent's pause, if any.
+- **Releasing** a torrent (discard, title delete, unassign) drops it when `TorrentInUse` finds no active assignment and no open job using it. A release that drops it also clears its pause, stored and in the client, so it isn't paused when it's assigned again (title deletes and unassigns, in `RemovalService`). Releases elsewhere (a job discard) leave the stored pause to startup: before the pauses are restored, those of torrents the library doesn't know (no active torrent assignment, no open non-dry-run job) are pruned.
 - **BitTorrent port:** `torrent.listen_port` (`TORRENT_LISTEN_PORT`), 42069 by default; 0 picks a free port, so two instances can run side by side.
 
 ### System

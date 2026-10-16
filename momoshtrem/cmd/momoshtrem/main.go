@@ -487,6 +487,7 @@ func main() {
 		Torrents:    torrentService,
 		Subtitles:   subtitleService,
 		Tree:        libraryFS,
+		Pauses:      settingsRepo,
 	})
 
 	// Activity: the torrents the library knows merged with the client's,
