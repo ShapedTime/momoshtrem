@@ -223,7 +223,8 @@ func TestHooksInline(t *testing.T) {
 		t.Fatalf("go build -gcflags=-m: %v\n%s", err, out)
 	}
 	inlinable := map[string]bool{}
-	re := regexp.MustCompile(`can inline \(\*Recorder\)\.(\w+)`)
+	// Anchored: "(*Recorder).SetLevel.deferwrap1" is a closure, not SetLevel.
+	re := regexp.MustCompile(`can inline \(\*Recorder\)\.(\w+)$`)
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		if m := re.FindStringSubmatch(sc.Text()); m != nil {

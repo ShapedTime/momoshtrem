@@ -181,7 +181,8 @@ type Stats struct {
 	// Head is the newest sequence number claimed: Head events were emitted.
 	Head uint64
 	// Dropped counts the events their writer gave up, because their slot
-	// was still being filled by a writer a whole lap behind.
+	// was still being filled by a writer a whole lap behind, or already
+	// held a newer event.
 	Dropped uint64
 	// Strings is how many strings are interned, and StringsRefused how many
 	// Intern calls returned 0 because the table was full.

@@ -13,8 +13,11 @@ import (
 //
 // Every line has seq, t_ns (since Stats.Start), kind and level; the rest
 // depends on the kind (see each constructor). Durations are integer
-// nanoseconds named *_ns; byte ranges are [start, end) pairs; flags appear
-// only when set; a string whose ID is 0 is left out.
+// nanoseconds named *_ns. The byte ranges (now, ra) are [start, end)
+// pairs. http.start's range is the Range header as ParseRange gives it:
+// [first, last] inclusive, with -1 for a missing end ([-1, n] is the last
+// n bytes). Flags appear only when set, and a string whose ID is 0 is
+// left out.
 func (r *Recorder) WriteNDJSON(w io.Writer, events []Event) error {
 	enc := encoder{strs: r.strs.snapshot(), b: make([]byte, 0, 32<<10)}
 	for i := range events {
