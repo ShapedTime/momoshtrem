@@ -1239,6 +1239,21 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
   - pins it;
   - loads at most 2 torrents with bytes left;
   - sets their wanted files to Normal priority.
+- **The manager's details** (P4 #202, `internal/downloads`), where the rules above leave room:
+  - **Wakes:** a Keep, PATCH or DELETE, a storage PUT, a removal, an Apply, an override or an HDRezka assign, and a pause or resume. A session poll every 5 s notices streams starting and ending, and local watches.
+  - **Admission order:** a file joins a download when its assignment is written or the download is created, whichever is later. Kept files are admitted first, by that time, then by the download's creation, then in episode order; smart files follow under their own cap. So a file assigned later is the one over the cap. A file that doesn't fit is over the cap, and a later, smaller one may still fit.
+  - **Smart picks while `smart.enabled` is off** aren't planned, listed, or found by PATCH and DELETE (`404`), but they still expire. A Keep on one still turns it kept.
+  - **Slots:** streamed torrents first (their prefetch carries on), then the ones holding a slot, then plan order (kept by creation, then smart). A torrent loads in the background; a failed load is retried after a minute.
+  - **`stalled`:** 10 minutes in a slot without its bytes on disk or arrived growing. It's retried after 5, 10, 20 and 40 minutes, then hourly; progress starts the backoff over.
+  - **`disk_full`:** the floor holds the cache below its limit (`floored`), and pinned bytes plus the streaming reserve reach `effective_bytes`.
+  - **Pause while streaming:** HDRezka sessions count. A torrent streamed within the last minute carries on through the grace minute.
+  - **A local watch:** a session reads at 90% of its file or more, for 20 s (players read a file's index at its end). Every item the file plays as is recorded, so a grouped file records all its episodes.
+  - **Until-watched endings:** a season has finished airing when every episode it lists has aired by today (in `TZ`), and the show has a later season, has ended (TMDB's `Ended` or `Canceled`), or the season's last episode is its finale. A show's "everything watched" is its regular episodes; specials don't count.
+  - **What's on disk** counts the bytes of a boundary piece that fall inside the file.
+  - **Pins:** one owner per torrent, covering every piece of its admitted files, boundary pieces included. At startup the cache defers its trims (`DeferTrim`) until `RestorePins` has pinned every download (it loads nothing); then `Ready`, and the governor steps any excess down. Watched files' pieces are demoted once per process, and again after a restart (downloads released as watched in the last 30 days).
+  - **The streaming reserve** that the governor sets on every pass is `min(reserve_bytes, effective_bytes)`, so without pins the trims are as before. The governor steps down only over bytes a trim can evict, so pins holding the fill above the cap cause no per-minute churn.
+  - **A storage PUT and a Keep run one at a time:** the PUT holds the downloads' commit lock from reading `committed_kept_bytes` until its settings are stored.
+  - A PATCH or DELETE with a malformed id is `400`, as on every route.
 - **Watched** means a Trakt play or a `local_watches` row (§5 `010`, written when a local session reaches 90%) with a time after the download's `created_at`. Smart picks also count a later episode of the same show streaming.
 - **Releases are soft** (§5 `010`): a released row stays, with `released_at` and a `release_reason` (`deleted`, `expired`, `watched`). Only active rows are listed, planned or shown as `keep`, so keeping the same thing again makes a new row.
   - Releasing unpins the data. It stays as ordinary cache and plays until the LRU evicts it.
