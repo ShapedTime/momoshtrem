@@ -66,7 +66,8 @@ func (h qualityHandlers) get(c *gin.Context) {
 }
 
 // PUT /settings/quality-profile takes the whole profile and answers the
-// saved one; a missing field takes its default. 422 names an invalid field.
+// saved one; a missing field takes its default. 422 names an invalid field
+// in error.field and in the message.
 func (h qualityHandlers) put(c *gin.Context) {
 	if !h.ready(c) {
 		return
@@ -81,7 +82,10 @@ func (h qualityHandlers) put(c *gin.Context) {
 		return
 	}
 	saved, err := h.profiles.SetQualityProfile(c.Request.Context(), profile)
+	var invalid *library.QualityProfileError
 	switch {
+	case errors.As(err, &invalid):
+		c.JSON(http.StatusUnprocessableEntity, ErrorBody{Error: ErrorDetail{Code: CodeValidationError, Message: invalid.Message, Field: invalid.Field}})
 	case errors.Is(err, library.ErrInvalidQualityProfile):
 		errorResponse(c, http.StatusUnprocessableEntity, err.Error())
 	case err != nil:
