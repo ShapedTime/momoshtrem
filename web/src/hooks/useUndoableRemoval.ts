@@ -1,0 +1,79 @@
+'use client';
+
+import { useCallback, useSyncExternalStore } from 'react';
+import { type QueryKey, useQueryClient } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
+import { useToast } from '@/components/ui';
+import {
+  addPendingRemoval,
+  commitPendingRemoval,
+  type PendingRemoval,
+  pendingRemovals,
+  releasePendingRemoval,
+  subscribePendingRemovals,
+  undoPendingRemoval,
+} from '@/lib/undo/removals';
+
+/** How long Undo is offered (HANDOFF §4.4). */
+export const UNDO_MS = 10_000;
+
+const NONE: ReadonlyMap<string, PendingRemoval> = new Map();
+
+/** The removals waiting out their Undo window; lists hide their items. */
+export function usePendingRemovals(): ReadonlyMap<string, PendingRemoval> {
+  return useSyncExternalStore(subscribePendingRemovals, pendingRemovals, () => NONE);
+}
+
+export interface UndoableRemoval extends PendingRemoval {
+  /** Queries to refresh once it's sent (or failed), e.g. `libraryKeys.all`. */
+  invalidate?: readonly QueryKey[];
+}
+
+/**
+ * Remove with a 10 s Undo (a delayed commit). The item hides at once and the
+ * toast offers Undo. The removal goes out when the toast closes: on timeout,
+ * on dismiss, or when another toast replaces it (one toast at a time, so a
+ * replaced Undo toast commits at once), or on `pagehide` (keepalive). If it
+ * fails, an error toast says so and the item comes back.
+ */
+export function useUndoableRemoval() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  return useCallback(
+    (removal: UndoableRemoval) => {
+      const { invalidate = [], ...pending } = removal;
+      // Inactive caches are dropped rather than marked stale: a page opened later
+      // must not show the removed item from its old cache while it refetches.
+      const refresh = () =>
+        Promise.all(
+          invalidate.map((queryKey) => {
+            queryClient.removeQueries({ queryKey, type: 'inactive' });
+            return queryClient.invalidateQueries({ queryKey });
+          })
+        );
+
+      addPendingRemoval(pending);
+      toast({
+        tone: 'info',
+        icon: Trash2,
+        title: `Removed ${removal.label}`,
+        body: 'Undo within 10 seconds',
+        durationMs: UNDO_MS,
+        action: { label: 'Undo', onClick: () => undoPendingRemoval(removal.key) },
+        onClose: async () => {
+          const outcome = await commitPendingRemoval(removal.key);
+          if (outcome.result === 'committed') {
+            await refresh().catch(() => undefined);
+            releasePendingRemoval(removal.key);
+          } else if (outcome.result === 'failed') {
+            const cause = outcome.error instanceof Error ? outcome.error.message : '';
+            toast({ tone: 'error', title: `Couldn’t remove ${removal.label}`, body: [cause, 'It’s back where it was.'].filter(Boolean).join(' · ') });
+            await refresh().catch(() => undefined);
+          }
+        },
+      });
+    },
+    [queryClient, toast]
+  );
+}

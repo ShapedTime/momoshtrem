@@ -278,8 +278,8 @@ func TestCatalogRepository_LibraryItems(t *testing.T) {
 		if err != nil || total != 8 || len(items) != 0 {
 			t.Fatalf("past the end = %d items, total %d, err %v", len(items), total, err)
 		}
-		if n := counter.n.Load() - before; n != 2 {
-			t.Errorf("queries past the end = %d, want 2", n)
+		if n := counter.n.Load() - before; n != 1 {
+			t.Errorf("queries past the end = %d, want 1", n)
 		}
 	})
 

@@ -1,0 +1,97 @@
+/* ==========================================================================
+   Library (/library, PLAN F7; #97).
+   Ported from docs/redesign/design-cinematic/css/screens/library.css. The
+   React parts live in components/library. Tokens only.
+   ========================================================================== */
+
+@layer components {
+  .lib-head { display: flex; flex-direction: column; gap: var(--sp-1); padding-top: calc(var(--sp-2) + env(safe-area-inset-top, 0px)); padding-bottom: var(--sp-4); }
+  @media (min-width: 1024px) { .lib-head { padding-top: var(--sp-10); padding-bottom: var(--sp-6); } }
+  .lib-head h1 { font-weight: var(--w-bold); }
+  .lib-head p { font-variant-numeric: tabular-nums; }
+  .lib-body { display: flex; flex-direction: column; gap: var(--sp-5); padding-bottom: var(--sp-10); }
+  @media (min-width: 1024px) { .lib-body { gap: var(--sp-6); } }
+
+  /* ---- Toolbar: search · filter chips · sort + layout ---------------------- */
+  .lib-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "search search" "chips chips" "count view"; gap: var(--sp-3); align-items: center; }
+  .lib-search { grid-area: search; min-width: 0; }
+  .lib-search input[type="search"]::-webkit-search-cancel-button { appearance: none; display: none; }
+  .lib-search .input-end .btn { color: var(--text-3); }
+  .lib-chips { grid-area: chips; }
+  .lib-chips .fchip svg { color: var(--st-review); }
+  .lib-chips .fchip--review[aria-pressed="false"] { border-color: var(--st-review-line); }
+  .lib-viewbar { grid-area: view; display: flex; align-items: center; gap: var(--sp-2); justify-self: end; min-width: 0; }
+  .lib-count { grid-area: count; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  @media (max-width: 359px) { .lib-count { visibility: hidden; } }
+  .lib-sort { position: relative; display: flex; align-items: center; min-width: 0; }
+  .lib-sort > svg { position: absolute; left: 12px; color: var(--text-3); pointer-events: none; }
+  .lib-sort select { padding-left: 36px; height: 44px; width: auto; min-width: 0; font-size: var(--t-small); font-weight: var(--w-medium); background-color: var(--surface-1); }
+  .lib-viewbar .seg button { min-width: 44px; padding: 0; }
+  .lib-tools--skel { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; overflow: hidden; }
+  @media (min-width: 640px) {
+    .lib-tools { grid-template-areas: "search view" "chips chips"; }
+    .lib-count { display: none; }
+    .lib-search { max-width: 420px; }
+    .lib-chips.fchips--scroll { flex-wrap: wrap; overflow: visible; margin-inline: 0; padding-inline: 0; }
+  }
+  @media (min-width: 1024px) {
+    .lib-tools { column-gap: var(--sp-4); }
+    .lib-search { max-width: 400px; }
+  }
+
+  /* ---- Grid card: title + status always visible (touch first) ---------------- */
+  .lib-grid { row-gap: var(--sp-6); }
+  @media (max-width: 359px) { .lib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); --col-gap: 12px; } }
+  @media (min-width: 1440px) { .lib-grid { --poster-min: 164px; } }
+  .libcard.has-review .media { box-shadow: 0 0 0 1.5px var(--st-review-line), var(--e-1); }
+  /* The watched bar: flush along the poster's bottom edge */
+  .libcard .media .progress { left: 0; right: 0; bottom: 0; height: 4px; border-radius: 0; background: rgb(8 9 13 / 0.6); }
+  .libcard .media .progress > span { background: var(--text-1); border-radius: 0 2px 2px 0; }
+  .libcard .meta { gap: 3px; }
+  .libcard .meta .status { font-size: 12px; line-height: 1.35; min-width: 0; }
+  @media (min-width: 1024px) { .libcard .meta .status, .libcard .meta .sub { font-size: var(--t-small); } }
+
+  /* Status line vocabulary */
+  .ls { display: inline-flex; align-items: flex-start; gap: 5px; font-weight: var(--w-medium); font-variant-numeric: tabular-nums; color: var(--text-2); min-width: 0; }
+  .ls svg { flex-shrink: 0; margin-top: 2px; }
+  .ls b { color: var(--text-1); font-weight: var(--w-semibold); }
+  .ls--ready, .ls--ready b { color: var(--st-ready); }
+  .ls--partial svg { color: var(--st-ready); }
+  .ls--dl { color: var(--st-downloading); }
+  .ls--missing { color: var(--st-missing); }
+
+  /* ---- List view ------------------------------------------------------------------ */
+  .lrows { display: flex; flex-direction: column; border-radius: var(--r-lg); background: var(--surface-1); border: 1px solid var(--line-1); overflow: hidden; }
+  .lrow { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "thumb title more" "thumb status more" "thumb watch more"; column-gap: var(--sp-3); row-gap: 4px; align-items: center; padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-3); }
+  .lrow + .lrow { border-top: 1px solid var(--line-1); }
+  .lrow-thumb { grid-area: thumb; align-self: start; }
+  .lrow-thumb .media { border-radius: var(--r-xs); }
+  .lrow-title { grid-area: title; display: flex; flex-direction: column; min-width: 0; }
+  .lrow-title .name { font-weight: var(--w-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); border-radius: var(--r-xs); }
+  .lrow-title .sub { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .lrow-status { grid-area: status; display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-2); font-size: var(--t-small); min-width: 0; }
+  .lrow-pills { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .lrow-watch { grid-area: watch; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .lrow-watch .progress { max-width: 220px; }
+  .lrow-size, .lrow-last { display: none; font-size: var(--t-small); color: var(--text-2); }
+  .lrow-more { grid-area: more; align-self: center; justify-self: center; }
+  .xs-inline { display: inline; }
+  .lrows-head { display: none; }
+  @media (min-width: 1024px) {
+    .lrows-head, .lrow { grid-template-columns: 44px minmax(0, 2fr) minmax(0, 1.6fr) minmax(0, 1.2fr) 96px 120px 44px; grid-template-areas: none; column-gap: var(--sp-5); }
+    .lrows-head { display: grid; padding: 0 var(--sp-2) var(--sp-2) var(--sp-4); font-size: var(--t-micro); letter-spacing: var(--tr-micro); text-transform: uppercase; font-weight: var(--w-semibold); color: var(--text-3); }
+    .lrow { padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4); min-height: 84px; transition: background-color var(--d-fast); }
+    .lrow:hover { background: var(--surface-2); }
+    .lrow > * { grid-area: auto; }
+    .lrow-thumb { align-self: center; }
+    .lrow-size, .lrow-last { display: block; font-variant-numeric: tabular-nums; }
+    .xs-inline { display: none; }
+  }
+
+  /* ---- Empty states and paging ----------------------------------------------------- */
+  .lib-first.empty { padding-top: var(--sp-16); max-width: 460px; }
+  .lib-first.empty .art { color: var(--surface-3); }
+  .lib-empty.empty { padding-top: var(--sp-10); }
+  .lib-empty.empty .art { color: var(--surface-3); }
+  .lib-more { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding-top: var(--sp-8); }
+}

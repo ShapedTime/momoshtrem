@@ -325,13 +325,25 @@ Migration numbers are reserved per task so parallel branches don't collide.
   - The subtitles that came with the file go: torrent rows, and HDRezka rows with their SRT files. Downloaded subtitles stay.
   - The torrent is released when nothing else uses it, but its data is never deleted.
   - The WebDAV tree is rebuilt, which renames a grouped entry's other episodes.
-- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=added|title|last_watched|size&q=&page=&page_size=` (50 by default, max 200) → `Paginated<LibraryItem>`. Replaces the per-item TMDB calls. Types: `web/src/lib/api/contract/library.ts`.
+- `GET /library?type=&status=ready|incomplete|needs_review|watching&sort=added|title|last_watched|size&q=&ids=&page=&page_size=` (50 by default, max 200) → `LibraryPage`. Replaces the per-item TMDB calls. Types: `web/src/lib/api/contract/library.ts`.
   ```
+  LibraryPage = Paginated<LibraryItem> + {
+    counts: {all, movie, tv, watching, ready, incomplete, needs_review},   // honour q and ids, never type or status
+    summary: {total, size_bytes, ready}                                    // the whole library, whatever the params
+  }
   LibraryItem { id, media_type, tmdb_id, title, year, poster_path, availability_stage,
                 episodes_total, episodes_ready, episodes_watched,   // shows; null for movies
-                needs_review, size_bytes, added_at, last_watched_at }
+                needs_review, size_bytes, added_at, last_watched_at,
+                runtime, resolution,                 // movies (minutes; the assigned file's); null for shows
+                webdav_path, webdav_url,             // as TitleLibraryState: null until something is assigned
+                review_job_id,                       // as TitleLibraryState (review rules)
+                download: {pct, info_hash} | null,   // while a file is being fetched; shows: combined, one of the hashes
+                missing: MissingRun | null,          // shows: the first frontier run, as TitleLibraryState.missing
+                streaming }                          // false until B6c (#99) knows the readers
   ```
-  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above; `last_watched_at` is null until B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`. `status=watching` stays empty until B5; until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
+  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above; `last_watched_at` is null until B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`. `status=watching` matches nothing until B5 (`counts.watching` is 0); until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
+  `ids=movie:603,tv:1399` looks titles up by TMDB id (Discover, Search and the palette mark library titles with it): comma-separated `media_type:tmdb_id`, at most 200, ANDed with the other filters; the answer is page 1 of all of them (`page_size` = the number of distinct ids; `page` and `page_size` are ignored). Malformed, or more than 200, is `400 bad_request`.
+  Cost: one query, whatever the params, including an empty page (it still carries `counts` and `summary`).
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
 - `GET /shows/{id}/episode-groups`: `{items: [{id, name, type, group_count, episode_count}]}`, TMDB episode groups for the ordering picker.
 - Errors: `502 tmdb_unavailable` when TMDB is down and nothing is cached (library titles fall back to stored metadata: no cast, crew, overview or similar titles); `503 unavailable` without a TMDB key, library titles included.

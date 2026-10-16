@@ -11,10 +11,28 @@
       "episodes_total": 38,
       "episodes_ready": 28,
       "episodes_watched": 0,
-      "needs_review": 0,
+      "needs_review": 2,
       "size_bytes": 28000,
       "added_at": "2026-09-01T10:00:00Z",
-      "last_watched_at": null
+      "last_watched_at": null,
+      "runtime": null,
+      "resolution": null,
+      "webdav_path": "/TV Shows/Frieren (2023)/",
+      "webdav_url": "https://momoshtrem.local:36911/TV%20Shows/Frieren%20%282023%29/",
+      "review_job_id": 101,
+      "download": {
+        "pct": 42,
+        "info_hash": "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00"
+      },
+      "missing": {
+        "season_number": 1,
+        "from": 29,
+        "to": 38,
+        "absolute_from": 29,
+        "absolute_to": 38,
+        "count": 10
+      },
+      "streaming": false
     },
     {
       "id": 7,
@@ -30,10 +48,56 @@
       "needs_review": 0,
       "size_bytes": 18400,
       "added_at": "2026-09-01T10:00:00Z",
-      "last_watched_at": null
+      "last_watched_at": null,
+      "runtime": 166,
+      "resolution": "2160p",
+      "webdav_path": "/Movies/Dune (2024)/Dune (2024).mkv",
+      "webdav_url": "https://momoshtrem.local:36911/Movies/Dune%20%282024%29/Dune%20%282024%29.mkv",
+      "review_job_id": null,
+      "download": null,
+      "missing": null,
+      "streaming": false
+    },
+    {
+      "id": 9,
+      "media_type": "movie",
+      "tmdb_id": 1054867,
+      "title": "One Battle After Another",
+      "year": 2025,
+      "poster_path": null,
+      "availability_stage": "needs_torrent",
+      "episodes_total": null,
+      "episodes_ready": null,
+      "episodes_watched": null,
+      "needs_review": 0,
+      "size_bytes": 0,
+      "added_at": "2026-09-01T10:00:00Z",
+      "last_watched_at": null,
+      "runtime": null,
+      "resolution": null,
+      "webdav_path": null,
+      "webdav_url": null,
+      "review_job_id": null,
+      "download": null,
+      "missing": null,
+      "streaming": false
     }
   ],
   "total": 51,
   "page": 2,
-  "page_size": 200
+  "page_size": 200,
+  "counts": {
+    "all": 51,
+    "movie": 20,
+    "tv": 31,
+    "watching": 0,
+    "ready": 40,
+    "incomplete": 11,
+    "needs_review": 2
+  },
+  "summary": {
+    "total": 60,
+    "size_bytes": 2000000000000,
+    "ready": 45
+  }
 }

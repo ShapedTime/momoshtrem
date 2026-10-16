@@ -119,6 +119,20 @@ function statusCode(status: number): string {
   }
 }
 
+/**
+ * Fire a request while the page unloads (`pagehide`), e.g. an Undo window's
+ * removal that hasn't been sent yet. The one place a raw fetch is allowed:
+ * the page is going away, so there's nobody to read an answer or redirect on
+ * a 401, and only `keepalive` lets the request outlive the page.
+ */
+export function apiKeepalive(input: string, method: 'DELETE' | 'POST'): void {
+  try {
+    void fetch(input, { method, keepalive: true, credentials: 'same-origin' }).catch(() => undefined);
+  } catch {
+    // The browser refused (e.g. over the keepalive quota): nothing more to do while unloading
+  }
+}
+
 /** Build a query string from defined params only. */
 export function toQuery(params: object): string {
   const search = new URLSearchParams();

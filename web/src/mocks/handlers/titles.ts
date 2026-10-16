@@ -18,9 +18,22 @@ let library: MockLibrary = seedLibrary();
 
 export const mockLibrary = () => library;
 
+/** A DELETE /movies|shows/{id} this page sent, with its `delete_data` (null when left out; #96). */
+export interface MockRemoval {
+  media_type: 'movie' | 'tv';
+  id: number;
+  delete_data: boolean | null;
+}
+
+let removals: MockRemoval[] = [];
+
+/** Tests: the removals sent so far, oldest first. */
+export const mockRemovals = (): readonly MockRemoval[] => removals;
+
 /** Tests: back to the seeded library. */
 export function resetMockLibrary(): void {
   library = seedLibrary();
+  removals = [];
 }
 
 const EPISODE_GROUPS: EpisodeGroup[] = [
@@ -75,10 +88,16 @@ export const titlesHandlers = [
       const added: AddTitleResult = { id: row.library_id, tmdb_id: entry.tmdb_id, title: entry.title, year: entry.year };
       return HttpResponse.json(added, { status: existing ? 200 : 201 });
     }),
-    http.delete(`*/api/${path}/:id`, ({ params }) => {
+    http.delete(`*/api/${path}/:id`, ({ params, request }) => {
+      // ?delete_data=true|false (#96): whether the title's downloaded data goes too
+      const deleteData = new URL(request.url).searchParams.get('delete_data');
+      if (deleteData !== null && deleteData !== 'true' && deleteData !== 'false') {
+        return apiError(400, 'bad_request', 'delete_data must be true or false.');
+      }
       const found = findByLibraryId(library, mediaType, Number(params.id));
       if (!found) return notFound();
       library.delete(found.key);
+      removals.push({ media_type: mediaType, id: found.row.library_id, delete_data: deleteData === null ? null : deleteData === 'true' });
       return noContent();
     }),
     http.post(`*/api/${path}/:id/refresh`, async ({ params }) => {

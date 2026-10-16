@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiJson } from '../client';
+import { apiJson, toQuery } from '../client';
 import type { AddTitleResult, EpisodeGroup, MediaType, SeasonDetail, ShowSettingsPatch, ShowTitle, Title } from '../contract';
 
 /** Title pages (PLAN §6 "Titles and library"; #4). */
@@ -11,16 +11,24 @@ export const titleKeys = {
   episodeGroups: (showId: number) => ['shows', showId, 'episode-groups'] as const,
 };
 
+export interface RemoveOptions {
+  /** Also delete the downloaded data of torrents no other title uses (#96). Unset: the backend's default (false). */
+  deleteData?: boolean;
+}
+
+/** `DELETE /movies/{id}` or `/shows/{id}`, with `?delete_data=` when chosen. */
+export function removeTitleUrl(mediaType: MediaType, libraryId: number, options: RemoveOptions = {}): string {
+  return `/api/${mediaType === 'movie' ? 'movies' : 'shows'}/${libraryId}${toQuery({ delete_data: options.deleteData })}`;
+}
+
 export const titlesApi = {
   get: (mediaType: MediaType, tmdbId: number) => apiJson<Title>(`/api/titles/${mediaType}/${tmdbId}`),
   season: (tmdbId: number, seasonNumber: number) => apiJson<SeasonDetail>(`/api/titles/tv/${tmdbId}/seasons/${seasonNumber}`),
   addMovie: (tmdbId: number) => apiJson<AddTitleResult>('/api/movies', { method: 'POST', json: { tmdb_id: tmdbId } }),
   addShow: (tmdbId: number) => apiJson<AddTitleResult>('/api/shows', { method: 'POST', json: { tmdb_id: tmdbId } }),
   /** Removes the title, its subtitles and the torrents nothing else uses; deleteData also deletes their data (B6). */
-  removeMovie: (movieId: number, deleteData = false) =>
-    apiJson<void>(`/api/movies/${movieId}${deleteData ? '?delete_data=true' : ''}`, { method: 'DELETE' }),
-  removeShow: (showId: number, deleteData = false) =>
-    apiJson<void>(`/api/shows/${showId}${deleteData ? '?delete_data=true' : ''}`, { method: 'DELETE' }),
+  removeMovie: (movieId: number, options?: RemoveOptions) => apiJson<void>(removeTitleUrl('movie', movieId, options), { method: 'DELETE' }),
+  removeShow: (showId: number, options?: RemoveOptions) => apiJson<void>(removeTitleUrl('tv', showId, options), { method: 'DELETE' }),
   /** The answer is informational: refetch the title afterwards. */
   refreshMovie: (movieId: number) => apiJson<void>(`/api/movies/${movieId}/refresh`, { method: 'POST' }),
   refreshShow: (showId: number) => apiJson<void>(`/api/shows/${showId}/refresh`, { method: 'POST' }),

@@ -6,6 +6,7 @@ import {
   askStream,
   hdrezkaApi,
   libraryApi,
+  libraryIds,
   parseSseFrame,
   recApi,
   searchApi,
@@ -19,6 +20,7 @@ import {
 import type { AskEvent } from '@/lib/api/contract';
 import { setMockScenario } from '@/mocks/scenario';
 import { episodeId } from '@/mocks/fixtures/titles';
+import { mockRemovals } from '@/mocks/handlers/titles';
 
 // The endpoint modules call relative /api/* URLs, as the browser does; resolve
 // them against a base. Wrap the fetch MSW installs on listen(), not the original.
@@ -117,6 +119,68 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     expect(events.map((e) => e.event)).toEqual(['status', 'status', 'item', 'text', 'text', 'done']);
     const done = events.at(-1);
     expect(done?.event === 'done' && done.data.refinements).toContain('lighter');
+  });
+});
+
+describe('GET /library (#97)', () => {
+  it('carries counts and the summary, and every item the card needs', async () => {
+    const page = await libraryApi.list();
+    expect(page.counts).toEqual({ all: 9, movie: 3, tv: 6, watching: 0, ready: 5, incomplete: 4, needs_review: 3 });
+    expect(page.summary).toMatchObject({ total: 9, ready: 5 });
+    expect(page.items.map((item) => item.title)[0]).toBe('Interstellar'); // newest first
+    const byTitle = new Map(page.items.map((item) => [item.title, item]));
+    expect(byTitle.get('Interstellar')).toMatchObject({ runtime: 169, resolution: '2160p', download: { pct: 42, info_hash: expect.any(String) }, streaming: false });
+    expect(byTitle.get('One Battle After Another')).toMatchObject({ availability_stage: 'needs_torrent', webdav_path: null, size_bytes: 0 });
+    expect(byTitle.get('Frieren: Beyond Journey’s End')).toMatchObject({
+      needs_review: 2,
+      review_job_id: 101,
+      missing: { season_number: 1, from: 29, to: 38, count: 10 },
+      webdav_url: expect.stringContaining('/TV%20Shows/'),
+    });
+    expect(byTitle.get('The Studio')).toMatchObject({ streaming: true, download: { pct: expect.any(Number) } });
+  });
+
+  it('filters, sorts and pages; the counts honour only the search', async () => {
+    const shows = await libraryApi.list({ type: 'tv', status: 'needs_review', sort: 'title' });
+    expect(shows.items.map((item) => item.title)).toEqual(['Doctor Who', 'Frieren: Beyond Journey’s End', 'One Piece']);
+    expect(shows.counts.all).toBe(9);
+    const searched = await libraryApi.list({ q: 'one' });
+    expect(searched.items.map((item) => item.title).sort()).toEqual(['One Battle After Another', 'One Piece']);
+    expect(searched.counts).toMatchObject({ all: 2, movie: 1, tv: 1 });
+    expect(searched.summary.total).toBe(9);
+    const second = await libraryApi.list({ sort: 'title', page: 2, page_size: 4 });
+    expect(second).toMatchObject({ page: 2, page_size: 4, total: 9 });
+    expect(second.items).toHaveLength(4);
+    expect((await libraryApi.list({ status: 'watching' })).items).toEqual([]);
+  });
+
+  it('looks titles up by ids', async () => {
+    const page = await libraryApi.list({ ids: libraryIds([{ media_type: 'movie', tmdb_id: 693134 }, { media_type: 'tv', tmdb_id: 209867 }, { media_type: 'movie', tmdb_id: 666277 }]) });
+    expect(page.items.map((item) => item.tmdb_id).sort()).toEqual([209867, 693134]);
+    expect(page).toMatchObject({ page: 1, page_size: 3, total: 2 });
+  });
+
+  it.each([
+    ['an unknown type', { type: 'music' }],
+    ['an unknown status', { status: 'done' }],
+    ['an unknown sort', { sort: 'rating' }],
+    ['page 0', { page: 0 }],
+    ['malformed ids', { ids: '603' }],
+    ['201 ids', { ids: Array.from({ length: 201 }, (_, i) => `tv:${i + 1}`).join(',') }],
+  ])('answers 400 bad_request for %s', async (_name, params) => {
+    await expect(libraryApi.list(params as never)).rejects.toMatchObject({ status: 400, code: 'bad_request' });
+  });
+
+  it('removes with ?delete_data=, which it records', async () => {
+    await titlesApi.removeMovie(2, { deleteData: true });
+    await titlesApi.removeShow(1, { deleteData: false });
+    await titlesApi.removeMovie(1);
+    expect(mockRemovals()).toEqual([
+      { media_type: 'movie', id: 2, delete_data: true },
+      { media_type: 'tv', id: 1, delete_data: false },
+      { media_type: 'movie', id: 1, delete_data: null },
+    ]);
+    expect((await libraryApi.list()).summary.total).toBe(6);
   });
 });
 

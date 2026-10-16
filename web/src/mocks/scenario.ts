@@ -17,6 +17,10 @@
  * - `hdrezka-premium`: every voice-over needs Premium; assigning answers 409 `premium_only`.
  * - `hdrezka-partial`: assigning episodes fails for every third one of a request (`timeout` per
  *   item), once: retrying those gets them through.
+ * - `library-empty`: /library answers an empty library (the first-time state).
+ * - `library-reviewed`: /library answers with nothing under mapping review.
+ * - `library-error`: /library answers 500.
+ * - `library-loading`: /library never answers (the loading state).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -31,7 +35,11 @@ export type MockScenario =
   | 'hdrezka-blocked'
   | 'hdrezka-down'
   | 'hdrezka-premium'
-  | 'hdrezka-partial';
+  | 'hdrezka-partial'
+  | 'library-empty'
+  | 'library-reviewed'
+  | 'library-error'
+  | 'library-loading';
 
 let override: MockScenario | null = null;
 

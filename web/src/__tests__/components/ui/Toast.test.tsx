@@ -64,6 +64,44 @@ describe('Toast', () => {
     expect(screen.getByText('Second')).toBeInTheDocument();
   });
 
+  it('stays for its own duration', () => {
+    renderWithToast({ tone: 'info', title: 'Removed Dune', durationMs: 10_000 });
+    act(() => jest.advanceTimersByTime(9_000));
+    expect(screen.getByText('Removed Dune')).toBeInTheDocument();
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(screen.queryByText('Removed Dune')).not.toBeInTheDocument();
+  });
+
+  it('runs onClose once, however the toast goes', () => {
+    const closes: string[] = [];
+    function Many() {
+      const { toast } = useToast();
+      const show = (title: string, extra: Partial<ToastOptions> = {}) => toast({ title, onClose: () => closes.push(title), ...extra });
+      return (
+        <>
+          <button onClick={() => show('Timed')}>timed</button>
+          <button onClick={() => show('Dismissed')}>dismissed</button>
+          <button onClick={() => show('Acted', { action: { label: 'Undo', onClick: () => closes.push('undo clicked') } })}>acted</button>
+          <button onClick={() => show('Replaced')}>replaced</button>
+        </>
+      );
+    }
+    render(
+      <ToastProvider>
+        <Many />
+      </ToastProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'timed' }));
+    act(() => jest.advanceTimersByTime(5000));
+    fireEvent.click(screen.getByRole('button', { name: 'dismissed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    fireEvent.click(screen.getByRole('button', { name: 'acted' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    fireEvent.click(screen.getByRole('button', { name: 'replaced' }));
+    fireEvent.click(screen.getByRole('button', { name: 'timed' }));
+    expect(closes).toEqual(['Timed', 'Dismissed', 'undo clicked', 'Acted', 'Replaced']);
+  });
+
   it('throws outside a provider', () => {
     const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => render(<Trigger options={{ title: 'x' }} />)).toThrow('useToast must be used within a ToastProvider');
