@@ -52,12 +52,30 @@ func TestParseLabelled(t *testing.T) {
 # labels: {"slreq":"s2.1"}
 #	0x6	github.com/shapedtime/momoshtrem/internal/vfs.(*TorrentFile).readContext.func1+0x1	/x/torrent_file.go:1
 
+1 @ 0x7 0x8
+# labels: {"slreq":"s1.9"}
+#	0x7	runtime.gopark+0x1	/go/src/runtime/proc.go:1
+#	0x8	time.Sleep+0x1	/go/src/runtime/time.go:1
+
 `
 	own, others := parseLabelled(profile, "slreq", func(id string) bool { return strings.HasPrefix(id, "s1.") })
 	if others != 3 {
-		t.Errorf("others = %d, want 3", others)
+		t.Errorf("others = %d, want 3 (the anacrolix connection)", others)
 	}
-	if len(own) != 1 || own[0].Request != "s1.7" || own[0].Count != 2 || !strings.Contains(own[0].Stack, "readContext") {
-		t.Errorf("own = %+v, want s1.7's two reads", own)
+	if len(own) != 2 || own[0].Request != "s1.7" || own[0].Count != 2 || !strings.Contains(own[0].Stack, "readContext") ||
+		own[1].Request != "s1.9" || own[1].Count != 1 {
+		t.Errorf("own = %+v, want s1.7's two reads and s1.9's lone time.Sleep", own)
+	}
+}
+
+func TestRootFunc(t *testing.T) {
+	rec := "2 @ 0x1 0x2\n# labels: {\"slreq\":\"s1.1\"}\n" +
+		"#\t0x1\tinternal/poll.runtime_pollWait+0x9f\t/go/src/runtime/netpoll.go:351\n" +
+		"#\t0x2\tgithub.com/anacrolix/torrent.(*Client).outgoingConnection+0x5c\t/x/client.go:9"
+	if got, want := rootFunc(rec), "github.com/anacrolix/torrent.(*Client).outgoingConnection+0x5c"; got != want {
+		t.Errorf("rootFunc = %q, want %q", got, want)
+	}
+	if got := rootFunc("1 @ 0x1"); got != "" {
+		t.Errorf("rootFunc of a record without frames = %q", got)
 	}
 }

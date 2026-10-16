@@ -74,6 +74,24 @@ func TestRangeResponse(t *testing.T) {
 	}
 }
 
+// A torrent loaded before the PROPFIND makes the probe inconclusive, and
+// it says so rather than "no torrent loaded".
+func TestF3Result_String(t *testing.T) {
+	tests := []struct {
+		r    checks.F3Result
+		want string
+	}{
+		{checks.F3Result{Dir: "/d", Entries: 2, Loaded: []string{"aa"}}, "torrent loaded by PROPFIND (Depth 1 of /d, 2 entries): aa"},
+		{checks.F3Result{Dir: "/d", Entries: 2, Before: []string{"aa"}}, "already loaded before the PROPFIND (Depth 1 of /d, 2 entries): aa"},
+		{checks.F3Result{Dir: "/d", Entries: 2}, "no torrent loaded by PROPFIND (Depth 1 of /d, 2 entries)"},
+	}
+	for _, tt := range tests {
+		if got := tt.r.String(); got != tt.want {
+			t.Errorf("String = %q, want %q", got, tt.want)
+		}
+	}
+}
+
 func TestPanics(t *testing.T) {
 	logged := []string{
 		"http: superfluous response.WriteHeader call from x",

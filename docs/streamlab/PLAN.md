@@ -62,6 +62,7 @@ Most of these come from reading the code during planning; F2 and F3 were already
 | F10 | `detectFormat` opens a second reader with no timeout. | `streaming/reader.go:263` |
 | F11 | The filecache LRU can evict pieces anacrolix still believes are complete. The Bolt piece-completion store is created but unused. | `torrent/client.go:InitStorage` |
 | F12 | `seekAndReadAtLeast` (the WebDAV `ReadAt` path) and `readWithTimeout` (`Read`) read under `context.Background()` + `read_timeout`, not the request context. If a client aborts while a read is blocked (an Infuse seek), the handler, its `PriorityReader` and its Now window live on for up to 120 s, competing with the new position. | `vfs/torrent_file.go:364,288` |
+| F13 | `NewPriorityReader` runs `InitialPrioritize` for every new reader. That sets the header and footer pieces to explicit High file-wide, which overwrites another open reader's Now/Readahead window. It's F6's mirror image, on open instead of close (#209). | `streaming/reader.go:98`, `streaming/prioritizer.go:InitialPrioritize` |
 
 (F8 and F9 from planning were folded into F12 and the HDRezka scenarios.)
 
@@ -115,7 +116,7 @@ momoshtrem/internal/streamlab/
 **Stack.** It is wired exactly as `cmd/momoshtrem/main.go` does:
 1. `InitStorage`, then the leecher.
 2. `NewActivityManager` → `NewMetainfoStore` → `NewService(WithMetainfoStore, WithPieceStorage, WithSpeedSampler)`.
-3. `NewStaticFS` → `SetTorrentService`, `SetReaderTracker`, `SetSessions(NewRegistry(WithClock))`, `SetMetrics(metrics.New(perRunRegistry))`, `SetRemoteSource`.
+3. `NewStaticFS` → `SetTorrentService`, `SetReaderTracker`, `SetSessions(NewRegistry(WithClock))`, `SetMetrics(metrics.New(perRunRegistry))`, `SetRemoteSource` (it comes with S6, #177).
 4. `webdav.NewServer(...)`, `SetMetrics` (the same metrics; without it, `requests_inflight` stays 0 and the quiescence check passes trivially), then `.Handler()`.
 
 The config is `config.DefaultConfig()` with an optional `--config prod.yaml` overlaid. A fingerprint of the effective config goes into every report.
@@ -158,7 +159,7 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 |---|---|
 | Integrity | Zero mismatched bytes. |
 | HTTP | A Range GET answers 206 with the right `Content-Range` and `Content-Length`, and no handler panics. |
-| Quiescence | After the last request, within the settle time: `ReaderTracker.Count()==0`; the `open_files`, `blocked_reads` and `requests_inflight` gauges are 0; no `slreq`-labelled goroutines remain; `sessions.Count()==0` after skewing the session clock 31 s; zero open CDN bodies. This is the leak signal that matters, because production never tears down. |
+| Quiescence | After the last request, within the settle time: `ReaderTracker.Count()==0`; the `open_files`, `blocked_reads` and `requests_inflight` gauges are 0; no `slreq`-labelled goroutine running momoshtrem code, or started by momoshtrem on a library function (anacrolix-rooted ones a request started, such as peer connections and hashers, are reported as inherited); `sessions.Count()==0` after skewing the session clock 31 s; zero open CDN bodies. This is the leak signal that matters, because production never tears down. |
 | Priority invariants | Stated over the **effective** priority of incomplete pieces while downloads are allowed: `Piece.State()` can't read the explicit priority. During playback, `[pos, pos+urgent)` is Now. `residual_download_bytes` measures what downloads after the last close. |
 
 **Watchdog.** If requests are active, no fault is running, and the client has made no progress for N s, it dumps:

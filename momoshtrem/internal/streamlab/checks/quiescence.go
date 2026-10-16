@@ -45,15 +45,16 @@ type QuiescenceResult struct {
 	// OpenFiles, BlockedReads and InFlight are the gauges, from the
 	// stack's registry (InFlight summed over methods).
 	OpenFiles, BlockedReads, InFlight float64
-	// Leaked are the goroutines that carry a request's label and run
-	// momoshtrem code: a read, a format detection or a handler that
-	// outlived its request. Each entry is a stack, with its count and
+	// Leaked are the goroutines that carry a request's label and aren't
+	// Inherited: a read, a format detection or a handler that outlived its
+	// request, or a goroutine one of them started on a library function
+	// (go io.Copy, go t.Drop). Each entry is a stack, with its count and
 	// request.
 	Leaked []LabelledGoroutines
-	// Inherited counts the labelled goroutines that run only library code:
-	// anacrolix's, such as a peer connection a request dialed and the
-	// piece hashers that connection started. They live with the torrent,
-	// so they aren't leaks.
+	// Inherited counts the labelled goroutines that run no momoshtrem code
+	// and started in anacrolix code: a peer connection a request dialed,
+	// the piece hashers that connection started. They live with the
+	// torrent, so they aren't leaks.
 	Inherited int
 	// Sessions are the streaming sessions left after the sessions clock
 	// was skewed by SessionSkew: those with a read still in flight.
@@ -145,13 +146,17 @@ func Value(g prometheus.Gatherer, name string) float64 {
 // ownCode marks a stack frame of momoshtrem (the lab included).
 const ownCode = "github.com/shapedtime/momoshtrem/"
 
+// anacrolixCode marks a function of anacrolix's.
+const anacrolixCode = "github.com/anacrolix/"
+
 // labelledGoroutines reads the goroutine profile and returns the
-// goroutines labelled with key that run momoshtrem code, and how many
-// labelled ones run only other code. A goroutine's stack starts at the
-// function it was started with, so anacrolix's goroutines, started by
-// anacrolix even when a request's goroutine triggered them, show no
-// momoshtrem frame. Only labels mine accepts count: the requests of one
-// stack.
+// goroutines labelled with key, split in two. Inherited ones (others, a
+// count) run no momoshtrem code and started in anacrolix code: anacrolix's
+// own goroutines, which a request's goroutine triggered and which live
+// with the torrent. A goroutine's stack starts at the function it was
+// started with, so those show no momoshtrem frame. Every other one is own:
+// it runs momoshtrem code, or momoshtrem started it on a library function
+// (go io.Copy). Only labels mine accepts count: the requests of one stack.
 func labelledGoroutines(key string, mine func(string) bool) (own []LabelledGoroutines, others int) {
 	var buf bytes.Buffer
 	if err := pprof.Lookup("goroutine").WriteTo(&buf, 1); err != nil {
@@ -191,11 +196,27 @@ func parseLabelled(profile, key string, mine func(string) bool) (own []LabelledG
 			continue
 		}
 		n, _ := strconv.Atoi(m[1])
-		if strings.Contains(rec, ownCode) {
+		if strings.Contains(rec, ownCode) || !strings.HasPrefix(rootFunc(rec), anacrolixCode) {
 			own = append(own, LabelledGoroutines{Request: req, Count: n, Stack: rec})
 		} else {
 			others += n
 		}
 	}
 	return own, others
+}
+
+// rootFunc returns the function a debug=1 record's goroutines started
+// with: the one in its last frame line, "#\t0x…\t<func>+0x…\t<file>:<line>".
+// "" when the record has no frame.
+func rootFunc(rec string) string {
+	lines := strings.Split(rec, "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, "#\t") {
+		return ""
+	}
+	fields := strings.Split(last, "\t")
+	if len(fields) < 3 {
+		return ""
+	}
+	return fields[2]
 }

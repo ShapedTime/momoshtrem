@@ -30,12 +30,21 @@ type F3Result struct {
 // torrent's file adds the torrent (vfs.LibraryFS.openTorrentFile).
 func (r F3Result) LoadedByPropfind() bool { return len(r.Loaded) > 0 }
 
+// Conclusive reports whether the probe could see a load: no torrent was
+// loaded before the PROPFIND. One that was can't be loaded again, so a
+// PROPFIND that loaded nothing proves nothing then (not a fix of F3).
+func (r F3Result) Conclusive() bool { return len(r.Before) == 0 }
+
 func (r F3Result) String() string {
-	if r.LoadedByPropfind() {
-		return fmt.Sprintf("torrent loaded by PROPFIND (Depth 1 of %s, %d entries): %s",
-			r.Dir, r.Entries, strings.Join(r.Loaded, ", "))
+	where := fmt.Sprintf("Depth 1 of %s, %d entries", r.Dir, r.Entries)
+	switch {
+	case r.LoadedByPropfind():
+		return fmt.Sprintf("torrent loaded by PROPFIND (%s): %s", where, strings.Join(r.Loaded, ", "))
+	case !r.Conclusive():
+		return fmt.Sprintf("already loaded before the PROPFIND (%s): %s", where, strings.Join(r.Before, ", "))
+	default:
+		return fmt.Sprintf("no torrent loaded by PROPFIND (%s)", where)
 	}
-	return fmt.Sprintf("no torrent loaded by PROPFIND (Depth 1 of %s, %d entries)", r.Dir, r.Entries)
 }
 
 // F3 lists dir (Depth 1) through conn, as a player browsing a movie or a

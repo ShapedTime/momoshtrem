@@ -5,9 +5,25 @@
 //
 // It differs from production only where the lab must (PLAN D1, D3): the
 // client's loopback overrides (swarm.Loopback), a static tree in place of
-// the database's, a temp folder, metrics always on in a registry of its
-// own, a sessions clock the checks can skew, and the lab middleware
-// outside the WebDAV handler.
+// the database's, a temp folder, a sessions clock the checks can skew, the
+// lab middleware outside the WebDAV handler, and metrics always on, in a
+// registry of its own.
+//
+// Metrics change the copy path. With them, the WebDAV metrics middleware
+// wraps the ResponseWriter in a type that hides http.response's ReadFrom,
+// so http.ServeContent copies in 32 KiB reads from the first byte; without
+// them the first read is 512 bytes (#210). Production runs with metrics on
+// (METRICS_ENABLED), but the default is off.
+//
+// What main.go wires and the lab leaves out, and why:
+//   - SetSubtitleRepository: it needs the database.
+//   - SetRemoteSource: HDRezka streams come with S6 (#177).
+//   - SetCacheDir: the tree cache only applies to the database's tree.
+//   - The DHT item store: without DHT it's never used.
+//   - sessions.WithItems: it resolves items from the database; the lab's
+//     sessions have none.
+//   - The Go, process and torrent collectors: the lab serves no /metrics,
+//     and the checks read only the streaming metrics.
 package stack
 
 import (
@@ -122,7 +138,9 @@ type Stack struct {
 // store, the torrent service and its speed sampler, then the VFS with the
 // service, the reader tracker, the sessions and the metrics, and the
 // WebDAV server with the same metrics on an http.Server with no timeouts.
-// The DHT item store is left out: without DHT it's never used.
+// What it leaves out (subtitles, HDRezka, the tree cache, the DHT item
+// store, session items, the extra collectors) is listed, with why, in the
+// package doc.
 func Start(opts Options) (_ *Stack, err error) {
 	id := fmt.Sprintf("s%d", stacks.Add(1))
 	s := &Stack{ID: id, Requests: &RequestLog{prefix: id + "."}, errs: &errorLog{}}
@@ -265,6 +283,10 @@ func (s *Stack) Close() error {
 		var errs []error
 		if s.server != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			// A Shutdown that times out isn't an error: a request can still
+			// be blocked in a read up to the read timeout (a #195 stall the
+			// run skipped, F12), and a skip mustn't turn into a failed
+			// cleanup. Close drops what's left.
 			if err := s.server.Shutdown(ctx); err != nil {
 				errs = append(errs, s.server.Close())
 			}

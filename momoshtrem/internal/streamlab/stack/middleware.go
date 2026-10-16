@@ -120,19 +120,20 @@ func (l *RequestLog) end(req *Request, w *recorder, aborted bool) {
 }
 
 // middleware runs each request under the RequestLabel pprof label and
-// records it in log.
+// records it in log. A handler that panics is recorded as done too: the
+// server recovers the panic and logs it (stack.ServerErrors).
 func middleware(log *RequestLog, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req := log.begin(r)
 		rec := &recorder{ResponseWriter: w}
-		var aborted bool
-		pprof.Do(r.Context(), pprof.Labels(RequestLabel, req.ID), func(ctx context.Context) {
-			next.ServeHTTP(rec, r.WithContext(ctx))
+		defer func() {
 			// The server cancels the context when the client closes the
 			// connection, and only after the handler returns otherwise.
-			aborted = ctx.Err() != nil
+			log.end(req, rec, r.Context().Err() != nil)
+		}()
+		pprof.Do(r.Context(), pprof.Labels(RequestLabel, req.ID), func(ctx context.Context) {
+			next.ServeHTTP(rec, r.WithContext(ctx))
 		})
-		log.end(req, rec, aborted)
 	})
 }
 

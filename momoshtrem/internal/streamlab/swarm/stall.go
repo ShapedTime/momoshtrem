@@ -9,10 +9,13 @@ const StallIssue = "#195"
 
 // Stalled reports whether a read that timed out on piece of t is the known
 // stall (StallIssue): the leecher is connected to a seeder, and the piece
-// is wanted now (anacrolix's effective priority Now, which counts its own
-// readers and is None while downloads are disallowed) but incomplete. A
-// torrent left idle or paused, or with no seeder connected, isn't the
-// known stall.
+// is wanted but incomplete. Wanted is any effective priority but None: a
+// reader still open holds it at Now, and once the reader has closed (a
+// WebDAV handler closes its file before net/http ends the truncated
+// response) the prioritizer's explicit priority, High say, remains. The
+// effective priority is None while downloads are disallowed, so a torrent
+// left idle or paused isn't the known stall, and neither is one with no
+// seeder connected.
 //
 // It's an expected failure (PLAN D6) until the issue is fixed; S4's
 // known-issue registry (#175) replaces this.
@@ -21,5 +24,5 @@ func Stalled(t *atorrent.Torrent, piece int) bool {
 		return false
 	}
 	ps := t.PieceState(piece)
-	return ps.Priority == atorrent.PiecePriorityNow && !ps.Complete
+	return ps.Priority != atorrent.PiecePriorityNone && !ps.Complete
 }

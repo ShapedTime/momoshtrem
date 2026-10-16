@@ -25,7 +25,7 @@ import (
 // done nothing may be left behind. Nothing is timed tightly: the machine
 // may be loaded.
 //
-// A read that stalls with the seeder connected and its piece wanted now is
+// A read that times out with the seeder connected and its piece wanted is
 // a known issue (swarm.StallIssue): the run is skipped with the client's
 // status rather than failed.
 
@@ -145,6 +145,7 @@ func (lr labRun) run(t *testing.T) {
 			resp.StatusCode, resp.ContentLength, resp.Header.Get("Accept-Ranges"), f.Size)
 	}
 	const probe = 64 << 10
+	p.started()
 	footer := make(chan probeResult, 1)
 	go func() {
 		r, body, err := b.Probe(ctx, path, f.Size-probe, probe)
@@ -177,8 +178,14 @@ func (lr labRun) run(t *testing.T) {
 	if err := p.integrity.Result().Err(); err != nil {
 		t.Error(err)
 	}
-	if panics := checks.Panics(s.ServerErrors()); len(panics) > 0 {
+	serverErrors := s.ServerErrors()
+	if panics := checks.Panics(serverErrors); len(panics) > 0 {
 		t.Errorf("handlers panicked:\n%s", strings.Join(panics, "\n"))
+	}
+	for _, e := range serverErrors {
+		if len(checks.Panics([]string{e})) == 0 {
+			t.Logf("server error log: %s", e)
+		}
 	}
 	reqs := s.Requests.Requests()
 	for _, r := range reqs {
@@ -210,7 +217,13 @@ type player struct {
 	hash      string
 	integrity *checks.Integrity
 	buf       []byte
+	// timeouts is read_timeouts_total when the current probes or play
+	// started: a break is the known stall only if a read timed out since.
+	timeouts float64
 }
+
+// started notes the server's read timeouts as requests start.
+func (p *player) started() { p.timeouts = checks.Value(p.s.Registry, readTimeouts) }
 
 // size is the file's size.
 func (p *player) size() int64 { return p.layout.Files()[p.file].Size }
@@ -233,6 +246,7 @@ func (p *player) probed(off, n int64, r probeResult) {
 // play starts playing at from on conn and checks the answer's headers.
 func (p *player) play(conn *client.Conn, from int64) *client.Stream {
 	p.t.Helper()
+	p.started()
 	st, err := conn.Play(context.Background(), p.path, from)
 	if err != nil {
 		p.t.Fatalf("play from %d: %v", from, err)
@@ -273,11 +287,11 @@ func (p *player) fail(off int64, err error) {
 }
 
 // knownStall reports whether a read that broke at the file offset off is
-// the known stall: a server-side read timed out (the server ends the
-// response early then) with the seeder connected and the piece at off
-// wanted (swarm.Stalled).
+// the known stall: a server-side read timed out since the request started
+// (the server ends the response early then), with the seeder connected and
+// the piece at off wanted (swarm.Stalled).
 func (p *player) knownStall(off int64) bool {
-	if checks.Value(p.s.Registry, readTimeouts) == 0 {
+	if checks.Value(p.s.Registry, readTimeouts) <= p.timeouts {
 		return false
 	}
 	tor, ok := p.s.Torrent(p.hash)
