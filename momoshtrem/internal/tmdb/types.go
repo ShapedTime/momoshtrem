@@ -168,20 +168,21 @@ func (v Videos) TrailerKey() string {
 
 // ListItem is a movie or show in a list (recommendations, similar).
 type ListItem struct {
-	ID               int     `json:"id"`
-	MediaType        string  `json:"media_type,omitempty"`
-	Title            string  `json:"title,omitempty"` // Movies
-	Name             string  `json:"name,omitempty"`  // TV
-	OriginalLanguage string  `json:"original_language"`
-	Overview         string  `json:"overview"`
-	PosterPath       string  `json:"poster_path"`
-	BackdropPath     string  `json:"backdrop_path"`
-	ReleaseDate      string  `json:"release_date,omitempty"`   // Movies
-	FirstAirDate     string  `json:"first_air_date,omitempty"` // TV
-	GenreIDs         []int   `json:"genre_ids"`
-	VoteAverage      float64 `json:"vote_average"`
-	VoteCount        int     `json:"vote_count"`
-	Popularity       float64 `json:"popularity"`
+	ID               int      `json:"id"`
+	MediaType        string   `json:"media_type,omitempty"`
+	Title            string   `json:"title,omitempty"` // Movies
+	Name             string   `json:"name,omitempty"`  // TV
+	OriginalLanguage string   `json:"original_language"`
+	OriginCountry    []string `json:"origin_country,omitempty"` // TV
+	Overview         string   `json:"overview"`
+	PosterPath       string   `json:"poster_path"`
+	BackdropPath     string   `json:"backdrop_path"`
+	ReleaseDate      string   `json:"release_date,omitempty"`   // Movies
+	FirstAirDate     string   `json:"first_air_date,omitempty"` // TV
+	GenreIDs         []int    `json:"genre_ids"`
+	VoteAverage      float64  `json:"vote_average"`
+	VoteCount        int      `json:"vote_count"`
+	Popularity       float64  `json:"popularity"`
 }
 
 // DisplayTitle returns the movie title or show name.
