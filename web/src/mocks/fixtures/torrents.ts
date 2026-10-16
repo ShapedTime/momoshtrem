@@ -8,6 +8,8 @@ import type {
   TorrentState,
 } from '@/lib/api/contract';
 import { iso } from './catalog';
+import { downloadsUsage, SEED_USAGE, seededTorrentShare } from './downloads';
+import { CACHE_FILLED_BYTES, MOCK_DISK, MOCK_STORAGE, mockStorageDocument, type StorageDocument, type StorageUsage, storageView } from './settings';
 import { episodeIdFor, SHOWS } from './title-seeds';
 
 const SEVERANCE_HASH = 'b2c3d4e5f60718293a4b5c6d7e8f9012345678a1';
@@ -80,14 +82,22 @@ const NOT_LOADED = {
   last_active_at: null,
 } as const;
 
+/** A torrent before the downloads (#77) are joined in. */
+type BaseTorrent = Omit<TorrentListItem, 'wanted' | 'holds'>;
+
 /**
  * GET /torrents (PLAN §6 "Torrents and activity (B6)"), in the order the
  * backend sorts them: streaming, two downloading (Interstellar with few
  * seeders), paused, then idle ones that are loaded and complete, loaded with
  * nothing referencing them (an Inspect dry run), known only to an open mapping
  * job, and not loaded at all.
+ *
+ * `wanted` and `holds` come from the seeded downloads (fixtures/downloads.ts):
+ * Interstellar is kept and downloading, One Piece #1100 is kept and paused with
+ * its torrent, and Bluey's season 3 is kept and on disk. Frieren's S02 torrent
+ * downloads with nothing wanting it: bytes still arriving (`download_bps > 0`).
  */
-export const TORRENTS: TorrentListItem[] = [
+const BASE_TORRENTS: BaseTorrent[] = [
   {
     info_hash: SEVERANCE_HASH,
     name: SEVERANCE_RELEASE,
@@ -229,6 +239,8 @@ export const TORRENTS: TorrentListItem[] = [
   },
 ];
 
+export const TORRENTS: TorrentListItem[] = BASE_TORRENTS.map((t) => ({ ...t, ...seededTorrentShare(t) }));
+
 /** A minute of totals, oldest first, every 2 s: a download ramping up. */
 const HISTORY_DOWN = Array.from({ length: 30 }, (_, i) => Math.round(6_400_000 * Math.min(1, (i + 1) / 20)));
 const HISTORY_UP = Array.from({ length: 30 }, (_, i) => Math.round(1_620_000 * Math.min(1, (i + 4) / 24)));
@@ -236,9 +248,14 @@ const HISTORY_UP = Array.from({ length: 30 }, (_, i) => Math.round(1_620_000 * M
 /**
  * GET /torrents/summary over `items` (the mock's current torrents). Its streaming is every
  * torrent's sessions plus the HDRezka one, the most recently read first: "Streaming now"
- * reads streaming[0].
+ * reads streaming[0]. The disk is the storage mock's (fixtures/settings.ts): the cache's
+ * fill, the cap it applies now, and what downloads pin (#77).
  */
-export function torrentsSummary(items: TorrentListItem[]): TorrentsSummary {
+export function torrentsSummary(
+  items: TorrentListItem[],
+  usage: StorageUsage = downloadsUsage(),
+  storage: StorageDocument = mockStorageDocument()
+): TorrentsSummary {
   const counts: Record<TorrentState, number> = { streaming: 0, downloading: 0, paused: 0, idle: 0 };
   for (const t of items) counts[t.state]++;
   const streaming = [...items.flatMap((t) => t.streaming), HDREZKA_SESSION].sort((a, b) => b.last_read_at.localeCompare(a.last_read_at));
@@ -248,7 +265,13 @@ export function torrentsSummary(items: TorrentListItem[]): TorrentsSummary {
     peers: items.reduce((sum, t) => sum + (t.peers ?? 0), 0),
     history: { interval_seconds: 2, download_bps: HISTORY_DOWN, upload_bps: HISTORY_UP },
     counts,
-    disk: { total_bytes: 2_000_000_000_000, free_bytes: 812_000_000_000, torrents_bytes: 3_100_000_000, cache_limit_bytes: 4_294_967_296 },
+    disk: {
+      ...MOCK_DISK,
+      torrents_bytes: CACHE_FILLED_BYTES,
+      cache_limit_bytes: storageView(storage, usage).effective_bytes,
+      kept_bytes: usage.kept_bytes,
+      smart_bytes: usage.smart_bytes,
+    },
     streaming,
   };
 }
@@ -351,4 +374,4 @@ export function torrentDetail(t: TorrentListItem): TorrentDetail {
   };
 }
 
-export const TORRENTS_SUMMARY: TorrentsSummary = torrentsSummary(TORRENTS);
+export const TORRENTS_SUMMARY: TorrentsSummary = torrentsSummary(TORRENTS, SEED_USAGE, MOCK_STORAGE);

@@ -94,8 +94,8 @@ export async function* askStream(body: AskRequest, signal?: AbortSignal): AsyncG
     signal,
   });
   if (!response.ok || !response.body) {
-    const { code, message, field, resetsAt } = parseErrorBody(await response.json().catch(() => undefined));
-    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? 'Ask momoshtrem is unavailable.', field, resetsAt);
+    const { code, message, field, resetsAt, details } = parseErrorBody(await response.json().catch(() => undefined));
+    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? 'Ask momoshtrem is unavailable.', field, resetsAt, details);
   }
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();

@@ -25,6 +25,20 @@ import type {
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
 import { type CatalogEntry, findTitle, iso } from './catalog';
 import {
+  EPISODE_BYTES_PER_MINUTE,
+  type EpisodeFileKind,
+  episodeHold,
+  episodeKeep,
+  episodeWanted,
+  keepOf,
+  type LiveHold,
+  mockHolds,
+  onEpisodeFile,
+  onMovieFile,
+  scopeHold,
+  wantsBytes,
+} from './downloads';
+import {
   absoluteNumbers,
   type EpisodeKey,
   episodeIdFor,
@@ -46,6 +60,10 @@ import { traktImported } from './trakt';
  * page's library: what's added, unassigned or changed lives in a `MockLibrary`
  * that handlers/titles.ts keeps per page. Watch state is what the mock Trakt
  * account has imported so far (fixtures/trakt.ts): nothing while it's off.
+ * Keeps and what's downloading come from the page's downloads
+ * (fixtures/downloads.ts, #77): a file is downloading only while a download
+ * wants it. (A movie assigned this session still starts out downloading, as
+ * before #77, until the title pages follow the new rule.)
  */
 
 /** The mock WEBDAV_PUBLIC_URL. */
@@ -194,10 +212,11 @@ type FileState = Exclude<EpisodeState, 'watched'>;
 /**
  * A file wins (seeded, or from an applied job); without one, an episode an open
  * mapping job wants to review is needs_review, otherwise missing or upcoming.
+ * A file is `ready` here: buildSeasons makes it downloading while a download wants it.
  */
 function fileState(seed: SeasonSeed['episodes'][number], id: number, row: MockLibraryEntry | undefined): FileState {
   const kept = row !== undefined && !row.unassigned.has(id);
-  if (kept && row.files && seededFile(seed.state)) return seed.state === 'downloading' ? 'downloading' : 'ready';
+  if (kept && row.files && seededFile(seed.state)) return 'ready';
   if (kept && (row.filed.has(id) || row.streamed.has(id))) return 'ready';
   if (row?.review.episode_ids.has(id)) return 'needs_review';
   if (seed.state === 'missing' || seed.state === 'upcoming') return seed.state;
@@ -236,6 +255,7 @@ function notInLibrary(): TitleLibraryState {
     missing: null,
     torrent: null,
     stream: null,
+    keep: null,
   };
 }
 
@@ -249,14 +269,20 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
   const includeSpecials = row?.settings.include_specials ?? true;
   const absolute = absoluteNumbers(show);
   const plays = traktImported('history');
+  const holds = row ? mockHolds() : [];
   return show.seasons
     .map((season) => {
       const episodes = season.episodes.map((seed): EpisodeSummary => {
         const id = episodeIdFor(show.key, season.n, seed.n);
-        const file = fileState(seed, id, row);
-        const filed = file === 'ready' || file === 'downloading';
+        const found = fileState(seed, id, row);
         // A play wins the state (PLAN §6); pct, the path, source and stream still describe the file
-        const stream = (file === 'ready' && row?.streamed.get(id)) || null;
+        const stream = (found === 'ready' && row?.streamed.get(id)) || null;
+        // #77: a file is downloading only while a download wants it (an HDRezka one never is)
+        const hold = episodeHold(holds, entry.tmdb_id, season.n, seed.n);
+        const facts = { season: season.n, episode: seed.n, has_file: found === 'ready', hdrezka: stream !== null, pct: seed.pct ?? null };
+        const file: FileState = found === 'ready' && episodeWanted(hold, facts) ? 'downloading' : found;
+        const filed = file === 'ready' || file === 'downloading';
+        const keep = episodeKeep(hold, facts);
         return {
           id,
           season_number: season.n,
@@ -269,10 +295,11 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
           runtime: seed.runtime,
           episode_type: seed.episode_type ?? 'standard',
           state: plays && hasPlay(show, season.n, seed) ? 'watched' : file,
-          pct: file === 'downloading' ? (seed.pct ?? 0) : null,
+          pct: file === 'downloading' ? (seed.pct ?? keep?.pct ?? 0) : null,
           webdav_path: filed ? episodePath(entry, season.n, seed.n, seed.name, stream ? '.mp4' : '.mkv') : null,
           source: stream ? 'hdrezka' : filed ? 'torrent' : null,
           stream,
+          keep,
         };
       });
       return { seed: season, episodes };
@@ -384,8 +411,11 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
     missing,
     torrent: null,
     stream: null,
+    keep: keepFor(scopeHold('tv', entry.tmdb_id)),
   };
 }
+
+const keepFor = (hold: LiveHold | undefined) => (hold ? keepOf(hold.download) : null);
 
 /** A torrent assigned this session: loaded, nothing fetched yet. */
 const JUST_ADDED: DownloadProgress = { pct: 0, speed_bps: 0, eta_seconds: null, seeders: 12 };
@@ -395,7 +425,14 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
   // A stream replaces the torrent, and is never downloading: it plays from the CDN
   const stream = row.stream ?? null;
   const torrent = stream ? null : (row.assigned ?? (row.files ? (movie.torrent ?? null) : null));
-  const download = row.assigned ? JUST_ADDED : torrent ? (movie.download ?? null) : null;
+  // #77: downloading only while a download wants the file (a torrent assigned this session still starts out downloading)
+  const hold = scopeHold('movie', entry.tmdb_id);
+  const wanted = torrent !== null && wantsBytes(hold?.admitted);
+  const download = row.assigned
+    ? JUST_ADDED
+    : wanted
+      ? (movie.download ?? { pct: keepFor(hold)?.pct ?? 0, speed_bps: 0, eta_seconds: null, seeders: torrent.seeders ?? 0 })
+      : null;
   const path = stream ? moviePath(entry, 'stream.mp4') : torrent ? moviePath(entry, torrent.file_name) : null;
   return {
     ...notInLibrary(),
@@ -410,6 +447,7 @@ function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEnt
     download,
     torrent,
     stream,
+    keep: keepFor(hold),
   };
 }
 
@@ -430,6 +468,7 @@ export function assignMovieRelease(
   row.assigned = torrent;
   row.stream = undefined;
   row.files = true;
+  onMovieFile(row.tmdb_id, torrent);
   return torrent;
 }
 
@@ -438,14 +477,26 @@ export function assignMovieStream(row: MockLibraryEntry, stream: Omit<TitleStrea
   row.stream = { provider: 'hdrezka', ...stream, added_at: new Date().toISOString() };
   row.assigned = undefined;
   row.files = true;
+  onMovieFile(row.tmdb_id, 'stream');
   return row.stream;
 }
 
 /** Episodes play from HDRezka (#63): each replaces the episode's torrent file. */
 export function assignEpisodeStream(row: MockLibraryEntry, episodeId: number, stream: EpisodeStream): void {
+  const previous = episodeFileKind(row, episodeId);
   row.streamed.set(episodeId, stream);
   row.filed.delete(episodeId);
   row.unassigned.delete(episodeId);
+  onEpisodeFile(episodeId, 'stream', previous);
+}
+
+/** The file an episode has now, for the downloads hooks: HDRezka, a torrent's (estimated by runtime), or none. */
+export function episodeFileKind(row: MockLibraryEntry, episodeId: number): EpisodeFileKind {
+  if (row.streamed.has(episodeId)) return 'stream';
+  const episode = findEpisode(episodeId);
+  const seed = episode && seedEpisode(SHOWS[episode.tmdbId], [episode.season, episode.episode]);
+  if (!seed || fileState(seed, episodeId, row) !== 'ready') return null;
+  return { bytes: seed.runtime * EPISODE_BYTES_PER_MINUTE };
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {
@@ -563,8 +614,17 @@ export function buildSeason(tmdbId: number, seasonNumber: number, library: MockL
   const entry = findTitle('tv', tmdbId);
   const show = SHOWS[tmdbId];
   if (!entry || !show) return undefined;
-  const season = buildSeasons(entry, show, library.get(libraryKey('tv', tmdbId))).find((s) => s.seed.n === seasonNumber);
-  return season && { season_number: season.seed.n, name: season.seed.name, episodes: season.episodes, ranges: ranges(season) };
+  const row = library.get(libraryKey('tv', tmdbId));
+  const season = buildSeasons(entry, show, row).find((s) => s.seed.n === seasonNumber);
+  return (
+    season && {
+      season_number: season.seed.n,
+      name: season.seed.name,
+      episodes: season.episodes,
+      ranges: ranges(season),
+      keep: row ? keepFor(scopeHold('tv', tmdbId, seasonNumber)) : null,
+    }
+  );
 }
 
 /**

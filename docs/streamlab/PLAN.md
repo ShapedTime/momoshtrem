@@ -76,6 +76,7 @@ All are additive or pure refactors.
 | H2 | `torrent.ClientConfigFor(cfg, cc) *atorrent.ClientConfig`. `NewClient` delegates to it, and a parity test covers it. | #173 |
 | H3 | `ActivityManager.SetCheckInterval(d)`, set before `Start`. It is a fixed 30 s today. | #173 |
 | H4 | A `build func() *DirectoryTree` field on `LibraryFS`: `buildTreeFromDB` by default, a static builder from `NewStaticFS`. `rebuildTree` calls `fs.build()`. This lets the lab invalidate the tree, which F4 and F5 need. | #183 |
+| H5 | `InitStorage` returns the vendored `*piececache.Cache` (`internal/torrent/piececache`, missinggo's filecache with pins) instead of missinggo's `filecache`. It takes the same parameters, so the lab's `InitStorage(dir, cfg.Torrent.GlobalCacheSize)` still compiles. Without pins it creates the same files and makes the same evictions as upstream; a differential test proves it. With pins, pinned pieces sit outside the LRU and a streaming reserve is never pinned. | #201 (#77 P3) |
 
 The leecher finds the seeder through the real `service.add()` path: the magnet carries `x.pe=<seeder addr>`, which anacrolix maps to `PeerAddrs` (`spec.go:42`).
 
@@ -111,7 +112,7 @@ momoshtrem/internal/streamlab/
 - A custom `storage.ClientImpl` whose `PieceImpl.ReadAt` generates bytes from `media`. `WriteAt` is a no-op and `Completion()` is always complete, so no gigabytes are written.
 - The seeder, the integrity check and the fake CDN all read from `media.Layout.ReadAt`.
 
-**Leecher storage.** The leecher uses the real `torrent.InitStorage`, the filecache LRU that production uses.
+**Leecher storage.** The leecher uses the real `torrent.InitStorage`, the filecache LRU that production uses (after H5, `piececache` with no pins).
 
 **Stack.** It is wired exactly as `cmd/momoshtrem/main.go` does:
 1. `InitStorage`, then the leecher.
@@ -304,6 +305,9 @@ The user opens the tunnel (`ssh -N -L 9090:localhost:9090 momoshtrem-v2`) and se
 - #28: VFS tree robustness (S12).
 - #56: test deadlocks on the shared Postgres. The lab needs no Postgres.
 - #77: smart caching. The lab measures waste and residual download.
+  - Its only change on the streaming path is H5 (#201): the pinnable piece cache.
+  - Background downloads set wanted files to Normal priority (`File.SetPriority`), outranked by the stream's Now and Readahead windows. While anything streams, they pause for other torrents (`pause_while_streaming`).
+  - #208 adds the `background-download` and pinned `small-cache` scenarios, which check that default with numbers. Contract: redesign PLAN §6 "Storage (#77)" and "Downloads (#77)".
 
 ## 10. Verification
 

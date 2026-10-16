@@ -79,6 +79,17 @@ describe('apiJson', () => {
     });
   });
 
+  it('keeps the error’s other fields in details (#77’s storage_full)', async () => {
+    respond(409, { error: { code: 'storage_full', message: 'Not enough space', needed_bytes: 18_400_000_000, available_bytes: 1_200_000_000 } });
+    await expect(apiJson('/api/downloads', { method: 'POST', json: { scope: 'movie', id: 1 } })).rejects.toMatchObject({
+      status: 409,
+      code: 'storage_full',
+      details: { needed_bytes: 18_400_000_000, available_bytes: 1_200_000_000 },
+    });
+    respond(404, { error: { code: 'not_found', message: 'No such title' } });
+    await expect(apiJson('/api/titles/tv/1')).rejects.toMatchObject({ details: {} });
+  });
+
   it('reads the legacy {error: "message"} shape too', async () => {
     respond(500, { error: 'Failed to fetch movies' });
     await expect(apiJson('/api/library/movies')).rejects.toMatchObject({ status: 500, code: 'internal_error', message: 'Failed to fetch movies' });

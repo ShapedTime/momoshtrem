@@ -1,0 +1,174 @@
+import type { MediaType, Timestamp } from './common';
+
+/**
+ * Downloads (PLAN §6 "Downloads (#77)"): a Keep (`kept`) or a smart pick
+ * (`smart`) fetches a movie's, show's, season's or episode's torrent files in
+ * the background and pins them on disk while it lasts. A show or season also
+ * covers episodes assigned later, while the kept cap has room. Releasing one
+ * (DELETE, expiry, watched) unpins the data: it stays as ordinary cache and
+ * plays until it's evicted; the row stays too, out of every read. Sizes are
+ * bytes; what's on disk comes from the piece cache.
+ *
+ * Invalidate `settingsKeys.storage` after a Keep or Stop keeping (the usage and
+ * what's committed move), and `downloadKeys.all` after a storage PUT.
+ */
+
+export type DownloadReason = 'kept' | 'smart';
+/** Why a smart pick was made: Trakt's Up next, or the episodes after the one streaming now. */
+export type SmartSource = 'up_next' | 'streaming';
+export type DownloadScope = 'movie' | 'show' | 'season' | 'episode';
+
+/**
+ * The first that matches: `unavailable` (nothing it covers can be downloaded: HDRezka only, or pure v2);
+ * `no_file` (nothing assigned yet); `done` (every downloadable file it covers is on disk); `paused` (the user
+ * paused its torrent, or background downloads are off); `disk_full`; `storage_full` (episodes assigned later
+ * didn't fit the kept cap: `files.over_cap`); `waiting_for_window` (outside every download window);
+ * `waiting_for_stream` (something else streams); `stalled` (no progress for 10 min, retried with backoff);
+ * `downloading` (in one of the 2 slots); `queued`.
+ *
+ * The `storage_full` state isn't the `storage_full` 409 code: the state is a kept show or season that
+ * can't take episodes assigned later; the 409 refuses a new Keep (`isStorageFullError`).
+ */
+export type DownloadState =
+  | 'queued'
+  | 'downloading'
+  | 'waiting_for_stream'
+  | 'waiting_for_window'
+  | 'paused'
+  | 'stalled'
+  | 'disk_full'
+  | 'storage_full'
+  | 'done'
+  | 'no_file'
+  | 'unavailable';
+
+/** What a download is for: the movie, or the show with its season and episode for those scopes. */
+export interface DownloadItem {
+  media_type: MediaType;
+  tmdb_id: number;
+  /** The movie's or the show's library id. */
+  library_id: number;
+  /** The movie's or the show's. */
+  title: string;
+  poster_path: string | null;
+  /** Season and episode scopes. */
+  season_number: number | null;
+  /** Episode scope. */
+  episode_number: number | null;
+  episode_name: string | null;
+}
+
+/** GET /downloads (items), and every POST and PATCH answer. */
+export interface Download {
+  id: number;
+  reason: DownloadReason;
+  /** Null for kept downloads. */
+  smart_source: SmartSource | null;
+  scope: DownloadScope;
+  item: DownloadItem;
+  state: DownloadState;
+  /** Over its admitted torrent files (a file several episodes share counts once; files over the cap aren't wanted). */
+  wanted_bytes: number;
+  /** On disk, from the piece cache. */
+  done_bytes: number;
+  /** Smoothed, over its torrents; 0 unless downloading. */
+  download_bps: number;
+  /** Only while downloading with a speed. */
+  eta_seconds: number | null;
+  /** `waiting_for_window`: the next window's start; `stalled`: the next retry. */
+  resumes_at: Timestamp | null;
+  /**
+   * The assigned files it covers; those on disk; those that can't be downloaded (HDRezka, pure v2); and those
+   * assigned later that the kept cap couldn't take (admitted in episode order; not pinned or fetched).
+   */
+  files: { total: number; done: number; unavailable: number; over_cap: number };
+  /**
+   * Watched files are released one by one (a Trakt play or a `local_watches` row after `created_at`). A movie
+   * or episode download then ends; a season one once it's all watched and finished airing; a show one once the
+   * show has ended and it's all watched. Smart picks: always true, 14 days at most.
+   */
+  until_watched: boolean;
+  /** Null: no maximum. */
+  expires_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+/** Why background downloads wait now: `pause_while_streaming`, outside every window, or `background.enabled` off. */
+export type DownloadsPausedReason = 'streaming' | 'window' | 'disabled';
+
+/** GET /downloads */
+export interface DownloadList {
+  /** Kept first (newest first), then smart picks by show and episode order. */
+  items: Download[];
+  usage: {
+    /** On disk now. */
+    kept_bytes: number;
+    smart_bytes: number;
+    /** The wanted size of every kept download, on disk or not, as /settings/storage's. */
+    committed_kept_bytes: number;
+    /** The effective caps (/settings/storage's `kept.effective_max_bytes` and `smart.effective_max_bytes`). */
+    kept_max_bytes: number;
+    smart_max_bytes: number;
+  };
+  paused_reason: DownloadsPausedReason | null;
+  /** `window`: the next window's start; `streaming`: a minute after the last stream ended (null while one streams); `disabled`: null. */
+  resumes_at: Timestamp | null;
+}
+
+/** How long a Keep lasts. Left out, both come from /settings/storage's `kept` defaults ("until watched, 30 days at most"). */
+export interface DownloadDuration {
+  until_watched?: boolean;
+  /** Null: no maximum. A time must be in the future. */
+  expires_at?: Timestamp | null;
+}
+
+/** What a Keep is on. `id` is a library id: the movie's, the show's (show and season scopes) or the episode's. */
+export type DownloadTarget =
+  | { scope: 'movie'; id: number }
+  | { scope: 'show'; id: number }
+  | { scope: 'season'; id: number; season_number: number }
+  | { scope: 'episode'; id: number };
+
+/** POST /downloads: a Keep. */
+export type DownloadCreate = DownloadTarget & DownloadDuration;
+
+/** GET /downloads/estimate (the target as query params): what a Keep would need, before it's made. Writes nothing. */
+export interface DownloadEstimate {
+  /** What it would want: its torrent files. */
+  wanted_bytes: number;
+  /** What it would add to `committed_kept_bytes`: 0 when it's already kept, or another kept download has its files. */
+  needed_bytes: number;
+  /** `kept.effective_max_bytes − committed_kept_bytes`. More needed than this is POST's 409 `storage_full`. */
+  available_bytes: number;
+  /** False where POST answers 422 `not_downloadable` (it plays from HDRezka). */
+  downloadable: boolean;
+}
+
+/** PATCH /downloads/{id}: kept downloads only (a smart pick is 422: Keep it first; a body that isn't an object, 400). */
+export type DownloadPatch = DownloadDuration;
+
+/** The extra fields of POST /downloads' `409 storage_full`. */
+export interface StorageFullDetails {
+  /** What the Keep adds to `committed_kept_bytes` (files another kept download has count nothing). */
+  needed_bytes: number;
+  /** `kept.effective_max_bytes − committed_kept_bytes`. */
+  available_bytes: number;
+}
+
+/**
+ * The download that holds a title, a season or an episode (PLAN §6 "Titles and library"). On an
+ * episode it's the narrowest kept one (its own, its season's, its show's), else a smart pick, and
+ * `state` and `pct` are the episode's own file's: its torrent's `TorrentWanted.state` (`done` and 100
+ * once it's on disk), `no_file` without a file, `unavailable` from HDRezka, `storage_full` over the
+ * cap. An episode an until-watched show or season keep has released (watched) has none.
+ */
+export interface Keep {
+  download_id: number;
+  reason: DownloadReason;
+  scope: DownloadScope;
+  state: DownloadState;
+  /** 0–100: what's on disk of what it wants. */
+  pct: number;
+  until_watched: boolean;
+  expires_at: Timestamp | null;
+}

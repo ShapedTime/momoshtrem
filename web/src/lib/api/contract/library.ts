@@ -28,7 +28,7 @@ export interface LibraryRef {
   tmdb_id: number;
 }
 
-/** What a library title is fetching. */
+/** What a library title is fetching: files a download (#77) wants that aren't all on disk. */
 export interface LibraryDownload {
   /** Shows: combined over the files being fetched. */
   pct: number;
@@ -64,7 +64,7 @@ export interface LibraryItem {
   webdav_url: string | null;
   /** The mapping job to review (PLAN §6 review rules). */
   review_job_id: number | null;
-  /** While a file is being fetched. */
+  /** While a file is downloading: a download wants it (#77) and it isn't all on disk. */
   download: LibraryDownload | null;
   /** Shows: the first frontier run, as `TitleLibraryState.missing`. */
   missing: MissingRun | null;

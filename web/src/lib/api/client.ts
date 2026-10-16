@@ -7,7 +7,7 @@
 import { LOGIN_ROUTE } from '@/config/auth';
 import type { ApiErrorBody } from './contract/common';
 
-/** Error from an /api call: HTTP status plus the contract's {code, message, field?, resets_at?}. */
+/** Error from an /api call: HTTP status plus the contract's {code, message, field?, resets_at?, …}. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -15,14 +15,20 @@ export class ApiError extends Error {
   readonly field?: string;
   /** `resets_at`: when a 429's limit lifts (the AI budget, Ask's daily limit). */
   readonly resetsAt?: string;
+  /**
+   * Every field of the error object but `code` and `message`, as sent: the extras some errors
+   * carry (`needed_bytes` on `storage_full`). Read them through a type guard, e.g. `isStorageFullError`.
+   */
+  readonly details: Readonly<Record<string, unknown>>;
 
-  constructor(status: number, code: string, message: string, field?: string, resetsAt?: string) {
+  constructor(status: number, code: string, message: string, field?: string, resetsAt?: string, details: Readonly<Record<string, unknown>> = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.field = field;
     this.resetsAt = resetsAt;
+    this.details = details;
   }
 }
 
@@ -30,18 +36,29 @@ export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
-/** Read both error shapes: `{error: {code, message}}` (PLAN §6) and legacy `{error: "message"}`. */
-export function parseErrorBody(body: unknown): { code?: string; message?: string; field?: string; resetsAt?: string } {
+/** What an error body says; `details` holds the error object's other fields. */
+export interface ParsedErrorBody {
+  code?: string;
+  message?: string;
+  field?: string;
+  resetsAt?: string;
+  details?: Record<string, unknown>;
+}
+
+/** Read both error shapes: `{error: {code, message, …}}` (PLAN §6) and legacy `{error: "message"}`. */
+export function parseErrorBody(body: unknown): ParsedErrorBody {
   if (!body || typeof body !== 'object' || !('error' in body)) return {};
   const error = (body as { error: unknown }).error;
   if (typeof error === 'string') return { message: error };
-  if (error && typeof error === 'object') {
-    const { code, message, field, resets_at } = error as Partial<ApiErrorBody['error']>;
+  if (error && typeof error === 'object' && !Array.isArray(error)) {
+    const { code, message, ...details } = error as Record<string, unknown>;
+    const { field, resets_at } = details as Partial<ApiErrorBody['error']>;
     return {
       code: typeof code === 'string' ? code : undefined,
       message: typeof message === 'string' ? message : undefined,
       field: typeof field === 'string' ? field : undefined,
       resetsAt: typeof resets_at === 'string' ? resets_at : undefined,
+      details,
     };
   }
   return {};
@@ -93,8 +110,8 @@ export async function apiJson<T>(input: string, init?: RequestInit & { json?: un
   if (response.status === 204) return undefined as T;
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const { code, message, field, resetsAt } = parseErrorBody(body);
-    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? `Request failed (${response.status})`, field, resetsAt);
+    const { code, message, field, resetsAt, details } = parseErrorBody(body);
+    throw new ApiError(response.status, code ?? statusCode(response.status), message ?? `Request failed (${response.status})`, field, resetsAt, details);
   }
   return body as T;
 }

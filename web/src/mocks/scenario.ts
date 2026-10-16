@@ -42,6 +42,16 @@
  * - `torrents-offline`: /torrents and /torrents/summary answer 502 `backend_unreachable`, as the proxy does
  *   when momoshtrem is gone (Activity keeps what it had and says so).
  * - `torrents-quiet`: /torrents lists only the idle torrents and the summary has nothing streaming (Activity's empty state).
+ * - `downloads-empty`: a fresh install (#77): no downloads, so no title has a `keep`, no torrent `wanted` or `holds`,
+ *   and nothing is downloading (Interstellar and The Studio S01E10 are ready: their files stream on demand); the
+ *   storage settings are the defaults (smart downloads off, pause while streaming on). Keeping works.
+ * - `downloads-full`: the kept cap (`kept.max_bytes`) leaves 1.2 GB beside what's kept, so a Keep that needs more
+ *   (a movie, a season, a show) answers 409 `storage_full` with `needed_bytes` and `available_bytes`; one inside a
+ *   kept season (a Bluey S3 episode) still fits.
+ * - `storage-config`: config.yaml sets `global_cache_size: 53760` (52.5 GB) and no PUT has sent a limit, so
+ *   /settings/storage answers `source: config`, `limit_bytes: null` and `config_bytes`. Its kept cap (half the
+ *   limit) is below what the seeded downloads commit: a PUT that doesn't lower it saves, and "Use auto"
+ *   (`limit_bytes: null`) takes the limit back to 75% of the disk.
  * - `trakt-off`: Trakt is set up but not connected: /me is empty (new episodes still list the library's). Connect works.
  * - `trakt-unconfigured`: no Trakt app or SECRET_KEY: `configured: false`, and connect answers 503 `unavailable`.
  * - `trakt-syncing`: connected, and the first import stays at its last step (`details`): history, ratings,
@@ -80,6 +90,12 @@
  * Without a scenario the recommendations mock is a state machine (fixtures/recommendations.ts): Refresh walks
  * a run through its steps, one per read of /home or the run, then /home serves the new picks; feedback hides
  * or marks titles at once; asks stream and grow the threads.
+ *
+ * The downloads mock (#77, fixtures/downloads.ts) is stateful too: seeded downloads in most states (its table),
+ * Keeps, duration changes and Stop keeping that titles, Activity and Settings › Storage follow, and the
+ * storage settings decide the rest: background downloads off makes them `paused`, a download window that
+ * isn't open now `waiting_for_window`, pause-while-streaming `waiting_for_stream` (Severance streams).
+ * Episodes a mapping job assigns to a kept show or season past the kept cap make it `storage_full`.
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -113,6 +129,9 @@ export type MockScenario =
   | 'title-search-loading'
   | 'torrents-offline'
   | 'torrents-quiet'
+  | 'downloads-empty'
+  | 'downloads-full'
+  | 'storage-config'
   | 'trakt-off'
   | 'trakt-unconfigured'
   | 'trakt-syncing'

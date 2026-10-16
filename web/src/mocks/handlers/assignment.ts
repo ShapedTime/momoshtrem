@@ -27,8 +27,9 @@ import {
   WORKING,
 } from '../fixtures/assignment';
 import { findTitle } from '../fixtures/catalog';
+import { onEpisodeFile } from '../fixtures/downloads';
 import { TORRENTS } from '../fixtures/torrents';
-import { assignMovieRelease, episodeFile, findByLibraryId, libraryKey, showEpisodes } from '../fixtures/titles';
+import { assignMovieRelease, episodeFile, episodeFileKind, findByLibraryId, libraryKey, showEpisodes } from '../fixtures/titles';
 import { HOLD_STEPS, heldStep, scenario } from '../scenario';
 import { mockAiSettings } from './settings';
 import { mockLibrary } from './titles';
@@ -121,6 +122,10 @@ function applyJob(job: MockJob): void {
   const found = libraryRow(job.media_type, job.library_id);
   if (found && job.media_type === 'tv') {
     const { row } = found;
+    // What each target had before, so a kept show or season counts a replaced file once (#77)
+    const before = new Map(
+      job.proposals.flatMap((p) => (p.decision === 'accepted' ? p.targets.map((t) => [t.episode_id, episodeFileKind(row, t.episode_id)] as const) : []))
+    );
     // Authoritative for this torrent: its earlier files the job no longer maps go
     for (const [id, file] of row.filed) if (file.info_hash === job.info_hash) row.filed.delete(id);
     for (const p of job.proposals) {
@@ -130,6 +135,8 @@ function applyJob(job: MockJob): void {
         row.unassigned.delete(target.episode_id);
         // One active source per item: the torrent replaces an HDRezka stream
         row.streamed.delete(target.episode_id);
+        // A kept show or season takes the file while the kept cap has room (#77)
+        onEpisodeFile(target.episode_id, { bytes: Math.round(p.file_size / p.targets.length) }, before.get(target.episode_id) ?? null);
       }
     }
   } else if (found) {

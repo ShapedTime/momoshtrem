@@ -13,6 +13,7 @@ export * from './recommendations';
 export * from './settings';
 export * from './system';
 export * from './torrents';
+export * from './downloads';
 export * from './hdrezka';
 export * from './discover';
 export * from './title-search';
