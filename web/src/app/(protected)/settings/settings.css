@@ -132,13 +132,14 @@
   .set-spend-legend span, .set-disk-legend span { color: var(--text-1); font-weight: var(--w-medium); }
 
   /* ---- Storage: the disk bar, size inputs, download windows ------------------ */
-  /* The piece cache's parts in the one accent (what you keep, then what's picked for you), the
-     streaming cache cool, other files grey, and free the track itself: every fill ≥ 3:1 on the
-     track; the 2 px gaps and the legend's labels and sizes carry which is which */
+  /* The disk's colours, shared with Activity (#221): the piece cache's parts in the one accent
+     (what you keep, then what's picked for you), the streaming cache cool, other files a quiet
+     grey (not ours, so it recedes: 2.3:1 on the track, the rest ≥ 3:1), and free the track itself;
+     the 2 px gaps and the legend's labels and sizes carry which is which */
   .set-disk-kept { background: var(--accent); }
   .set-disk-smart { background: color-mix(in srgb, var(--accent) 55%, transparent); }
   .set-disk-cache { background: var(--st-info); }
-  .set-disk-other { background: var(--text-3); }
+  .set-disk-other { background: var(--text-4); }
   .set-disk-free { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-3); }
   .set-disk-meter { position: relative; }
   /* The limit's marker stands out of the bar, so the bar's rounding never clips it */
