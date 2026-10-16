@@ -1,5 +1,5 @@
 import type { StorageSettings } from '@/lib/api/contract';
-import { diskBar, floorNote } from '@/lib/settings/storage';
+import { diskBar, floorNote, trimNote } from '@/lib/settings/storage';
 import { formatBytes } from '@/lib/title/format';
 import { cx } from '@/lib/utils/cx';
 import { SettingsCard } from '../SettingsCard';
@@ -7,11 +7,13 @@ import { SettingsCard } from '../SettingsCard';
 /**
  * Where the disk goes (GET /settings/storage, as saved: edits don't move it):
  * the piece cache's kept, smart and streaming parts, other files and what's
- * free, with a marker at the limit, then the free-space floor.
+ * free, with a marker at the limit, then the free-space floor, and that the
+ * cache is being trimmed while it holds more than it may.
  */
 export function DiskCard({ settings }: { settings: StorageSettings }) {
   const bar = diskBar(settings);
   const floor = floorNote(settings);
+  const trimming = trimNote(settings);
   const limit = formatBytes(settings.limit_effective_bytes);
   return (
     <SettingsCard id="st-disk" title="Disk">
@@ -49,6 +51,7 @@ export function DiskCard({ settings }: { settings: StorageSettings }) {
             <span className="tabular-nums">{limit}</span>
           </li>
         </ul>
+        {trimming && <p className="t-small text-fg-2">{trimming}</p>}
         <p className={cx('t-small', floor.warn ? 'text-warning' : 'text-fg-3')}>{floor.text}</p>
       </div>
     </SettingsCard>

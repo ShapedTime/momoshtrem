@@ -1,5 +1,6 @@
 import type { StorageSettings } from '@/lib/api/contract';
 import {
+  belowCommittedCapCopy,
   belowCommittedCopy,
   configLine,
   crossesMidnight,
@@ -7,8 +8,10 @@ import {
   diskBar,
   draftOf,
   fieldErrorCopy,
+  fieldProblem,
   firstError,
   floorNote,
+  focusAfterRemove,
   formatSizeInput,
   hasChanges,
   isStorageField,
@@ -21,6 +24,7 @@ import {
   smartCapHelp,
   storageChanges,
   storageNavSummary,
+  trimNote,
   windowsProblem,
   withEdits,
 } from '@/lib/settings/storage';
@@ -126,6 +130,13 @@ describe('windows', () => {
     expect(windowsProblem(five)).toEqual({ index: 4, message: 'Keep it to 4 windows or fewer.' });
   });
 
+  it('moves focus to the next Remove once one goes, else the previous one, else Add', () => {
+    expect(focusAfterRemove(1, 3)).toBe(1);
+    expect(focusAfterRemove(0, 2)).toBe(0);
+    expect(focusAfterRemove(2, 3)).toBe(1);
+    expect(focusAfterRemove(0, 1)).toBe('add');
+  });
+
   it('knows a window that ends the next day', () => {
     expect(crossesMidnight({ start: '23:00', end: '06:00' })).toBe(true);
     expect(crossesMidnight({ start: '01:00', end: '07:00' })).toBe(false);
@@ -138,6 +149,14 @@ describe('draftOf', () => {
     expect(draftOf(AUTO)).toMatchObject({ limitMode: 'auto', limit: '750', keptMax: '', smartMax: '', days: 30, untilWatched: true, episodesAhead: 2 });
     expect(draftOf(CONFIG)).toMatchObject({ limitMode: 'config', limit: '56.4' });
     expect(draftOf(CUSTOM)).toMatchObject({ limitMode: 'custom', limit: '300', keptMax: '120', smartMax: '37.5' });
+  });
+
+  it('holds the custom prefill inside the bounds it says, for a limit clamped at the maximum', () => {
+    const clamped = { ...CONFIG, config_bytes: 300e9, limit_effective_bytes: 189.67e9, max_bytes: 189.67e9 };
+    expect(customLimitHelp(clamped)).toBe('From 4.3 GB to 189.6 GB (90% of the disk).');
+    expect(draftOf(clamped).limit).toBe('189.6');
+    expect(storageChanges({ limitMode: 'custom' }, clamped)).toEqual({ patch: { limit_bytes: 189.6e9 }, errors: {}, windowIndex: null });
+    expect(draftOf({ ...CONFIG, limit_effective_bytes: 4 * GiB }).limit).toBe('4.3');
   });
 
   it('copies the windows, so editing the draft never changes the query’s data', () => {
@@ -241,8 +260,32 @@ describe('errors', () => {
     expect(fieldErrorCopy('kept.default_days', 'kept.default_days must be 7, 30 or 90')).toBe('kept.default_days must be 7, 30 or 90');
   });
 
-  it('says what kept downloads need on 409 limit_below_committed', () => {
+  it('tells a limit out of the bounds (the disk shrank since they were read) from one that squeezes the caps', () => {
+    const shrunk = { min_bytes: 4 * GiB, max_bytes: 180e9 };
+    expect(fieldErrorCopy('limit_bytes', '', { sent: 200e9, settings: shrunk })).toBe('Enter a size from 4.3 GB to 180 GB.');
+    expect(fieldErrorCopy('limit_bytes', '', { sent: 150e9, settings: shrunk })).toMatch(/^This limit leaves too little for the space you set/);
+    expect(fieldErrorCopy('limit_bytes', '', { sent: null, settings: shrunk })).toMatch(/^This limit leaves too little/);
+    expect(fieldErrorCopy('limit_bytes', '')).toMatch(/^This limit leaves too little/);
+  });
+
+  it('says what kept downloads need on 409 limit_below_committed: in the bar for a limit, on the field for the kept cap', () => {
     expect(belowCommittedCopy(86.4e9)).toBe('Kept downloads need 86.4 GB. Stop keeping some, or set a limit that leaves room for them.');
+    expect(belowCommittedCapCopy(86.4e9)).toBe('Kept downloads need 86.4 GB. Enter at least that here, or stop keeping some.');
+  });
+
+  it('places a refused PUT’s problem on its field, or leaves it to the bar', () => {
+    const conflict = { status: 409, code: 'limit_below_committed', message: 'Kept downloads need 86.4 GB…', details: { committed_kept_bytes: 86.4e9 } };
+    expect(fieldProblem(conflict, { kept: { max_bytes: 50e9 } })).toEqual({ field: 'kept.max_bytes', text: belowCommittedCapCopy(86.4e9) });
+    expect(fieldProblem(conflict, { kept: { max_bytes: null }, limit_bytes: 100e9 })?.field).toBe('kept.max_bytes');
+    expect(fieldProblem(conflict, { limit_bytes: 100e9 })).toBeNull();
+    expect(fieldProblem(conflict, { kept: { default_days: 7 } })).toBeNull();
+
+    const invalid = { status: 422, code: 'validation_error', field: 'smart.max_bytes', message: 'smart.max_bytes can be at most 2 GB', details: {} };
+    expect(fieldProblem(invalid, { smart: { max_bytes: 9e9 } })).toEqual({ field: 'smart.max_bytes', text: fieldErrorCopy('smart.max_bytes', '') });
+    const range = { status: 422, code: 'validation_error', field: 'limit_bytes', message: 'limit_bytes must be from…', details: {} };
+    expect(fieldProblem(range, { limit_bytes: 950e9 }, AUTO)?.text).toBe('Enter a size from 4.3 GB to 900 GB.');
+    expect(fieldProblem({ ...invalid, field: 'kept' }, {})).toBeNull();
+    expect(fieldProblem({ status: 500, code: 'internal_error', message: 'disk', details: {} }, {})).toBeNull();
   });
 });
 
@@ -271,6 +314,12 @@ describe('the words', () => {
   it('notes the floor, and what it holds the cache at while it does', () => {
     expect(floorNote(AUTO)).toEqual({ text: 'The cache always leaves 5.4 GB of the disk free.', warn: false });
     expect(floorNote({ ...AUTO, floored: true, effective_bytes: 869e9 })).toEqual({ text: 'Holding the cache at 869 GB to keep 5.4 GB of the disk free.', warn: true });
+  });
+
+  it('says the cache is trimmed while it holds more than it may', () => {
+    expect(trimNote(AUTO)).toBeNull();
+    expect(trimNote(CONFIG)).toBeNull();
+    expect(trimNote({ ...CONFIG, effective_bytes: CONFIG.limit_effective_bytes })).toBe('Trimming the cache down to 56.4 GB.');
   });
 
   it('sums up the limit for the settings nav', () => {

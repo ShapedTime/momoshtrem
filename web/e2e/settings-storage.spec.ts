@@ -133,6 +133,27 @@ test.describe('Settings › Storage', () => {
     await expectAccessibleAndContained(page);
   });
 
+  test('a kept cap below what kept downloads need answers 409 on that field, and focus moves there', async ({ page }) => {
+    await openSection(page);
+    await keptCap(page).fill('50');
+    await save(page).click();
+    await expect(saveBar(page).getByRole('alert')).toHaveText('Check “Space for kept downloads” above.');
+    await expect(keptCap(page)).toHaveAttribute('aria-invalid', 'true');
+    await expect(keptCap(page)).toHaveAccessibleDescription(/^Kept downloads need 86\.4 GB\. Enter at least that here, or stop keeping some\./);
+    await expect(keptCap(page)).toBeFocused();
+    await expect(keptCap(page)).toBeInViewport();
+    await expectAccessibleAndContained(page);
+
+    // A cap that covers them saves
+    await keptCap(page).fill('100');
+    await expect(keptCap(page)).not.toHaveAttribute('aria-invalid');
+    const put = putStorage(page);
+    await save(page).click();
+    expect((await put).postDataJSON()).toEqual({ kept: { max_bytes: 100e9 } });
+    await expect(page.getByText('Settings saved')).toBeVisible();
+    await expect(keptCap(page)).toHaveAccessibleDescription('Empty: half the limit. Now 100 GB; kept downloads need 86.4 GB.');
+  });
+
   test('a 422 on a cap shows on its field in words, and focus moves there', async ({ page }) => {
     await openSection(page);
     await keptCap(page).fill('740');
@@ -156,6 +177,12 @@ test.describe('Settings › Storage', () => {
     await openSection(page);
     const puts = countPuts(page);
     const add = page.getByRole('button', { name: 'Add a window' });
+    // Removing the only window hands focus to Add (its own button is gone)
+    await add.click();
+    await page.getByRole('button', { name: 'Remove window 1' }).click();
+    await expect(add).toBeFocused();
+    await expect(page.getByLabel('Window 1 starts')).toHaveCount(0);
+
     await add.click();
     await expect(page.getByLabel('Window 1 starts')).toHaveValue('01:00');
     await expect(page.getByLabel('Window 1 ends')).toHaveValue('07:00');
@@ -180,10 +207,15 @@ test.describe('Settings › Storage', () => {
     await expect(page.getByLabel('Window 1 starts')).not.toHaveAttribute('aria-invalid');
     expect(puts.count).toBe(0);
 
-    await page.getByRole('button', { name: 'Remove window 4' }).click();
-    await page.getByRole('button', { name: 'Remove window 3' }).click();
+    // Focus follows each removal: the next row's Remove, else the previous one's
     await page.getByRole('button', { name: 'Remove window 2' }).click();
+    await expect(page.getByRole('button', { name: 'Remove window 2' })).toBeFocused();
     await expect(add).toBeEnabled();
+    await page.getByRole('button', { name: 'Remove window 3' }).click();
+    await expect(page.getByRole('button', { name: 'Remove window 2' })).toBeFocused();
+    await page.getByRole('button', { name: 'Remove window 2' }).click();
+    await expect(page.getByRole('button', { name: 'Remove window 1' })).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Remove window 1');
     const put = putStorage(page);
     await save(page).click();
     expect((await put).postDataJSON()).toEqual({ background: { windows: [{ start: '23:00', end: '06:00' }] } });
@@ -200,6 +232,8 @@ test.describe('Settings › Storage', () => {
     await expect(limitMode(page, 'Custom')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('#st-limit-help')).toHaveText('Choose Auto (75% of the disk · 750 GB) or a custom size.');
     await expect(diskBar(page)).toHaveAttribute('aria-label', /Limit 56\.4 GB\.$/);
+    // The cache's 62.4 GB is over that limit: it's being trimmed
+    await expect(page.getByText('Trimming the cache down to 56.4 GB.')).toBeVisible();
     await expectAccessibleAndContained(page);
 
     // Its kept cap (half of 56.4 GB) is below what kept downloads need; a change that doesn't touch it still saves
@@ -213,11 +247,15 @@ test.describe('Settings › Storage', () => {
     await banner.getByRole('button', { name: 'Use auto' }).click();
     await expect(banner).toBeHidden();
     await expect(limitMode(page, 'Auto')).toHaveAttribute('aria-pressed', 'true');
+    // The button went with the banner: focus is on the choice it made, not lost to <body>
+    await expect(limitMode(page, 'Auto')).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Auto');
     const second = putStorage(page);
     await save(page).click();
     expect((await second).postDataJSON()).toEqual({ limit_bytes: null });
     await expect(page.locator('#st-limit-help')).toHaveText('Auto (75% of the disk) · 750 GB. It follows the disk when it grows.');
     await expect(diskBar(page)).toHaveAttribute('aria-label', /Limit 750 GB\.$/);
+    await expect(page.getByText('Trimming the cache down to', { exact: false })).toBeHidden();
     await expect((await sectionNav(page)).getByRole('link', { name: /Storage/ })).toContainText('750 GB · auto');
   });
 
@@ -262,6 +300,8 @@ test.describe('screenshots', () => {
       // A viewport as tall as the page, so fixed parts (save bar, tab bar) sit at the bottom as in the design exports
       const height = await page.evaluate(() => document.documentElement.scrollHeight);
       await page.setViewportSize({ width, height });
+      // A focused field may have scrolled the page: start the shot at the top
+      await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(300);
     }
     await page.screenshot({ path: path.resolve(__dirname, '../../docs/screenshots/v2/settings', `${name}-${width}.png`), animations: 'disabled' });
@@ -287,7 +327,7 @@ test.describe('screenshots', () => {
   test('storage, from config.yaml', async ({ page }, testInfo) => {
     await scenario(page, 'storage-config');
     await openSection(page);
-    await shoot(page, testInfo, 'storage-config');
+    await shoot(page, testInfo, 'storage-config', { fullPage: true });
   });
 
   test('storage, a fresh install', async ({ page }, testInfo) => {

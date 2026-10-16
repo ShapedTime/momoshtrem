@@ -27,6 +27,11 @@ export function LimitCard({ draft, saved, onChange, errorFor }: LimitCardProps) 
   // A problem with the limit shows on the size while it's custom, else on the choice
   const modeError = custom ? null : errorFor('limit_bytes');
   const sizeError = custom ? errorFor('limit_bytes') : null;
+  const useAuto = () => {
+    onChange({ limitMode: 'auto' });
+    // The banner and its button go: focus lands on the choice it made
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('#st-limit button[aria-pressed="true"]')?.focus());
+  };
   return (
     <SettingsCard id="st-limit-card" title="Limit" description="Streaming, kept and smart downloads share it.">
       {draft.limitMode === 'config' && (
@@ -34,7 +39,7 @@ export function LimitCard({ draft, saved, onChange, errorFor }: LimitCardProps) 
           <Banner
             title={configLine(saved)}
             action={
-              <Button variant="secondary" size="sm" onClick={() => onChange({ limitMode: 'auto' })}>
+              <Button variant="secondary" size="sm" onClick={useAuto}>
                 Use auto
               </Button>
             }

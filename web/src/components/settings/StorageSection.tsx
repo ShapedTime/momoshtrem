@@ -11,10 +11,9 @@ import { isLimitBelowCommittedError, settingsApi, settingsKeys, storageSettingsQ
 import {
   belowCommittedCopy,
   FIELD_LABELS,
-  fieldErrorCopy,
+  fieldProblem,
   firstError,
   hasChanges,
-  isStorageField,
   type StorageDraft,
   type StorageField,
   storageChanges,
@@ -66,7 +65,7 @@ function StorageSkeleton() {
  * downloads run. Edits stay local until Save sends only what changed (PUT
  * /settings/storage is partial, and `limit_bytes` goes only when the limit
  * control changed); a 422 shows next to the field it names, and a 409
- * `limit_below_committed` in the bar.
+ * `limit_below_committed` on the kept cap when Save lowered it, else in the bar.
  */
 export function StorageSection() {
   const queryClient = useQueryClient();
@@ -78,17 +77,22 @@ export function StorageSection() {
   const [triedSave, setTriedSave] = useState(false);
 
   const save = useMutation({
-    mutationFn: (patch: StorageSettingsPatch) => settingsApi.putStorage(patch),
-    onSuccess: (saved) => {
+    // `edits` is what the patch was built from: edits made while it's in flight stay
+    mutationFn: ({ patch }: { patch: StorageSettingsPatch; edits: Partial<StorageDraft> }) => settingsApi.putStorage(patch),
+    onSuccess: (saved, { edits: sent }) => {
       queryClient.setQueryData(settingsKeys.storage, saved);
-      setEdits({});
+      setEdits((current) => (current === sent ? {} : current));
       setTriedSave(false);
       toast({ tone: 'ready', title: 'Settings saved' });
       // The caps and the waits move with the settings
       void queryClient.invalidateQueries({ queryKey: downloadKeys.all });
     },
-    onError: (error) => {
-      if (isApiError(error) && isStorageField(error.field)) showField(error.field);
+    onError: (error, { patch }) => {
+      const problem = isApiError(error) ? fieldProblem(error, patch) : null;
+      if (!problem) return;
+      // A limit the server refuses may follow a disk that changed: read the bounds again
+      if (problem.field === 'limit_bytes') void queryClient.invalidateQueries({ queryKey: settingsKeys.storage });
+      showField(problem.field);
     },
   });
 
@@ -118,15 +122,11 @@ export function StorageSection() {
 
   const apiError = isApiError(save.error) ? save.error : null;
   const invalid = apiError?.status === 422;
-  const serverField = apiError && invalid && isStorageField(apiError.field) ? apiError.field : null;
+  const serverProblem = apiError ? fieldProblem(apiError, save.variables?.patch, saved) : null;
   const draftErrors = triedSave ? changes.errors : {};
-  const errorFor = (field: StorageField): string | null => {
-    const draftError = draftErrors[field];
-    if (draftError) return draftError;
-    return serverField === field && apiError ? fieldErrorCopy(field, apiError.message) : null;
-  };
+  const errorFor = (field: StorageField): string | null => draftErrors[field] ?? (serverProblem?.field === field ? serverProblem.text : null);
   // A field's problem shows there; the bar points at it. Anything else shows in the bar.
-  const problemField = firstError(draftErrors) ?? serverField;
+  const problemField = firstError(draftErrors) ?? serverProblem?.field ?? null;
   // The limit's problem shows on its size while that's custom
   const problemLabel = problemField === 'limit_bytes' && current.limitMode === 'custom' ? 'Custom limit' : problemField && FIELD_LABELS[problemField];
   const barError = problemLabel
@@ -174,7 +174,7 @@ export function StorageSection() {
               requestAnimationFrame(() => showField(field));
               return;
             }
-            save.mutate(changes.patch);
+            save.mutate({ patch: changes.patch, edits });
           }}
         />
       )}

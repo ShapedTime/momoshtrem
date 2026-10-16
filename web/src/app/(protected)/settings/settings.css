@@ -136,8 +136,8 @@
      streaming cache cool, other files grey, and free the track itself: every fill ≥ 3:1 on the
      track; the 2 px gaps and the legend's labels and sizes carry which is which */
   .set-disk-kept { background: var(--accent); }
-  .set-disk-smart { background: rgb(242 179 61 / 0.55); }
-  .set-disk-cache { background: var(--st-upcoming); }
+  .set-disk-smart { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .set-disk-cache { background: var(--st-info); }
   .set-disk-other { background: var(--text-3); }
   .set-disk-free { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-3); }
   .set-disk-meter { position: relative; }

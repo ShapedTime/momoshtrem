@@ -52,13 +52,28 @@ export function parseSize(text: string): number | null | undefined {
   return Number.isSafeInteger(bytes) ? bytes : undefined;
 }
 
+/** A size in GB to a tenth, rounded the way given: 189.67e9 down is "189.6". */
+const tenths = (bytes: number, round: (value: number) => number) => SIZE_INPUT.format(round(bytes / (GB / 10)) / 10);
+
 /**
  * The limit's bounds as the input's help says them, in its unit and precision:
  * the minimum rounded up and the maximum down, so typing what it says always fits.
  */
 export function limitBounds(settings: Pick<StorageSettings, 'min_bytes' | 'max_bytes'>): { min: string; max: string } {
-  const tenths = (bytes: number, round: (value: number) => number) => `${SIZE_INPUT.format(round(bytes / (GB / 10)) / 10)} GB`;
-  return { min: tenths(settings.min_bytes, Math.ceil), max: tenths(settings.max_bytes, Math.floor) };
+  return { min: `${tenths(settings.min_bytes, Math.ceil)} GB`, max: `${tenths(settings.max_bytes, Math.floor)} GB` };
+}
+
+/**
+ * The custom input's first text when the limit isn't custom yet: the limit that
+ * applies now, held inside the bounds as the help says them (a limit clamped at
+ * the maximum would otherwise round up past it).
+ */
+function limitPrefill(settings: Pick<StorageSettings, 'limit_effective_bytes' | 'min_bytes' | 'max_bytes'>): string {
+  const text = formatSizeInput(settings.limit_effective_bytes);
+  const bytes = parseSize(text) ?? 0;
+  if (bytes > settings.max_bytes) return tenths(settings.max_bytes, Math.floor);
+  if (bytes < settings.min_bytes) return tenths(settings.min_bytes, Math.ceil);
+  return text;
 }
 
 // ---- Download windows ---------------------------------------------------------------
@@ -83,6 +98,16 @@ export function windowsProblem(windows: readonly DownloadWindow[]): WindowProble
     }
   }
   return null;
+}
+
+/**
+ * Where focus goes once window `index` of `count` is removed (its button goes
+ * with it): the next window's Remove, else the previous one's (both by their
+ * index in the shorter list), else Add.
+ */
+export function focusAfterRemove(index: number, count: number): number | 'add' {
+  if (index < count - 1) return index;
+  return index > 0 ? index - 1 : 'add';
 }
 
 /** "23:00"–"06:00" ends the next day. */
@@ -136,8 +161,8 @@ const sizeText = (bytes: number | null) => (bytes === null ? '' : formatSizeInpu
 export function draftOf(settings: StorageSettings): StorageDraft {
   return {
     limitMode: SOURCE_MODE[settings.source],
-    // Custom starts from the limit that applies now
-    limit: formatSizeInput(settings.source === 'setting' && settings.limit_bytes !== null ? settings.limit_bytes : settings.limit_effective_bytes),
+    // Custom starts from the stored limit, else from the one that applies now
+    limit: settings.source === 'setting' && settings.limit_bytes !== null ? formatSizeInput(settings.limit_bytes) : limitPrefill(settings),
     keptMax: sizeText(settings.kept.max_bytes),
     untilWatched: settings.kept.default_until_watched,
     days: settings.kept.default_days,
@@ -265,12 +290,21 @@ const ROOM = 'Kept and smart downloads together get the limit less the streaming
 
 /**
  * A 422's message for the field it names, in words (the server's are for
- * developers): the ranges that depend on the disk say what has to fit.
- * The other fields can't fail from this page; they keep the server's words.
+ * developers): the ranges that depend on the disk say what has to fit. A
+ * limit outside the bounds (the disk shrank since they were read) gets them;
+ * otherwise a limit fails because it squeezes the caps. The other fields
+ * can't fail from this page; they keep the server's words.
  */
-export function fieldErrorCopy(field: StorageField, message: string): string {
+export function fieldErrorCopy(
+  field: StorageField,
+  message: string,
+  limit?: { sent: number | null | undefined; settings: Pick<StorageSettings, 'min_bytes' | 'max_bytes'> }
+): string {
   switch (field) {
     case 'limit_bytes':
+      if (limit && typeof limit.sent === 'number' && (limit.sent < limit.settings.min_bytes || limit.sent > limit.settings.max_bytes)) {
+        return SIZE_ERRORS.limitRange(limitBounds(limit.settings));
+      }
       return 'This limit leaves too little for the space you set for kept or smart downloads. Lower that too, or choose a larger limit.';
     case 'kept.max_bytes':
       return `${ROOM} Enter less here, or lower the space for smart downloads.`;
@@ -283,9 +317,45 @@ export function fieldErrorCopy(field: StorageField, message: string): string {
   }
 }
 
-/** PUT's 409 `limit_below_committed`: the change would leave kept downloads less than they need. */
+/** PUT's 409 `limit_below_committed` from a lower limit: the change would leave kept downloads less than they need. */
 export function belowCommittedCopy(committedKeptBytes: number): string {
   return `Kept downloads need ${formatBytes(committedKeptBytes)}. Stop keeping some, or set a limit that leaves room for them.`;
+}
+
+/** The same 409 when the PUT lowered the kept cap itself: it shows on that field. */
+export function belowCommittedCapCopy(committedKeptBytes: number): string {
+  return `Kept downloads need ${formatBytes(committedKeptBytes)}. Enter at least that here, or stop keeping some.`;
+}
+
+/** What a refused PUT carries (`ApiError`). */
+export interface SaveError {
+  status: number;
+  code: string;
+  field?: string;
+  message: string;
+  details: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The field a refused PUT is about, and its words: a 422's field, or the kept
+ * cap for a 409 `limit_below_committed` when the PUT sent one (the kept cap
+ * moves only with the limit and `kept.max_bytes`). Null: the problem belongs
+ * in the save bar (a 409 from the limit, anything else).
+ */
+export function fieldProblem(
+  error: SaveError,
+  sent: StorageSettingsPatch | undefined,
+  settings?: Pick<StorageSettings, 'min_bytes' | 'max_bytes'>
+): { field: StorageField; text: string } | null {
+  if (error.status === 422 && isStorageField(error.field)) {
+    const limit = settings ? { sent: sent?.limit_bytes, settings } : undefined;
+    return { field: error.field, text: fieldErrorCopy(error.field, error.message, limit) };
+  }
+  const committed = error.details.committed_kept_bytes;
+  if (error.status === 409 && error.code === 'limit_below_committed' && typeof committed === 'number' && sent?.kept?.max_bytes !== undefined) {
+    return { field: 'kept.max_bytes', text: belowCommittedCapCopy(committed) };
+  }
+  return null;
 }
 
 // ---- The limit's words ----------------------------------------------------------------------
@@ -414,6 +484,12 @@ export function floorNote(settings: Pick<StorageSettings, 'floored' | 'effective
   return settings.floored
     ? { text: `Holding the cache at ${formatBytes(settings.effective_bytes)} to keep ${floor} of the disk free.`, warn: true }
     : { text: `The cache always leaves ${floor} of the disk free.`, warn: false };
+}
+
+/** While the cache holds more than it may (a lower limit, or the floor), it's trimmed in steps: say so. */
+export function trimNote(settings: Pick<StorageSettings, 'usage' | 'effective_bytes'>): string | null {
+  const { kept_bytes: kept, smart_bytes: smart, cache_bytes: cache } = settings.usage;
+  return kept + smart + cache > settings.effective_bytes ? `Trimming the cache down to ${formatBytes(settings.effective_bytes)}.` : null;
 }
 
 // ---- The settings nav ------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import type { DownloadWindow } from '@/lib/api/contract';
 import {
   backgroundHelp,
   crossesMidnight,
+  focusAfterRemove,
   MAX_WINDOWS,
   NEW_WINDOW,
   PAUSE_HELP,
@@ -32,6 +33,12 @@ interface WindowsFieldProps {
 function WindowsField({ windows, onChange, error, invalidWindow }: WindowsFieldProps) {
   const describedBy = rowDescribedBy('st-windows', error);
   const set = (index: number, next: Partial<DownloadWindow>) => onChange(windows.map((window, i) => (i === index ? { ...window, ...next } : window)));
+  const remove = (index: number) => {
+    onChange(windows.filter((_, i) => i !== index));
+    // Its button goes with the row: focus the next row's Remove, else the previous one's, else Add
+    const target = focusAfterRemove(index, windows.length);
+    requestAnimationFrame(() => document.getElementById(target === 'add' ? 'st-windows-add' : `st-window-${target}-remove`)?.focus());
+  };
   return (
     <div className="set-windows">
       {windows.length > 0 && (
@@ -64,7 +71,7 @@ function WindowsField({ windows, onChange, error, invalidWindow }: WindowsFieldP
                   aria-describedby={describedBy}
                   onChange={(event) => set(index, { end: event.target.value })}
                 />
-                <IconButton aria-label={`Remove window ${n}`} onClick={() => onChange(windows.filter((_, i) => i !== index))}>
+                <IconButton id={`st-window-${index}-remove`} aria-label={`Remove window ${n}`} onClick={() => remove(index)}>
                   <X size={18} aria-hidden="true" />
                 </IconButton>
                 {crossesMidnight(window) && <span className="set-window-next t-small text-fg-3">Ends the next day</span>}
