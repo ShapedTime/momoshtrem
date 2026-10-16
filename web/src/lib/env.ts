@@ -17,19 +17,13 @@ export interface EnvConfig {
   SESSION_SECRET: string;
 
   // Optional - warnings logged but app continues
-  JACKETT_URL: string | undefined;
-  JACKETT_API_KEY: string | undefined;
   MOMOSHTREM_URL: string | undefined;
   BACKEND_API_TOKEN: string | undefined;
 }
 
 const REQUIRED_VARS = ['APP_PASSWORD', 'TMDB_API_KEY', 'SESSION_SECRET'] as const;
 
-const OPTIONAL_VARS = [
-  'JACKETT_URL',
-  'JACKETT_API_KEY',
-  'MOMOSHTREM_URL',
-] as const;
+const OPTIONAL_VARS = ['MOMOSHTREM_URL'] as const;
 
 /**
  * Validate all environment variables at startup.
@@ -97,8 +91,6 @@ export function validateEnvironment(): EnvConfig {
     APP_PASSWORD: process.env.APP_PASSWORD!,
     TMDB_API_KEY: process.env.TMDB_API_KEY!,
     SESSION_SECRET: process.env.SESSION_SECRET!,
-    JACKETT_URL: process.env.JACKETT_URL,
-    JACKETT_API_KEY: process.env.JACKETT_API_KEY,
     MOMOSHTREM_URL: process.env.MOMOSHTREM_URL,
     BACKEND_API_TOKEN: process.env.BACKEND_API_TOKEN,
   };
