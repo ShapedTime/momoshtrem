@@ -74,12 +74,12 @@ describe('file classes', () => {
   });
 });
 
-describe('assign hints from the legacy search', () => {
-  const base = { query: 'Frieren', title: 'Frieren', tmdbId: 209867 };
+describe('assign hints from the search sheet’s context', () => {
+  const show = { kind: 'show' as const, tmdbId: 209867, key: '' };
   it('an episode search hints its episode, a season search its season', () => {
-    expect(assignHint({ ...base, mediaType: 'episode', season: 1, episode: 30 })).toEqual({ season: 1, episode: 30 });
-    expect(assignHint({ ...base, mediaType: 'tv', season: 2 })).toEqual({ season: 2 });
-    expect(assignHint({ ...base, mediaType: 'tv' })).toBeUndefined();
-    expect(assignHint({ ...base, mediaType: 'movie' })).toBeUndefined();
+    expect(assignHint({ ...show, season: 1, episode: 30 })).toEqual({ season: 1, episode: 30 });
+    expect(assignHint({ ...show, season: 2, episode: null })).toEqual({ season: 2 });
+    expect(assignHint({ ...show, season: null, episode: null })).toBeUndefined();
+    expect(assignHint({ kind: 'movie', tmdbId: 1054867, key: '' })).toBeUndefined();
   });
 });

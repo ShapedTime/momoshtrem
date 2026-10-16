@@ -139,7 +139,7 @@ test.describe('library', () => {
       const sheet = page.getByRole('dialog', { name: 'Frieren: Beyond Journey’s End' });
       await expect(sheet).toContainText('28/38 ready · 39.2 GB');
       await expect(sheet.getByRole('link', { name: /Review mapping/ })).toHaveAttribute('href', '/mapping/101');
-      await expect(sheet.getByRole('link', { name: /Find missing episodes/ })).toHaveAttribute('href', '/tv/209867?season=1');
+      await expect(sheet.getByRole('button', { name: /Find missing episodes/ })).toBeVisible();
       await expectNoA11yViolations(page);
       await sheet.getByRole('button', { name: 'Close' }).click();
       await expect(sheet).toBeHidden();

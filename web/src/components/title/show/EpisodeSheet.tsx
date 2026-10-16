@@ -6,7 +6,6 @@ import { ReplaceMenu } from '@/components/source/ReplaceMenu';
 import { Banner, Button, CopyField, FilePath, LoadingRegion, Sheet, Skeleton, SkeletonText, StatusPill } from '@/components/ui';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
-import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { useRemoveEpisodeFile } from '@/hooks/useTitle';
 import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
 import { seasonQuery, titleQuery } from '@/lib/api/endpoints';
@@ -15,7 +14,6 @@ import { useSheet } from '@/lib/sheets/useSheet';
 import { showSourceParams } from '@/lib/source/context';
 import { episodeCode, parseEpisodeCode } from '@/lib/title/episodes';
 import { formatDate } from '@/lib/title/format';
-import { legacySearchContext } from '@/lib/title/legacy-search';
 import { SubtitlesPanel } from '../SubtitlesPanel';
 
 /** `?sheet=episode` params for one episode of a show. */
@@ -43,12 +41,8 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
   const hdrezka = useHDRezkaEnabled();
   const sheets = useSheet();
   const scope = { season: episode.season_number, episode: episode.episode_number };
-  const find = () => {
-    close();
-    // The page shows the search once the sheet has gone (a sheet traps focus)
-    openLegacySearch(legacySearchContext(show, scope));
-  };
-  // Over this sheet in history: Back (or closing it) comes back here
+  // The source sheet's tabs, over this sheet in history: Back (or closing it) comes back here
+  const find = () => sheets.open('torrent', showSourceParams(show.tmdb_id, scope));
   const streamFromHDRezka = () => sheets.open('hdrezka', showSourceParams(show.tmdb_id, scope));
   const source = sourceLine(episode);
   const facts = [episode.runtime ? `${episode.runtime} min` : null, episode.air_date ? formatDate(episode.air_date) : null].filter(Boolean);

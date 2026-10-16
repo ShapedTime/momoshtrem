@@ -403,13 +403,15 @@ describe('the mock library keeps what the page changed', () => {
     expect(stored.map((s) => `${s.language_code}:${s.match}`)).toEqual(['en:exact_release', 'ru:exact_release', 'az:same_source']);
   });
 
-  it('assigns a torrent from the legacy search: one plausible file applies on its own and starts downloading', async () => {
-    const search = await (await fetch('/api/jackett/search?q=One%20Battle%20After%20Another%202025')).json();
-    expect(search.results).toHaveLength(3);
-    const { job_id: jobId } = await assignmentApi.assignMovie(3, { magnet_uri: search.results[0].magnetUri, indexer: search.results[0].indexer });
+  it('assigns a torrent from the search: one plausible file applies on its own and starts downloading', async () => {
+    const search = await searchApi.torrents({ media_type: 'movie', tmdb_id: 1054867 });
+    const [best] = search.items;
+    expect(best.id).toBe(search.best_id);
+    if (!best.magnet_uri) throw new Error('The best match has a magnet');
+    const { job_id: jobId } = await assignmentApi.assignMovie(3, { magnet_uri: best.magnet_uri, indexer: best.indexer });
     // In Node a job moves one step per read: fetching metadata, classifying, then applied
     for (let read = 0; read < 2; read++) await assignmentApi.job(jobId);
-    expect((await assignmentApi.job(jobId)).job).toMatchObject({ status: 'applied', ai_available: false, torrent: { indexer: 'TorrentLeech' } });
+    expect((await assignmentApi.job(jobId)).job).toMatchObject({ status: 'applied', ai_available: false, torrent: { indexer: best.indexer } });
     expect((await titlesApi.get('movie', 1054867)).library).toMatchObject({
       availability_stage: 'downloading',
       torrent: { release_name: 'One.Battle.After.Another.2025.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX', state: 'active' },

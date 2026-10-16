@@ -2,12 +2,12 @@ import type { ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/components/ui';
-import { useAssignTorrent } from '@/hooks/useAssignTorrent';
-import type { AssignmentJobDetail } from '@/lib/api/contract';
+import { type AssignTarget, assignTarget, useAssignTorrent } from '@/hooks/useAssignTorrent';
+import type { AssignmentJobDetail, MediaType, Title } from '@/lib/api/contract';
 import { waitForJob } from '@/lib/api/endpoints';
 import { jobDetail, seedJobs } from '@/mocks/fixtures/assignment';
 import { findTitle } from '@/mocks/fixtures/catalog';
-import type { TorrentSearchContext } from '@/types/jackett';
+import { buildTitle } from '@/mocks/fixtures/titles';
 
 /** Adding a movie's torrent waits on its job, but not forever (#5): a slow one hands over to its page. */
 
@@ -54,8 +54,8 @@ it('a movie job still working after 40 s: the search closes and its page takes o
       <ToastProvider>{children}</ToastProvider>
     </QueryClientProvider>
   );
-  const context: TorrentSearchContext = { mediaType: 'movie', query: 'Dune 2024', title: 'Dune', tmdbId: 1054867, libraryId: 3 };
-  const { result } = renderHook(() => useAssignTorrent(context, { onLeave }), { wrapper });
+  const target: AssignTarget = { mediaType: 'movie', tmdbId: 1054867, libraryId: 3 };
+  const { result } = renderHook(() => useAssignTorrent(target, { onLeave }), { wrapper });
 
   act(() => result.current.add('magnet:?xt=urn:btih:abc'));
   await waitFor(() => expect(result.current.isAdding('magnet:?xt=urn:btih:abc')).toBe(true));
@@ -70,4 +70,23 @@ it('a movie job still working after 40 s: the search closes and its page takes o
   await waitFor(() => expect(push).toHaveBeenCalledWith('/mapping/7'));
   expect(onLeave).toHaveBeenCalled();
   expect(document.body).not.toHaveTextContent('Couldn’t add the torrent');
+});
+
+function title(mediaType: MediaType, tmdbId: number): Title {
+  const built = buildTitle(mediaType, tmdbId);
+  if (!built) throw new Error(`No title ${tmdbId}`);
+  return built;
+}
+
+it('the sheet’s context says what Add assigns to: the title, and a show’s season or episode as the hint', () => {
+  const show = title('tv', 209867);
+  expect(assignTarget(show, { kind: 'show', tmdbId: 209867, season: 1, episode: 30, key: '' })).toEqual({
+    mediaType: 'tv',
+    tmdbId: 209867,
+    libraryId: show.library.library_id,
+    hint: { season: 1, episode: 30 },
+  });
+  expect(assignTarget(show, { kind: 'show', tmdbId: 209867, season: null, episode: null, key: '' })).not.toHaveProperty('hint');
+  const movie = title('movie', 1054867);
+  expect(assignTarget(movie, { kind: 'movie', tmdbId: 1054867, key: '' })).toEqual({ mediaType: 'movie', tmdbId: 1054867, libraryId: movie.library.library_id });
 });

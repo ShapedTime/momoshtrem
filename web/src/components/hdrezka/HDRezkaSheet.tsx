@@ -257,7 +257,7 @@ function HDRezkaPicker({ context, title, close }: PickerProps) {
   const [restored] = useState(() => loadDraft(context.key) !== null);
   const [draft, setDraft] = useState<HDRezkaDraft>(() => loadDraft(context.key) ?? freshDraft(title));
   const [remembered] = useState(rememberedVoiceOver);
-  const switchTo = useSwitchSource(context, close, title);
+  const switchTo = useSwitchSource();
   const inputRef = useRef<HTMLInputElement>(null);
   const focusVoiceOver = useRef(false);
   const voiceOverRef = useCallback((heading: HTMLHeadingElement | null) => {

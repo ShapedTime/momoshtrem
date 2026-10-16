@@ -5,7 +5,8 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
 
 /**
  * The torrent search sheet (#92) against the MSW mocks, through its deep
- * links: until #95 nothing else opens it. Frieren misses S01E29–E38 (the
+ * links (the title, show, HDRezka and mapping-entry specs open it from the
+ * pages). Frieren misses S01E29–E38 (the
  * 29–38 batch is the best match), Severance's The Pirate Bay times out until
  * a Retry, One Battle After Another is a movie with a CAM. Scenarios in
  * src/mocks/scenario.ts (search-partial, -none, -slow, -down).
@@ -27,7 +28,7 @@ async function expectAccessibleAndContained(page: Page) {
 const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
 const sheet = (page: Page) => page.getByRole('dialog', { name: /^Find a source · / });
 
-/** Client-side, like an entry point will (#95): a reload would forget the session's drafts. */
+/** Client-side, like an entry point does: a reload would forget the session's drafts. */
 const openClientSide = (page: Page, href: string) =>
   page.evaluate((url) => (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push(url), href);
 
@@ -189,13 +190,6 @@ test.describe('Torrent search', () => {
     await expect(field).toHaveValue('Frieren batch');
     await expect(dialog.getByRole('button', { name: 'Season pack', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(dialog.getByText('4 results · Nyaa, TorrentLeech, The Pirate Bay')).toBeVisible();
-  });
-
-  test('the Torrents tab still opens the legacy search until #95', async ({ page }) => {
-    await signIn(page, '/tv/209867?sheet=hdrezka&show=209867&se=S01E29');
-    await sheet(page).getByRole('tab', { name: 'Torrents' }).click();
-    await expect(sheet(page)).toBeHidden();
-    await expect(page.getByRole('dialog', { name: 'Search: Frieren: Beyond Journey’s End S01E29' })).toBeVisible();
   });
 });
 

@@ -1,17 +1,12 @@
 'use client';
 
-import { type ReactNode, useCallback, useId } from 'react';
+import { type ReactNode, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Sheet, Tabs } from '@/components/ui';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
-import { openLegacySearch } from '@/hooks/useLegacySearch';
-import type { Title } from '@/lib/api/contract';
 import { seasonQuery, titleQuery } from '@/lib/api/endpoints';
-import { TORRENT_SHEET_LIVE } from '@/lib/search/live';
-import { getSheet } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
-import { contextMediaType, legacyScope, type SourceContext, sourceHeading } from '@/lib/source/context';
-import { legacySearchContext } from '@/lib/title/legacy-search';
+import { contextMediaType, type SourceContext, sourceHeading } from '@/lib/source/context';
 
 /** The source sheet's tabs; each is its own registered sheet (`?sheet=torrent|hdrezka`) on the same params. */
 export type SourceTab = 'torrent' | 'hdrezka';
@@ -28,25 +23,9 @@ export function useSourceTitle(context: SourceContext) {
   return { title, episode };
 }
 
-/**
- * Switch the source sheet to another tab. A registered sibling swaps in on the
- * same params (Back still closes it). Until `TORRENT_SHEET_LIVE` (#95),
- * Torrents closes the sheet and opens the legacy search for the same context,
- * once the sheet is gone (a sheet traps focus).
- */
-export function useSwitchSource(context: SourceContext, close: () => void, title: Title | undefined) {
-  const sheets = useSheet();
-  return useCallback(
-    (tab: SourceTab) => {
-      if (getSheet(tab) && (tab !== 'torrent' || TORRENT_SHEET_LIVE)) {
-        sheets.swap(tab);
-        return;
-      }
-      close();
-      if (tab === 'torrent' && title) openLegacySearch(legacySearchContext(title, legacyScope(context)));
-    },
-    [close, context, sheets, title]
-  );
+/** Switch the source sheet to another tab: its sheet swaps in on the same params, so Back still closes it. */
+export function useSwitchSource(): (tab: SourceTab) => void {
+  return useSheet().swap;
 }
 
 interface SourceSheetProps {
@@ -72,7 +51,7 @@ export function SourceSheet({ tab, context, close, head, footer, children }: Sou
   const panelId = useId();
   const { title, episode } = useSourceTitle(context);
   const hdrezka = useHDRezkaEnabled();
-  const switchTo = useSwitchSource(context, close, title);
+  const switchTo = useSwitchSource();
   const { label, heading } = sourceHeading(context, title, episode);
   // HDRezka is opt-in: without it, the Torrents tab stands alone
   const tabs: SourceTab[] = hdrezka || tab === 'hdrezka' ? ['torrent', 'hdrezka'] : ['torrent'];

@@ -6,19 +6,16 @@ import { useOverArt } from '@/components/shell/ShellContext';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
-import { openLegacySearch } from '@/hooks/useLegacySearch';
 import { useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { MovieTitle } from '@/lib/api/contract';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { titleFacts } from '@/lib/title/facts';
-import { legacySearchContext } from '@/lib/title/legacy-search';
 import { primaryActionFor, type StageIntent } from '@/lib/title/stage-copy';
 import { ActionDock } from './ActionDock';
 import { CastRow } from './CastRow';
 import { CurrentStreamPanel } from './CurrentStreamPanel';
 import { CurrentTorrentPanel } from './CurrentTorrentPanel';
 import { DetailsAside } from './DetailsAside';
-import { LegacySearchHost } from './LegacySearchHost';
 import { MoreLikeThis } from './MoreLikeThis';
 import { PrimaryPanel } from './PrimaryPanel';
 import { NeedsReviewBanner } from './show';
@@ -41,8 +38,10 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
   const copy = primaryActionFor(movie, { hdrezka });
   useDocumentTitle(movie.title);
 
-  const findTorrent = () => openLegacySearch(legacySearchContext(movie));
-  const streamFromHDRezka = () => sheets.open('hdrezka', { movie: String(movie.tmdb_id) });
+  // The source sheet's tabs, on the same params (`?sheet=torrent|hdrezka&movie=<tmdb>`)
+  const sourceParams = { movie: String(movie.tmdb_id) };
+  const findTorrent = () => sheets.open('torrent', sourceParams);
+  const streamFromHDRezka = () => sheets.open('hdrezka', sourceParams);
   const onAction = (intent: StageIntent) => {
     if (intent === 'add') actions.add();
     else if (intent === 'find') findTorrent();
@@ -87,7 +86,6 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
         </DetailsAside>
       </div>
       <ActionDock copy={copy} onAction={onAction} busy={busy} />
-      <LegacySearchHost onAdded={() => void actions.torrentChanged()} onClose={() => void actions.refetch()} />
     </>
   );
 }
