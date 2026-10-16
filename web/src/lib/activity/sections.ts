@@ -1,5 +1,5 @@
 import type { StreamingSession, TorrentListItem, TorrentState } from '@/lib/api/contract';
-import { wantsMore } from './downloads';
+import { waitsOnItsOwn } from './downloads';
 
 /**
  * Activity's sections (activity.js `groups`): Streaming now, Downloading,
@@ -41,10 +41,11 @@ export const onlyIdle = (items: readonly Pick<TorrentListItem, 'state'>[]) => it
 
 /**
  * Nothing to show but the empty state: no torrents at all, or only idle ones
- * (they sit below it, full width) whose downloads want nothing more (#77): a
- * download waiting for the stream, its window or a slot isn't quiet.
+ * (they sit below it, full width) whose downloads won't carry on by themselves
+ * (#77): one waiting for the stream, its window or a slot isn't quiet; one held
+ * by background downloads being off is.
  */
-export const isQuiet = (items: readonly Pick<TorrentListItem, 'state' | 'wanted'>[]) => onlyIdle(items) && !items.some(wantsMore);
+export const isQuiet = (items: readonly Pick<TorrentListItem, 'state' | 'wanted'>[]) => onlyIdle(items) && !items.some(waitsOnItsOwn);
 
 /**
  * The session the "Streaming now" tile shows: the most recently read one,

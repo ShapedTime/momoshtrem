@@ -63,7 +63,13 @@ function waitingHealth(wanted: TorrentWanted): Health | null {
       return {
         kind: 'waiting',
         title,
-        body: sentence('Something else is streaming, so background downloads wait and Infuse gets the bandwidth. They pick up a minute after it ends.', onDisk),
+        // resumes_at is set once the last stream ended: the minute's grace in case it picks up again
+        body: sentence(
+          wanted.resumes_at
+            ? `The stream just ended. Background downloads wait a minute in case it picks up again, and resume at ${formatTimeOfDay(Date.parse(wanted.resumes_at))}.`
+            : 'Something else is streaming, so background downloads wait and Infuse gets the bandwidth. They pick up a minute after it ends.',
+          onDisk
+        ),
       };
     case 'waiting_for_window':
       return { kind: 'waiting', title, body: sentence('It’s outside your download windows, so it waits for the next one.', onDisk, STREAMS_ANYWAY) };

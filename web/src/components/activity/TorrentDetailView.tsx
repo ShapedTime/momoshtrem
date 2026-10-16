@@ -80,7 +80,7 @@ function DetailHeader({ detail }: { detail: TorrentDetail }) {
         </h1>
         <ReleaseName name={detail.name} className="td-release" />
         {wanted && (
-          <div className={cx('td-prog', detail.state === 'paused' && 'is-paused')}>
+          <div className={cx('td-prog', (detail.state === 'paused' || detail.wanted?.state === 'paused') && 'is-paused')}>
             <Progress value={wanted.pct} size="lg" tone={detail.state === 'streaming' ? 'accent' : 'downloading'} label={`${label.text} progress`} />
             <span className="t-small text-fg-2 tabular-nums">
               {wanted.pct}% · {wanted.detail}

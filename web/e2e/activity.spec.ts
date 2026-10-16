@@ -114,6 +114,8 @@ test.describe('activity', () => {
     await card(page, 'Interstellar').getByRole('button', { name: 'Remove Interstellar torrent' }).click();
     const dialog = page.getByRole('alertdialog', { name: 'Remove this torrent?' });
     await expect(dialog).toContainText('Infuse will no longer be able to play Interstellar. The movie stays in your library and shows “Needs a torrent”.');
+    // Kept (#77): the Keep stays, waiting for a file
+    await expect(dialog).toContainText('The Keep stays; with no other file it shows “No file yet” until it has one again.');
     await expect(dialog.getByRole('checkbox', { name: 'Also delete downloaded data (up to 63.1 GB)' })).toBeChecked();
     await expectNoA11yViolations(page);
     await dialog.getByRole('button', { name: 'Remove torrent' }).click();
@@ -232,7 +234,7 @@ test.describe('background downloads (#77)', () => {
     await signIn(page, '/activity');
     const interstellar = card(page, 'Interstellar');
     await expect(interstellar.getByText('Kept', { exact: true })).toBeVisible();
-    await expect(interstellar).toContainText('26.5 GB of 63.1 GB on disk · about 4 h 25 min left');
+    await expect(interstellar).toContainText('26.5 GB of 63.1 GB on disk · about 4 h 30 min left');
     await expect(interstellar.getByRole('progressbar', { name: 'Interstellar progress' })).toHaveAttribute('aria-valuenow', '41');
     // Downloading counts what downloads still want, not the whole torrents
     await expect(section(page, 'Downloading')).toContainText('36.6 GB left for kept downloads');
@@ -255,7 +257,8 @@ test.describe('background downloads (#77)', () => {
     // The disk tile: kept and smart beside the cache, and the cache limit
     const disk = page.getByRole('region', { name: 'Summary' }).getByRole('img', { name: /^Disk: 48\.8 GB kept, 1\.9 GB smart, .+ the cache may grow to 750 GB$/ });
     await expect(disk).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Summary' })).toContainText('62.4 GB of 750 GB cache');
+    await expect(page.getByRole('region', { name: 'Summary' })).toContainText('62.4 GB of 750 GB limit');
+    await expect(page.getByRole('region', { name: 'Summary' })).toContainText('11.7 GB cache');
 
     // The side column on desktop; below the busy sections on phone
     const keptBox = await kept(page).boundingBox();
@@ -273,8 +276,11 @@ test.describe('background downloads (#77)', () => {
     const undo = toast(page, 'Stopped keeping Interstellar');
     await expect(undo).toContainText('What’s downloaded stays as cache until it’s cleared to make room. Undo within 10 seconds.');
     await expect(row(page, 'Interstellar')).toHaveCount(0);
+    // Its card lets go of the Keep at once too
+    await expect(card(page, 'Interstellar').getByText('Kept', { exact: true })).toHaveCount(0);
     await undo.getByRole('button', { name: 'Undo' }).click();
     await expect(row(page, 'Interstellar')).toHaveCount(1);
+    await expect(card(page, 'Interstellar').getByText('Kept', { exact: true })).toBeVisible();
     expect(sent).toHaveLength(0);
 
     await row(page, 'Interstellar').getByRole('button', { name: 'Stop keeping: Interstellar' }).click();
@@ -315,9 +321,34 @@ test.describe('background downloads (#77)', () => {
     await expect(row(page, 'Interstellar')).toContainText(`Waits until ${start.start}`);
     await expect(kept(page).getByRole('link', { name: 'Storage settings' })).toHaveAttribute('href', '/settings?section=storage');
 
+    // Background downloads off: Paused, and nothing to pause, since only turning them back on lifts it
     await putStorage(page, { background: { enabled: false, windows: [] } });
     await expect(kept(page).getByRole('status')).toContainText('Background downloads are off');
     await expect(row(page, 'Interstellar')).toContainText('Paused');
+    const held = section(page, 'Idle').getByRole('article', { name: 'Interstellar' });
+    await expect(held).toContainText('Paused');
+    await expect(held.getByRole('button', { name: 'Pause Interstellar' })).toHaveCount(0);
+  });
+
+  test('a list that can’t load says so with Try again; one that can’t refresh keeps what it had', async ({ page }) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'downloads-error'));
+    await signIn(page, '/activity');
+    const failed = page.getByRole('alert').filter({ hasText: 'Couldn’t load your kept downloads' });
+    await expect(failed).toContainText('The torrents on this page are up to date, and what’s on disk still plays in Infuse.', { timeout: 20_000 });
+    await expect(section(page, 'Downloading').getByRole('article')).toHaveCount(2);
+
+    await page.evaluate(() => window.localStorage.removeItem('msw:scenario'));
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    await expect(kept(page).getByRole('listitem')).toHaveCount(7);
+    await expect(failed).toHaveCount(0);
+
+    // The next refresh fails: the rows stay, with a quiet note, and polling carries on
+    await page.evaluate(() => window.localStorage.setItem('msw:scenario', 'downloads-error'));
+    const stale = kept(page).getByRole('status').filter({ hasText: 'Couldn’t refresh these.' });
+    await expect(stale).toContainText(/Showing what momoshtrem said at \d\d:\d\d\./, { timeout: 20_000 });
+    await expect(kept(page).getByRole('listitem')).toHaveCount(7);
+    await page.evaluate(() => window.localStorage.removeItem('msw:scenario'));
+    await expect(stale).toHaveCount(0, { timeout: 20_000 });
   });
 
   test('a backend without downloads: no Kept & smart, and the cards as before', async ({ page }) => {
@@ -385,13 +416,17 @@ test.describe('torrent detail', () => {
     await signIn(page, `/activity/${INTERSTELLAR}`);
     await expect(page.getByRole('heading', { name: 'Interstellar', level: 1 })).toBeVisible();
     await expect(page.getByText('Downloading 41%')).toBeVisible();
-    await expect(page.getByText('41% · 26.5 GB of 63.1 GB on disk · about 4 h 25 min left')).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Slow but moving' })).toContainText('It downloads what you keep in the background: 41% is on disk, about 4 h 25 min left.');
+    await expect(page.getByText('41% · 26.5 GB of 63.1 GB on disk · about 4 h 30 min left')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Slow but moving' })).toContainText('It downloads what you keep in the background: 41% is on disk, about 4 h 30 min left.');
     const holds = page.getByRole('region', { name: 'Kept & smart' });
     await expect(holds.getByRole('listitem')).toHaveCount(1);
     await expect(holds.getByRole('listitem')).toContainText(/Kept.*Interstellar.*The movie/);
     await expect(holds.getByRole('link', { name: 'See your kept downloads' })).toHaveAttribute('href', '/activity#act-dl-h');
     await expectAccessibleAndContained(page);
+    // The list mounts once it answers, and then scrolls into view
+    await holds.getByRole('link', { name: 'See your kept downloads' }).click();
+    await expect(page).toHaveURL(/\/activity#act-dl-h$/);
+    await expect(page.locator('#act-dl-h')).toBeInViewport();
 
     await page.goto(`/activity/${BLUEY}`);
     await expect(page.getByRole('region', { name: 'On disk' })).toContainText('Everything is on disk.');

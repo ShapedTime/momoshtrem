@@ -22,15 +22,28 @@ export function wantedPct(wanted: Pick<TorrentWanted, 'bytes' | 'done_bytes' | '
 /** Its downloads still want bytes (queued, downloading, waiting, stalled, paused or the disk full). */
 export const wantsMore = (torrent: Pick<TorrentListItem, 'wanted'>): boolean => torrent.wanted !== null && torrent.wanted.state !== 'done';
 
-/** "about 4 h 25 min left", "about 12 min left", "about 2 d 3 h left". Only for wanted files with a speed (PLAN §6). */
+/**
+ * Its downloads will carry on by themselves: they want bytes and aren't `paused`
+ * (you paused the torrent, or background downloads are off). Such a torrent can
+ * be paused, and keeps Activity from reading "quiet".
+ */
+export const waitsOnItsOwn = (torrent: Pick<TorrentListItem, 'wanted'>): boolean => wantsMore(torrent) && torrent.wanted?.state !== 'paused';
+
+/**
+ * "about 12 min left", "about 4 h 30 min left", "about 2 d 3 h left": an estimate, so past an
+ * hour it moves in 10-minute steps and doesn't jitter or promise the minute (STYLE_GUIDE §9).
+ * Only for wanted files with a speed (PLAN §6).
+ */
 export function formatEta(seconds: number): string {
   const minutes = Math.round(Math.max(0, seconds) / 60);
   if (minutes < 2) return 'about a minute left';
   if (minutes < 60) return `about ${minutes} min left`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `about ${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ''} left`;
-  const days = Math.floor(hours / 24);
-  return `about ${days} d${hours % 24 ? ` ${hours % 24} h` : ''} left`;
+  const steps = Math.round(minutes / 10) * 10;
+  const hours = Math.floor(steps / 60);
+  if (hours < 24) return `about ${hours} h${steps % 60 ? ` ${steps % 60} min` : ''} left`;
+  const wholeHours = Math.round(minutes / 60);
+  const days = Math.floor(wholeHours / 24);
+  return `about ${days} d${wholeHours % 24 ? ` ${wholeHours % 24} h` : ''} left`;
 }
 
 /** A StatusPill's props. */
@@ -47,7 +60,8 @@ export interface PillSpec {
  * - Downloading: of what its downloads want ("42%", or "Downloading 42%" large), else anacrolix's progress;
  * - idle with downloads: "On disk" once they're done, else why they wait ("Waits for the stream to end",
  *   "Waits until 01:00", "No peers · retrying", "Queued"…);
- * - Complete (only when it is), or Idle.
+ * - Complete (only when it is), or Idle; also for an idle torrent whose downloads read `downloading`
+ *   (the activity manager idled it a moment), as its health says.
  */
 export function torrentPill(torrent: Pick<TorrentListItem, 'state' | 'progress' | 'complete' | 'wanted'>, size: 'md' | 'lg' = 'md'): PillSpec {
   const { wanted } = torrent;
@@ -63,9 +77,20 @@ export function torrentPill(torrent: Pick<TorrentListItem, 'state' | 'progress' 
     }
     default:
       if (wanted?.state === 'done') return { status: 'on_disk' };
-      if (wanted) return keepStatePill(wanted.state, wantedPct(wanted), wanted.resumes_at);
+      if (wanted && wanted.state !== 'downloading') return keepStatePill(wanted.state, wantedPct(wanted), wanted.resumes_at);
       return torrent.complete ? { status: 'complete', label: size === 'lg' ? 'Complete · ready in Infuse' : undefined } : { status: 'idle' };
   }
+}
+
+/**
+ * A torrent while some of its downloads wait out a Stop keeping's Undo: their
+ * holds go, and once none is left nothing wants it any more (`wanted` null), as
+ * the server will say once the DELETE lands.
+ */
+export function withoutHolds<T extends Pick<TorrentListItem, 'holds' | 'wanted'>>(torrent: T, released: (downloadId: number) => boolean): T {
+  if (!torrent.holds.some((hold) => released(hold.download_id))) return torrent;
+  const holds = torrent.holds.filter((hold) => !released(hold.download_id));
+  return { ...torrent, holds, wanted: holds.length > 0 ? torrent.wanted : null };
 }
 
 /** The Kept and Smart pills: each reason once, kept first (`holds` is kept first, then by id). */
@@ -234,18 +259,21 @@ export interface PausedBanner {
   settings: boolean;
 }
 
+/**
+ * Only while a download the reason holds still wants bytes: background downloads
+ * off hold every one (`paused`), but the stream and the window don't hold one
+ * whose torrent you paused.
+ */
 export function pausedBanner(list: Pick<ShownList, 'items' | 'paused_reason' | 'resumes_at'>): PausedBanner | null {
-  if (!list.paused_reason || !list.items.some(downloadPending)) return null;
+  const reason = list.paused_reason;
+  if (!reason || !list.items.some((download) => downloadPending(download) && (reason === 'disabled' || download.state !== 'paused'))) return null;
   const at = list.resumes_at ? formatTimeOfDay(Date.parse(list.resumes_at)) : null;
-  switch (list.paused_reason) {
+  switch (reason) {
     case 'streaming':
-      return {
-        title: 'Downloads wait for the stream to end',
-        body: at
-          ? `The stream ended, so they pick up again at ${at}.`
-          : 'So Infuse gets the bandwidth. They pick up again a minute after it ends.',
-        settings: false,
-      };
+      // resumes_at is set once the last stream ended: the minute's grace before they carry on
+      return at
+        ? { title: `Downloads resume at ${at}`, body: 'They wait a minute after a stream ends, in case it picks up again.', settings: false }
+        : { title: 'Downloads wait for the stream to end', body: 'So Infuse gets the bandwidth. They pick up again a minute after it ends.', settings: false };
     case 'window':
       return {
         title: at ? `Downloads wait until ${at}` : 'Downloads wait for their window',

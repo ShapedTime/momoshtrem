@@ -1370,9 +1370,11 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 
 - **Expiry** reads "Kept until watched", "Kept until Nov 16", or "Kept until watched · by Nov 16". With neither, it's "Kept".
 - **Activity.** Cards take Kept and Smart pills from `holds` and progress and ETA from `wanted`, and say a waiting state with the copy above. An idle torrent whose downloads are done reads "On disk".
-  - The Downloading section's line counts what downloads still want, not the whole torrents: "36.6 GB left for kept downloads". A torrent whose downloads wait can be paused like a downloading one.
-  - The "Kept & smart" list (`GET /downloads`, P9 #207) sits in the side column on desktop and below the busy sections on phone. Each row has its state, size, progress, expiry and Stop keeping (a smart pick's is "Dismiss"), which removes the row with a 10 s Undo before the DELETE. Above the rows, `paused_reason` reads "Downloads wait for the stream to end", "Downloads wait until 01:00" or "Background downloads are off", while some download still wants bytes.
-  - The disk tile splits the cache into kept, smart and streaming cache, with a marker at `cache_limit_bytes`.
+  - The Downloading section's line counts what downloads still want, not the whole torrents: "36.6 GB left for kept downloads". A torrent whose downloads wait on their own (not `paused`: background downloads off) can be paused like a downloading one, and keeps the page from reading quiet.
+  - ETAs read "about 4 h 30 min left": past an hour they move in 10-minute steps.
+  - The "Kept & smart" list (`GET /downloads`, P9 #207) sits in the side column on desktop and below the busy sections on phone. Each row has its state, size, progress, expiry and Stop keeping (a smart pick's is "Dismiss"), which removes the row with a 10 s Undo before the DELETE. Above the rows, `paused_reason` reads "Downloads wait for the stream to end" ("Downloads resume at 21:43" in the minute after it ended), "Downloads wait until 01:00" or "Background downloads are off", while a download that reason holds still wants bytes (the stream and the window don't hold one you paused). A list that can't load shows "Couldn't load your kept downloads" with Try again; one that can't refresh keeps its rows with "Couldn't refresh these".
+  - Removing a kept torrent says "The Keep stays; with no other file it shows “No file yet” until it has one again."
+  - The disk tile splits the cache into kept, smart and streaming cache, with a marker at `cache_limit_bytes`, in Settings › Storage's colours: kept the accent, smart the accent at 55%, cache `--st-info`, other files grey, free the track.
   - A backend without downloads (`GET /downloads` 404, no `wanted` or `holds`) shows no list and the cards as before (mock scenario `downloads-absent`).
 
 **The Keep sheet** ("Download & keep"):

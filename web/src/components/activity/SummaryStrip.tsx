@@ -128,19 +128,20 @@ export function SummaryStrip({ summary, items, now, stale }: SummaryStripProps) 
               </span>
               <b className="limit" style={{ left: bar.limitAt }} />
             </span>
-            <span className="sub">{bar.cacheLine}</span>
-            {bar.pinned && (
-              <span className="sub act-disk-pinned">
-                <span>
-                  <i className="is-kept" aria-hidden="true" />
-                  {bar.pinned.kept}
-                </span>
-                <span>
-                  <i className="is-smart" aria-hidden="true" />
-                  {bar.pinned.smart}
-                </span>
+            <span className="sub act-disk-key">
+              <span>
+                <i className="limit-key" aria-hidden="true" />
+                {bar.limitLine}
               </span>
-            )}
+            </span>
+            <span className="sub act-disk-key">
+              {bar.legend.map((item) => (
+                <span key={item.kind}>
+                  <i className={`is-${item.kind}`} aria-hidden="true" />
+                  {item.text}
+                </span>
+              ))}
+            </span>
           </>
         ) : (
           <>

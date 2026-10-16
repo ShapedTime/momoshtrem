@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, HardDrive, Pause, Play, Trash2, TriangleAlert, Tv, 
 import { Button, ButtonLink, IconButton, Media, Progress, ReleaseName, StatusPill } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import type { TorrentHold, TorrentListItem } from '@/lib/api/contract';
-import { holdReasons, torrentPill, wantedProgress, wantsMore } from '@/lib/activity/downloads';
+import { holdReasons, torrentPill, waitsOnItsOwn, wantedProgress } from '@/lib/activity/downloads';
 import { formatRate, sessionBanner, torrentLabel } from '@/lib/activity/format';
 import { isWeak } from '@/lib/activity/health';
 import { formatBytes, plural } from '@/lib/title/format';
@@ -62,8 +62,8 @@ export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compac
   // What its downloads want counts, not the whole torrent; without downloads, anacrolix's progress
   const wanted = wantedProgress(torrent);
   const pct = torrent.wanted === null && torrent.progress !== null ? torrent.progress * 100 : null;
-  // A waiting download can be paused too: it would start on its own
-  const canPause = active || wantsMore(torrent);
+  // A waiting download can be paused too: it would start on its own (not one background downloads being off hold)
+  const canPause = active || waitsOnItsOwn(torrent);
   const detailHref = `/activity/${torrent.info_hash}`;
 
   return (
@@ -91,7 +91,7 @@ export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compac
         </div>
         <HoldPills holds={torrent.holds} />
         {wanted ? (
-          <div className="tcard-wanted">
+          <div className={cx('tcard-wanted', torrent.wanted?.state === 'paused' && 'is-paused')}>
             <Progress value={wanted.pct} label={`${label.text} progress`} />
             <span>{wanted.detail}</span>
           </div>

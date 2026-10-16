@@ -10,6 +10,7 @@ import { apiKeepalive, isApiError } from '@/lib/api/client';
 import type { Download, DownloadList, DownloadsPausedReason } from '@/lib/api/contract';
 import { downloadKeys, downloadPath, downloadsApi, libraryKeys, settingsKeys, titleKeys, torrentKeys } from '@/lib/api/endpoints';
 import { downloadName, downloadRemovalKey, downloadRow, downloadsUsageLine, pausedBanner, stopKeepingCopy } from '@/lib/activity/downloads';
+import { formatTimeOfDay } from '@/lib/activity/format';
 import { formatNumber } from '@/lib/title/format';
 import { STORAGE_SETTINGS_HREF } from '@/lib/title/keep';
 import { cx } from '@/lib/utils/cx';
@@ -83,11 +84,21 @@ interface DownloadsSectionProps {
   list: DownloadList | undefined;
   /** The rows to show: the list's, less those waiting out a Stop keeping's Undo. */
   items: readonly Download[];
-  /** GET /downloads failed (not a 404: without downloads the section isn't there at all). */
+  /** The last GET /downloads failed (not a 404: without downloads the section isn't there at all). */
   failed: boolean;
+  /** When the list shown was fetched: said when a later fetch failed. */
+  updatedAt: number;
   retrying: boolean;
   onRetry: () => void;
 }
+
+/** The heading's anchor: the detail page's "See your kept downloads" links here. */
+const HEADING_ID = 'act-dl-h';
+
+/** The list mounts once GET /downloads answers, after the browser looked for the hash: scroll to it then. */
+const scrollWhenLinked = (heading: HTMLHeadingElement | null) => {
+  if (heading && window.location.hash === `#${HEADING_ID}`) heading.scrollIntoView({ block: 'start' });
+};
 
 /**
  * "Kept & smart" (#77, GET /downloads): every download, its state, size,
@@ -95,7 +106,7 @@ interface DownloadsSectionProps {
  * wait now (`paused_reason`). The side column on desktop, below the busy
  * sections on phone. Hidden when there are none.
  */
-export function DownloadsSection({ list, items, failed, retrying, onRetry }: DownloadsSectionProps) {
+export function DownloadsSection({ list, items, failed, updatedAt, retrying, onRetry }: DownloadsSectionProps) {
   const stop = useStopKeeping();
   if (!list) {
     return failed ? (
@@ -120,12 +131,20 @@ export function DownloadsSection({ list, items, failed, retrying, onRetry }: Dow
     <section className="act-group act-dl" aria-labelledby="act-dl-h">
       <div className="section-head">
         <div className="titles">
-          <h2 className="t-title-3" id="act-dl-h">
+          <h2 className="t-title-3" id={HEADING_ID} ref={scrollWhenLinked}>
             Kept &amp; smart <span className="count">{formatNumber(items.length)}</span>
           </h2>
           <p className="t-small text-fg-3">{downloadsUsageLine(shown)}</p>
         </div>
       </div>
+      {failed && (
+        <p className="act-dl-stale" role="status">
+          <span>Couldn’t refresh these. Showing what momoshtrem said at {formatTimeOfDay(updatedAt)}.</span>
+          <Button variant="ghost" size="sm" onClick={onRetry} loading={retrying}>
+            Try again
+          </Button>
+        </p>
+      )}
       {banner && list.paused_reason && (
         <Banner
           role="status"

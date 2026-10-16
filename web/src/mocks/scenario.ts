@@ -51,6 +51,7 @@
  *   kept season (a Bluey S3 episode) still fits.
  * - `downloads-absent`: a backend before #77's P4 and P6: every /downloads route answers 404, torrents have no
  *   `wanted` or `holds`, and the summary's disk no `kept_bytes` or `smart_bytes` (Activity shows no "Kept & smart").
+ * - `downloads-error`: GET /downloads answers 500 (Activity's "Couldn’t load" banner, or its stale note once it had a list).
  * - `storage-config`: config.yaml sets `global_cache_size: 53760` (52.5 GB) and no PUT has sent a limit, so
  *   /settings/storage answers `source: config`, `limit_bytes: null` and `config_bytes`. Its kept cap (half the
  *   limit) is below what the seeded downloads commit: a PUT that doesn't lower it saves, and "Use auto"
@@ -135,6 +136,7 @@ export type MockScenario =
   | 'downloads-empty'
   | 'downloads-full'
   | 'downloads-absent'
+  | 'downloads-error'
   | 'storage-config'
   | 'trakt-off'
   | 'trakt-unconfigured'

@@ -14,7 +14,9 @@ import {
   torrentPill,
   wantedPct,
   wantedProgress,
+  waitsOnItsOwn,
   wantsMore,
+  withoutHolds,
 } from '@/lib/activity/downloads';
 import { formatTimeOfDay } from '@/lib/activity/format';
 import { healthFor } from '@/lib/activity/health';
@@ -62,22 +64,31 @@ describe('wanted progress', () => {
     expect(wantedPct({ bytes: 0, done_bytes: 0, state: 'queued' })).toBe(0);
   });
 
-  it('writes the ETA as “about … left”, only ever an estimate', () => {
+  it('writes the ETA as “about … left”, in 10-minute steps past an hour so it doesn’t jitter', () => {
     expect(formatEta(30)).toBe('about a minute left');
     expect(formatEta(600)).toBe('about 10 min left');
     expect(formatEta(3600)).toBe('about 1 h left');
-    expect(formatEta(15_913)).toBe('about 4 h 25 min left');
+    expect(formatEta(3_900)).toBe('about 1 h 10 min left');
+    expect(formatEta(15_913)).toBe('about 4 h 30 min left');
+    expect(formatEta(15_500)).toBe('about 4 h 20 min left');
+    expect(formatEta(7_150)).toBe('about 2 h left');
     expect(formatEta(90_000)).toBe('about 1 d 1 h left');
   });
 
   it('shows the bar and what’s on disk while downloads still want bytes', () => {
-    expect(wantedProgress(INTERSTELLAR)).toEqual({ pct: 41, detail: '26.5 GB of 63.1 GB on disk · about 4 h 25 min left' });
+    expect(wantedProgress(INTERSTELLAR)).toEqual({ pct: 41, detail: '26.5 GB of 63.1 GB on disk · about 4 h 30 min left' });
     expect(wantedProgress(ONE_PIECE)).toEqual({ pct: 31, detail: '124 MB of 400 MB on disk' });
     expect(wantedProgress(BLUEY)).toBeNull();
     expect(wantedProgress(FRIEREN)).toBeNull();
     expect(wantsMore(INTERSTELLAR)).toBe(true);
     expect(wantsMore(BLUEY)).toBe(false);
     expect(wantsMore(FRIEREN)).toBe(false);
+    // Held by you or by background downloads being off: they won't carry on by themselves
+    expect(waitsOnItsOwn(INTERSTELLAR)).toBe(true);
+    expect(waitsOnItsOwn(waiting('waiting_for_window'))).toBe(true);
+    expect(waitsOnItsOwn(waiting('paused'))).toBe(false);
+    expect(waitsOnItsOwn(ONE_PIECE)).toBe(false);
+    expect(waitsOnItsOwn(BLUEY)).toBe(false);
   });
 
   it('counts the bytes downloads still want in the Downloading section, not the whole torrents', () => {
@@ -102,6 +113,10 @@ describe('the card’s pills', () => {
     expect(torrentPill(waiting('stalled'))).toEqual({ status: 'stalled', label: 'No peers · retrying' });
     expect(torrentPill(waiting('queued'))).toEqual({ status: 'queued', label: 'Queued' });
     expect(torrentPill(waiting('disk_full'))).toEqual({ status: 'disk_full', label: 'Disk full' });
+    expect(torrentPill(waiting('paused'))).toEqual({ status: 'paused', label: 'Paused' });
+    // Idled a moment while its downloads read downloading: Idle, as its health says
+    expect(torrentPill(waiting('downloading'))).toEqual({ status: 'idle' });
+    expect(healthFor(waiting('downloading'))).toMatchObject({ kind: 'idle', title: 'Idle' });
     expect(torrentPill({ ...BLUEY, wanted: null })).toEqual({ status: 'complete', label: undefined });
     expect(torrentPill({ ...BLUEY, wanted: null }, 'lg')).toEqual({ status: 'complete', label: 'Complete · ready in Infuse' });
   });
@@ -113,6 +128,14 @@ describe('the card’s pills', () => {
     expect(holdReasons([])).toEqual([]);
     expect(holdReasons(BLUEY.holds)).toEqual(['kept']);
   });
+
+  it('drops the holds of downloads waiting out a Stop keeping’s Undo, and wanted with the last one', () => {
+    const released = (id: number) => id === INTERSTELLAR.holds[0].download_id;
+    expect(withoutHolds(INTERSTELLAR, released)).toMatchObject({ holds: [], wanted: null });
+    expect(withoutHolds(INTERSTELLAR, () => false)).toBe(INTERSTELLAR);
+    const shared = { ...INTERSTELLAR, holds: [...INTERSTELLAR.holds, { download_id: 9, reason: 'smart' as const, scope: 'episode' as const, title: 'X' }] };
+    expect(withoutHolds(shared, released)).toMatchObject({ holds: [{ download_id: 9 }], wanted: INTERSTELLAR.wanted });
+  });
 });
 
 describe('sections and the status line', () => {
@@ -121,8 +144,10 @@ describe('sections and the status line', () => {
     expect(isQuiet([waiting('waiting_for_window')])).toBe(false);
     expect(onlyIdle([waiting('waiting_for_window')])).toBe(true);
     expect(statusLine([waiting('queued')], null)).toEqual({ lead: 'Everything’s working.', text: '' });
-    // A torrent you paused waits for you, not in the queue
+    // A torrent you paused, or downloads held by background downloads being off, wait for you, not in the queue
     expect(statusLine([ONE_PIECE, BLUEY], null).text).toMatch(/^All quiet/);
+    expect(statusLine([waiting('paused')], null).text).toMatch(/^All quiet/);
+    expect(isQuiet([waiting('paused'), BLUEY])).toBe(true);
   });
 });
 
@@ -130,6 +155,7 @@ describe('health', () => {
   it('says why an idle torrent’s downloads wait, and what still plays', () => {
     const cases = [
       [waiting('waiting_for_stream'), 'waiting', 'Waits for the stream to end', /Something else is streaming.*a minute after it ends\. 41% of what you keep is on disk\./],
+      [waiting('waiting_for_stream', { resumes_at: ONE_AM }), 'waiting', 'Waits for the stream to end', /^The stream just ended\. Background downloads wait a minute in case it picks up again, and resume at 01:00\./],
       [waiting('waiting_for_window', { resumes_at: ONE_AM }), 'waiting', 'Waits until 01:00', /outside your download windows.*Infuse still plays it/],
       [waiting('queued'), 'waiting', 'Queued', /Two downloads run at a time/],
       [waiting('stalled', { resumes_at: ONE_AM }), 'slow', 'No peers · retrying', /Nothing arrived for 10 minutes.*It tries again at 01:00\./],
@@ -146,8 +172,8 @@ describe('health', () => {
   });
 
   it('gives the ETA of what downloads want while they fetch, and says a paused torrent’s downloads wait', () => {
-    expect(healthFor(INTERSTELLAR).body).toContain('It downloads what you keep in the background: 41% is on disk, about 4 h 25 min left.');
-    expect(healthFor({ ...INTERSTELLAR, seeders: 20 }).body).toMatch(/41% is on disk, about 4 h 25 min left\. You can start watching now\.$/);
+    expect(healthFor(INTERSTELLAR).body).toContain('It downloads what you keep in the background: 41% is on disk, about 4 h 30 min left.');
+    expect(healthFor({ ...INTERSTELLAR, seeders: 20 }).body).toMatch(/41% is on disk, about 4 h 30 min left\. You can start watching now\.$/);
     expect(healthFor(ONE_PIECE).body).toContain('Its downloads wait too: 31% of what you keep is on disk.');
   });
 });
@@ -164,7 +190,7 @@ describe('the “Kept & smart” list', () => {
       href: '/movie/157336',
       pill: { status: 'downloading', label: 'Downloading 41%', pct: 41 },
       pct: 41,
-      size: '26.5 GB of 63.1 GB · about 4 h 25 min left',
+      size: '26.5 GB of 63.1 GB · about 4 h 30 min left',
       files: null,
       retry: null,
       expiry: `Kept until watched · by ${formatShortDate(interstellar.expires_at!)}`,
@@ -220,7 +246,12 @@ describe('the “Kept & smart” list', () => {
       body: 'So Infuse gets the bandwidth. They pick up again a minute after it ends.',
       settings: false,
     });
-    expect(pausedBanner({ ...base, paused_reason: 'streaming', resumes_at: ONE_AM })?.body).toBe('The stream ended, so they pick up again at 01:00.');
+    // The minute's grace after the last stream
+    expect(pausedBanner({ ...base, paused_reason: 'streaming', resumes_at: ONE_AM })).toEqual({
+      title: 'Downloads resume at 01:00',
+      body: 'They wait a minute after a stream ends, in case it picks up again.',
+      settings: false,
+    });
     expect(pausedBanner({ ...base, paused_reason: 'window', resumes_at: ONE_AM })).toEqual({
       title: 'Downloads wait until 01:00',
       body: 'That’s when your next download window opens. What’s on disk still plays in Infuse.',
@@ -229,6 +260,11 @@ describe('the “Kept & smart” list', () => {
     expect(pausedBanner({ ...base, paused_reason: 'disabled' })).toMatchObject({ title: 'Background downloads are off', settings: true });
     // Everything is on disk: nothing waits
     expect(pausedBanner({ ...base, paused_reason: 'disabled', items: base.items.filter((d) => d.state === 'done') })).toBeNull();
+    // Only one you paused still wants bytes: the stream and the window don't hold it, background downloads off do
+    const yours = base.items.filter((d) => d.state === 'done' || d.state === 'paused');
+    expect(pausedBanner({ ...base, paused_reason: 'streaming', items: yours })).toBeNull();
+    expect(pausedBanner({ ...base, paused_reason: 'window', resumes_at: ONE_AM, items: yours })).toBeNull();
+    expect(pausedBanner({ ...base, paused_reason: 'disabled', items: yours })).toMatchObject({ title: 'Background downloads are off' });
   });
 });
 
@@ -240,8 +276,12 @@ describe('the disk tile', () => {
     expect(bar.segments.map((s) => s.kind)).toEqual(['kept', 'smart', 'cache', 'other']);
     expect(bar.segments.reduce((sum, s) => sum + s.bytes, 0)).toBe(disk.total_bytes - disk.free_bytes);
     expect(bar.limitAt).toBe('75.0%');
-    expect(bar.cacheLine).toBe('62.4 GB of 750 GB cache · 1.0 TB disk');
-    expect(bar.pinned).toEqual({ kept: '48.8 GB kept', smart: '1.9 GB smart' });
+    expect(bar.limitLine).toBe('62.4 GB of 750 GB limit');
+    expect(bar.legend).toEqual([
+      { kind: 'kept', text: '48.8 GB kept' },
+      { kind: 'smart', text: '1.9 GB smart' },
+      { kind: 'cache', text: '11.7 GB cache' },
+    ]);
     expect(bar.label).toBe(
       'Disk: 48.8 GB kept, 1.9 GB smart, 11.7 GB streaming cache, 126 GB other, 812 GB free of 1.0 TB; the cache may grow to 750 GB'
     );
@@ -250,7 +290,7 @@ describe('the disk tile', () => {
   it('draws today’s bar when nothing is pinned (a backend without downloads)', () => {
     const bar = diskBar({ ...disk, kept_bytes: 0, smart_bytes: 0 });
     expect(bar.segments.map((s) => s.kind)).toEqual(['cache', 'other']);
-    expect(bar.pinned).toBeNull();
+    expect(bar.legend).toEqual([{ kind: 'cache', text: '62.4 GB cache' }]);
     expect(bar.label).toMatch(/^Disk: 62\.4 GB in torrents, 126 GB other, 812 GB free/);
   });
 });

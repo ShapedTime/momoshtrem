@@ -6,7 +6,7 @@ import { ListChecks, Magnet, Pause, Play, Trash2 } from 'lucide-react';
 import { ActionMenu, Button, copyText, useToast } from '@/components/ui';
 import type { TorrentDetail, TorrentTitle } from '@/lib/api/contract';
 import { assignmentApi } from '@/lib/api/endpoints';
-import { wantsMore } from '@/lib/activity/downloads';
+import { waitsOnItsOwn } from '@/lib/activity/downloads';
 import { isActive } from '@/lib/activity/sections';
 
 interface DetailActionsProps {
@@ -53,7 +53,7 @@ export function DetailActions({ detail, onPause, onResume, onRemove, busy }: Det
         <Button variant="primary" onClick={onResume} loading={busy}>
           <Play size={17} aria-hidden="true" /> Resume
         </Button>
-      ) : isActive(detail) || wantsMore(detail) ? (
+      ) : isActive(detail) || waitsOnItsOwn(detail) ? (
         <Button onClick={onPause} loading={busy}>
           <Pause size={17} aria-hidden="true" /> Pause
         </Button>

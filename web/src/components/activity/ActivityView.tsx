@@ -9,7 +9,7 @@ import { usePendingRemovals } from '@/hooks/useUndoableRemoval';
 import { isApiError } from '@/lib/api/client';
 import type { StreamingSession, TorrentListItem } from '@/lib/api/contract';
 import { downloadsQuery, torrentsListQuery, torrentsSummaryQuery } from '@/lib/api/endpoints';
-import { downloadRemovalKey, downloadingLine } from '@/lib/activity/downloads';
+import { downloadRemovalKey, downloadingLine, withoutHolds } from '@/lib/activity/downloads';
 import { formatTimeOfDay } from '@/lib/activity/format';
 import { torrentRemovalKey } from '@/lib/activity/remove';
 import { groupTorrents, isActive, isQuiet, onlyIdle, streamingNow } from '@/lib/activity/sections';
@@ -45,13 +45,23 @@ export function ActivityView() {
   const list = useQuery({ ...torrentsListQuery(), refetchInterval: (query) => (query.state.status === 'error' ? false : ACTIVITY_POLL_MS) });
   const offline = list.isError;
   const summary = useQuery({ ...torrentsSummaryQuery(), refetchInterval: offline ? false : ACTIVITY_POLL_MS });
-  // Downloads move with the torrents (a smart pick appears, a wait ends), so they follow the page's poll
-  const downloads = useQuery({ ...downloadsQuery(), refetchInterval: (query) => (offline || query.state.status === 'error' ? false : ACTIVITY_POLL_MS) });
+  // Downloads move with the torrents (a smart pick appears, a wait ends), so they follow the page's poll;
+  // a failed fetch keeps polling (its banner or note says so), and only a backend without /downloads stops it
+  const downloads = useQuery({ ...downloadsQuery(), refetchInterval: (query) => (offline || noDownloads(query.state.error) ? false : ACTIVITY_POLL_MS) });
   const downloadsAbsent = noDownloads(downloads.error);
 
-  // Torrents and downloads waiting out their Undo are hidden everywhere on the page
-  const items = useMemo(() => (list.data?.items ?? []).filter((item) => !pending.has(torrentRemovalKey(item.info_hash))), [list.data, pending]);
-  const kept = useMemo(() => (downloads.data?.items ?? []).filter((download) => !pending.has(downloadRemovalKey(download.id))), [downloads.data, pending]);
+  // Torrents and downloads waiting out their Undo are hidden everywhere on the page, a released download's hold too
+  const items = useMemo(
+    () =>
+      (list.data?.items ?? [])
+        .filter((item) => !pending.has(torrentRemovalKey(item.info_hash)))
+        .map((item) => withoutHolds(item, (id) => pending.has(downloadRemovalKey(id)))),
+    [list.data, pending]
+  );
+  const kept = useMemo(
+    () => (downloadsAbsent ? [] : (downloads.data?.items ?? []).filter((download) => !pending.has(downloadRemovalKey(download.id)))),
+    [downloads.data, downloadsAbsent, pending]
+  );
   const sections = groupTorrents(items);
   const now = streamingNow(summary.data?.streaming ?? [], items);
   // The page shows once both have answered, so "Nothing playing" is never a guess; the kept downloads join when they answer
@@ -71,7 +81,8 @@ export function ActivityView() {
     <DownloadsSection
       list={downloads.data}
       items={kept}
-      failed={downloads.isError && !downloadsAbsent}
+      failed={downloads.isError && !downloadsAbsent && !offline}
+      updatedAt={downloads.dataUpdatedAt}
       retrying={downloads.isFetching}
       onRetry={() => void refetchDownloads()}
     />
