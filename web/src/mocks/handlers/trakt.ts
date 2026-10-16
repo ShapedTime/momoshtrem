@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import type { MediaType, NewEpisodeItem, TraktSettings, TraktSettingsPatch, UpNextItem, WatchlistItem } from '@/lib/api/contract';
 import {
   connectTrakt,
@@ -37,6 +37,7 @@ function intParam(raw: string | null, fallback: number, min: number, max: number
 
 export const traktHandlers = [
   http.get('*/api/integrations/trakt', async () => {
+    if (scenario() === 'trakt-loading') await delay('infinite');
     await latency();
     return HttpResponse.json(readTraktIntegration(mockLibrary()));
   }),

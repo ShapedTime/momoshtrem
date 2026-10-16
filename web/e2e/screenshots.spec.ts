@@ -607,3 +607,61 @@ test.describe('activity', () => {
     await shoot(page, testInfo, 'activity/remove');
   });
 });
+
+test.describe('for you', () => {
+  const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
+  const settle = async (page: Page) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(800);
+  };
+
+  test('default', async ({ page }, testInfo) => {
+    await signIn(page, '/');
+    await page.locator('section.home-hero h2.t-display-xl').waitFor();
+    await page.getByRole('region', { name: 'Your Trakt watchlist' }).locator('article.pcard').first().waitFor();
+    await page.getByRole('region', { name: 'Trending this week' }).locator('article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/default', { fullPage: true });
+  });
+
+  test('trakt off', async ({ page }, testInfo) => {
+    await scenario(page, 'trakt-off');
+    await signIn(page, '/');
+    await page.locator('section.home-hero h2.t-display-xl').waitFor();
+    await page.getByRole('region', { name: 'Popular movies' }).locator('article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/trakt-off', { fullPage: true });
+  });
+
+  test('first sync', async ({ page }, testInfo) => {
+    await scenario(page, 'trakt-syncing');
+    await signIn(page, '/');
+    await page.getByRole('region', { name: 'Up next' }).locator('article.lcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/syncing', { fullPage: true });
+  });
+
+  test('first sync stopped', async ({ page }, testInfo) => {
+    await scenario(page, 'trakt-sync-error');
+    await signIn(page, '/');
+    await page.getByText('The first sync stopped at your watchlist').waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/sync-error', { fullPage: true });
+  });
+
+  test('first time', async ({ page }, testInfo) => {
+    await scenario(page, 'first-time');
+    await signIn(page, '/');
+    await page.getByRole('region', { name: 'Trending this week' }).locator('article.pcard').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/empty', { fullPage: true });
+  });
+
+  test('loading', async ({ page }, testInfo) => {
+    await scenario(page, 'trakt-loading');
+    await signIn(page, '/');
+    await page.locator('.home-body .skel').first().waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'home/loading');
+  });
+});

@@ -52,6 +52,7 @@
  * - `me-error`: every /me read answers 500.
  * - `trakt-pending`: off, and a device code from Connect is never approved, so the code and waiting
  *   screens hold (until Cancel or the code expires).
+ * - `trakt-loading`: GET /integrations/trakt never answers (For You's loading state).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -93,7 +94,8 @@ export type MockScenario =
   | 'first-time'
   | 'up-next-empty'
   | 'me-error'
-  | 'trakt-pending';
+  | 'trakt-pending'
+  | 'trakt-loading';
 
 let override: MockScenario | null = null;
 

@@ -9,6 +9,7 @@ export { StatusPill, Confidence, Progress, RingMeter, Steps } from './Status';
 export type { ConfidenceLevel, Step } from './Status';
 export { Media, PosterCard, PosterGrid } from './Media';
 export { Rail, RailItem } from './Rail';
+export { EpisodeCard } from './EpisodeCard';
 export { Panel, ListRow, Banner } from './Panel';
 export type { BannerTone } from './Panel';
 export {
