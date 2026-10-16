@@ -289,6 +289,22 @@ describe('the handler', () => {
     expect((await searchApi.torrents({ ...FRIEREN_E29, refresh: 1 })).indexers.at(-1)?.status).toBe('ok');
   });
 
+  it('search-challenge: three more indexers fail with Jackett’s FlareSolverr error, Retry or not', async () => {
+    setMockScenario('search-challenge');
+    const answer = await searchApi.torrents(FRIEREN_E29);
+    expect(answer.indexers.map(({ name, status }) => `${name} ${status}`)).toEqual([
+      'Nyaa ok',
+      'TorrentLeech ok',
+      'The Pirate Bay ok',
+      'RuTracker.org error',
+      '1337x error',
+      'EZTV error',
+    ]);
+    expect(answer.indexers.at(-1)).toMatchObject({ count: 0, error: 'jackett error: Challenge detected but FlareSolverr is not configured' });
+    expect(answer).toMatchObject({ complete: true, total: 27 });
+    expect((await searchApi.torrents({ ...FRIEREN_E29, refresh: 1 })).indexers.at(-1)?.status).toBe('error');
+  });
+
   it('search-slow: pending indexers, then one more each second until complete', async () => {
     setMockScenario('search-slow');
     const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);

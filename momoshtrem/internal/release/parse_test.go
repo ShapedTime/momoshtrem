@@ -150,7 +150,9 @@ var parseCases = []struct {
 	{"[SubsPlease] One Piece - 1071 (1080p) [ABCD1234].mkv", "One Piece", 0, "1080p unknown unknown g:SubsPlease | episode Episode 1071 e1071-1071 abs"},
 	{"[Group] One Piece 1071 [1080p]", "One Piece", 0, "1080p unknown unknown g:Group | episode Episode 1071 e1071-1071 abs"},
 	{"[SubsPlease] Sousou no Frieren - 28.5 (1080p)", "Sousou no Frieren", 0, "1080p unknown unknown g:SubsPlease | unknown Episode 28.5"},
-	{"[Judas] Golden Kamuy (Batch) [1080p]", "Golden Kamuy", 0, "1080p unknown unknown g:Judas | complete Complete"},
+	// A batch that doesn't say what it holds isn't the whole show.
+	{"[Judas] Golden Kamuy (Batch) [1080p]", "Golden Kamuy", 0, "1080p unknown unknown g:Judas | unknown Batch"},
+	{"[Judas] Golden Kamuy (Complete) [Batch] [1080p]", "Golden Kamuy", 0, "1080p unknown unknown g:Judas | complete Complete"},
 	{"[Judas] Golden Kamuy S03 [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs] (Batch)", "Golden Kamuy", 0, "1080p unknown x265 b10 lang:dual subs:multi g:Judas | season Season 3 s3"},
 	{"[Group] Show - 01 [ENG SUB] [720p]", "Show", 0, "720p unknown unknown g:Group | episode Episode 1 e1-1 abs"},
 
@@ -162,6 +164,26 @@ var parseCases = []struct {
 	{"The.Wire.S01.S03.S05.720p.BluRay", "The Wire", 0, "720p BluRay unknown | multi_season Seasons 1, 3, 5 s1,3,5"},
 	{"Show.Name.S01.Specials.720p.WEB", "Show Name", 0, "720p WEB unknown | multi_season Season 1 + Specials s0,1"},
 	{"Doctor Who (2005-2022) Complete 1080p", "Doctor Who", 2005, "1080p unknown unknown | complete Complete"},
+
+	// Indexers that turn "-", "+" and "." into spaces (#122). The unmangled
+	// names are above: "(29-38)", "S01-S04", "DDP5.1", "[5.1]".
+	{"[SubsPlease] Sousou no Frieren (01 28) (1080p) [V2] [Batch]", "Sousou no Frieren", 0, "1080p unknown unknown g:SubsPlease | multi_episode Episodes 1–28 e1-28 abs"},
+	{"[SubsPlease] Sousou no Frieren [01 28] (1080p) [Batch]", "Sousou no Frieren", 0, "1080p unknown unknown g:SubsPlease | multi_episode Episodes 1–28 e1-28 abs"},
+	{"[SubsPlease] Sousou no Frieren S2 (01 04) (1080p) [Batch]", "Sousou no Frieren", 0, "1080p unknown unknown g:SubsPlease | multi_episode S02E01–E04 s2 e1-4"},
+	{"Frieren Beyond Journeys End S01   S02 1080p WEB DL DDP5 1 H 264 VARYG", "Frieren Beyond Journeys End", 0, "1080p WEB-DL x264 audio:DD+ ch:5.1 | multi_season Seasons 1–2 s1,2"},
+	{"Friends S01 S02 1080p BluRay x265 GRP", "Friends", 0, "1080p BluRay x265 | multi_season Seasons 1–2 s1,2"},
+	{"The Good Place S01 S04 COMPLETE 1080p BluRay x265 10bit AAC5 1 YAWNiX", "The Good Place", 0, "1080p BluRay x265 b10 audio:AAC ch:5.1 | multi_season Seasons 1–4 s1,2,3,4"},
+	{"The Wire S01 S03 S05 720p BluRay", "The Wire", 0, "720p BluRay unknown | multi_season Seasons 1, 3, 5 s1,3,5"},
+	{"Bluey S01 1080p DSNP WEB DL AAC2 0 H 264 GRP", "Bluey", 0, "1080p WEB-DL x264 audio:AAC ch:2.0 | season Season 1 s1"},
+	{"One Battle After Another (2025) [1080p] [BluRay] [5 1] [YTS BZ]", "One Battle After Another", 2025, "1080p BluRay unknown ch:5.1"},
+	{"Movie 2019 2160p BluRay REMUX HDR10 HEVC TrueHD 7 1 Atmos FGT", "Movie", 2019, "2160p REMUX x265 hdr:HDR10 audio:Atmos,TrueHD ch:7.1"},
+	{"Interstellar 2014 2160p UHD BluRay REMUX HDR HEVC DTS HD MA 5 1 FGT", "Interstellar", 2014, "2160p REMUX x265 hdr:HDR audio:DTS-HD ch:5.1"},
+	// Number pairs that aren't ranges or channels.
+	{"2 Fast 2 Furious 2003 1080p BluRay x264 GRP", "2 Fast 2 Furious", 2003, "1080p BluRay x264"},
+	{"2.Fast.2.Furious.2003.1080p.BluRay.x264-GRP", "2 Fast 2 Furious", 2003, "1080p BluRay x264 g:GRP"},
+	{"Kill Bill Vol 1 2 2003 1080p BluRay x264", "Kill Bill Vol 1 2", 2003, "1080p BluRay x264"},
+	{"[Group] Show (28 01) [1080p]", "Show", 0, "1080p unknown unknown g:Group"},
+	{"Movie (2019) [1080p] (16 9)", "Movie", 2019, "1080p unknown unknown"},
 
 	// Russian trackers: "Сезон" and "Серии ... из N".
 	{"Игра престолов / Game of Thrones / Сезон: 1-8 / Серии: 1-73 из 73 [2011-2019, США, фэнтези, драма, BDRip 1080p] MVO (LostFilm) + Original + Sub (Rus, Eng)",

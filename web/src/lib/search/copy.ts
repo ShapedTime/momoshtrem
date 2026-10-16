@@ -52,6 +52,16 @@ export function searchingDetail(q: string, queries: SearchQuery[]): string {
   return also ? `${q} · also ${also}` : q;
 }
 
+/**
+ * Jackett's error for an indexer behind a Cloudflare challenge it can't pass
+ * without FlareSolverr: "jackett error: Challenge detected but FlareSolverr
+ * is not configured" (#106).
+ */
+const NEEDS_FLARESOLVERR = /flaresolverr is not configured/i;
+
+/** An indexer's error without Jackett's "jackett error:" prefix or a closing period; "" for none. */
+const errorText = (error: string | undefined) => (error ?? '').replace(/^jackett error:\s*/i, '').replace(/\.$/, '');
+
 /** One indexer in the searching list: "26 results", "waiting · 6 s", "timed out after 8 s", or its error. */
 export function indexerProgress(report: IndexerReport): string {
   switch (report.status) {
@@ -62,31 +72,73 @@ export function indexerProgress(report: IndexerReport): string {
     case 'timeout':
       return `timed out after ${seconds(report.ms)}`;
     case 'error':
-      return report.error ?? 'failed';
+      if (NEEDS_FLARESOLVERR.test(report.error ?? '')) return 'Jackett needs FlareSolverr for it';
+      return errorText(report.error) || 'failed';
   }
 }
 
+/** At most this many sentences name who failed and why; the rest are counted, so the banner stays two lines. */
+const MAX_REASONS = 2;
+
+/** The reason shared by indexers that need FlareSolverr; every other reason is the error's text. */
+const FLARESOLVERR = Symbol('flaresolverr');
+
+/** "RuTracker.org, 1337x and EZTV: Jackett needs FlareSolverr for them." / "1337x failed: Cloudflare blocked it." */
+function failedBecause(who: string, count: number, reason: string | typeof FLARESOLVERR): string {
+  if (reason === FLARESOLVERR) return `${who}: Jackett needs FlareSolverr for ${count === 1 ? 'it' : 'them'}.`;
+  return reason ? `${who} failed: ${reason}.` : `${who} failed.`;
+}
+
+/** Indexers that didn't answer for one reason, and the sentence that says it about them ("Nyaa and EZTV", "4 indexers"). */
+interface Failure {
+  names: string[];
+  say: (who: string) => string;
+}
+
 /**
- * The banner when indexers timed out or failed: "2 of 3 indexers answered" /
- * "The Pirate Bay timed out after 8 s. Results may be incomplete." Null when
- * every indexer answered (or some are still pending).
+ * Who didn't answer and why, one sentence per reason, the biggest group
+ * first: "RuTracker.org, 1337x and EZTV: Jackett needs FlareSolverr for them."
+ * Past MAX_REASONS, the rest are counted: "2 other indexers didn’t answer."
+ */
+function failureSentences(timeouts: IndexerReport[], errors: IndexerReport[]): string[] {
+  const failures: Failure[] = [];
+  if (timeouts.length > 0) {
+    const after = seconds(Math.max(...timeouts.map((indexer) => indexer.ms)));
+    failures.push({ names: timeouts.map((indexer) => indexer.name), say: (who) => `${who} timed out after ${after}.` });
+  }
+  const byReason = new Map<string | typeof FLARESOLVERR, string[]>();
+  for (const { name, error } of errors) {
+    const reason = NEEDS_FLARESOLVERR.test(error ?? '') ? FLARESOLVERR : errorText(error);
+    byReason.set(reason, [...(byReason.get(reason) ?? []), name]);
+  }
+  for (const [reason, names] of byReason) failures.push({ names, say: (who) => failedBecause(who, names.length, reason) });
+  failures.sort((a, b) => b.names.length - a.names.length);
+
+  const named = failures.length > MAX_REASONS ? failures.slice(0, MAX_REASONS - 1) : failures;
+  const sentences = named.map(({ names, say }) => say(names.length <= 3 ? prose(names) : plural(names.length, 'indexer')));
+  const others = failures.slice(named.length).reduce((count, { names }) => count + names.length, 0);
+  if (others > 0) sentences.push(`${plural(others, 'other indexer')} didn’t answer.`);
+  return sentences;
+}
+
+/**
+ * The banner when indexers timed out or failed: "4 of 7 indexers answered" /
+ * "RuTracker.org, 1337x and EZTV: Jackett needs FlareSolverr for them." Null
+ * when every indexer answered (or some are still pending).
  */
 export function partialProblem(indexers: IndexerReport[]): { title: string; body: string; none: boolean } | null {
   if (indexers.some((indexer) => indexer.status === 'pending')) return null;
   const timeouts = indexers.filter((indexer) => indexer.status === 'timeout');
   const errors = indexers.filter((indexer) => indexer.status === 'error');
   if (timeouts.length + errors.length === 0) return null;
-  const sentences: string[] = [];
-  if (timeouts.length > 0) {
-    sentences.push(`${prose(timeouts.map((indexer) => indexer.name))} timed out after ${seconds(Math.max(...timeouts.map((indexer) => indexer.ms)))}.`);
-  }
-  for (const { name, error } of errors) sentences.push(error ? `${name} failed: ${error.replace(/\.?$/, '.')}` : `${name} failed.`);
+  const sentences = failureSentences(timeouts, errors);
   const answered = indexers.length - timeouts.length - errors.length;
   if (answered === 0) {
     const title = indexers.length === 1 ? `${indexers[0].name} didn’t answer` : `None of the ${plural(indexers.length, 'indexer')} answered`;
     return { title, body: [...sentences, 'Try again in a moment.'].join(' '), none: true };
   }
-  return { title: `${answered} of ${plural(indexers.length, 'indexer')} answered`, body: [...sentences, 'Results may be incomplete.'].join(' '), none: false };
+  // The title already says the results are partial
+  return { title: `${answered} of ${plural(indexers.length, 'indexer')} answered`, body: sentences.join(' '), none: false };
 }
 
 /**

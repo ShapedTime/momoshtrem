@@ -22,6 +22,9 @@
  * - `library-error`: /library answers 500.
  * - `library-loading`: /library never answers (the loading state).
  * - `search-partial`: torrent search's last indexer times out until a Retry (`refresh=1`).
+ * - `search-challenge`: RuTracker.org, 1337x and EZTV fail with Jackett's "Challenge detected but
+ *   FlareSolverr is not configured", as they do on a Jackett without FlareSolverr (#106); Retry
+ *   doesn't help.
  * - `search-none`: torrent search finds nothing; every indexer answers.
  * - `search-slow`: torrent search answers `complete: false` with pending indexers, and one more
  *   indexer answers each second (about three polls) until it's complete.
@@ -51,6 +54,7 @@ export type MockScenario =
   | 'library-error'
   | 'library-loading'
   | 'search-partial'
+  | 'search-challenge'
   | 'search-none'
   | 'search-slow'
   | 'search-down'

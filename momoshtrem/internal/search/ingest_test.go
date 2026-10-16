@@ -37,6 +37,8 @@ func TestIngest_EpisodeScope(t *testing.T) {
 		{"a scene season pack covers the episode", "Frieren Beyond Journeys End S02 1080p WEB-DL", false, true,
 			"S01E29–E38 (10)", `Scene "Season 2" = TMDB S01E29–E38`},
 		{"an absolute batch", "Sousou no Frieren (29-38) [1080p] Batch", false, true, "S01E29–E38 (10)", ""},
+		{"a space-mangled batch of 1–28 doesn't hold 29", "[SubsPlease] Sousou no Frieren (01 28) (1080p) [V2] [Batch]", false, false, "", ""},
+		{"a batch that doesn't say what it holds", "[SubsPlease] Sousou no Frieren (1080p) [Batch]", false, false, "", ""},
 		{"TMDB's own numbering", "Frieren.S01E29.1080p.WEB", false, true, "S01E29 (1)", ""},
 		{"another episode", "Frieren.Beyond.Journeys.End.S01E05.1080p.WEB-DL", false, false, "", ""},
 		{"the first cour's season pack", "Frieren Beyond Journeys End S01 1080p", false, false, "", ""},
@@ -86,6 +88,7 @@ func TestIngest_SeasonScope(t *testing.T) {
 	}{
 		{"Frieren Beyond Journeys End S02 1080p WEB-DL", true, false}, // E29–E38
 		{"Sousou no Frieren (01-38) [1080p] Batch", true, true},
+		{"[SubsPlease] Sousou no Frieren (01 28) (1080p) [V2] [Batch]", true, false}, // "(01-28)" with the dash a space
 		{"Frieren.S01E01-E03.1080p", true, false},
 		{"Frieren.Beyond.Journeys.End.S02E01.1080p", false, false}, // a single episode
 		{"Frieren.Beyond.Journeys.End.Specials.1080p", false, false},

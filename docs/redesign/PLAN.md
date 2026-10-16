@@ -636,9 +636,10 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   - `needs_torrent_fetch`: no magnet yet, so Add and Copy magnet call resolve first. A release with an info hash but no magnet gets one built from the hash and its name (`magnet:?xt=urn:btih:…&dn=…`), so it isn't flagged.
   - `hdr` and `audio` list only what the name says; `repack` covers PROPER too.
   - `pack` (parsed by `internal/release`):
-    - `label` is short: "S01E29", "S01E01–E03", "Episode 29" and "Episodes 29–38" (absolute numbers, `seasons: []`), "Season 2", "Specials", "Seasons 1–4", "Complete".
-    - `complete` is the whole show without seasons ("Complete Series", a Batch with no numbers). "S01.COMPLETE" is a `season`, and "S01-S04.COMPLETE" a `multi_season`; only "Complete Series" or "Complete Collection" makes named seasons `complete`.
-    - `unknown`: markers that don't add up, such as episodes of two seasons ("S01E05-S02E03") or a half episode ("- 28.5").
+    - `label` is short: "S01E29", "S01E01–E03", "Episode 29" and "Episodes 29–38" (absolute numbers, `seasons: []`), "Season 2", "Specials", "Seasons 1–4", "Complete", "Batch".
+    - `complete` is the whole show without seasons ("Complete Series", or "Complete" with no seasons named). "S01.COMPLETE" is a `season`, and "S01-S04.COMPLETE" a `multi_season`; only "Complete Series" or "Complete Collection" makes named seasons `complete`. "Batch" alone never does (#122).
+    - `unknown`: markers that don't add up, such as episodes of two seasons ("S01E05-S02E03") or a half episode ("- 28.5"), and a Batch with no numbers, which doesn't say what it holds (label "Batch").
+    - Some indexers send names with "-", "+" and "." turned into spaces. Those read as the original where the spaces can mean one thing: "(01 28)" right after the title (or its season) is episodes 1–28, "S01 S04" (one space) is Seasons 1–4 while wider gaps and longer runs stay lists, and "DDP5 1", "TrueHD 7 1" and "[5 1]" are channels.
 - **Allowed values** (they are both the facet values and the filter values):
   - `resolution`: 2160p, 1080p, 720p, 576p, 480p, unknown;
   - `source`: REMUX, BluRay, WEB-DL, WEBRip, WEB, HDTV, DVD, CAM (which also covers TS, HDTS, TELESYNC, TC and SCR), unknown;
