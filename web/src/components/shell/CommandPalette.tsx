@@ -70,8 +70,9 @@ interface Row {
  *
  * - Before typing: two recent searches, your four latest titles and every action.
  * - Typing: up to 4 library titles (`/library?q=`, plus TMDB titles you have),
- *   up to 5 TMDB titles you don't ("Add"), the actions whose words match, and
- *   "Search all results", always last.
+ *   up to 5 TMDB titles you don't ("Add"), the actions whose words match,
+ *   "Search all results", and (with an Anthropic key) "Ask momoshtrem: “q”"
+ *   last.
  * - Keys: ↑ ↓ move (and wrap), ↵ opens, Esc closes. **⌘↵ (Ctrl ↵) runs the
  *   selected row's secondary action**: torrent search. For a library title
  *   that lacks a file it's Find missing (or Find a torrent), on the current

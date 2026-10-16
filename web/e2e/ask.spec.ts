@@ -117,8 +117,14 @@ test.describe('Ask momoshtrem', () => {
     await expect(first.locator('.ask-trace summary')).toHaveText('History checked');
     await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 
-    await field(page).fill('a 90-minute thriller for tonight');
-    await page.keyboard.press('Enter');
+    // Shift+Enter adds a line, Enter sends
+    await field(page).fill('a 90-minute thriller');
+    await field(page).press('Shift+Enter');
+    await field(page).pressSequentially('for tonight');
+    await expect(field(page)).toHaveValue('a 90-minute thriller\nfor tonight');
+    await field(page).press('Enter');
+    await expect(field(page)).toHaveValue('');
+    await expect(page.locator('.msg--me').nth(1)).toHaveText('You asked: a 90-minute thriller\nfor tonight');
     const second = answers(page).nth(1);
     await expect(second.locator('.ask-steps .step.is-active')).toHaveText(/Searching the web/);
     await expect(second.locator('.ask-error')).toHaveCount(0);
