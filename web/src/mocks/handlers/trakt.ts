@@ -25,8 +25,9 @@ export { resetMockTrakt };
 const SETTINGS: ReadonlyArray<keyof TraktSettings> = ['use_ratings', 'show_watchlist', 'include_paused'];
 const MAX_HISTORY_PAGE_SIZE = 200;
 
-/** `me-error`: every /me read fails. */
-const meError = () => (scenario() === 'me-error' ? apiError(500, 'internal_error', 'Couldn’t read what Trakt imported.') : null);
+/** `me-error` (and `for-you-no-hero`): every /me read fails. */
+const meError = () =>
+  scenario() === 'me-error' || scenario() === 'for-you-no-hero' ? apiError(500, 'internal_error', 'Couldn’t read what Trakt imported.') : null;
 
 /** A whole number from min to max, the default when absent, or null when it's anything else. */
 function intParam(raw: string | null, fallback: number, min: number, max: number): number | null {

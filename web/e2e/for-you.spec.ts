@@ -216,6 +216,19 @@ test.describe('For You', () => {
     await expectAccessibleAndContained(page);
   });
 
+  test('no hero to pick (trending down, the Trakt rows failing): the rows start below the top bar', async ({ page }) => {
+    await scenario(page, 'for-you-no-hero');
+    await signIn(page, '/');
+    const banner = page.getByText('Couldn’t load your Trakt rows');
+    await expect(banner).toBeVisible();
+    await expect(hero(page)).toHaveCount(0);
+    const bar = page.locator('header.topbar, header.phone-bar').filter({ visible: true }).first();
+    const barBottom = await bar.evaluate((el) => el.getBoundingClientRect().bottom);
+    const firstTop = await page.locator('.home-body > *').first().evaluate((el) => el.getBoundingClientRect().top);
+    expect(firstTop).toBeGreaterThanOrEqual(barBottom);
+    await expectAccessibleAndContained(page);
+  });
+
   test('loading: skeletons the size of the page', async ({ page }) => {
     await scenario(page, 'trakt-loading');
     await signIn(page, '/');
