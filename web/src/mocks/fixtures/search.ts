@@ -1,4 +1,4 @@
-import type { MediaType, Release, ReleaseAttributes, ReleaseFlag, SearchQuery } from '@/lib/api/contract';
+import type { MediaType, Release, ReleaseAttributes, ReleaseFlag, SearchQuery, SearchScope } from '@/lib/api/contract';
 import { normaliseTitle } from '@/lib/search/query';
 import { type CatalogEntry, findTitle, iso } from './catalog';
 import type { Coverage, MockRelease } from './search-rules';
@@ -118,11 +118,13 @@ function build(id: string, spec: Spec): MockRelease {
 /** A release an earlier search found (resolve and inspect take its id for an hour). */
 export const findMockRelease = (id: unknown): MockRelease | undefined => (typeof id === 'string' ? known.get(id) : undefined);
 
+// Packs as the release parser labels them (internal/release, PLAN §6 "Release")
 const S1 = (from: number, to: number): Coverage[] => [{ season: 1, from, to }];
-const episodePack = (label: string, seasons: number[], from: number, to: number) => ({ type: 'episode' as const, label, seasons, episodes: { from, to } });
-const single = (n: number, label = String(n)) => episodePack(label, [], n, n);
+const episodePack = (season: number, n: number) => ({ type: 'episode' as const, label: `S${pad(season)}E${pad(n)}`, seasons: [season], episodes: { from: n, to: n } });
+/** Absolute numbering: no season in the name. */
+const single = (n: number) => ({ type: 'episode' as const, label: `Episode ${n}`, seasons: [], episodes: { from: n, to: n } });
 const run = (from: number, to: number) => ({ type: 'multi_episode' as const, label: `Episodes ${from}–${to}`, seasons: [], episodes: { from, to } });
-const season = (n: number, label = `Season ${n}`) => ({ type: 'season' as const, label, seasons: [n], episodes: null });
+const season = (n: number) => ({ type: 'season' as const, label: `Season ${n}`, seasons: [n], episodes: null });
 
 // ---- Frieren ------------------------------------------------------------------------------
 
@@ -176,7 +178,7 @@ const FRIEREN_SPECS: Spec[] = [
   {
     raw: '[Judas] Sousou no Frieren - S01E29 [1080p][HEVC x265 10bit][Multi-Subs]',
     gb: 0.402, seeders: 41, leechers: 2, days: 268, indexer: 'Nyaa',
-    attrs: { source: 'unknown', codec: 'x265', bit_depth: 10, group: 'Judas', subs: 'multi', pack: single(29, 'S01E29') },
+    attrs: { source: 'unknown', codec: 'x265', bit_depth: 10, group: 'Judas', subs: 'multi', pack: episodePack(1, 29) },
     score: 74, covers: S1(29, 29),
   },
   {
@@ -206,13 +208,13 @@ const FRIEREN_SPECS: Spec[] = [
   {
     raw: `${F}.S02E01.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG`,
     gb: 1.4, seeders: 140, leechers: 6, days: 270, indexer: 'TorrentLeech',
-    attrs: { audio: ['AAC'], channels: '2.0', group: 'VARYG', pack: episodePack('S02E01', [2], 1, 1) },
+    attrs: { audio: ['AAC'], channels: '2.0', group: 'VARYG', pack: episodePack(2, 1) },
     score: 86, notes: ['Scene "S02E01" = TMDB S01E29'], covers: S1(29, 29),
   },
   {
     raw: `${F}.S01E29.Lets.Go.Somewhere.We.Cant.Reach.1080p.CR.WEB-DL.DUAL.AAC2.0.H.264-VARYG`,
     gb: 1.5, seeders: 57, leechers: 3, days: 269, indexer: 'TorrentLeech',
-    attrs: { audio: ['AAC'], channels: '2.0', languages: ['dual'], group: 'VARYG', pack: single(29, 'S01E29') },
+    attrs: { audio: ['AAC'], channels: '2.0', languages: ['dual'], group: 'VARYG', pack: episodePack(1, 29) },
     score: 82, covers: S1(29, 29), fetch: true,
   },
   {
@@ -224,13 +226,13 @@ const FRIEREN_SPECS: Spec[] = [
   {
     raw: '[Yameii] Frieren - Beyond Journey’s End - S01E29 [English Dub] [CR WEB-DL 1080p] [F1A2B3C4]',
     gb: 1.4, seeders: 48, leechers: 5, days: 240, indexer: 'Nyaa',
-    attrs: { codec: 'unknown', languages: ['en'], group: 'Yameii', pack: single(29, 'S01E29') },
+    attrs: { codec: 'unknown', languages: ['en'], group: 'Yameii', pack: episodePack(1, 29) },
     score: 70, covers: S1(29, 29),
   },
   {
     raw: '[DKB] Sousou no Frieren - S01E29 [1080p][HEVC x265 10bit][Multi-Subs]',
     gb: 0.45, seeders: 38, leechers: 1, days: 266, indexer: 'Nyaa',
-    attrs: { source: 'unknown', codec: 'x265', bit_depth: 10, subs: 'multi', group: 'DKB', pack: single(29, 'S01E29') },
+    attrs: { source: 'unknown', codec: 'x265', bit_depth: 10, subs: 'multi', group: 'DKB', pack: episodePack(1, 29) },
     score: 69, covers: S1(29, 29),
   },
   {
@@ -242,7 +244,7 @@ const FRIEREN_SPECS: Spec[] = [
   {
     raw: '[LostYears] Frieren - Beyond Journey’s End - S01E29 (WEB 1080p HEVC AAC) [Dual-Audio]',
     gb: 0.6, seeders: 29, leechers: 2, days: 230, indexer: 'Nyaa',
-    attrs: { source: 'WEB', codec: 'x265', audio: ['AAC'], languages: ['dual'], group: 'LostYears', pack: single(29, 'S01E29') },
+    attrs: { source: 'WEB', codec: 'x265', audio: ['AAC'], languages: ['dual'], group: 'LostYears', pack: episodePack(1, 29) },
     score: 73, covers: S1(29, 29),
   },
   {
@@ -254,13 +256,13 @@ const FRIEREN_SPECS: Spec[] = [
   {
     raw: `${F}.S01E29.2160p.CR.WEB-DL.AAC2.0.H.265-NanDesuKa`,
     gb: 3.2, seeders: 22, leechers: 3, days: 268, indexer: 'TorrentLeech',
-    attrs: { resolution: '2160p', codec: 'x265', audio: ['AAC'], channels: '2.0', group: 'NanDesuKa', pack: single(29, 'S01E29') },
+    attrs: { resolution: '2160p', codec: 'x265', audio: ['AAC'], channels: '2.0', group: 'NanDesuKa', pack: episodePack(1, 29) },
     score: 79, covers: S1(29, 29),
   },
   {
     raw: '[Breeze] Sousou no Frieren - S01E29 [1080p AV1][Dual Audio]',
     gb: 0.5, seeders: 15, leechers: 1, days: 220, indexer: 'Nyaa',
-    attrs: { source: 'unknown', codec: 'AV1', languages: ['dual'], group: 'Breeze', pack: single(29, 'S01E29') },
+    attrs: { source: 'unknown', codec: 'AV1', languages: ['dual'], group: 'Breeze', pack: episodePack(1, 29) },
     score: 66, covers: S1(29, 29),
   },
   {
@@ -290,13 +292,13 @@ const FRIEREN_SPECS: Spec[] = [
   {
     raw: `${F}.S01.Part.3.1080p.NF.WEB-DL.DDP5.1.H.264-VARYG`,
     gb: 15, seeders: 61, leechers: 4, days: 160, indexer: 'TorrentLeech',
-    attrs: { audio: ['DD+'], channels: '5.1', group: 'VARYG', pack: { type: 'multi_episode', label: 'Season 1 part 3', seasons: [1], episodes: { from: 29, to: 38 } } },
+    attrs: { audio: ['DD+'], channels: '5.1', group: 'VARYG', pack: season(1) },
     score: 78, covers: S1(29, 38),
   },
   {
     raw: 'Frieren.Complete.Series.1080p.WEB-DL.AAC2.0.H.264',
     gb: 52, seeders: 23, leechers: 9, days: 140, indexer: 'The Pirate Bay',
-    attrs: { audio: ['AAC'], channels: '2.0', pack: { type: 'complete', label: 'Complete series', seasons: [1], episodes: null } },
+    attrs: { audio: ['AAC'], channels: '2.0', pack: { type: 'complete', label: 'Complete', seasons: [], episodes: null } },
     score: 60, notes: ['Covers the whole show, 38 episodes', HAS_FILES], covers: S1(1, 38),
   },
   {
@@ -338,7 +340,7 @@ const FRIEREN_SPECS: Spec[] = [
     (n): Spec => ({
       raw: `${F}.S02E${pad(n)}.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG`,
       gb: 1.4, seeders: 130 - n * 5, leechers: 5, days: 270 - n * 7, indexer: 'TorrentLeech',
-      attrs: { audio: ['AAC'], channels: '2.0', group: 'VARYG', pack: episodePack(`S02E${pad(n)}`, [2], n, n) },
+      attrs: { audio: ['AAC'], channels: '2.0', group: 'VARYG', pack: episodePack(2, n) },
       score: 57, notes: [`Scene "S02E${pad(n)}" = TMDB S01E${28 + n}`], covers: S1(28 + n, 28 + n),
     })
   ),
@@ -354,17 +356,28 @@ const FRIEREN_SPECS: Spec[] = [
 
 const FRIEREN_RELEASES = FRIEREN_SPECS.map((spec, i) => build(`rel-${i}`, spec));
 
-function frierenQueries(seasonNumber: number | undefined, episode: number | undefined): SearchQuery[] {
-  if (seasonNumber === 1 && episode !== undefined) {
+/**
+ * The plan's text queries for anime (internal/search/plan.go): the short
+ * title, the absolute number for an episode, the romaji title as the
+ * "original title", and scene numbering (TMDB S01E29 is release S02E01).
+ */
+function frierenQueries({ scope, season: s, episode: e }: SearchContext): SearchQuery[] {
+  if (scope === 'episode' && s === 1 && e !== undefined) {
     return [
-      { q: `Frieren ${episode}`, label: null },
-      { q: `Sousou no Frieren ${episode}`, label: 'original title' },
-      ...(episode > 28 ? [{ q: `Frieren S02E${pad(episode - 28)}`, label: 'scene numbering' as const }] : []),
+      { q: `Frieren ${pad(e)}`, label: null },
+      { q: `Sousou no Frieren ${pad(e)}`, label: 'original title' },
+      e > 28 ? { q: `Frieren S02E${pad(e - 28)}`, label: 'scene numbering' } : { q: `Frieren S01E${pad(e)}`, label: null },
     ];
   }
-  const primary = seasonNumber !== undefined ? `Frieren Beyond Journeys End S${pad(seasonNumber)}` : 'Frieren Beyond Journeys End';
+  if (scope === 'season' && s !== undefined) {
+    return [
+      { q: `Frieren S${pad(s)}`, label: null },
+      { q: `Sousou no Frieren S${pad(s)}`, label: 'original title' },
+      ...(s === 1 ? [{ q: 'Frieren S02', label: 'scene numbering' as const }] : []),
+    ];
+  }
   return [
-    { q: primary, label: null },
+    { q: 'Frieren', label: null },
     { q: 'Sousou no Frieren', label: 'original title' },
   ];
 }
@@ -386,7 +399,7 @@ function showSpecs(entry: CatalogEntry, show: ShowSeed, seasonNumber: number | u
     specs.push({
       raw: `${T}.S01-S${pad(last.n)}.COMPLETE.1080p.BluRay.x265.10bit.AAC5.1-YAWNiX`,
       gb: 0.45 * allEpisodes, seeders: 88, leechers: 14, days: 1100, indexer: 'The Pirate Bay',
-      attrs: { source: 'BluRay', codec: 'x265', bit_depth: 10, audio: ['AAC'], channels: '5.1', group: 'YAWNiX', pack: { type: 'complete', label: `Seasons 1–${last.n}`, seasons: regular.map((s) => s.n), episodes: null } },
+      attrs: { source: 'BluRay', codec: 'x265', bit_depth: 10, audio: ['AAC'], channels: '5.1', group: 'YAWNiX', pack: { type: 'multi_season', label: `Seasons 1–${last.n}`, seasons: regular.map((s) => s.n), episodes: null } },
       score: 89, notes: [`Covers all ${regular.length} seasons, ${allEpisodes} episodes`],
       covers: regular.map((s) => ({ season: s.n, from: 1, to: s.episodes.length })),
     });
@@ -431,7 +444,7 @@ function showSpecs(entry: CatalogEntry, show: ShowSeed, seasonNumber: number | u
   const code = `S${pad(seasonNumber)}E${pad(episode)}`;
   const named = `${code}.${dotted(episodeSeed.name)}`;
   const one = [{ season: seasonNumber, from: episode, to: episode }];
-  const pack = episodePack(code, [seasonNumber], episode, episode);
+  const pack = episodePack(seasonNumber, episode);
   return [
     ...specs,
     {
@@ -559,8 +572,15 @@ const SEVERANCE = 95396;
 
 const releasesOf = (tmdbId: number, specs: Spec[]) => specs.map((spec) => build(`rel-${tmdbId}-${hashOf(spec.raw).slice(0, 10)}`, spec));
 
+/** A search's context: the title's season and episode, and the scope in effect (null for movies). */
+export interface SearchContext {
+  season?: number;
+  episode?: number;
+  scope?: SearchScope | null;
+}
+
 /** What the indexers find for a title (and its season and episode); undefined for a title TMDB doesn't know. */
-export function searchFixture(mediaType: MediaType, tmdbId: number, context: { season?: number; episode?: number } = {}): SearchFixture | undefined {
+export function searchFixture(mediaType: MediaType, tmdbId: number, context: SearchContext = {}): SearchFixture | undefined {
   const entry = findTitle(mediaType, tmdbId);
   if (!entry) return undefined;
   if (entry.media_type === 'movie') {
@@ -572,12 +592,13 @@ export function searchFixture(mediaType: MediaType, tmdbId: number, context: { s
     };
   }
   if (tmdbId === FRIEREN) {
-    return { queries: frierenQueries(context.season, context.episode), indexers: ['Nyaa', 'TorrentLeech', 'The Pirate Bay'], releases: FRIEREN_RELEASES };
+    return { queries: frierenQueries(context), indexers: ['Nyaa', 'TorrentLeech', 'The Pirate Bay'], releases: FRIEREN_RELEASES };
   }
   const show = SHOWS[tmdbId];
   const name = normaliseTitle(entry.title);
-  const { season: s, episode: e } = context;
-  const q = s !== undefined && e !== undefined ? `${name} S${pad(s)}E${pad(e)}` : s !== undefined ? `${name} S${pad(s)}` : name;
+  const { season: s, episode: e, scope } = context;
+  // The primary follows the scope: "Title S02E08", "Title S02" or "Title"
+  const q = scope === 'episode' && s !== undefined && e !== undefined ? `${name} S${pad(s)}E${pad(e)}` : scope === 'season' && s !== undefined ? `${name} S${pad(s)}` : name;
   return {
     queries: [{ q, label: null }],
     indexers: ['TorrentLeech', 'EZTV', 'The Pirate Bay'],

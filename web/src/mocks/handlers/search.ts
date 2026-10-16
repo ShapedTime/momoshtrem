@@ -42,7 +42,7 @@ export const searchHandlers = [
     const parsed = parseSearchParams(new URL(request.url).searchParams);
     if ('error' in parsed) return apiError(400, 'bad_request', parsed.error);
     const { params } = parsed;
-    const fixture = searchFixture(params.media_type, params.tmdb_id, { season: params.season, episode: params.episode });
+    const fixture = searchFixture(params.media_type, params.tmdb_id, { season: params.season, episode: params.episode, scope: parsed.scope });
     if (!fixture) return notFound('TMDB has no such title.');
 
     const now = Date.now();

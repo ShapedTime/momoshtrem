@@ -106,7 +106,7 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   const scope = draft.scope ?? defaultScope(context);
   const params = searchParams(context, { scope, sort: draft.sort, filters: draft.filters, q });
   const { query, first, last, items, retry } = useReleaseSearch(params);
-  const guess = defaultQuery(context, title);
+  const guess = defaultQuery(context, title, scope);
   const primary = first?.queries[0]?.q;
   const shownQuery = q || primary || guess;
 

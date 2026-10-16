@@ -12,17 +12,25 @@ const severance = buildTitle('tv', 95396, library) as ShowTitle;
 const battle = buildTitle('movie', 1054867, library) as MovieTitle;
 const goodPlace = buildTitle('tv', 66573, library) as ShowTitle;
 
-describe('normaliseTitle and shortTitle', () => {
-  it('drops the punctuation release names leave out', () => {
+describe('normaliseTitle and shortTitle (as the backend’s query plan writes titles)', () => {
+  it('drops marks and apostrophes, writes & as "and", and turns other punctuation into spaces', () => {
     expect(normaliseTitle('Frieren: Beyond Journey’s End')).toBe('Frieren Beyond Journeys End');
     expect(normaliseTitle('Dune: Part Two')).toBe('Dune Part Two');
     expect(normaliseTitle('Mr. Robot')).toBe('Mr Robot');
-    expect(normaliseTitle('Spider-Man - Into the Spider-Verse!')).toBe('Spider-Man Into the Spider-Verse');
+    expect(normaliseTitle('Shōgun')).toBe('Shogun');
+    expect(normaliseTitle('Law & Order')).toBe('Law and Order');
+    expect(normaliseTitle('Who Is Alive?')).toBe('Who Is Alive');
   });
 
-  it('keeps the part before a colon or a dash', () => {
+  it('keeps a hyphen inside a word only', () => {
+    expect(normaliseTitle('Spider-Man - Into the Spider-Verse!')).toBe('Spider-Man Into the Spider-Verse');
+    expect(normaliseTitle('9-1-1: Lone Star')).toBe('9-1-1 Lone Star');
+  });
+
+  it('keeps the part before a colon when it has three letters or digits', () => {
     expect(shortTitle('Frieren: Beyond Journey’s End')).toBe('Frieren');
-    expect(shortTitle('Star Wars - A New Hope')).toBe('Star Wars');
+    expect(shortTitle('Re:Zero − Starting Life in Another World')).toBe('Re Zero Starting Life in Another World');
+    expect(shortTitle('Star Wars - A New Hope')).toBe('Star Wars A New Hope');
     expect(shortTitle('Severance')).toBe('Severance');
   });
 });
@@ -54,14 +62,26 @@ describe('defaultQuery', () => {
     expect(defaultQuery(show(209867, 1, 29), frieren)).toBe('Frieren 29');
   });
 
-  it('anime without absolute numbers (not in the library) falls back to SxxEyy', () => {
+  it('anime outside the library counts its absolute number over TMDB’s seasons, padded to two digits', () => {
     const outside = { ...frieren, seasons: frieren.seasons.map((s) => ({ ...s, absolute_from: null, absolute_to: null })) };
-    expect(defaultQuery(show(209867, 1, 29), outside)).toBe('Frieren Beyond Journeys End S01E29');
+    expect(defaultQuery(show(209867, 1, 29), outside)).toBe('Frieren 29');
+    expect(defaultQuery(show(209867, 1, 5), frieren)).toBe('Frieren 05');
+    const twoSeasons = { ...outside, seasons: [{ ...outside.seasons[1], season_number: 1, episodes_total: 28 }, { ...outside.seasons[1], season_number: 2 }] };
+    expect(absoluteNumber(twoSeasons, 2, 1)).toBe(29);
+    expect(absoluteNumber(frieren, 0, 3)).toBeNull();
   });
 
-  it('a season: "Title S01"; a whole show: the title', () => {
+  it('a season: "Title S01" (anime: the short title); a whole show: the title', () => {
     expect(defaultQuery(show(66573, 1, null), goodPlace)).toBe('The Good Place S01');
     expect(defaultQuery(show(66573, null, null), goodPlace)).toBe('The Good Place');
+    expect(defaultQuery(show(209867, 1, null), frieren)).toBe('Frieren S01');
+    expect(defaultQuery(show(209867, null, null), frieren)).toBe('Frieren');
+  });
+
+  it('follows the scope, like the plan: an episode’s season packs, or anything', () => {
+    expect(defaultQuery(show(95396, 2, 8), severance, 'season')).toBe('Severance S02');
+    expect(defaultQuery(show(95396, 2, 8), severance, 'any')).toBe('Severance');
+    expect(defaultQuery(show(209867, 1, 29), frieren, 'season')).toBe('Frieren S01');
   });
 });
 

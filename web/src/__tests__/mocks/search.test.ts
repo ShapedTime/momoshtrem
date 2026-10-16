@@ -99,6 +99,8 @@ describe('the rules', () => {
     expect(error('media_type=tv&tmdb_id=1&scope=everything')).toBe('error');
     expect(error('media_type=tv&tmdb_id=1&sort=random')).toBe('error');
     expect(error('media_type=tv&tmdb_id=1&min_seeders=many')).toBe('error');
+    expect(error('media_type=tv&tmdb_id=1&episode=29')).toBe('error');
+    expect(error('media_type=tv&tmdb_id=1&season=1&episode=0')).toBe('error');
     expect(error('media_type=movie&tmdb_id=1&scope=episode')).toBe('ok');
   });
 
@@ -229,7 +231,14 @@ describe('the handler', () => {
     expect(episode.missing).toEqual({ season_number: 1, from: 29, to: 38, absolute_from: 29, absolute_to: 38, count: 10, best_covers: true });
     expect(episode.indexers.map((i) => `${i.name}:${i.status}:${i.count}`)).toEqual(['Nyaa:ok:16', 'TorrentLeech:ok:7', 'The Pirate Bay:ok:4']);
     expect((await searchApi.torrents({ ...FRIEREN_E29, page: 2 })).items).toHaveLength(2);
-    expect((await searchApi.torrents({ ...FRIEREN_E29, scope: 'season' })).total).toBe(13);
+    const season = await searchApi.torrents({ ...FRIEREN_E29, scope: 'season' });
+    expect(season.total).toBe(13);
+    // The plan follows the scope (internal/search/plan.go)
+    expect(season.queries).toEqual([
+      { q: 'Frieren S01', label: null },
+      { q: 'Sousou no Frieren S01', label: 'original title' },
+      { q: 'Frieren S02', label: 'scene numbering' },
+    ]);
     expect((await searchApi.torrents({ ...FRIEREN_E29, scope: 'any' })).total).toBe(45);
     expect((await searchApi.torrents({ media_type: 'tv', tmdb_id: 209867, season: 1 })).total).toBe(13);
   });

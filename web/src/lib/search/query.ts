@@ -9,20 +9,28 @@ import type { SearchFilters } from './filters';
 export const PAGE_SIZE = 25;
 
 /**
- * "Frieren: Beyond Journey’s End" → "Frieren Beyond Journeys End": release
- * names drop punctuation, so the query does too (the plan strips `: ' ! ,`).
+ * A title as release names write it, like the backend's query plan
+ * (`internal/search/plan.go`, queryTitle): marks dropped ("Shōgun" is
+ * "Shogun"), "&" as "and", apostrophes gone ("Journey’s" is "Journeys"),
+ * other punctuation a space; a hyphen inside a word stays ("Spider-Man").
  */
 export function normaliseTitle(title: string): string {
   return title
-    .replace(/\s+[-–—]\s+/g, ' ')
-    .replace(/[:'’‘!,?."“”]/g, '')
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '')
+    .normalize('NFC')
+    .replace(/&/g, ' and ')
+    .replace(/['’‘`´]/g, '')
+    .replace(/[^\p{L}\p{N}-]|(?<![\p{L}\p{N}])-|-(?![\p{L}\p{N}])/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-/** The part before a colon or dash: "Frieren", "Dune". Release names often use only that. */
+/** The part before a colon ("Frieren"), when it has at least three letters or digits ("Re:Zero" stays whole). */
 export function shortTitle(title: string): string {
-  return normaliseTitle(title.split(/\s*:\s*|\s+[-–—]\s+/)[0]);
+  const colon = title.indexOf(':');
+  const before = colon < 0 ? '' : title.slice(0, colon);
+  return normaliseTitle((before.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 3 ? before : title);
 }
 
 /** The scope a context starts on: an episode's, a season's packs, or anything for a whole show. Null for movies. */
@@ -43,29 +51,37 @@ export function scopeOptions(context: SourceContext): SearchScope[] {
 export const SCOPE_LABEL: Record<SearchScope, string> = { episode: 'Episode', season: 'Season pack', any: 'Any' };
 
 /**
- * An episode's absolute number from its season's range, when the library
- * numbers the show that way (anime); null otherwise.
+ * An episode's absolute number: from its season's range when the library
+ * numbers the show that way, else counted over TMDB's regular seasons (a
+ * title outside the library). Null for specials and unknown seasons.
  */
 export function absoluteNumber(show: Pick<ShowTitle, 'seasons'>, season: number, episode: number): number | null {
   const summary = show.seasons.find((s) => s.season_number === season);
-  return summary?.absolute_from != null ? summary.absolute_from + episode - 1 : null;
+  if (!summary || season === 0) return null;
+  if (summary.absolute_from !== null) return summary.absolute_from + episode - 1;
+  return show.seasons.filter((s) => s.season_number > 0 && s.season_number < season).reduce((sum, s) => sum + s.episodes_total, 0) + episode;
 }
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
 /**
- * The field's first frame, before the server answers with its own primary
- * query: "Title Year" for a movie, "Title S01E29" for an episode (anime: the
- * short title and the absolute number, "Frieren 29"), "Title S01" for a
- * season, else the title.
+ * The field's first frame, before the server answers: the plan's primary
+ * query, so the two match. "Title Year" for a movie; for a show by scope,
+ * "Title S01E29" (episode), "Title S01" (season) or "Title" (any). Anime uses
+ * the short title and numbers an episode by its absolute number ("Frieren 29").
  */
-export function defaultQuery(context: SourceContext, title: Title): string {
-  const name = normaliseTitle(title.title);
-  if (context.kind === 'movie' || title.media_type === 'movie') return title.year ? `${name} ${title.year}` : name;
-  const { season, episode } = context;
-  if (season !== null && episode !== null) {
-    const absolute = title.is_anime ? absoluteNumber(title, season, episode) : null;
-    return absolute !== null ? `${shortTitle(title.title)} ${absolute}` : `${name} ${episodeCode(season, episode)}`;
+export function defaultQuery(context: SourceContext, title: Title, scope: SearchScope | null = defaultScope(context)): string {
+  if (context.kind === 'movie' || title.media_type === 'movie') {
+    const name = normaliseTitle(title.title);
+    return title.year ? `${name} ${title.year}` : name;
   }
-  if (season !== null) return `${name} S${String(season).padStart(2, '0')}`;
+  const name = title.is_anime ? shortTitle(title.title) : normaliseTitle(title.title);
+  const { season, episode } = context;
+  if (scope === 'episode' && season !== null && episode !== null) {
+    const absolute = title.is_anime ? absoluteNumber(title, season, episode) : null;
+    return `${name} ${absolute !== null ? pad(absolute) : episodeCode(season, episode)}`;
+  }
+  if (scope === 'season' && season !== null) return `${name} S${pad(season)}`;
   return name;
 }
 

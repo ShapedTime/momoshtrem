@@ -70,7 +70,7 @@ export function parseSearchParams(query: URLSearchParams): ParsedSearch | { erro
   };
   const numbers = {
     season: number('season'),
-    episode: number('episode'),
+    episode: number('episode', { min: 1 }),
     page: number('page', { min: 1 }),
     page_size: number('page_size', { min: 1 }),
     min_seeders: number('min_seeders'),
@@ -87,7 +87,8 @@ export function parseSearchParams(query: URLSearchParams): ParsedSearch | { erro
   const { season, episode, min_seeders, min_size_gb, max_size_gb } = numbers;
   let scope: SearchScope | null = null;
   if (mediaType === 'tv') {
-    scope = (scopeParam as SearchScope | null) ?? (episode !== undefined && season !== undefined ? 'episode' : season !== undefined ? 'season' : 'any');
+    if (episode !== undefined && season === undefined) return { error: 'An episode needs a season.' };
+    scope =(scopeParam as SearchScope | null) ?? (episode !== undefined && season !== undefined ? 'episode' : season !== undefined ? 'season' : 'any');
     if (scope === 'episode' && (episode === undefined || season === undefined)) return { error: 'scope=episode needs a season and an episode.' };
     if (scope === 'season' && season === undefined) return { error: 'scope=season needs a season.' };
   }

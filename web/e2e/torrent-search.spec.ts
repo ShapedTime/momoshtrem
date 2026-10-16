@@ -106,6 +106,9 @@ test.describe('Torrent search', () => {
     await dialog.getByRole('button', { name: 'Season packs' }).click();
     await expect(dialog.getByRole('button', { name: 'Season pack', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(dialog.getByText('13 results · Nyaa, TorrentLeech, The Pirate Bay')).toBeVisible();
+    // The plan follows the scope, and so does the field until you type
+    await expect(dialog.getByRole('searchbox', { name: 'Search releases' })).toHaveValue('Frieren S01');
+    await expect(dialog.getByText('Also searched: Sousou no Frieren S01 · Frieren S02 (scene numbering)')).toBeVisible();
     await expect(banner).toBeHidden();
     await expect(dialog.getByRole('article', { name: BATCH })).toContainText('Best match');
 
