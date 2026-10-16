@@ -49,12 +49,11 @@ type scorer struct {
 	languages  map[string]float64
 	movieShare float64
 	animeShare float64
-	seedRank   map[string]int // a loved title's clipped name → its rank
 }
 
 func newScorer(p *profile.Profile) *scorer {
 	s := &scorer{genres: map[string]float64{}, keywords: map[int]float64{}, languages: map[string]float64{},
-		movieShare: p.Mix.MovieShare, animeShare: p.Mix.AnimeShare, seedRank: map[string]int{}}
+		movieShare: p.Mix.MovieShare, animeShare: p.Mix.AnimeShare}
 	if p.Mix.Movies+p.Mix.Shows == 0 {
 		s.movieShare = 0.5
 	}
@@ -67,12 +66,6 @@ func newScorer(p *profile.Profile) *scorer {
 	for _, l := range p.Languages {
 		s.languages[l.Name] = l.W
 	}
-	for i, t := range p.Loved {
-		if i == seeds {
-			break
-		}
-		s.seedRank[clipName(t.Title)] = i
-	}
 	return s
 }
 
@@ -80,15 +73,14 @@ func newScorer(p *profile.Profile) *scorer {
 // (once TMDB described it), language, media type, anime and rating.
 func (s *scorer) score(c *Candidate) float64 {
 	var src float64
-	for _, w := range c.Why {
-		kind, seed, _ := strings.Cut(w, ":")
-		switch kind {
+	for _, h := range c.hits {
+		switch h.kind {
 		case "rec":
-			src += recScore * s.seedWeight(seed)
+			src += recScore * seedWeight(h.seed)
 		case "similar":
-			src += similarScore * s.seedWeight(seed)
+			src += similarScore * seedWeight(h.seed)
 		default:
-			src += sourceScore[kind]
+			src += sourceScore[h.kind]
 		}
 	}
 	score := min(src, maxSourceScore)
@@ -120,15 +112,9 @@ func (s *scorer) score(c *Candidate) float64 {
 	return math.Round(score*1000) / 1000
 }
 
-// seedWeight is a loved title's weight as a seed: the first counts fully,
-// each next one 5% less.
-func (s *scorer) seedWeight(name string) float64 {
-	rank, ok := s.seedRank[name]
-	if !ok {
-		return 0.5
-	}
-	return 1 - 0.05*float64(rank)
-}
+// seedWeight is a seed's weight by its rank among the loved titles: the
+// first counts fully, each next one 5% less.
+func seedWeight(rank int) float64 { return 1 - 0.05*float64(rank) }
 
 // rank scores the candidates and sorts them best first (ties: the more
 // sources, then TMDB id, so a pool is stable).
@@ -137,7 +123,7 @@ func rank(cands []*Candidate, s *scorer) {
 		c.score = s.score(c)
 	}
 	slices.SortStableFunc(cands, func(a, b *Candidate) int {
-		return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(len(b.Why), len(a.Why)),
+		return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(len(b.hits), len(a.hits)),
 			cmp.Compare(a.MediaType, b.MediaType), cmp.Compare(a.TMDBID, b.TMDBID))
 	})
 }

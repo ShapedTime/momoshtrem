@@ -321,12 +321,21 @@ func (p *Plan) classify(e *entry) {
 	e.weight = base * mult * p.recency(e)
 }
 
-// lastActivity is when you last watched, rated or gave feedback on e.
+// lastActivity is when you last watched or rated e: what its recency
+// weighs. Feedback isn't a watch (seen says you watched it once, but not
+// when), so a title only feedback names weighs at recencyFloor.
 func (p *Plan) lastActivity(e *entry) time.Time {
 	t := e.lastWatched
 	if e.rating > 0 && e.ratedAt.After(t) {
 		t = e.ratedAt
 	}
+	return t
+}
+
+// lastTouched is when you last watched, rated or gave feedback on e: the
+// lists' order.
+func (p *Plan) lastTouched(e *entry) time.Time {
+	t := p.lastActivity(e)
 	if e.feedbackAt.After(t) {
 		t = e.feedbackAt
 	}
@@ -416,7 +425,7 @@ func (p *Plan) lists() planLists {
 		}
 	}
 	slices.SortStableFunc(l.loved, func(a, b *entry) int { return cmp.Compare(b.weight, a.weight) })
-	byLast := func(a, b *entry) int { return p.lastActivity(b).Compare(p.lastActivity(a)) }
+	byLast := func(a, b *entry) int { return p.lastTouched(b).Compare(p.lastTouched(a)) }
 	slices.SortStableFunc(l.dropped, byLast)
 	slices.SortStableFunc(l.recent, func(a, b *entry) int { return b.lastWatched.Compare(a.lastWatched) })
 	slices.SortStableFunc(l.aversions, byLast)
@@ -557,7 +566,7 @@ func (p *Plan) lovedNote(e *entry) string {
 		parts = append(parts, fmt.Sprintf("%d of %d", e.show.Completed, e.show.Aired))
 	}
 	if e.feedback == signalSeen && len(parts) == 0 {
-		parts = append(parts, "marked seen")
+		parts = append(parts, NoteSeen)
 	}
 	if e.rating > 0 {
 		parts = append(parts, fmt.Sprintf("rated %d", e.rating))

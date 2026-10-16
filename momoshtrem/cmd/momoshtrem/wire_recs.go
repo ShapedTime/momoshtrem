@@ -25,7 +25,7 @@ import (
 //     rebuilt when stale (Ask);
 //   - pools.Build(ctx, profile): the candidate pool;
 //   - taste.TitleStates with candidates.Exclusion: validating a run's
-//     items (watched, hidden, negative feedback);
+//     items (watched, rated, hidden, negative feedback);
 //   - tools(inputs): the custom tools, over tools.Fixed{profile, pool}
 //     for a run or a tools.Cached for Ask.
 type recsWiring struct {

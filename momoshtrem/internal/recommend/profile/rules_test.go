@@ -104,10 +104,17 @@ func TestRules_Lists(t *testing.T) {
 	if got := notes(p.Loved); !reflect.DeepEqual(got, wantLoved) {
 		t.Errorf("loved = %v\nwant %v", got, wantLoved)
 	}
-	// Heaviest first: the rewatched 9 and the 10 lead, the year-old watch
-	// trails
-	if p.Loved[0].Title != "Dune: Part Two" || p.Loved[1].Title != "Frieren" || p.Loved[len(p.Loved)-1].Title != "Arrival" {
-		t.Errorf("loved order = %v", titleNames(p.Loved))
+	// Heaviest first: the rewatched 9 and the 10 lead. Titles only feedback
+	// names trail even a year-old watch: a like or a seen says nothing of
+	// when you watched, so they weigh at the recency floor.
+	wantOrder := []string{"Dune: Part Two", "Frieren", "Rated Unseen", "Severance", "Paddington 2", "Old Watch", "Arrival", "The Bear", "Heat"}
+	if got := titleNames(p.Loved); !reflect.DeepEqual(got, wantOrder) {
+		t.Errorf("loved order = %v\nwant %v", got, wantOrder)
+	}
+	for _, title := range p.Loved {
+		if seenOnly := title.Title == "Heat"; title.SeenOnly() != seenOnly {
+			t.Errorf("%s: seen only = %v", title.Title, title.SeenOnly())
+		}
 	}
 
 	wantDropped := []Title{
@@ -219,6 +226,38 @@ func TestRules_Recency(t *testing.T) {
 	}
 	if got := titleNames(plan.Build(nil).Loved); !reflect.DeepEqual(got, []string{"New", "Mid", "Old"}) {
 		t.Errorf("loved = %v", got)
+	}
+}
+
+// A title marked seen yesterday doesn't outweigh real watches: seen says
+// you watched it, not when, so it weighs at the floor. Its rating, when
+// it has one, dates it.
+func TestRules_SeenOnlyWeight(t *testing.T) {
+	h := &History{
+		Movies: []library.WatchedMovie{{TMDBID: 1, Title: "Watched Two Years Ago", Plays: 1, LastWatchedAt: daysAgo(730)}},
+		Feedback: []library.TasteFeedback{
+			{TitleRef: movie(2), Signal: "seen", Title: "Marked Seen Yesterday", UpdatedAt: daysAgo(1)},
+			{TitleRef: movie(3), Signal: "seen", Title: "Seen And Rated", UpdatedAt: daysAgo(1)},
+		},
+		Ratings: []library.TasteRating{{TitleRef: movie(3), Rating: 8, RatedAt: daysAgo(1)}},
+	}
+	plan := NewPlan(h, true, now)
+	w := map[int]float64{}
+	for _, e := range plan.entries {
+		w[e.ref.TMDBID] = e.weight
+	}
+	if w[2] != recencyFloor {
+		t.Errorf("seen only weighs %.3f, want the floor %.2f", w[2], recencyFloor)
+	}
+	if !(w[1] > w[2]) || !(w[3] > w[1]) {
+		t.Errorf("weights = %v, want the seen-and-rated title first and the seen-only one last", w)
+	}
+	p := plan.Build(nil)
+	if got := titleNames(p.Loved); !reflect.DeepEqual(got, []string{"Seen And Rated", "Watched Two Years Ago", "Marked Seen Yesterday"}) {
+		t.Errorf("loved = %v", got)
+	}
+	if !p.Loved[0].SeenOnly() || p.Loved[0].Note != "marked seen · rated 8" || p.Loved[2].Note != NoteSeen {
+		t.Errorf("notes = %+v", p.Loved)
 	}
 }
 

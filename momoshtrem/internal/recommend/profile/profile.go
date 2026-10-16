@@ -8,7 +8,10 @@
 // run) and Builder.Current (the newest stored one, rebuilt when stale).
 package profile
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // MinLoved is how many loved titles a run needs (PLAN §6: fewer is
 // no_history).
@@ -94,6 +97,14 @@ type Title struct {
 	Year      int    `json:"year,omitempty"`
 	Note      string `json:"note"`
 }
+
+// NoteSeen leads a loved title's note when only seen feedback says you
+// watched it: no play, so nothing says when.
+const NoteSeen = "marked seen"
+
+// SeenOnly reports whether only seen feedback makes t loved. It weighs at
+// the recency floor and never seeds the candidate pool.
+func (t Title) SeenOnly() bool { return strings.HasPrefix(t.Note, NoteSeen) }
 
 // Readiness is whether a run can go ahead (refresh's no_history check):
 // Trakt connected and at least MinLoved loved titles.

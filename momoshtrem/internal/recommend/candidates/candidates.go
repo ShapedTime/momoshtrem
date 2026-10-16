@@ -60,7 +60,16 @@ type Candidate struct {
 	year       int
 	genreIDs   []int
 	keywordIDs []int
+	hits       []hit // every source it came from, which scoring weighs
 	score      float64
+}
+
+// hit is one source of a candidate: its kind (rec, similar, kw, new,
+// gems, lang, trending, upcoming, on_air) and, for rec and similar, the
+// seed's rank.
+type hit struct {
+	kind string
+	seed int
 }
 
 // Ref is the candidate's title.
@@ -104,6 +113,7 @@ type Lists interface {
 type Store interface {
 	WatchedMovies(ctx context.Context) ([]library.WatchedMovie, error)
 	WatchedShows(ctx context.Context) ([]library.WatchedShow, error)
+	TasteRatings(ctx context.Context) ([]library.TasteRating, error)
 	HiddenShows(ctx context.Context) ([]library.HiddenShow, error)
 	TasteFeedback(ctx context.Context) ([]library.TasteFeedback, error)
 	LibraryTitles(ctx context.Context) ([]library.LibraryTitle, error)
@@ -134,7 +144,8 @@ func New(d Deps) *Builder {
 // ErrNoSources means every TMDB source failed (TMDB down, or no key).
 var ErrNoSources = errors.New("TMDB answered none of the candidate sources")
 
-// Known reads what the database knows about titles in bulk. Five queries.
+// Known reads what the database knows about titles in bulk. Seven
+// queries.
 func (b *Builder) Known(ctx context.Context) (*Known, error) {
 	movies, err := b.d.Store.WatchedMovies(ctx)
 	if err != nil {
@@ -160,7 +171,11 @@ func (b *Builder) Known(ctx context.Context) (*Known, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewKnown(movies, shows, hidden, feedback, titles, watchlist), nil
+	ratings, err := b.d.Store.TasteRatings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewKnown(movies, shows, ratings, hidden, feedback, titles, watchlist), nil
 }
 
 // Build gathers the candidates for p: TMDB's recommendations and similar
@@ -182,7 +197,7 @@ func (b *Builder) Build(ctx context.Context, p *profile.Profile) (*Pool, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if failed == len(sources)+min(seeds, len(p.Loved)) && failed > 0 {
+	if failed == len(sources)+len(seedTitles(p)) && failed > 0 {
 		return nil, ErrNoSources
 	}
 	if failed > 0 {
@@ -245,11 +260,39 @@ func (b *Builder) genreNames(ctx context.Context) map[string]map[int]string {
 }
 
 // found is one source's titles. order sorts the sources so a pool doesn't
-// depend on which answered first: the seeds' first, in rank.
+// depend on which answered first: the seeds' first, in rank. label is
+// how a candidate's why names it.
 type found struct {
-	order  int
-	source string
-	items  []tmdb.ListItem
+	order int
+	kind  string
+	seed  int // rec and similar: the seed's rank; else -1
+	label string
+	items []tmdb.ListItem
+}
+
+// seedTitles are the loved titles whose recommendations and similar
+// titles a pool reads: the first seeds of them, but titles only marked
+// seen (no play, so nothing says when they were watched).
+func seedTitles(p *profile.Profile) []profile.Title {
+	var out []profile.Title
+	for _, t := range p.Loved {
+		if len(out) == seeds {
+			break
+		}
+		if !t.SeenOnly() {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// seedLabel names a seed in a candidate's why, with its year, so two
+// titles of one name stay apart: "rec:Dune (2021)".
+func seedLabel(t profile.Title) string {
+	if t.Year > 0 {
+		return fmt.Sprintf("%s (%d)", clipName(t.Title), t.Year)
+	}
+	return clipName(t.Title)
 }
 
 // fetch runs the sources and the seeds' details, a few at a time. failed
@@ -274,10 +317,7 @@ func (b *Builder) fetch(ctx context.Context, p *profile.Profile, sources []sourc
 			raw = append(raw, got...)
 		}()
 	}
-	for i, t := range p.Loved {
-		if i == seeds {
-			break
-		}
+	for i, t := range seedTitles(p) {
 		run(func() ([]found, error) { return b.seed(ctx, i, t) })
 	}
 	for i, src := range sources {
@@ -286,7 +326,7 @@ func (b *Builder) fetch(ctx context.Context, p *profile.Profile, sources []sourc
 			if err != nil {
 				return nil, err
 			}
-			return []found{{order: 2*seeds + i, source: src.name, items: page.Results}}, nil
+			return []found{{order: 2*seeds + i, kind: src.name, seed: -1, label: src.name, items: page.Results}}, nil
 		})
 	}
 	wg.Wait()
@@ -322,8 +362,11 @@ func (b *Builder) seed(ctx context.Context, rank int, t profile.Title) ([]found,
 		}
 		return out
 	}
-	name := clipName(t.Title)
-	return []found{{2 * rank, "rec:" + name, mark(recs)}, {2*rank + 1, "similar:" + name, mark(similar)}}, nil
+	name := seedLabel(t)
+	return []found{
+		{order: 2 * rank, kind: "rec", seed: rank, label: "rec:" + name, items: mark(recs)},
+		{order: 2*rank + 1, kind: "similar", seed: rank, label: "similar:" + name, items: mark(similar)},
+	}, nil
 }
 
 func clipName(s string) string {
@@ -351,11 +394,11 @@ func merge(raw []found, today string, genreNames map[string]map[int]string) []*C
 				byRef[ref] = c
 				out = append(out, c)
 			}
-			src := f.source
-			if src == "upcoming" && c.Date != "" && c.Date <= today {
-				src = "new"
+			h, label := hit{kind: f.kind, seed: f.seed}, f.label
+			if h.kind == "upcoming" && c.Date != "" && c.Date <= today {
+				h.kind, label = "new", "new"
 			}
-			c.addWhy(src)
+			c.addSource(h, label)
 		}
 	}
 	return out
@@ -382,13 +425,14 @@ func fromItem(mediaType string, item tmdb.ListItem, genreNames map[int]string) *
 	return c
 }
 
-func (c *Candidate) addWhy(src string) {
-	for _, w := range c.Why {
-		if w == src {
-			return
-		}
+// addSource records a source: its hit for scoring, its label for why.
+func (c *Candidate) addSource(h hit, label string) {
+	if !slices.Contains(c.hits, h) {
+		c.hits = append(c.hits, h)
 	}
-	c.Why = append(c.Why, src)
+	if !slices.Contains(c.Why, label) {
+		c.Why = append(c.Why, label)
+	}
 }
 
 // describe has TMDB describe each candidate (runtime, seasons, keywords,

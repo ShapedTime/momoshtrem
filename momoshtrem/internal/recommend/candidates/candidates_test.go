@@ -117,6 +117,7 @@ func (f *fakeTMDB) GenreList(_ context.Context, mediaType string) ([]tmdb.Genre,
 type fakeStore struct {
 	movies    []library.WatchedMovie
 	shows     []library.WatchedShow
+	ratings   []library.TasteRating
 	hidden    []library.HiddenShow
 	feedback  []library.TasteFeedback
 	titles    []library.LibraryTitle
@@ -127,7 +128,10 @@ func (f *fakeStore) WatchedMovies(context.Context) ([]library.WatchedMovie, erro
 	return f.movies, nil
 }
 func (f *fakeStore) WatchedShows(context.Context) ([]library.WatchedShow, error) { return f.shows, nil }
-func (f *fakeStore) HiddenShows(context.Context) ([]library.HiddenShow, error)   { return f.hidden, nil }
+func (f *fakeStore) TasteRatings(context.Context) ([]library.TasteRating, error) {
+	return f.ratings, nil
+}
+func (f *fakeStore) HiddenShows(context.Context) ([]library.HiddenShow, error) { return f.hidden, nil }
 func (f *fakeStore) TasteFeedback(context.Context) ([]library.TasteFeedback, error) {
 	return f.feedback, nil
 }
@@ -196,6 +200,10 @@ func testStore() *fakeStore {
 			{TMDBID: 95396, Plays: 19, Aired: 19, Completed: 19, HasProgress: true},
 		},
 		hidden: []library.HiddenShow{{TMDBID: 3, FromProgress: true}, {TMDBID: 51, Dropped: true}},
+		ratings: []library.TasteRating{
+			{TitleRef: movieRef(20), Rating: 6},                    // rated on Trakt, never played: seen
+			{TitleRef: showRef(50), Rating: 7, FromEpisodes: true}, // its episodes' mean isn't its own rating
+		},
 		feedback: []library.TasteFeedback{
 			{TitleRef: movieRef(12), Signal: "dislike"}, {TitleRef: movieRef(13), Signal: "seen"},
 			{TitleRef: movieRef(14), Signal: "like"}, {TitleRef: movieRef(21), Signal: "not_interested"},
@@ -225,12 +233,12 @@ func byID(pool *Pool) map[string]Candidate {
 func TestBuild_Exclusions(t *testing.T) {
 	pool := build(t, testTMDB(), testStore(), testProfile())
 	got := byID(pool)
-	for _, gone := range []string{"tv:2", "tv:3", "tv:4", "movie:11", "movie:12", "movie:13", "movie:21", "tv:51"} {
+	for _, gone := range []string{"tv:2", "tv:3", "tv:4", "movie:11", "movie:12", "movie:13", "movie:20", "movie:21", "tv:51"} {
 		if _, ok := got[gone]; ok {
 			t.Errorf("%s is in the pool", gone)
 		}
 	}
-	for _, kept := range []string{"tv:1", "movie:10", "movie:14", "movie:15", "tv:30", "movie:20", "movie:40", "movie:41", "tv:50"} {
+	for _, kept := range []string{"tv:1", "movie:10", "movie:14", "movie:15", "tv:30", "movie:40", "movie:41", "tv:50"} {
 		if _, ok := got[kept]; !ok {
 			t.Errorf("%s isn't in the pool", kept)
 		}
@@ -239,7 +247,7 @@ func TestBuild_Exclusions(t *testing.T) {
 	if !got["movie:15"].InLibrary || !got["tv:1"].OnWatchlist || got["movie:10"].InLibrary {
 		t.Errorf("marks: library %+v, watchlist %+v", got["movie:15"], got["tv:1"])
 	}
-	if want := (Stats{Considered: 17, Excluded: 8, Kept: 9}); pool.Stats != want {
+	if want := (Stats{Considered: 17, Excluded: 9, Kept: 8}); pool.Stats != want {
 		t.Errorf("stats = %+v, want %+v", pool.Stats, want)
 	}
 }
@@ -266,10 +274,9 @@ func TestBuild_Ranking(t *testing.T) {
 			t.Errorf("%s (%.3f) after %s (%.3f)", c.Title, c.Score(), pool.Items[i-1].Title, pool.Items[i-1].Score())
 		}
 	}
-	// A loved movie's recommendation beats a trending action movie, and an
-	// anime show sinks for someone who doesn't watch anime
-	if pos[10] > pos[20] {
-		t.Errorf("Annihilation at %d after Big Action at %d", pos[10], pos[20])
+	// A loved movie's recommendation beats a trending airing show
+	if pos[10] > pos[50] {
+		t.Errorf("Annihilation at %d after Airing at %d", pos[10], pos[50])
 	}
 	byIDs := byID(pool)
 	if !byIDs["tv:30"].Anime {
@@ -359,6 +366,7 @@ func TestBuild_TMDBDown(t *testing.T) {
 }
 
 func TestExclusion(t *testing.T) {
+	six := 6
 	tests := []struct {
 		name string
 		s    library.TitleState
@@ -376,6 +384,9 @@ func TestExclusion(t *testing.T) {
 		{"dropped, never started", library.TitleState{TitleRef: showRef(1), Dropped: true}, ExcludedDropped},
 		{"hidden from progress", library.TitleState{TitleRef: showRef(1), Hidden: true}, ExcludedHidden},
 		{"in the library", library.TitleState{TitleRef: showRef(1), InLibrary: true}, ""},
+		{"rated, never played", library.TitleState{TitleRef: movieRef(1), Rating: &six}, ExcludedRated},
+		{"rated show, never started", library.TitleState{TitleRef: showRef(1), Rating: &six, Hidden: true}, ExcludedRated},
+		{"watched beats rated", library.TitleState{TitleRef: movieRef(1), Plays: 1, Started: true, Rating: &six}, ExcludedWatched},
 	}
 	for _, tt := range tests {
 		if got := Exclusion(tt.s); got != tt.want {
@@ -438,5 +449,37 @@ func TestPool_Filter(t *testing.T) {
 	}
 	if items, _ := (&Pool{}).Filter(Filter{}); items == nil {
 		t.Error("an empty filter result is nil, not []")
+	}
+}
+
+// Seeds are keyed by their rank, not their name: two loved titles called
+// Dune stay apart, and a title only marked seen seeds nothing.
+func TestBuild_Seeds(t *testing.T) {
+	tm := testTMDB()
+	tm.movies[841] = &tmdb.MovieDetails{ID: 841, Title: "Dune",
+		Recommendations: tmdb.ResultsPage{Results: []tmdb.ListItem{item(60, "Flash Gordon", 878)}}}
+	tm.movies[438631] = &tmdb.MovieDetails{ID: 438631, Title: "Dune",
+		Recommendations: tmdb.ResultsPage{Results: []tmdb.ListItem{item(61, "Arrakis Story", 878)}}}
+	tm.movies[949] = &tmdb.MovieDetails{ID: 949, Title: "Heat",
+		Recommendations: tmdb.ResultsPage{Results: []tmdb.ListItem{item(62, "From a Seen Seed", 80)}}}
+	p := testProfile()
+	p.Loved = []profile.Title{
+		{MediaType: "movie", TMDBID: 949, Title: "Heat", Year: 1995, Note: profile.NoteSeen},
+		{MediaType: "movie", TMDBID: 438631, Title: "Dune", Year: 2021, Note: "watched"},
+		{MediaType: "movie", TMDBID: 841, Title: "Dune", Year: 1984, Note: "watched"},
+	}
+	got := byID(build(t, tm, testStore(), p))
+	if w := got["movie:61"].Why; !reflect.DeepEqual(w, []string{"rec:Dune (2021)"}) {
+		t.Errorf("2021's pick why = %v", w)
+	}
+	if w := got["movie:60"].Why; !reflect.DeepEqual(w, []string{"rec:Dune (1984)"}) {
+		t.Errorf("1984's pick why = %v", w)
+	}
+	// The first real seed counts fully, the second 5% less
+	if a, b := got["movie:61"], got["movie:60"]; a.Score() <= b.Score() {
+		t.Errorf("first seed's pick %.3f, second's %.3f", a.Score(), b.Score())
+	}
+	if _, ok := got["movie:62"]; ok {
+		t.Error("a title only marked seen seeded the pool")
 	}
 }
