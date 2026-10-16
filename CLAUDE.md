@@ -15,7 +15,7 @@ All work is tracked in GitHub issues on `ShapedTime/momoshtrem`. **Every agent s
 7. **Open a PR.** Conventional-commit title. Body has `Closes #n` (or `Part of #n`), what changed, verification output, and screenshots at 390 px and 1440 px for UI work.
 8. **Finish.** Remove `in-progress` and leave a summary comment: what shipped, what didn't, and links to follow-up issues.
 
-Labels: `v2` (redesign and features), `ops` (deployment, CI/CD, backups and server setup), `epic` (large, may be split), `in-progress` (claimed), `blocked` (waiting on an issue or the user).
+Labels: `v2` (redesign and features), `ops` (deployment, CI/CD, backups and server setup), `streaming` (the streaming path and its tooling, streamlab), `epic` (large, may be split), `in-progress` (claimed), `blocked` (waiting on an issue or the user).
 
 ## Project Overview
 
@@ -40,6 +40,19 @@ v2 is a redesign plus new features (Trakt, AI recommendations, episode mapping, 
 ## Ops track
 
 Server setup, CI/CD and backups are a separate track from v2: issues labelled `ops` (`gh issue list --label ops --state open`), epic #32. Read `docs/ops/PLAN.md` before any ops work: decisions (§2), state inventory (§5), rollback model (§6) and the deploy contract (§8). The VM is configured by the Ansible playbook in `ops/ansible/` (runbook: `docs/ops/HOST.md`). CI checks PRs and publishes images to GHCR from `.github/workflows/ci.yml` (runbook: `docs/ops/CI.md`). Deploys run from the Mac with `ops/deploy/deploy.sh` over SSH, never from GitHub (runbook: `docs/ops/DEPLOY.md`). The repo is public, so secrets and the public hostname never go in it.
+
+## Streaming track
+
+The streaming path (WebDAV → VFS → anacrolix, and HDRezka remote streams: `internal/{webdav,vfs,streaming,torrent,sessions,hdrezka}`) is fragile, and it was tuned by hand against Infuse. It has its own track: issues labelled `streaming`, epic #171. Read `docs/streamlab/PLAN.md` before any streaming work:
+- decisions (§2)
+- suspected live bugs F1–F12 (§3)
+- production hooks (§4)
+- the lab (§5)
+- verdict rules (§6)
+- streamtrace's no-behaviour-change rules (§7)
+- read-only production (§8)
+
+Until streamlab's gate exists, keep changes to this path minimal, and test them on the device.
 
 ## Commands
 
