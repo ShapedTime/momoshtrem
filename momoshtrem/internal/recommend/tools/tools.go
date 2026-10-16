@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -87,8 +88,17 @@ type Cached struct {
 	poolAt    time.Time
 }
 
-// NewCached creates a Cached: buildProfile is, say, profile.Builder's
-// Current; buildPool candidates.Builder's Build.
+// NewCached creates a Cached. buildPool is candidates.Builder's Build;
+// buildProfile adapts profile.Builder's Current, which answers a stored
+// profile:
+//
+//	tools.NewCached(func(ctx context.Context) (*profile.Profile, error) {
+//		s, err := profiles.Current(ctx, 12*time.Hour)
+//		if err != nil {
+//			return nil, err
+//		}
+//		return s.Profile, nil
+//	}, pools.Build, time.Hour)
 func NewCached(buildProfile func(context.Context) (*profile.Profile, error),
 	buildPool func(context.Context, *profile.Profile) (*candidates.Pool, error), ttl time.Duration) *Cached {
 	return &Cached{buildProfile: buildProfile, buildPool: buildPool, ttl: ttl, now: time.Now}
@@ -201,11 +211,12 @@ func decode(input json.RawMessage, v any) error {
 	return nil
 }
 
-// tmdbError is a TMDB failure the model can work around; a cancelled
-// context ends the run instead.
-func tmdbError(err error, what string) error {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
+// tmdbError is a TMDB failure as the model sees it: only the run's own
+// context ending is fatal. A timeout of TMDB's request (the HTTP client's,
+// or the cache's fetch) is DeadlineExceeded too, but the run goes on.
+func tmdbError(ctx context.Context, err error, what string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if errors.Is(err, tmdb.ErrNotFound) {
 		return &agent.ToolError{Message: "TMDB has no " + what + "."}
@@ -213,11 +224,14 @@ func tmdbError(err error, what string) error {
 	return &agent.ToolError{Message: "TMDB didn't answer for " + what + "; go on without it."}
 }
 
+// validID is a TMDB id the database can hold (int4).
+func validID(id int) bool { return id > 0 && id <= math.MaxInt32 }
+
 func validMediaType(mt string) bool { return mt == tmdb.MediaMovie || mt == tmdb.MediaTV }
 
 // Mark is what's known about a title, as every tool's results mark it.
 type Mark struct {
-	// Excluded says why it can't be picked (watched, started, dropped on
+	// Excluded says why it can't be picked (watched, started, rated, dropped on
 	// Trakt, hidden on Trakt, disliked, not interested, marked seen).
 	Excluded    string `json:"excluded,omitempty"`
 	Rating      int    `json:"your_rating,omitempty"` // your Trakt rating

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -246,28 +248,35 @@ func TestGetCandidates(t *testing.T) {
 		{MediaType: "tv", TMDBID: 3}: {Feedback: "dislike"},
 	}}
 	tl := NewGetCandidates(Fixed{C: pool}, titles)
-	nulls := `"media_type":null,"genres":null,"min_runtime":null,"max_runtime":null,"year_from":null,"year_to":null,"language":null,"anime":null`
+	open := `"media_type":"any","genres":[],"min_runtime":0,"max_runtime":0,"year_from":0,"year_to":0,"language":"","anime":"either"`
 
-	out, err := run(t, tl, `{`+nulls+`,"limit":null}`)
+	out, err := run(t, tl, `{`+open+`,"limit":0}`)
 	want := `{"matched":2,"pool":{"considered":40,"excluded":6,"kept":3},"items":[` +
 		`{"media_type":"tv","tmdb_id":1,"title":"Dark","genres":["Drama"],"runtime":55,"why":["rec:Severance"]},` +
 		`{"media_type":"movie","tmdb_id":2,"title":"Annihilation","genres":["Science Fiction"],"runtime":115,"why":["kw"]}]}`
 	if err != nil || out != want {
 		t.Errorf("all = %s, %v\nwant %s", out, err, want)
 	}
-	out, err = run(t, tl, `{"media_type":"tv","genres":["drama"],"min_runtime":null,"max_runtime":60,"year_from":null,"year_to":null,"language":null,"anime":null,"limit":1}`)
+	out, err = run(t, tl, `{"media_type":"tv","genres":["drama"],"min_runtime":0,"max_runtime":60,"year_from":0,"year_to":0,"language":"","anime":"exclude","limit":1}`)
 	if err != nil || !strings.HasPrefix(out, `{"matched":1,`) || !strings.Contains(out, `"title":"Dark"`) {
 		t.Errorf("filtered = %s, %v", out, err)
 	}
-	if _, err := run(t, tl, `{`+nulls+`,"limit":-1}`); toolError(err) == "" {
+	if _, err := run(t, tl, `{`+open+`,"limit":-1}`); toolError(err) == "" {
 		t.Errorf("negative limit = %v, want a tool error", err)
 	}
-	if _, err := run(t, tl, `{"media_type":"show","genres":null,"min_runtime":null,"max_runtime":null,"year_from":null,"year_to":null,"language":null,"anime":null,"limit":null}`); toolError(err) == "" {
+	if _, err := run(t, tl, `{"media_type":"show","genres":[],"min_runtime":0,"max_runtime":0,"year_from":0,"year_to":0,"language":"","anime":"either","limit":0}`); toolError(err) == "" {
 		t.Errorf("bad media type = %v, want a tool error", err)
+	}
+	if _, err := run(t, tl, `{"media_type":"any","genres":[],"min_runtime":0,"max_runtime":0,"year_from":0,"year_to":0,"language":"","anime":"yes","limit":0}`); toolError(err) == "" {
+		t.Errorf("bad anime = %v, want a tool error", err)
+	}
+	// anime: only
+	if out, err := run(t, tl, `{"media_type":"any","genres":[],"min_runtime":0,"max_runtime":0,"year_from":0,"year_to":0,"language":"","anime":"only","limit":0}`); err != nil || !strings.HasPrefix(out, `{"matched":0,`) {
+		t.Errorf("anime only = %s, %v", out, err)
 	}
 	// The store failing ends the run: it isn't the model's to fix
 	titles.err = errors.New("db down")
-	if _, err := run(t, tl, `{`+nulls+`,"limit":null}`); err == nil || toolError(err) != "" {
+	if _, err := run(t, tl, `{`+open+`,"limit":0}`); err == nil || toolError(err) != "" {
 		t.Errorf("db error = %v, want a plain error", err)
 	}
 }
@@ -280,7 +289,7 @@ func TestTMDBSearch(t *testing.T) {
 	tm := &fakeTMDB{}
 	tl := NewTMDBSearch(tm, titles)
 
-	out, err := run(t, tl, `{"query":"  dune ","media_type":null,"year":null}`)
+	out, err := run(t, tl, `{"query":"  dune ","media_type":"any","year":0}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,21 +323,28 @@ func TestTMDBSearch(t *testing.T) {
 	if _, err := run(t, tl, `{"query":"dune","media_type":"tv","year":2024}`); err != nil || !reflect.DeepEqual(tm.queries, []string{"tv dune 2024"}) {
 		t.Errorf("tv 2024: %v, queries %v", err, tm.queries)
 	}
-	if _, err := run(t, tl, `{"query":" ","media_type":null,"year":null}`); toolError(err) == "" {
+	if _, err := run(t, tl, `{"query":" ","media_type":"any","year":0}`); toolError(err) == "" {
 		t.Errorf("empty query = %v", err)
 	}
 	// One type failing still answers; both failing is the model's to know
 	tm.searchErr = map[string]error{"tv": &tmdb.StatusError{StatusCode: 500}}
-	if out, err := run(t, tl, `{"query":"dune","media_type":null,"year":null}`); err != nil || strings.Contains(out, "Prophecy") {
+	if out, err := run(t, tl, `{"query":"dune","media_type":"any","year":0}`); err != nil || strings.Contains(out, "Prophecy") {
 		t.Errorf("tv down = %s, %v", out, err)
 	}
 	tm.searchErr["movie"] = &tmdb.StatusError{StatusCode: 500}
-	if _, err := run(t, tl, `{"query":"dune","media_type":null,"year":null}`); !strings.Contains(toolError(err), "TMDB didn't answer") {
+	if _, err := run(t, tl, `{"query":"dune","media_type":"any","year":0}`); !strings.Contains(toolError(err), "TMDB didn't answer") {
 		t.Errorf("TMDB down = %v", err)
 	}
-	tm.searchErr["movie"] = context.Canceled
-	tm.searchErr["tv"] = context.Canceled
-	if _, err := run(t, tl, `{"query":"dune","media_type":null,"year":null}`); !errors.Is(err, context.Canceled) {
+	// A deadline inside TMDB's request isn't the run's: the run goes on
+	tm.searchErr["movie"] = context.DeadlineExceeded
+	tm.searchErr["tv"] = context.DeadlineExceeded
+	if _, err := run(t, tl, `{"query":"dune","media_type":"any","year":0}`); toolError(err) == "" {
+		t.Errorf("TMDB's deadline = %v, want a tool error", err)
+	}
+	// The run ending does end it
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := tl.Run(ctx, json.RawMessage(`{"query":"dune","media_type":"any","year":0}`)); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled = %v, want it to end the run", err)
 	}
 }
@@ -443,5 +459,137 @@ func TestEncode(t *testing.T) {
 	out, err := Encode(map[string]string{"genre": "Sci-Fi & Fantasy", "why": "rec:<x>"})
 	if err != nil || string(out) != `{"genre":"Sci-Fi & Fantasy","why":"rec:<x>"}` {
 		t.Errorf("Encode = %s, %v", out, err)
+	}
+}
+
+// The structured-outputs limits allow 16 parameters with a union (anyOf or
+// a type array) per request, across every strict tool, and #157 and #158
+// add theirs to the same request: R1's tools keep within 2 (sentinels, not
+// nullables). None of their parameters is optional either.
+func TestTools_UnionBudget(t *testing.T) {
+	unions := 0
+	for _, tl := range allTools() {
+		var root any
+		if err := json.Unmarshal(tl.Schema(), &root); err != nil {
+			t.Fatal(err)
+		}
+		unions += countUnions(root)
+	}
+	if unions > 2 {
+		t.Errorf("R1's tools use %d union parameters, want at most 2 of the request's 16", unions)
+	}
+}
+
+// countUnions counts the schemas under node that are an anyOf or a type
+// array.
+func countUnions(node any) int {
+	n := 0
+	switch v := node.(type) {
+	case map[string]any:
+		if _, ok := v["anyOf"]; ok {
+			n++
+		}
+		if _, ok := v["type"].([]any); ok {
+			n++
+		}
+		for _, child := range v {
+			n += countUnions(child)
+		}
+	case []any:
+		for _, child := range v {
+			n += countUnions(child)
+		}
+	}
+	return n
+}
+
+func TestCountUnions(t *testing.T) {
+	var schema any
+	_ = json.Unmarshal([]byte(`{"type":"object","properties":{"a":{"anyOf":[{"type":"string"},{"type":"null"}]},
+		"b":{"type":["integer","null"]},"c":{"type":"array","items":{"anyOf":[{"type":"string"},{"type":"integer"}]}}}}`), &schema)
+	if got := countUnions(schema); got != 3 {
+		t.Errorf("countUnions = %d, want 3", got)
+	}
+}
+
+// fakeInputs fails or answers nothing.
+type fakeInputs struct{ err error }
+
+func (f fakeInputs) Profile(context.Context) (*profile.Profile, error) { return nil, f.err }
+func (f fakeInputs) Pool(context.Context) (*candidates.Pool, error)    { return nil, f.err }
+
+// Missing inputs and a pool TMDB couldn't build are the model's to work
+// around; a database error or the run ending isn't.
+func TestInputErrors(t *testing.T) {
+	open := `{"media_type":"any","genres":[],"min_runtime":0,"max_runtime":0,"year_from":0,"year_to":0,"language":"","anime":"either","limit":0}`
+	if _, err := run(t, NewGetCandidates(Fixed{}, &fakeTitles{}), open); toolError(err) == "" {
+		t.Errorf("nil pool = %v, want a tool error", err)
+	}
+	if _, err := run(t, NewGetTasteProfile(Fixed{}), `{}`); toolError(err) == "" {
+		t.Errorf("nil profile = %v, want a tool error", err)
+	}
+	noSources := fmt.Errorf("building: %w", candidates.ErrNoSources)
+	if _, err := run(t, NewGetCandidates(fakeInputs{err: noSources}, &fakeTitles{}), open); !strings.Contains(toolError(err), "tmdb_search") {
+		t.Errorf("no sources = %v, want a tool error", err)
+	}
+	dbDown := errors.New("db down")
+	if _, err := run(t, NewGetCandidates(fakeInputs{err: dbDown}, &fakeTitles{}), open); !errors.Is(err, dbDown) {
+		t.Errorf("db error = %v, want it to end the run", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewGetCandidates(fakeInputs{err: noSources}, &fakeTitles{}).Run(ctx, json.RawMessage(open)); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled = %v, want it to end the run", err)
+	}
+}
+
+// A TMDB request that times out (the HTTP client's timeout is a
+// DeadlineExceeded too) is a tool error; only the run's own context ending
+// is fatal.
+func TestTMDBTimeoutIsAToolError(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(2 * time.Second):
+		case <-r.Context().Done():
+		}
+	}))
+	defer slow.Close()
+	client := tmdb.NewClient("key", tmdb.WithBaseURL(slow.URL), tmdb.WithRetries(1, 0),
+		tmdb.WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
+	tm := tmdb.NewCached(client, nopCache{})
+	ctx := context.Background()
+
+	if _, err := NewTMDBDetails(tm, &fakeTitles{}).Run(ctx, json.RawMessage(`{"media_type":"movie","tmdb_id":603}`)); !strings.Contains(toolError(err), "didn't answer") {
+		t.Errorf("details timeout = %v, want a tool error", err)
+	}
+	if _, err := NewTMDBSearch(tm, &fakeTitles{}).Run(ctx, json.RawMessage(`{"query":"matrix","media_type":"movie","year":0}`)); !strings.Contains(toolError(err), "didn't answer") {
+		t.Errorf("search timeout = %v, want a tool error", err)
+	}
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if _, err := NewTMDBDetails(tm, &fakeTitles{}).Run(short, json.RawMessage(`{"media_type":"movie","tmdb_id":603}`)); toolError(err) != "" || err == nil {
+		t.Errorf("the run's own deadline = %v, want it to end the run", err)
+	}
+}
+
+// nopCache caches nothing.
+type nopCache struct{}
+
+func (nopCache) Get(context.Context, string) ([]byte, time.Time, bool, error) {
+	return nil, time.Time{}, false, nil
+}
+func (nopCache) Set(context.Context, string, []byte, time.Time) error { return nil }
+
+// An id the database can't hold is the model's mistake, not a crash.
+func TestIDsOutOfRange(t *testing.T) {
+	titles := &fakeTitles{}
+	if _, err := run(t, NewTMDBDetails(&fakeTMDB{}, titles), `{"media_type":"movie","tmdb_id":2147483648}`); toolError(err) == "" {
+		t.Errorf("details = %v, want a tool error", err)
+	}
+	if _, err := run(t, NewCheckSeen(titles), `{"titles":[{"media_type":"movie","tmdb_id":2147483648}]}`); toolError(err) == "" {
+		t.Errorf("check_seen = %v, want a tool error", err)
+	}
+	if titles.calls != 0 {
+		t.Errorf("the store was asked %d times", titles.calls)
 	}
 }

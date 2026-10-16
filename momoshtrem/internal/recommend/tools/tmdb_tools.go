@@ -36,12 +36,13 @@ var tmdbSearchSchema = compact(`{
 			"type": "string"
 		},
 		"media_type": {
-			"description": "movie or tv; null searches both.",
-			"anyOf": [{"type": "string", "enum": ["movie", "tv"]}, {"type": "null"}]
+			"description": "movie, tv, or any to search both.",
+			"type": "string",
+			"enum": ["movie", "tv", "any"]
 		},
 		"year": {
-			"description": "The release (or first air) year, to tell remakes apart; null for any.",
-			"anyOf": [{"type": "integer"}, {"type": "null"}]
+			"description": "The release (or first air) year, to tell remakes apart; 0 for any year.",
+			"type": "integer"
 		}
 	},
 	"required": ["query", "media_type", "year"],
@@ -49,9 +50,9 @@ var tmdbSearchSchema = compact(`{
 }`)
 
 type tmdbSearchInput struct {
-	Query     string  `json:"query"`
-	MediaType *string `json:"media_type"`
-	Year      *int    `json:"year"`
+	Query     string `json:"query"`
+	MediaType string `json:"media_type"`
+	Year      int    `json:"year"`
 }
 
 // searchHit is one tmdb_search result.
@@ -74,7 +75,7 @@ func NewTMDBSearch(t TMDB, titles Titles) agent.Tool {
 	return &tool{
 		name: NameTMDBSearch,
 		description: "Find a movie or show on TMDB by name, for a title that isn't in the candidates (one you know of, or found on the web). " +
-			"Answers up to 10 matches, most popular first, each with its tmdb_id, and excluded when it can't be picked (watched, started, " +
+			"Answers up to 10 matches, most popular first, each with its tmdb_id, and excluded when it can't be picked (watched, started, rated, " +
 			"dropped or hidden on Trakt, disliked, not interested, marked seen).",
 		schema: tmdbSearchSchema,
 		run: func(ctx context.Context, input json.RawMessage) (any, error) {
@@ -87,17 +88,17 @@ func NewTMDBSearch(t TMDB, titles Titles) agent.Tool {
 				return nil, &agent.ToolError{Message: "query is empty."}
 			}
 			types := []string{tmdb.MediaMovie, tmdb.MediaTV}
-			if in.MediaType != nil {
-				if !validMediaType(*in.MediaType) {
-					return nil, &agent.ToolError{Message: "media_type is movie, tv or null."}
-				}
-				types = []string{*in.MediaType}
+			switch {
+			case in.MediaType == anyMedia || in.MediaType == "":
+			case validMediaType(in.MediaType):
+				types = []string{in.MediaType}
+			default:
+				return nil, &agent.ToolError{Message: "media_type is movie, tv or any."}
 			}
-			year := 0
-			if in.Year != nil {
-				year = *in.Year
+			if in.Year < 0 {
+				return nil, &agent.ToolError{Message: "year can't be negative (0 means any year)."}
 			}
-			return search(ctx, t, titles, query, types, year)
+			return search(ctx, t, titles, query, types, in.Year)
 		},
 	}
 }
@@ -119,7 +120,7 @@ func search(ctx context.Context, t TMDB, titles Titles, query string, types []st
 		}
 	}
 	if answered == 0 {
-		return nil, tmdbError(lastErr, fmt.Sprintf("%q", query))
+		return nil, tmdbError(ctx, lastErr, fmt.Sprintf("%q", query))
 	}
 	slices.SortStableFunc(hits, func(a, b searchHit) int { return cmp.Compare(b.popularity, a.popularity) })
 	hits = hits[:min(len(hits), searchResults)]
@@ -236,20 +237,20 @@ func NewTMDBDetails(t TMDB, titles Titles) agent.Tool {
 			if err := decode(input, &in); err != nil {
 				return nil, err
 			}
-			if !validMediaType(in.MediaType) || in.TMDBID <= 0 {
-				return nil, &agent.ToolError{Message: "Send media_type (movie or tv) and a positive tmdb_id."}
+			if !validMediaType(in.MediaType) || !validID(in.TMDBID) {
+				return nil, &agent.ToolError{Message: "Send media_type (movie or tv) and a TMDB id (a positive whole number)."}
 			}
 			var d *details
 			if in.MediaType == tmdb.MediaMovie {
 				m, err := t.MovieDetails(ctx, in.TMDBID)
 				if err != nil {
-					return nil, tmdbError(err, "movie "+strconv.Itoa(in.TMDBID))
+					return nil, tmdbError(ctx, err, "movie "+strconv.Itoa(in.TMDBID))
 				}
 				d = movieDetails(m)
 			} else {
 				s, err := t.ShowDetails(ctx, in.TMDBID)
 				if err != nil {
-					return nil, tmdbError(err, "show "+strconv.Itoa(in.TMDBID))
+					return nil, tmdbError(ctx, err, "show "+strconv.Itoa(in.TMDBID))
 				}
 				d = showDetails(s)
 			}
@@ -395,7 +396,7 @@ type seenItem struct {
 func NewCheckSeen(titles Titles) agent.Tool {
 	return &tool{
 		name: NameCheckSeen,
-		description: "Check whether titles can be recommended: can_pick is false for anything watched, started, dropped or hidden on Trakt, " +
+		description: "Check whether titles can be recommended: can_pick is false for anything watched, started, rated, dropped or hidden on Trakt, " +
 			"disliked, not interested or marked seen (excluded says which). Also answers plays, a show's progress, the user's rating and " +
 			"whether it's liked, in the library or on the watchlist. Check every title that didn't come from get_candidates.",
 		schema: checkSeenSchema,
@@ -409,8 +410,8 @@ func NewCheckSeen(titles Titles) agent.Tool {
 			}
 			refs := make([]library.TitleRef, len(in.Titles))
 			for i, t := range in.Titles {
-				if !validMediaType(t.MediaType) || t.TMDBID <= 0 {
-					return nil, &agent.ToolError{Message: "Each title needs media_type (movie or tv) and a positive tmdb_id."}
+				if !validMediaType(t.MediaType) || !validID(t.TMDBID) {
+					return nil, &agent.ToolError{Message: "Each title needs media_type (movie or tv) and a TMDB id (a positive whole number)."}
 				}
 				refs[i] = library.TitleRef{MediaType: t.MediaType, TMDBID: t.TMDBID}
 			}
