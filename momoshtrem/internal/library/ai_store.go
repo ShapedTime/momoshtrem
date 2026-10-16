@@ -93,15 +93,49 @@ func (s *AIStore) RecordUsage(ctx context.Context, u AIUsage) error {
 	return nil
 }
 
-// MonthToDateCost is what every AI feature has cost since the start of
-// the database's current month.
-func (s *AIStore) MonthToDateCost(ctx context.Context) (float64, error) {
+// CostSince is what every AI feature has cost since a time: for the
+// budget, the start of the server-local month, computed in Go
+// (aicore.MonthBounds): Postgres's session zone isn't the service's TZ.
+func (s *AIStore) CostSince(ctx context.Context, since time.Time) (float64, error) {
 	var cost float64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(cost_usd), 0)::float8 FROM ai_usage WHERE created_at >= date_trunc('month', NOW())
-	`).Scan(&cost)
+		SELECT COALESCE(SUM(cost_usd), 0)::float8 FROM ai_usage WHERE created_at >= $1
+	`, since).Scan(&cost)
 	if err != nil {
 		return 0, fmt.Errorf("failed to sum AI usage: %w", err)
 	}
 	return cost, nil
+}
+
+// AIFeatureTotal is one feature's spend and API calls over a period.
+type AIFeatureTotal struct {
+	Feature  string
+	CostUSD  float64
+	Requests int
+}
+
+// FeatureTotalsSince sums each feature's usage since a time: one entry per
+// feature that has any, by feature name.
+func (s *AIStore) FeatureTotalsSince(ctx context.Context, since time.Time) ([]AIFeatureTotal, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT feature, COALESCE(SUM(cost_usd), 0)::float8, COUNT(*)
+		FROM ai_usage WHERE created_at >= $1
+		GROUP BY feature ORDER BY feature
+	`, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sum AI usage by feature: %w", err)
+	}
+	defer rows.Close()
+	var out []AIFeatureTotal
+	for rows.Next() {
+		var t AIFeatureTotal
+		if err := rows.Scan(&t.Feature, &t.CostUSD, &t.Requests); err != nil {
+			return nil, fmt.Errorf("failed to read AI usage by feature: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read AI usage by feature: %w", err)
+	}
+	return out, nil
 }

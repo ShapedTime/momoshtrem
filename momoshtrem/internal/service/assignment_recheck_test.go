@@ -482,7 +482,8 @@ func TestReclassify_InterruptedByShutdown(t *testing.T) {
 }
 
 // The resolver's Postgres side: answers cached, usage recorded against the
-// job (cache writes counted as input), and the monthly budget.
+// job (cache writes counted as input), and the monthly budget: $15 on a
+// fresh install, none with an explicit null.
 func TestClassifierAIStore(t *testing.T) {
 	db := openSchemaDB(t)
 	ctx := context.Background()
@@ -497,7 +498,7 @@ func TestClassifierAIStore(t *testing.T) {
 	}
 
 	if err := s.Check(ctx); err != nil {
-		t.Errorf("no budget: %v", err)
+		t.Errorf("under the default budget: %v", err)
 	}
 	if err := s.Record(ctx, identify.Usage{Model: "claude-haiku-5-5", InputTokens: 100, CacheWriteTokens: 50, CacheReadTokens: 2000,
 		OutputTokens: 30, CostUSD: 0.6}, 7); err != nil {
@@ -524,6 +525,12 @@ func TestClassifierAIStore(t *testing.T) {
 	}
 	if err := s.Check(ctx); !errors.Is(err, ai.ErrBudgetExceeded) {
 		t.Errorf("over budget: %v", err)
+	}
+	if err := settings.Set(ctx, library.AISettingsKey, []byte(`{"monthly_budget_usd": null}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Check(ctx); err != nil {
+		t.Errorf("no cap: %v", err)
 	}
 }
 

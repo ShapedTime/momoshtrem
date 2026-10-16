@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/aicore"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
 
@@ -26,12 +27,10 @@ type UsageRecorder interface {
 	Record(ctx context.Context, u identify.Usage, ref int64) error
 }
 
-// Budget guards the monthly AI budget (monthly_budget_usd).
-type Budget interface {
-	// Check returns an error wrapping ErrBudgetExceeded once this month's
-	// spend has reached the budget.
-	Check(ctx context.Context) error
-}
+// Budget guards the monthly AI budget every AI feature shares
+// (monthly_budget_usd): Check returns an error wrapping ErrBudgetExceeded
+// once this month's spend has reached it (aicore.Ledger).
+type Budget = aicore.Budget
 
 // The defaults: no cache, nothing recorded, no limit.
 type (

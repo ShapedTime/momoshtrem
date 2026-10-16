@@ -20,7 +20,7 @@ import (
 // "Recommendations (R1–R3)"; the AI core, #154): app_settings key "ai",
 // shared with the classifier. Both work without ANTHROPIC_API_KEY.
 type AISettings interface {
-	// AISettings reads the document over recommend.DefaultSettings.
+	// AISettings reads the document over library.DefaultAISettings.
 	AISettings(ctx context.Context) (recommend.Settings, error)
 	// UpdateAISettings applies the fields set in one jsonb `||` statement
 	// and answers every setting.
