@@ -8,6 +8,21 @@ export interface ProbeStatus {
   error?: string;
 }
 
+/** One Jackett indexer's latest search outcome since startup; `unknown` before any search (#6). */
+export interface IndexerHealth {
+  name: string;
+  status: 'ok' | 'timeout' | 'error' | 'unknown';
+  ms: number | null;
+  /** When the current timeout or error streak began ("Timing out for 2 h"). */
+  since: Timestamp | null;
+  error?: string;
+}
+
+export interface JackettStatus extends ProbeStatus {
+  /** Omitted when Jackett isn't configured or reachable, and by a backend older than #6. */
+  indexers?: IndexerHealth[];
+}
+
 export interface SystemStatus {
   version: string;
   uptime_seconds: number;
@@ -15,7 +30,7 @@ export interface SystemStatus {
   checked_at: Timestamp;
   db: { ok: boolean; size_bytes: number | null; error?: string };
   webdav: { url: string; port: number; auth_enabled: boolean; username?: string; active_readers?: number };
-  jackett: ProbeStatus;
+  jackett: JackettStatus;
   tmdb: ProbeStatus;
   trakt: { configured: boolean; connected: boolean };
   ai: { configured: boolean; mtd_cost_usd: number | null };

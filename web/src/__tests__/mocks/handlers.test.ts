@@ -80,8 +80,10 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['PUT /movies/{id}/assignment', () => assignmentApi.setMovieAssignment(1, { info_hash: 'x', file_path: 'a.mkv' })],
     ['GET /torrents/{hash}/files', async () => assignmentApi.torrentFiles((await assignmentApi.job(101)).job.torrent.info_hash)],
     ['GET /search/torrents', () => searchApi.torrents({ media_type: 'tv', tmdb_id: 209867, season: 1, episode: 29 })],
+    ['POST /search/torrents/resolve', () => searchApi.resolve({ release_id: 'rel-0' })],
     ['POST /search/torrents/inspect', () => searchApi.inspect({ release_id: 'rel-0', media_type: 'tv', tmdb_id: 209867 })],
     ['GET /settings/quality-profile', () => searchApi.qualityProfile()],
+    ['PUT /settings/quality-profile', async () => searchApi.putQualityProfile({ ...(await searchApi.qualityProfile()), max_gb_per_hour: 6 })],
     ['GET /integrations/trakt', () => traktApi.integration()],
     ['POST /integrations/trakt/connect', () => traktApi.connect()],
     ['POST /integrations/trakt/sync', () => traktApi.sync()],
@@ -240,6 +242,22 @@ describe('the mock library keeps what the page changed', () => {
     expect(new Set(search.items.map((item) => item.match))).toEqual(new Set(['unknown']));
     const { items: stored } = await subtitlesApi.list('movie', 1);
     expect(stored.map((s) => `${s.language_code}:${s.source}:${s.match}`)).toEqual(['ru:opensubtitles:unknown']);
+  });
+});
+
+describe('torrent search in mock mode (#6)', () => {
+  it('resolves a release to its magnet, and says when a result expired', async () => {
+    const { items } = await searchApi.torrents({ media_type: 'tv', tmdb_id: 209867, season: 1, episode: 29 });
+    expect(await searchApi.resolve({ release_id: items[0].id })).toEqual({ magnet_uri: items[0].magnet_uri, info_hash: items[0].info_hash });
+    await expect(searchApi.resolve({ release_id: 'gone' })).rejects.toMatchObject({ status: 404, code: 'not_found' });
+  });
+
+  it('keeps a saved quality profile until the state is reset', async () => {
+    const profile = await searchApi.qualityProfile();
+    await searchApi.putQualityProfile({ ...profile, preferred_resolution: '1080p', max_resolution: null });
+    expect(await searchApi.qualityProfile()).toMatchObject({ preferred_resolution: '1080p', max_resolution: null });
+    resetMockState();
+    expect(await searchApi.qualityProfile()).toEqual(profile);
   });
 });
 

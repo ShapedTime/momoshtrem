@@ -32,7 +32,7 @@ export const handlers = [
   ...legacyHandlers,
 ];
 
-/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings and stored subtitles live per page). */
+/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile and stored subtitles live per page). */
 export function resetMockState(): void {
   resetMockLibrary();
   resetMockSettings();

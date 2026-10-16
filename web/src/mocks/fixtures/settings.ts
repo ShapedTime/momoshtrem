@@ -1,4 +1,4 @@
-import type { AiSettings, AiUsage } from '@/lib/api/contract';
+import type { AiSettings, AiUsage, QualityProfile } from '@/lib/api/contract';
 
 export const AI_SETTINGS: AiSettings = {
   rec_enabled: true,
@@ -19,4 +19,16 @@ export const AI_USAGE: AiUsage = {
     { feature: 'ask', cost_usd: 0.43, requests: 9 },
     { feature: 'classifier', cost_usd: 0.08, requests: 31 },
   ],
+};
+
+/** The prototype's profile (screens/settings/quality-*), not the backend's defaults. */
+export const QUALITY_PROFILE: QualityProfile = {
+  preferred_resolution: '2160p',
+  max_resolution: '2160p',
+  max_gb_per_hour: 8,
+  prefer_x265: true,
+  prefer_hdr: true,
+  prefer_dolby_vision: true,
+  avoid_terms: ['CAM', 'TS', 'HDCAM', 'TELESYNC', 'HC', 'KORSUB'],
+  preferred_groups: ['FLUX', 'NTb', 'SubsPlease', 'VARYG'],
 };
