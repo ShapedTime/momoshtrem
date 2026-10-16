@@ -537,7 +537,6 @@ func main() {
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
-	apiServer.SetReaderTracker(readerTracker)
 	apiServer.SetSubtitleService(subtitleService)
 	jobService.Start()
 
