@@ -2,7 +2,6 @@ package airdate
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -76,33 +75,6 @@ func (s *SyncService) Stop() {
 	s.mu.Unlock()
 	close(s.stopChan)
 	s.log.Info("Air date sync service stopped")
-}
-
-// TriggerSync manually triggers a sync
-func (s *SyncService) TriggerSync() error {
-	// Use write lock for atomic check-and-set to prevent race condition
-	s.mu.Lock()
-	if s.syncStatus == "in_progress" {
-		s.mu.Unlock()
-		return errors.New("sync already in progress")
-	}
-	s.syncStatus = "in_progress"
-	s.mu.Unlock()
-
-	// doSync will set final status (ok/error) when complete
-	return s.doSync(context.Background(), false)
-}
-
-// GetStatus returns current sync status
-func (s *SyncService) GetStatus() (lastSync time.Time, status string, lastError error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lastSync, s.syncStatus, s.lastError
-}
-
-// GetLookbackDays returns the configured lookback days
-func (s *SyncService) GetLookbackDays() int {
-	return s.config.LookbackDays
 }
 
 // SyncSingleShow syncs air dates for a single show (called when a show is added)

@@ -605,7 +605,6 @@ func main() {
 	if cfg.AirDateSync.Enabled && cfg.TMDB.APIKey != "" {
 		airDateSync = airdate.NewSyncService(cfg.AirDateSync, showRepo, syncMetaRepo, cachedTMDB)
 		airDateSync.Start()
-		apiServer.SetAirDateSyncService(airDateSync)
 		slog.Info("Air date sync service initialized",
 			"interval_hours", cfg.AirDateSync.SyncIntervalHours,
 			"lookback_days", cfg.AirDateSync.LookbackDays,
