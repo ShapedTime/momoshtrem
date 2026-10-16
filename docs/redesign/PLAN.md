@@ -1430,6 +1430,21 @@ Epic #9, in slices: the contract, stateful mocks and skeletons (#152); then R1 (
   - A run that ends with fewer than 4 shelves or no hero picks gets one nudge turn on the same prefix; it fails with fewer than 4 shelves after it. Stopping at the web search cap counts as stopping short: the nudge (appended to the tool results the loop stopped on) says there are no more searches, and runs with `Caps.WebSearches: 1`, only the cap changed, never the tools or `max_uses`, so a search ends it after that call (its shelves still count). One stopped early (a cap, an API error, its own 20-minute deadline) with 4 or more publishes them; only shutdown fails it outright. A run's final write (succeeded, failed, skipped) is made past its deadline and retried (1 s, 4 s, 15 s), so it doesn't stay active (refreshing) until a restart.
   - `internal/recommend/schedule` (`Scheduler`): the 03:00 loop (re-planned on `Reschedule`, which `aisettings.Service.SetOnChange` calls after every `PUT /settings/ai`; waits at most an hour), the catch-up (dropped when the schedule turns manual or picks off), one worker, the reaping of a run left `running` that this process isn't executing once it's older than a run may be (20 minutes and a 10-minute margin, so `recommend-run` in another process is left alone; a queued one wakes the worker), `Refresh` in the contract's order, `FirstSync`, `NextRunAt`; it serves `api.Recommendations`, `aisettings.RecsReporter` and `catalog.Reasons`. `trakt.Syncer.SetOnImported` calls `FirstSync` after an initial import stored everything, before the sync reports it idle.
   - `aicore.Client.CountTokens` and `aicore.RequestBody` for `recommend-run -dry-run`: it builds the first request (profile and pool built, not stored) and counts it on the free `count_tokens`, or reports its size without a key. The real run queues a `manual` run (refused while another is active, or while picks are off) and prints the shelves, the hero picks and the usage. A demo account (16 loved titles, the full pool) measured 23,525 input tokens for the first call: $0.12 written to the cache on Opus 5.5, $0.005 a later call reading it.
+- **Live check** (#160, 2026-10-16: the real API, a real Trakt account with 1,872 plays and 145 loved titles, a scratch stack on `TZ=Asia/Baku`):
+  - **First sync.** The initial import took 18.5 s. The `first_sync` run was queued 13 ms before the import reported idle, and started at once.
+  - **Opus 5.5: 80 s, 4 API calls, $0.32.**
+    - 12 s of the 80 built the profile and the pool on a cold TMDB cache.
+    - The first call wrote the 24,215-token prefix to the cache ($0.12, exactly what `-dry-run` counted on `count_tokens`).
+    - The next three calls read 24k, 29k and 35k from the cache, 83–98% of each prompt.
+    - Output was 6.4k tokens. All five shelves came in one call: 5.2k tokens over 44 s.
+    - It wrote 5 shelves of 7–11 titles (46 titles) and 7 hero picks.
+  - **Sonnet 5.5 (Run now, TMDB warm): 36 s, 4 calls, $0.14.** It wrote 5 shelves and 5 hero picks. Its reasons are shorter and more generic.
+  - **No web search in either run.** The "new" shelf came from the pool's on-the-air and trending titles, and neither run wrote a coming-soon shelf.
+  - **Quality.**
+    - The reasons cite what the profile holds: the one 10/10 rating ("the closest match to your 10/10 for The Courier"), loved titles, runtimes, book adaptations.
+    - Every title is real. None was watched or rated (checked in SQL against the imported history).
+    - Title pages show the reason.
+    - A few reasons drift off their shelf's theme (a Knives Out nod on a What We Do in the Shadows shelf).
 
 **R3 · Ask momoshtrem** (#158; depends on R2's agent and the AI core)
 - Owns `internal/recommend/ask`, `api.Ask` (the SSE route's service and the threads), and `cmd/momoshtrem/wire_ask.go`, whose `Close` cancels the turns in flight (`main.go` registers it with `httpServer.RegisterOnShutdown`). At startup a turn a crash left `streaming` is marked `error`.
@@ -1443,16 +1458,63 @@ Epic #9, in slices: the contract, stateful mocks and skeletons (#152); then R1 (
   - The web route streams without buffering (`Cache-Control: no-transform`, `X-Accel-Buffering: no`; check that Caddy doesn't buffer either).
 - **Landed in #158:**
   - `internal/recommend/ask` is `api.Ask` and `aisettings.AskReporter` (`asks_today`, `ask_usd`), wired in `wire_ask.go`, which also installs it on the usage page and, at startup, ends a crash's `streaming` turn as `error` (`internal`). Threads read without a key; asking needs one. `library/ask_repo.go` stores the threads.
-  - **The agent.** The thread's model (a new thread's is `rec_model`) at the core's default effort, `max_tokens` 32k, R1's five tools over a `tools.Cached` (the stored profile while it's under 12 h old, the pool kept an hour), then `show_picks`, then web search (`max_uses` 4) and fetch (2), with `drop_block`. Caps per turn: 12 calls, 24 tool calls, $1 (no token cap, see Limits). Once `show_picks` has shown a pick, a cap lets one more call end the turn (`aicore.Request.AllowFinal`; that call may not run tools), so a shown answer isn't turned into `limit_reached`. A `prompt_version` (`ask-v1`) pins the system prompt and every tool definition as sent: a test hashes the first request's `system` and `tools`, so a change to R1's tools, `show_picks` or the core's encoding needs a new version, and retires the old one (the old definitions aren't kept), whose threads then answer `409 thread_full`. aicore logs a warning when the API drops replayed thinking blocks (`input_transformations`, e.g. `prefix_binding_mismatch`). Each user message carries today's date (server-local) and the message in `<ask>`, or `<refine>` for a chip; a refinement that offers no chips keeps the previous turn's.
-  - **`show_picks`** (strict, no union, nothing optional): `{intro, items: [{media_type, tmdb_id, match_tag, reason}], refinements}`. Each pick is checked (`candidates.Exclusion` on `TitleStates`), described from the TMDB cache (`meta`; a title not out yet gets a badge: "Jan 16", or its year past the next twelve months) and sent as an `item` at once; the answer lists what was shown and what was dropped and why (watched, turned down, unknown to TMDB, already shown, past the turn's 10th shown), so the model may replace them. `match_tag` and `reason` are cut to 32 and 140 characters; refinements are kept to 5 distinct chips of up to 40.
+  - **The agent.** The thread's model (a new thread's is `rec_model`) at the core's default effort, `max_tokens` 32k, R1's five tools over a `tools.Cached` (the stored profile while it's under 12 h old, the pool kept an hour), then `show_picks`, then web search (`max_uses` 4) and fetch (2), with `drop_block`. Caps per turn: 12 calls, 24 tool calls, $1 (no token cap, see Limits). Once `show_picks` has shown a pick, a cap lets one more call end the turn (`aicore.Request.AllowFinal`; that call may not run tools), so a shown answer isn't turned into `limit_reached`. A `prompt_version` (`ask-v2` since #160; `ask-v1` is retired) pins the system prompt and every tool definition as sent: a test hashes the first request's `system` and `tools`, so a change to R1's tools, `show_picks` or the core's encoding needs a new version, and retires the old one (the old definitions aren't kept), whose threads then answer `409 thread_full`. aicore logs a warning when the API drops replayed thinking blocks (`input_transformations`, e.g. `prefix_binding_mismatch`). Each user message carries today's date (server-local) and the message in `<ask>`, or `<refine>` for a chip; a refinement that offers no chips keeps the previous turn's.
+  - **`show_picks`** (strict, no union, nothing optional): `{intro, items: [{media_type, tmdb_id, title, year, match_tag, reason}], refinements}`.
+    - Each pick is checked (`candidates.Exclusion` on `TitleStates`).
+    - It's described from the TMDB cache (`meta`; a title not out yet gets a badge: "Jan 16", or its year past the next twelve months).
+    - Its `title` and `year` must match the id's, by R2's rule (`recommend.SameTitle`, `SameYear`; added in #160).
+    - It's sent as an `item` at once.
+    - The answer lists what was shown, and what was dropped and why (watched, turned down, unknown to TMDB, an id of another title, already shown, past the turn's 10th shown), so the model may replace them. `match_tag` and `reason` are cut to 32 and 140 characters; refinements are kept to 5 distinct chips of up to 40.
   - **Ending a turn.** Its outcome is settled once: a cancelled context first marks the turn `cancelled` in the database and frees the slot (before the cut-off call's usage is written), and a turn already settled `done` never flips. The end (status, view, cost, and a done turn's messages, each message's blocks as one JSON array) is one transaction, committed before `done` or `error` is sent. A failing store never leaves a turn `streaming` (which would answer `ask_busy` to every ask): the end is retried with backoff for 10 s; a done turn whose messages can't be stored is written as `error` (`internal`); then, as a last resort, only its status is set (`error`); and if even that fails, the next ask sets it before it starts. `Close` cancels the turns in flight and waits up to 5 s for them to write their ends.
   - **Caddy** flushes a `text/event-stream` response at once (its `reverse_proxy` treats SSE as low-latency), and the Caddyfile has no `encode`, so nothing buffers between the browser and the web proxy.
+- **Live check** (#160, the same account and stack as R2's; `curl -N` through the web proxy, signed in):
+  - **The stream is live.** For "something like Severance but lighter" on Opus 5.5 the events came as they happened:
+    - `start` at 0.03 s;
+    - `history` at 12 s (the first call);
+    - `tmdb` from 15 to 44 s;
+    - `write` at 44 s;
+    - `text` at 55 s;
+    - nine `item`s from 55.8 to 58.3 s, and a tenth at 68.9 s;
+    - `done` at 73 s.
 
-**Cost ballpark** (verify with real usage; #160 documents a live run):
-- The classifier costs a fraction of a cent per torrent on Haiku 5.5 (about $0.0007 in `ai_always` mode, #5).
-- Opus 5.5 is $4 / $20 per million input / output tokens, Sonnet 5.5 $2 / $10. The design guesses $0.36 a run on Opus and $0.07 on Sonnet, and about $0.02 an ask; nightly Opus runs at that rate are about $11 a month, within the $15 default budget with room for Ask.
-- Web searches are billed per search on top of tokens.
-- Settings › AI & picks shows the month's spend by feature, the budget and the estimates (`/settings/ai/usage`).
+    `: ping` came every 15 s, and the headers were `no-cache, no-transform` and `X-Accel-Buffering: no`.
+  - **Cost.**
+    - That ask: 73 s, 7 calls, $0.22.
+    - The same ask after the fix below: 55 s, 5 calls, $0.24.
+    - A refinement chip ("Even lighter"): 39 s, 4 calls, $0.09. Its first call read 24,835 of its 25,353 prompt tokens from the cache.
+  - **Cancel.**
+    - Killing curl as the web step started ended the turn `cancelled` at 13.9 s, with its $0.03 recorded (the cut-off call's prompt).
+    - An ask sent right after it got a 200, not a 409.
+    - The thread reloads with the cancelled turn's finished steps only, and no stored messages.
+  - **Bug, fixed in #160: two of ten cards showed the wrong title.**
+    - The model sent TMDB ids from memory: 82856 (The Mandalorian) for Upload, and 75299 for Russian Doll. `check_seen` passed them, so two cards showed the wrong title with another title's reason.
+    - `show_picks` now takes `title` and `year` and checks them (above).
+    - The prompt says ids come from tools (`ask-v2`).
+    - The rerun showed ten right cards, every title looked up with `tmdb_search`.
+  - **Wasted `code_execution` calls (#193).** Opus 5.5 tries to call `tmdb_search` from `code_execution`, which the 20260209 web tools bring for dynamic filtering.
+    - It fails (`NameError`), and that call becomes a two-iteration call that bills its prompt twice (about $0.005 of cache reads).
+    - `ask-v2`'s prompt line didn't stop it.
+
+**Cost ballpark** (measured in #160's live run on Opus 5.5, with a 1,872-play Trakt history):
+- **The classifier** costs a fraction of a cent per torrent on Haiku 5.5 (about $0.0007 in `ai_always` mode, #5).
+- **A picks run: $0.32 on Opus 5.5, $0.14 on Sonnet 5.5** (the design guessed $0.36 and $0.07).
+  - Rates: Opus 5.5 is $4 / $20 per million input / output tokens, Sonnet 5.5 $2 / $10.
+  - About 40% of a run is the first call writing the ~24k-token prefix to the cache (tools, system prompt, profile, 90 candidates).
+  - Most of the rest is output.
+- **An ask: $0.22–0.24, a refinement $0.09** (the design guessed $0.02).
+  - About half of an ask is writing new prompt to the cache: the tools, then the profile and the candidates the tools return.
+  - A third is output.
+  - A refinement reuses the thread's cache.
+- **Prompt caching works.**
+  - 82% of all prompt tokens were cache reads.
+  - From a run's or turn's second call, 72–99% of each prompt was. The low end is the call that first reads the tools' results.
+- **A month.**
+  - Nightly Opus runs come to about $10.
+  - Weekly Opus about $1.40.
+  - Nightly Sonnet about $4.
+  - On the $15 default budget, nightly Opus leaves room for about 25 asks.
+- **Web searches** are billed per search ($0.01) on top of tokens. Neither live run used one.
+- **Settings › AI & picks** shows the month's spend by feature, the budget, and estimates from real usage: the mean of each model's last 5 runs, and of the last 20 asks. There are no static figures.
 
 ### Phase D: Design (involves the user; runs in parallel with Phase 1)
 
