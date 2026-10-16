@@ -28,10 +28,18 @@ import (
 )
 
 const (
-	// DefaultRequestTimeout bounds a search or an indexer-list request.
-	DefaultRequestTimeout = 8 * time.Second
-	// DefaultDownloadTimeout bounds a .torrent download.
-	DefaultDownloadTimeout = 15 * time.Second
+	// DefaultSearchTimeout bounds a search request. An indexer behind
+	// Cloudflare answers only after FlareSolverr's challenge (about 12 s),
+	// Jackett sends one challenge at a time, and 1337x then reads 4 pages
+	// 3 s apart. A search with cold cookies had requests take 59 s (#106).
+	DefaultSearchTimeout = 90 * time.Second
+	// DefaultDownloadTimeout bounds a .torrent download. 1337x's goes
+	// through Cloudflare too, and resolve answers within one request, under
+	// the web proxy's 30 s.
+	DefaultDownloadTimeout = 25 * time.Second
+	// IndexersTimeout bounds the indexer-list request, which Jackett answers
+	// from its own config.
+	IndexersTimeout = 8 * time.Second
 	// IndexersTTL is how long Indexers reuses the configured-indexer list.
 	IndexersTTL = 10 * time.Minute
 
@@ -59,7 +67,7 @@ type Client struct {
 	log     *slog.Logger
 	now     func() time.Time
 
-	requestTimeout  time.Duration
+	searchTimeout   time.Duration
 	downloadTimeout time.Duration
 
 	health *healthTracker
@@ -80,13 +88,13 @@ func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) { c.http = h }
 }
 
-// WithTimeouts sets the per-request timeouts: request for searches and the
-// indexer list (default 8 s), download for .torrent files (default 15 s).
-// Zero keeps the default.
-func WithTimeouts(request, download time.Duration) Option {
+// WithTimeouts sets the per-request timeouts: search for searches (default
+// 90 s), download for .torrent files (default 25 s). Zero keeps the
+// default. The indexer list always has IndexersTimeout.
+func WithTimeouts(search, download time.Duration) Option {
 	return func(c *Client) {
-		if request > 0 {
-			c.requestTimeout = request
+		if search > 0 {
+			c.searchTimeout = search
 		}
 		if download > 0 {
 			c.downloadTimeout = download
@@ -114,7 +122,7 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		http:            &http.Client{},
 		log:             slog.Default(),
 		now:             time.Now,
-		requestTimeout:  DefaultRequestTimeout,
+		searchTimeout:   DefaultSearchTimeout,
 		downloadTimeout: DefaultDownloadTimeout,
 		health:          newHealthTracker(),
 	}

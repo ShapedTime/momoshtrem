@@ -23,8 +23,9 @@ const (
 	maxPlans = 200
 	// defaultWait is how long the GET that starts a search waits for it.
 	defaultWait = 2 * time.Second
-	// defaultRunTimeout bounds a whole search, fallback included.
-	defaultRunTimeout = 60 * time.Second
+	// defaultRunTimeout bounds a whole search, fallback included: two
+	// passes of one torznab.DefaultSearchTimeout each.
+	defaultRunTimeout = 180 * time.Second
 )
 
 // TitleSource builds a search's title context. *service.TitleContexts
@@ -62,7 +63,7 @@ type Deps struct {
 	Now      func() time.Time // nil: time.Now
 	Log      *slog.Logger     // nil: slog.Default()
 	// Wait is how long the GET that starts a search waits for it (0: 2 s),
-	// and RunTimeout bounds a whole search (0: 60 s).
+	// and RunTimeout bounds a whole search (0: 180 s).
 	Wait, RunTimeout time.Duration
 }
 

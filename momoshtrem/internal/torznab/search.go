@@ -80,7 +80,7 @@ func (c *Client) Search(ctx context.Context, indexerID string, q Query) ([]Resul
 	}
 
 	start := c.now()
-	body, err := c.get(ctx, apiPath(ix.ID), params, c.requestTimeout)
+	body, err := c.get(ctx, apiPath(ix.ID), params, c.searchTimeout)
 	var results []Result
 	if err == nil {
 		results, err = parseResults(body, ix)

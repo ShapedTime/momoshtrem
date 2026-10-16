@@ -89,7 +89,7 @@ func (x *releaseIndex) setMagnet(id, magnet string) {
 // name of the indexer that found it (POST /search/torrents/resolve, and
 // api.ReleaseResolver for Inspect). A release without a magnet has its
 // .torrent fetched through Jackett (torznab.Download: only from the
-// configured Jackett, at most 5 MB, within 15 s) and turned into a magnet
+// configured Jackett, at most 5 MB, within 25 s) and turned into a magnet
 // with its name and trackers.
 //
 // Errors: ErrReleaseNotFound (unknown or expired), ErrResolveTimeout (it

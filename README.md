@@ -107,6 +107,8 @@ The frontend talks to TMDB for metadata and to momoshtrem for everything else. m
 5. **Configure Jackett**
    - Open Jackett at `http://localhost:9117` (it listens on the server's loopback only; from another machine, use `ssh -L 9117:localhost:9117 <server>`)
    - Add your preferred torrent indexers
+   - Under **Jackett Configuration**, set **FlareSolverr API URL** to `http://flaresolverr:8191` and **FlareSolverr Max Timeout** to `20000`, then **Apply server settings**. Indexers behind Cloudflare (1337x, EZTV, RuTracker) fail without it. With a 20 s cap, Jackett reports a challenge it can't solve before momoshtrem stops waiting. Jackett keeps both in its `/config`
+   - An indexer that signs in through the challenge (RuTracker) may need its settings saved again afterwards: its wrench, then **Okay**
    - Copy the API key from the top of the Jackett UI
    - Add it to `.env` as `JACKETT_API_KEY` and restart. momoshtrem uses it for torrent search; the web app never sees it:
      ```bash
@@ -184,6 +186,7 @@ The virtual filesystem is built from your library database. When you add a movie
 | **momoshtrem** | 4444 (internal) | Go backend — REST API, torrent client, library management |
 | **momoshtrem WebDAV** | 36911 | Virtual filesystem endpoint for media players |
 | **Jackett** | 9117 (loopback) | Torrent indexer aggregator — momoshtrem searches across its trackers |
+| **FlareSolverr** | 8191 (internal) | Passes Cloudflare challenges for Jackett's indexers behind one (1337x, EZTV, RuTracker) |
 | **PostgreSQL** | 5432 (internal) | Library and metadata storage |
 | **Caddy** | 443, 36911, 5050 | Reverse proxy — HTTPS (Let's Encrypt) for the web UI and WebDAV, basic auth for WebDAV, LAN-only pgAdmin |
 

@@ -208,6 +208,66 @@ func TestIndexers_CachedForTTL(t *testing.T) {
 	check("expired after the TTL", 3)
 }
 
+// deadlineRecorder is a transport that records how long each kind of
+// request had left when it was sent: "list" (t=indexers), "download" (/dl/)
+// or "search".
+type deadlineRecorder struct {
+	mu   sync.Mutex
+	left map[string]time.Duration
+}
+
+func (d *deadlineRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	kind := "search"
+	switch {
+	case r.URL.Query().Get("t") == "indexers":
+		kind = "list"
+	case strings.HasPrefix(r.URL.Path, "/dl/"):
+		kind = "download"
+	}
+	if deadline, ok := r.Context().Deadline(); ok {
+		d.mu.Lock()
+		d.left[kind] = time.Until(deadline)
+		d.mu.Unlock()
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// A search waits out FlareSolverr's challenge, the indexer list doesn't
+// (#106).
+func TestTimeouts_PerRequestKind(t *testing.T) {
+	tests := []struct {
+		name                   string
+		opts                   []Option
+		list, search, download time.Duration
+	}{
+		{"defaults", nil, IndexersTimeout, DefaultSearchTimeout, DefaultDownloadTimeout},
+		{"WithTimeouts leaves the list alone", []Option{WithTimeouts(2*time.Second, 3*time.Second)},
+			IndexersTimeout, 2 * time.Second, 3 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := newFakeJackett(t)
+			j.handle("thepiratebay", serveFixture(t, "search_thepiratebay.xml"))
+			j.dl = func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, testMagnet, http.StatusFound) }
+			rec := &deadlineRecorder{left: map[string]time.Duration{}}
+			c := New(j.URL, testKey, append([]Option{WithHTTPClient(&http.Client{Transport: rec})}, tt.opts...)...)
+
+			ctx := context.Background()
+			if _, err := c.Search(ctx, "thepiratebay", Query{Q: "Frieren"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := c.Download(ctx, jackettLink("jackett.test")); err != nil {
+				t.Fatal(err)
+			}
+			for kind, want := range map[string]time.Duration{"list": tt.list, "search": tt.search, "download": tt.download} {
+				if got, ok := rec.left[kind]; !ok || got <= want-time.Second || got > want {
+					t.Errorf("%s request had %v left, want %v", kind, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestFetchIndexers_SharedRequestAndCallerDeadline(t *testing.T) {
 	release := make(chan struct{})
 	body := fixture(t, "indexers.xml")

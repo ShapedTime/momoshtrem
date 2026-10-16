@@ -52,15 +52,40 @@ export function searchingDetail(q: string, queries: SearchQuery[]): string {
   return also ? `${q} · also ${also}` : q;
 }
 
+/** What one of Jackett's FlareSolverr errors means: in the searching list, and in the banner after "{who}: ". */
+interface FlareSolverrReason {
+  pattern: RegExp;
+  short: string;
+  say: (count: number) => string;
+}
+
 /**
- * Jackett's error for an indexer behind a Cloudflare challenge it can't pass
- * without FlareSolverr: "jackett error: Challenge detected but FlareSolverr
- * is not configured" (#106).
+ * Jackett's errors for an indexer behind a Cloudflare challenge (#106), the
+ * most specific first. Their seconds and details vary, so indexers that
+ * failed the same way share one sentence.
  */
-const NEEDS_FLARESOLVERR = /flaresolverr is not configured/i;
+const FLARESOLVERR_REASONS: FlareSolverrReason[] = [
+  // "Challenge detected but FlareSolverr is not configured"
+  {
+    pattern: /flaresolverr is not configured/i,
+    short: 'Jackett needs FlareSolverr for it',
+    say: (count) => `Jackett needs FlareSolverr for ${count === 1 ? 'it' : 'them'}`,
+  },
+  // "Error connecting to FlareSolverr server: … Name does not resolve (flaresolverr:8191)"
+  { pattern: /error connecting to flaresolverr/i, short: 'Jackett can’t reach FlareSolverr', say: () => 'Jackett can’t reach FlareSolverr' },
+  // "FlareSolverr was able to process the request, but a captcha was detected. Message: …"
+  { pattern: /captcha was detected/i, short: 'Cloudflare asks for a captcha', say: () => 'Cloudflare asks for a captcha FlareSolverr can’t solve' },
+  // "FlareSolverr was unable to process the request, … Timeout after 20.0 seconds."
+  { pattern: /flaresolverr/i, short: 'FlareSolverr couldn’t get past Cloudflare', say: () => 'FlareSolverr couldn’t get past Cloudflare' },
+];
+
+const flareSolverrReason = (error: string | undefined) => FLARESOLVERR_REASONS.find(({ pattern }) => pattern.test(error ?? ''));
 
 /** An indexer's error without Jackett's "jackett error:" prefix or a closing period; "" for none. */
 const errorText = (error: string | undefined) => (error ?? '').replace(/^jackett error:\s*/i, '').replace(/\.$/, '');
+
+/** An indexer's error in a few words: FlareSolverr's in plain words ("Jackett can’t reach FlareSolverr"), any other as Jackett says it; "" for none. */
+export const indexerErrorText = (error: string | undefined) => flareSolverrReason(error)?.short ?? errorText(error);
 
 /** One indexer in the searching list: "26 results", "waiting · 6 s", "timed out after 8 s", or its error. */
 export function indexerProgress(report: IndexerReport): string {
@@ -72,20 +97,16 @@ export function indexerProgress(report: IndexerReport): string {
     case 'timeout':
       return `timed out after ${seconds(report.ms)}`;
     case 'error':
-      if (NEEDS_FLARESOLVERR.test(report.error ?? '')) return 'Jackett needs FlareSolverr for it';
-      return errorText(report.error) || 'failed';
+      return indexerErrorText(report.error) || 'failed';
   }
 }
 
 /** At most this many sentences name who failed and why; the rest are counted, so the banner stays two lines. */
 const MAX_REASONS = 2;
 
-/** The reason shared by indexers that need FlareSolverr; every other reason is the error's text. */
-const FLARESOLVERR = Symbol('flaresolverr');
-
 /** "RuTracker.org, 1337x and EZTV: Jackett needs FlareSolverr for them." / "1337x failed: Cloudflare blocked it." */
-function failedBecause(who: string, count: number, reason: string | typeof FLARESOLVERR): string {
-  if (reason === FLARESOLVERR) return `${who}: Jackett needs FlareSolverr for ${count === 1 ? 'it' : 'them'}.`;
+function failedBecause(who: string, count: number, reason: string | FlareSolverrReason): string {
+  if (typeof reason !== 'string') return `${who}: ${reason.say(count)}.`;
   return reason ? `${who} failed: ${reason}.` : `${who} failed.`;
 }
 
@@ -106,9 +127,9 @@ function failureSentences(timeouts: IndexerReport[], errors: IndexerReport[]): s
     const after = seconds(Math.max(...timeouts.map((indexer) => indexer.ms)));
     failures.push({ names: timeouts.map((indexer) => indexer.name), say: (who) => `${who} timed out after ${after}.` });
   }
-  const byReason = new Map<string | typeof FLARESOLVERR, string[]>();
+  const byReason = new Map<string | FlareSolverrReason, string[]>();
   for (const { name, error } of errors) {
-    const reason = NEEDS_FLARESOLVERR.test(error ?? '') ? FLARESOLVERR : errorText(error);
+    const reason = flareSolverrReason(error) ?? errorText(error);
     byReason.set(reason, [...(byReason.get(reason) ?? []), name]);
   }
   for (const [reason, names] of byReason) failures.push({ names, say: (who) => failedBecause(who, names.length, reason) });

@@ -27,6 +27,30 @@ services:
       start_period: 60s
       start_interval: 5s
 
+  # Passes Cloudflare challenges for Jackett's indexers behind one (1337x,
+  # EZTV, RuTracker; #106). Only Jackett calls it, on the compose network:
+  # set Jackett's FlareSolverr API URL to http://flaresolverr:8191 once
+  # (README, Configure Jackett). Not published (ops PLAN D8)
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=UTC
+    expose:
+      - "8191"
+    # Each challenge runs a Chromium: 160 MiB idle, 830 MiB while solving
+    # one, 1.7 GiB for six pages at once. Jackett sends one at a time
+    mem_limit: 2g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8191/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 5s
+
   postgres:
     image: postgres:16.15-alpine
     container_name: momoshtrem-postgres
