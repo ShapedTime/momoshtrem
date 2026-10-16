@@ -95,6 +95,9 @@
   /* text-3 drops under 4.5:1 on the selected row's lighter fill */
   .palette .p-item[aria-selected="true"] .grow > span:last-child { color: var(--text-2); }
   .palette .p-item .pill, .palette .p-add { flex-shrink: 0; }
+  /* Ask momoshtrem's rows: Noir on amber (#156) */
+  .palette .p-item .ic.is-accent { background: var(--accent-soft); color: var(--accent-text); }
+  .palette .p-item .ic .cat-avatar { box-shadow: none; }
   .palette .p-foot .ml-auto svg { color: var(--text-3); }
   .palette .p-cancel { flex-shrink: 0; }
   @media (min-width: 1024px) { .palette .p-cancel { display: none; } }

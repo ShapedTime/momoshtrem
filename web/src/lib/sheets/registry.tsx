@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { SheetProps } from '@/components/ui';
+import { AskHistory } from '@/components/ask/AskHistory';
 import { HDRezkaSheet } from '@/components/hdrezka/HDRezkaSheet';
 import { TorrentSearchSheet } from '@/components/search/TorrentSearchSheet';
 import { InfuseSetupSheet } from '@/components/shell/InfuseSetupSheet';
@@ -61,6 +62,8 @@ export const SHEETS: Record<string, SheetDefinition> = {
   hdrezka: { params: SOURCE_PARAMS, Component: HDRezkaSheet },
   // Find a source, Torrents tab (#92), on the same params
   torrent: { params: SOURCE_PARAMS, Component: TorrentSearchSheet },
+  // Ask momoshtrem's past conversations on phone (#156; the desktop rail shows them)
+  'ask-history': { title: 'Conversations', size: 'narrow', render: () => <AskHistory /> },
 };
 
 /** The sheet registered as `name`. Own keys only, so `?sheet=toString` opens nothing. */

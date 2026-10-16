@@ -1,9 +1,12 @@
 'use client';
 
+import { AskEntry } from '@/components/ask/AskEntry';
 import { Banner, Button, LoadingRegion, PosterCard, PosterGrid, PosterSkeletons, Skeleton, Tabs } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
+import { useAskAvailable } from '@/hooks/useAskAvailable';
 import { isApiError } from '@/lib/api/client';
 import type { TitleSearchItem } from '@/lib/api/contract';
+import { askHref } from '@/lib/recommendations/ask-href';
 import { inTab, SEARCH_TABS, type SearchTab, TAB_NOUN, TMDB_HEADING } from '@/lib/title-search/results';
 import { titleHref } from '@/lib/title/href';
 import { Highlight } from './Highlight';
@@ -24,12 +27,14 @@ interface TitleSearchResultsProps {
 /**
  * Results (search.js `resultsBody`): tabs with counts, "In your library"
  * rows with their actions, then the TMDB titles you don't have. An empty
- * tab offers all results.
+ * tab offers all results. Last, "Not quite it?" asks Noir about the query
+ * (with an Anthropic key).
  */
 export function TitleSearchResults({ shown, tab, onTab, onRetry, retrying }: TitleSearchResultsProps) {
   const { query, sections, tmdbError, libraryError } = shown;
   const visible = inTab(sections, tab);
   const empty = visible.library.length === 0 && visible.titles.length === 0;
+  const askAvailable = useAskAvailable();
 
   return (
     <>
@@ -91,6 +96,7 @@ export function TitleSearchResults({ shown, tab, onTab, onRetry, retrying }: Tit
           </p>
         )}
       </div>
+      {askAvailable && <AskEntry href={askHref(query)} title="Not quite it?" sub={`Ask momoshtrem about “${query}”`} />}
     </>
   );
 }

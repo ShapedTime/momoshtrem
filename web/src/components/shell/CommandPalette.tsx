@@ -7,7 +7,7 @@ import { Command } from 'cmdk';
 import { Activity, Compass, History, LibraryBig, Link2, ListChecks, LogOut, RefreshCw, Search, Settings, Tv, type LucideIcon } from 'lucide-react';
 import { MarkMono } from '@/components/brand';
 import { Highlight } from '@/components/title-search/Highlight';
-import { PaletteIcon, PaletteRow, PaletteThumb } from '@/components/title-search/PaletteRow';
+import { PaletteAskIcon, PaletteIcon, PaletteRow, PaletteThumb } from '@/components/title-search/PaletteRow';
 import { usePaletteData } from '@/components/title-search/usePaletteData';
 import { Kbd, StatusPill, useToast } from '@/components/ui';
 import { useRestoreFocus } from '@/hooks/useRestoreFocus';
@@ -18,7 +18,7 @@ import { kindLine } from '@/lib/library/display';
 import { SYNC_STARTED_TOAST } from '@/lib/settings/trakt';
 import { getSheet } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
-import { findTorrentHref, matchingActions, type PaletteAction, type PaletteActionIcon, type PaletteActionTarget } from '@/lib/title-search/actions';
+import { askAction, findTorrentHref, matchingActions, type PaletteAction, type PaletteActionIcon, type PaletteActionTarget } from '@/lib/title-search/actions';
 import { libraryRowPill, librarySecondary, libraryStatusText } from '@/lib/title-search/library-row';
 import { addRecentSearch } from '@/lib/title-search/recent';
 import { cleanQuery } from '@/lib/title-search/text';
@@ -32,7 +32,7 @@ interface PaletteProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const ACTION_ICONS: Record<PaletteActionIcon, LucideIcon> = {
+const ACTION_ICONS: Record<Exclude<PaletteActionIcon, 'ask'>, LucideIcon> = {
   review: ListChecks,
   find: Search,
   activity: Activity,
@@ -70,8 +70,9 @@ interface Row {
  *
  * - Before typing: two recent searches, your four latest titles and every action.
  * - Typing: up to 4 library titles (`/library?q=`, plus TMDB titles you have),
- *   up to 5 TMDB titles you don't ("Add"), the actions whose words match, and
- *   "Search all results", always last.
+ *   up to 5 TMDB titles you don't ("Add"), the actions whose words match,
+ *   "Search all results", and (with an Anthropic key) "Ask momoshtrem: “q”"
+ *   last.
  * - Keys: ↑ ↓ move (and wrap), ↵ opens, Esc closes. **⌘↵ (Ctrl ↵) runs the
  *   selected row's secondary action**: torrent search. For a library title
  *   that lacks a file it's Find missing (or Find a torrent), on the current
@@ -81,7 +82,8 @@ interface Row {
  * - Phone: pinned to the top with Cancel; the footer and pills are hidden.
  *
  * Trakt's action is Connect Trakt (its settings) or Sync Trakt now, which
- * runs here with a toast. "Ask momoshtrem" (#9) joins when it lands.
+ * runs here with a toast. With an Anthropic key, "Ask momoshtrem" is an
+ * action, and while you type "Ask momoshtrem: “q”" is always last (#156).
  */
 export function CommandPalette({ open, onOpenChange }: PaletteProps) {
   const router = useRouter();
@@ -153,7 +155,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
     group: 'Actions',
     value: `action:${action.key}`,
     run: () => runAction(action.target),
-    leading: <PaletteIcon icon={ACTION_ICONS[action.icon]} />,
+    leading: action.icon === 'ask' ? <PaletteAskIcon /> : <PaletteIcon icon={ACTION_ICONS[action.icon]} />,
     label: <Highlight text={action.label} query={marked} />,
     sub: action.sub,
   });
@@ -194,6 +196,7 @@ export function CommandPalette({ open, onOpenChange }: PaletteProps) {
       label: `Search all results for “${typed}”`,
       sub: total > 0 ? plural(total, 'title') : 'Movies, shows and people',
     });
+    if (data.ask) rows.push(actionRow(askAction(typed), ''));
   }
 
   // A new list selects its first row (results arrive after typing, above the actions)

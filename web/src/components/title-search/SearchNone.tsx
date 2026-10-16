@@ -1,16 +1,34 @@
+'use client';
+
 import Link from 'next/link';
 import { Compass, Info, User } from 'lucide-react';
-import { EmptyState } from '@/components/ui';
+import { CatAvatar } from '@/components/brand';
+import { ButtonLink, EmptyState } from '@/components/ui';
+import { useAskAvailable } from '@/hooks/useAskAvailable';
+import { askHref } from '@/lib/recommendations/ask-href';
 import { TrendingSection } from './TrendingSection';
 
 /**
  * A search that found nothing (search.js `noneBody`): what to try instead,
- * then what's popular. "Ask momoshtrem" joins with #9.
+ * asking Noir about it (with an Anthropic key), then what's popular.
  */
 export function SearchNone({ query }: { query: string }) {
+  const askAvailable = useAskAvailable();
   return (
     <div className="srch-none">
-      <EmptyState cat="sit" title={`Nothing for “${query}”`} headingLevel="h2">
+      <EmptyState
+        cat="sit"
+        title={`Nothing for “${query}”`}
+        headingLevel="h2"
+        actions={
+          askAvailable ? (
+            <ButtonLink href={askHref(query)}>
+              <CatAvatar size={22} />
+              Ask momoshtrem
+            </ButtonLink>
+          ) : undefined
+        }
+      >
         Check the spelling, or try fewer words.
       </EmptyState>
       <ul className="srch-tips panel panel-pad" aria-label="Search tips">

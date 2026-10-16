@@ -150,7 +150,8 @@ test.describe('search page', () => {
     await expect(recent.getByText('No recent searches.')).toBeVisible();
 
     const moods = page.getByRole('region', { name: 'Not sure what you want?' });
-    await expect(moods.getByRole('link')).toHaveText(['Cosy', 'Mind-bending', 'Slow cinema', 'Laugh-out-loud', 'Short & sharp', 'Epic nights']);
+    // The moods, then Ask momoshtrem (#156)
+    await expect(moods.getByRole('link')).toHaveText(['Cosy', 'Mind-bending', 'Slow cinema', 'Laugh-out-loud', 'Short & sharp', 'Epic nights', 'Ask momoshtrem']);
     await moods.getByRole('link', { name: 'Cosy' }).click();
     await expect(page).toHaveURL(/\/discover\?.*mood=cosy/);
     await expect(page.getByRole('group', { name: 'Moods' }).getByRole('button', { name: 'Cosy' })).toHaveAttribute('aria-pressed', 'true');
@@ -218,7 +219,10 @@ test.describe('command palette', () => {
     await openPalette(page, testInfo);
     await page.keyboard.type('dune');
     await expect(option(page, /Search all results for “dune”/)).toContainText('6 titles');
+    // The last row asks Noir (#156); "Search all results" is just above it
     await page.keyboard.press('End');
+    await expect(option(page, /^Ask momoshtrem: “dune”/)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowUp');
     await expect(option(page, /Search all results for “dune”/)).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/search\?q=dune$/);

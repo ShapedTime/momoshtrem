@@ -81,10 +81,11 @@ test.describe('command palette', () => {
     await page.keyboard.press('/');
     await expect(page.getByRole('dialog', { name: 'Search or jump to' })).toBeVisible();
     await page.keyboard.type('frieren');
-    // Your library's Frieren comes first; "Search all results" is always last
+    // Your library's Frieren comes first; "Search all results", then "Ask momoshtrem: “frieren”" (#156), are always last
     await expect(page.getByRole('option', { name: /^Frieren: Beyond Journey’s End/ })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('option', { name: /Search all results for “frieren”/ })).toBeVisible();
     await page.keyboard.press('End');
+    await page.keyboard.press('ArrowUp');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/search\?q=frieren$/);
   });

@@ -1051,6 +1051,12 @@ function askEvents(ctx: ReadContext, thread: MockThread, turn: MockTurn, set: As
     events.push({ event: 'status', data: { step, state: 'active', detail: null } });
     // ask-hold stops at the second step (a fresh ask's web search); ask-error fails there
     if (i === 1 && scenario() === 'ask-hold') return { events, hold: true };
+    // ask-working holds at TMDB with the first pick in (picks usually come after the steps; the order isn't fixed)
+    if (i === 2 && scenario() === 'ask-working') {
+      const [first] = set.items;
+      if (first) events.push({ event: 'item', data: askItem(ctx, { id: first.id, match_tag: first.match, reason: first.reason }) });
+      return { events, hold: true };
+    }
     if (i === 1 && scenario() === 'ask-error') {
       events.push({ event: 'error', data: { code: 'upstream', message: 'The Anthropic API didn’t answer. Try again in a minute.' } });
       return { events, hold: false };
