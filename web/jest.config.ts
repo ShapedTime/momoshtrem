@@ -26,6 +26,8 @@ const config: Config = {
 // ESM-only packages that must go through the SWC transform. next/jest sets
 // transformIgnorePatterns itself, so override it after the config is built.
 const ESM_PACKAGES = ['jose', 'msw', '@mswjs', '@open-draft', 'rettime', 'until-async', 'outvariant', 'strict-event-emitter', 'headers-polyfill', 'is-node-process', '@bundled-es-modules'];
+// nuqs: Discover's URL state (#100)
+ESM_PACKAGES.push('nuqs');
 
 export default async function jestConfig(): Promise<Config> {
   const resolved = await createJestConfig(config)();

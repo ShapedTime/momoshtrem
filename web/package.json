@@ -25,6 +25,7 @@
     "lucide-react": "^1.57.0",
     "moviedb-promise": "^4.0.7",
     "next": "^16.0.10",
+    "nuqs": "^2.10.1",
     "parse-torrent": "^11.0.19",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

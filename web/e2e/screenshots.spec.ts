@@ -447,3 +447,52 @@ test.describe('library', () => {
     await shoot(page, testInfo, 'library/loading');
   });
 });
+
+test.describe('discover', () => {
+  const phone = (testInfo: TestInfo) => testInfo.project.name === 'mobile';
+  // Tall enough for the first rows, short enough that the infinite-scroll footer stays out of reach
+  const tall = (page: Page, testInfo: TestInfo) => page.setViewportSize({ width: phone(testInfo) ? 390 : 1440, height: 1400 });
+  const settled = async (page: Page) => {
+    await page.locator('.disc-grid article.pcard').first().waitFor();
+    await page.waitForTimeout(600);
+  };
+
+  test('default', async ({ page }, testInfo) => {
+    await tall(page, testInfo);
+    await signIn(page, '/discover');
+    await settled(page);
+    await shoot(page, testInfo, 'discover/default');
+  });
+
+  test('filtered', async ({ page }, testInfo) => {
+    await signIn(page, '/discover?type=tv&genres=comedy&from=2015&rating=8');
+    await settled(page);
+    await shoot(page, testInfo, 'discover/filtered', { fullPage: true });
+  });
+
+  test('filters sheet', async ({ page }, testInfo) => {
+    test.skip(!phone(testInfo), 'The filter sheet is the phone layout');
+    await signIn(page, '/discover?type=tv&genres=comedy&from=2015&rating=8');
+    await settled(page);
+    await page.getByRole('button', { name: /^Filters/ }).click();
+    await page.getByRole('dialog', { name: 'Filters' }).getByText('Show 7 shows').waitFor();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'discover/filters-sheet');
+  });
+
+  test('empty', async ({ page }, testInfo) => {
+    await signIn(page, '/discover?type=tv&anime=1&genres=comedy&from=2020&rating=8&status=ended');
+    await page.getByText('still none').first().waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'discover/empty', { fullPage: true });
+  });
+
+  test('loading', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'discover-loading'));
+    await signIn(page, '/discover');
+    await page.locator('.skel').first().waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'discover/loading');
+  });
+});

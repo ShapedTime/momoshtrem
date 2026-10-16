@@ -1,5 +1,6 @@
 import { setMockScenario } from '../scenario';
 import { assignmentHandlers, resetMockJobs } from './assignment';
+import { discoverHandlers } from './discover';
 import { hdrezkaHandlers, resetMockHDRezka } from './hdrezka';
 import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
@@ -29,6 +30,7 @@ export const handlers = [
   ...systemHandlers,
   ...torrentsHandlers,
   ...hdrezkaHandlers,
+  ...discoverHandlers,
   ...legacyHandlers,
 ];
 

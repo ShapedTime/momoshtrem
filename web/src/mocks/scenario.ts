@@ -29,6 +29,8 @@
  * - `indexers-degraded`: /status lists a Jackett indexer timing out for 2 h and one failing for
  *   5 min, so Settings › Status says Degraded.
  * - `quality-invalid`: saving the quality profile answers 422 naming `avoid_terms`.
+ * - `discover-error`: /api/discover answers 502 `tmdb_unavailable`.
+ * - `discover-loading`: /api/discover never answers (the loading state).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -53,7 +55,9 @@ export type MockScenario =
   | 'search-slow'
   | 'search-down'
   | 'indexers-degraded'
-  | 'quality-invalid';
+  | 'quality-invalid'
+  | 'discover-error'
+  | 'discover-loading';
 
 let override: MockScenario | null = null;
 
