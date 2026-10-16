@@ -18,10 +18,12 @@ type torrentView struct {
 
 // torrentSnapshot is one torrent as the client sees it now.
 type torrentSnapshot struct {
-	loaded  bool
-	active  bool
-	seeders int
-	files   map[string]torrent.FileProgress
+	loaded   bool
+	active   bool
+	paused   bool  // the user paused it, loaded or not; never active
+	seeders  int
+	speedBps int64 // download speed, smoothed
+	files    map[string]torrent.FileProgress
 }
 
 func (s *Service) torrentView() *torrentView {
@@ -37,6 +39,7 @@ func (v *torrentView) state(hash string) *torrentSnapshot {
 	if v.client == nil || hash == "" {
 		return st
 	}
+	_, st.paused = v.client.PausedAt(hash)
 	files, err := v.client.FilesProgress(hash)
 	if err != nil {
 		return st // not loaded (it loads on first read)
@@ -45,6 +48,7 @@ func (v *torrentView) state(hash string) *torrentSnapshot {
 	st.active = v.client.IsActive(hash)
 	if status, err := v.client.GetStatus(hash); err == nil {
 		st.seeders = status.Seeders
+		st.speedBps = status.DownloadSpeed
 	}
 	return st
 }

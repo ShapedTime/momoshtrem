@@ -34,6 +34,7 @@ type fakeClient struct {
 	peers   map[string]bool // AddTorrent finds these
 	adds    []string
 	removed []removal
+	resumed []string
 }
 
 type removal struct {
@@ -76,6 +77,13 @@ func (f *fakeClient) RemoveTorrent(hash string, deleteData bool) error {
 	}
 	delete(f.loaded, hash)
 	delete(f.stored, hash)
+	return nil
+}
+
+func (f *fakeClient) Resume(hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumed = append(f.resumed, hash)
 	return nil
 }
 
@@ -311,6 +319,9 @@ func TestDeleteTorrent_ForgetsItAndKeepsHistory(t *testing.T) {
 	}
 	if got := e.client.removals(); !slices.Equal(got, []removal{{hashA, true}}) {
 		t.Errorf("removals = %v, want the torrent with its data", got)
+	}
+	if !slices.Equal(e.client.resumed, []string{hashA}) {
+		t.Errorf("resumed = %v, want the deleted torrent's pause cleared", e.client.resumed)
 	}
 	if e.tree.count() != 1 || !slices.Equal(e.tree.handles, []string{hashA}) {
 		t.Errorf("tree rebuilds = %d, handles = %v", e.tree.count(), e.tree.handles)

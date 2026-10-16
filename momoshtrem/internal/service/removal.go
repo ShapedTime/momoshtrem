@@ -13,12 +13,14 @@ import (
 )
 
 // RemovalTorrents is what removals need from the torrent client: whether a
-// torrent is loaded, dropping it (with its data when asked), and adding it
-// again to learn its pieces when its metainfo isn't stored.
+// torrent is loaded, dropping it (with its data when asked), adding it
+// again to learn its pieces when its metainfo isn't stored, and clearing a
+// deleted torrent's pause (Resume, once it's dropped).
 type RemovalTorrents interface {
 	GetTorrent(infoHash string) (*torrent.TorrentInfo, error)
 	AddTorrent(magnetURI string) (*torrent.TorrentInfo, error)
 	RemoveTorrent(infoHash string, deleteData bool) error
+	Resume(infoHash string) error
 }
 
 var _ RemovalTorrents = (torrent.Service)(nil)
@@ -88,11 +90,12 @@ func NewRemovalService(d RemovalDeps) *RemovalService {
 
 // DeleteTorrent removes a torrent from the library and the client:
 //   - its open jobs are cancelled (dry runs too), its active assignments
-//     deactivated (the rows stay, as history) and its torrent subtitles
-//     deleted, in one transaction;
+//     deactivated (the rows stay, as history), its torrent subtitles
+//     deleted and its stored pause cleared, in one transaction;
 //   - it's dropped from the client, with its data when deleteData is set
 //     (from the live or stored metainfo; without either, the metainfo is
-//     fetched again in the background, best effort);
+//     fetched again in the background, best effort), and its pause there
+//     is cleared too, so it isn't paused if it's added again;
 //   - the WebDAV tree is rebuilt.
 //
 // The hash may be hex in either case, or base32: torrent.ErrInvalidInfoHash
@@ -124,8 +127,15 @@ func (s *RemovalService) DeleteTorrent(ctx context.Context, infoHash string, del
 		"jobs_cancelled", forgotten.Cancelled,
 		"assignments_deactivated", forgotten.Deactivated,
 		"subtitles_deleted", forgotten.Subtitles,
+		"pause_cleared", forgotten.Unpaused > 0,
 	)
 	s.drop(library.TorrentRef{InfoHash: hash, MagnetURI: forgotten.MagnetURI}, deleteData)
+	if s.torrents != nil {
+		// It's dropped, so this only clears the pause: nothing wakes.
+		if err := s.torrents.Resume(hash); err != nil {
+			s.log.Warn("Failed to clear a deleted torrent's pause", "info_hash", hash, "error", err)
+		}
+	}
 	s.invalidateTree()
 	return nil
 }

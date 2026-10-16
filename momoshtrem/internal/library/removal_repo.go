@@ -40,13 +40,16 @@ type ForgottenTorrent struct {
 	// Cancelled open jobs (dry runs too), deactivated assignments and
 	// deleted torrent subtitles.
 	Cancelled, Deactivated, Subtitles int64
+	// Unpaused is 1 when the torrent's stored pause was cleared.
+	Unpaused int64
 }
 
 // ForgetTorrent drops the library's use of a torrent, in one transaction:
 // its open jobs (dry runs too) are cancelled, its active assignments
-// deactivated (the rows stay, as history) and its torrent subtitles
-// deleted. Jobs go first: Apply locks the job before it writes assignments,
-// so taking them in the same order can't deadlock with it.
+// deactivated (the rows stay, as history), its torrent subtitles deleted
+// and its stored pause cleared (TorrentSettingsKey). Jobs go first: Apply
+// locks the job before it writes assignments, so taking them in the same
+// order can't deadlock with it.
 func (r *AssignmentJobRepository) ForgetTorrent(ctx context.Context, infoHash string) (*ForgottenTorrent, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -79,6 +82,10 @@ func (r *AssignmentJobRepository) ForgetTorrent(ctx context.Context, infoHash st
 			UPDATE torrent_assignments SET is_active = FALSE WHERE info_hash = $1 AND is_active`, []any{infoHash}},
 		{&out.Subtitles, "delete the torrent's subtitles", `
 			DELETE FROM subtitles WHERE source = 'torrent' AND info_hash = $1`, []any{infoHash}},
+		{&out.Unpaused, "clear the torrent's pause", `
+			UPDATE app_settings SET value = value #- ARRAY['paused', $2::text], updated_at = NOW()
+			WHERE key = $1 AND jsonb_typeof(value->'paused') = 'object' AND (value->'paused') ? $2`,
+			[]any{TorrentSettingsKey, infoHash}},
 	}
 	for _, step := range steps {
 		res, err := tx.ExecContext(ctx, step.query, step.args...)

@@ -63,6 +63,7 @@ torrent:
   start_paused: true
   drop_duplicate_peer_ids: true   # Prevent duplicate peer connections (reduces wasted chunks)
   max_unverified_mb: 64           # Cap in-flight unverified data in MB (0=unlimited)
+  listen_port: 42069              # BitTorrent port, TCP and uTP (0 = any free port; TORRENT_LISTEN_PORT)
 
 # Streaming buffer sizes for playback optimization
 streaming:

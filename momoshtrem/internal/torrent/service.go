@@ -27,18 +27,32 @@ type TorrentInfo struct {
 	AddedAt   time.Time
 }
 
-// TorrentStatus contains current status of a torrent
+// TorrentStatus contains current status of a loaded torrent
 type TorrentStatus struct {
-	InfoHash      string
-	Name          string
-	TotalSize     int64
-	Downloaded    int64
-	Progress      float64 // 0.0 to 1.0
-	Seeders       int
-	Leechers      int
-	DownloadSpeed int64   // bytes per second
-	UploadSpeed   int64   // bytes per second
-	IsPaused      bool
+	InfoHash   string
+	Name       string
+	TotalSize  int64
+	Downloaded int64   // bytes on disk
+	Progress   float64 // 0.0 to 1.0
+	// Complete is true when every piece is on disk. Pieces are fetched on
+	// demand and kept in an LRU cache, so it can go back to false.
+	Complete bool
+	Seeders  int // connected seeders
+	Leechers int
+	Peers    int // connected peers
+	// DownloadSpeed and UploadSpeed are smoothed, in bytes per second (the
+	// speed sampler's; 0 without one).
+	DownloadSpeed int64
+	UploadSpeed   int64
+	// IsPaused is true while the torrent's network is off: idle, or paused
+	// by the user.
+	IsPaused bool
+	// Paused is true while the user has it paused (Pause).
+	Paused bool
+	// LoadedAt is when it was added to the client.
+	LoadedAt time.Time
+	// LastActive is when it was last read, resumed or loaded.
+	LastActive time.Time
 }
 
 // FullStats contains complete torrent statistics for Prometheus metrics collection.
@@ -151,11 +165,27 @@ type Service interface {
 	// GetStatus returns detailed status of a specific torrent.
 	GetStatus(infoHash string) (*TorrentStatus, error)
 
-	// Pause pauses downloading/uploading for a torrent.
+	// Pause pauses a torrent until Resume, loaded or not: its network goes
+	// off and reads don't wake it; one that isn't loaded is paused when it
+	// loads. Idempotent. The pause lives in memory: the caller persists it
+	// (RestorePauses). The hash may be hex in either case, or base32;
+	// ErrInvalidInfoHash otherwise.
 	Pause(infoHash string) error
 
-	// Resume resumes a paused torrent.
+	// Resume clears a pause. A loaded torrent's network comes back on until
+	// the idle timeout; one that isn't loaded stays unloaded. Idempotent.
 	Resume(infoHash string) error
+
+	// PausedAt returns when the torrent was paused; ok is false when it
+	// isn't.
+	PausedAt(infoHash string) (at time.Time, ok bool)
+
+	// Pauses returns every paused torrent, loaded or not, with when it was
+	// paused.
+	Pauses() map[string]time.Time
+
+	// RestorePauses applies pauses kept from before a restart.
+	RestorePauses(pauses map[string]time.Time)
 
 	// CollectStats returns complete statistics for all active torrents.
 	// Used by the Prometheus metrics collector.

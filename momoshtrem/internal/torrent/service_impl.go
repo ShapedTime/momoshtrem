@@ -31,10 +31,13 @@ var _ Service = (*service)(nil)
 type service struct {
 	mu     sync.RWMutex
 	client *torrent.Client
-	am     *ActivityManager
+	// am idles torrents and holds the user's pauses. Without idle mode it's
+	// a manager that only pauses (newPauseManager): never nil.
+	am *ActivityManager
 
-	// Loaded torrents by info hash (lowercase hex)
+	// Loaded torrents by info hash (lowercase hex), and when each loaded
 	torrents map[string]*torrent.Torrent
+	loadedAt map[string]time.Time
 
 	// File index cache: infoHash -> filePath -> *torrent.File
 	// Built after metadata arrives, enables O(1) file lookup.
@@ -57,6 +60,9 @@ type service struct {
 	// pieces is the client's piece storage, for deleting the data of a
 	// torrent that isn't loaded; nil skips that.
 	pieces storage.ClientImpl
+	// speeds smooths each torrent's speed from its byte counters; nil
+	// reports 0.
+	speeds *SpeedSampler
 
 	log *slog.Logger
 }
@@ -78,7 +84,14 @@ func WithPieceStorage(impl storage.ClientImpl) Option {
 	return func(s *service) { s.pieces = impl }
 }
 
-// NewService creates a new torrent service.
+// WithSpeedSampler reports each torrent's speed from sampler, which the
+// caller runs over the service (sampler.Run).
+func WithSpeedSampler(sampler *SpeedSampler) Option {
+	return func(s *service) { s.speeds = sampler }
+}
+
+// NewService creates a new torrent service. am is nil without idle mode:
+// torrents then stay active, and only Pause turns their network off.
 func NewService(
 	client *torrent.Client,
 	am *ActivityManager,
@@ -89,10 +102,14 @@ func NewService(
 }
 
 func newService(client *torrent.Client, am *ActivityManager, addTimeout, readTimeout time.Duration, opts ...Option) *service {
+	if am == nil {
+		am = newPauseManager()
+	}
 	s := &service{
 		client:      client,
 		am:          am,
 		torrents:    make(map[string]*torrent.Torrent),
+		loadedAt:    make(map[string]time.Time),
 		fileIndexes: make(map[string]map[string]*torrent.File),
 		addTimeout:  addTimeout,
 		readTimeout: readTimeout,
@@ -199,14 +216,13 @@ func (s *service) add(hash, magnetURI string) (*TorrentInfo, error) {
 		idx[f.Path()] = f
 	}
 
-	// Register with activity manager for idle tracking
-	if s.am != nil {
-		s.am.Register(hash, t)
-	}
+	// Register with activity manager for idle tracking and pauses
+	s.am.Register(hash, t)
 
 	// Store in map
 	s.mu.Lock()
 	s.torrents[hash] = t
+	s.loadedAt[hash] = time.Now()
 	s.fileIndexes[hash] = idx
 	s.mu.Unlock()
 
@@ -348,14 +364,13 @@ func (s *service) RemoveTorrent(infoHash string, deleteData bool) error {
 	s.mu.Lock()
 	t, loaded := s.torrents[hash]
 	delete(s.torrents, hash)
+	delete(s.loadedAt, hash)
 	delete(s.fileIndexes, hash)
 	s.mu.Unlock()
 
 	if loaded {
-		// Unregister from activity manager
-		if s.am != nil {
-			s.am.Unregister(hash)
-		}
+		// Unregister from activity manager (a pause stays)
+		s.am.Unregister(hash)
 		var pieces []storage.Piece
 		if deleteData {
 			pieces = livePieces(t)
@@ -453,14 +468,14 @@ func (s *service) deletePieces(hash string, pieces []storage.Piece) {
 	s.log.Info("deleted torrent data", "hash", hash, "pieces", len(pieces))
 }
 
-// ListTorrents returns status of all active torrents.
+// ListTorrents returns status of all loaded torrents.
 func (s *service) ListTorrents() ([]TorrentStatus, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	result := make([]TorrentStatus, 0, len(s.torrents))
-	for _, t := range s.torrents {
-		result = append(result, s.torrentToStatus(t))
+	for hash, t := range s.torrents {
+		result = append(result, s.torrentToStatus(hash, t))
 	}
 
 	return result, nil
@@ -469,49 +484,61 @@ func (s *service) ListTorrents() ([]TorrentStatus, error) {
 // GetStatus returns detailed status of a specific torrent.
 func (s *service) GetStatus(infoHash string) (*TorrentStatus, error) {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	t, exists := s.torrents[infoHash]
-	s.mu.RUnlock()
-
 	if !exists {
 		return nil, ErrTorrentNotFound
 	}
 
-	status := s.torrentToStatus(t)
+	status := s.torrentToStatus(infoHash, t)
 	return &status, nil
 }
 
-// Pause pauses downloading/uploading for a torrent.
+// Pause pauses a torrent through the activity manager, loaded or not.
 func (s *service) Pause(infoHash string) error {
-	s.mu.RLock()
-	t, exists := s.torrents[infoHash]
-	s.mu.RUnlock()
-
-	if !exists {
-		return ErrTorrentNotFound
+	hash := NormalizeInfoHash(infoHash)
+	if hash == "" {
+		return fmt.Errorf("%w: %q", ErrInvalidInfoHash, infoHash)
 	}
-
-	t.DisallowDataDownload()
-	t.DisallowDataUpload()
-
-	s.log.Info("paused torrent", "hash", infoHash)
+	s.am.Pause(hash, time.Now())
+	s.log.Info("paused torrent", "hash", hash, "loaded", s.loaded(hash) != nil)
 	return nil
 }
 
-// Resume resumes a paused torrent.
+// Resume clears a torrent's pause through the activity manager.
 func (s *service) Resume(infoHash string) error {
-	s.mu.RLock()
-	t, exists := s.torrents[infoHash]
-	s.mu.RUnlock()
-
-	if !exists {
-		return ErrTorrentNotFound
+	hash := NormalizeInfoHash(infoHash)
+	if hash == "" {
+		return fmt.Errorf("%w: %q", ErrInvalidInfoHash, infoHash)
 	}
-
-	t.AllowDataDownload()
-	t.AllowDataUpload()
-
-	s.log.Info("resumed torrent", "hash", infoHash)
+	s.am.Resume(hash)
+	s.log.Info("resumed torrent", "hash", hash, "loaded", s.loaded(hash) != nil)
 	return nil
+}
+
+// PausedAt returns when the torrent was paused.
+func (s *service) PausedAt(infoHash string) (time.Time, bool) {
+	return s.am.PausedAt(NormalizeInfoHash(infoHash))
+}
+
+// Pauses returns every paused torrent.
+func (s *service) Pauses() map[string]time.Time {
+	return s.am.Pauses()
+}
+
+// RestorePauses applies pauses kept from before a restart. Keys that aren't
+// info hashes are skipped.
+func (s *service) RestorePauses(pauses map[string]time.Time) {
+	restored := 0
+	for hash, at := range pauses {
+		if norm := NormalizeInfoHash(hash); norm != "" {
+			s.am.Pause(norm, at)
+			restored++
+		}
+	}
+	if restored > 0 {
+		s.log.Info("restored torrent pauses", "count", restored)
+	}
 }
 
 // Close shuts down the torrent service.
@@ -520,14 +547,13 @@ func (s *service) Close() error {
 	defer s.mu.Unlock()
 
 	// Unregister all torrents from activity manager
-	if s.am != nil {
-		for hash := range s.torrents {
-			s.am.Unregister(hash)
-		}
+	for hash := range s.torrents {
+		s.am.Unregister(hash)
 	}
 
 	// Clear maps (client shutdown is handled separately)
 	s.torrents = make(map[string]*torrent.Torrent)
+	s.loadedAt = make(map[string]time.Time)
 	s.fileIndexes = make(map[string]map[string]*torrent.File)
 
 	s.log.Info("torrent service closed")
@@ -686,8 +712,8 @@ func (s *service) FilesProgress(infoHash string) (map[string]FileProgress, error
 	return progress, nil
 }
 
-// IsActive reports whether a torrent is loaded and not idle. Without an
-// activity manager, loaded torrents are always active.
+// IsActive reports whether a torrent is loaded, not idle and not paused.
+// Without idle mode, loaded torrents are active unless paused.
 func (s *service) IsActive(infoHash string) bool {
 	s.mu.RLock()
 	_, exists := s.torrents[infoHash]
@@ -696,7 +722,7 @@ func (s *service) IsActive(infoHash string) bool {
 	if !exists {
 		return false
 	}
-	return s.am == nil || !s.am.IsPaused(infoHash)
+	return !s.am.IsPaused(infoHash)
 }
 
 // torrentToInfo converts a torrent.Torrent to TorrentInfo.
@@ -725,14 +751,16 @@ func (s *service) torrentToInfo(t *torrent.Torrent) *TorrentInfo {
 	}
 }
 
-// torrentToStatus converts a torrent.Torrent to TorrentStatus.
-func (s *service) torrentToStatus(t *torrent.Torrent) TorrentStatus {
-	hash := t.InfoHash().HexString()
+// torrentToStatus converts a loaded torrent to TorrentStatus. The caller
+// holds s.mu.
+func (s *service) torrentToStatus(hash string, t *torrent.Torrent) TorrentStatus {
 	stats := t.Stats()
+	done := t.BytesCompleted()
 
 	var totalSize int64
 	var name string
-	if info := t.Info(); info != nil {
+	info := t.Info()
+	if info != nil {
 		totalSize = info.TotalLength()
 		name = info.Name
 	}
@@ -740,26 +768,32 @@ func (s *service) torrentToStatus(t *torrent.Torrent) TorrentStatus {
 	// Calculate download progress
 	var progress float64
 	if totalSize > 0 {
-		progress = float64(t.BytesCompleted()) / float64(totalSize)
+		progress = float64(done) / float64(totalSize)
 	}
 
-	// Check if paused via activity manager
-	isPaused := false
-	if s.am != nil {
-		isPaused = s.am.IsPaused(hash)
+	var speed Rate
+	if s.speeds != nil {
+		speed = s.speeds.Rate(hash)
 	}
+	_, paused := s.am.PausedAt(hash)
+	lastActive, _ := s.am.LastAccess(hash)
 
 	return TorrentStatus{
 		InfoHash:      hash,
 		Name:          name,
 		TotalSize:     totalSize,
-		Downloaded:    t.BytesCompleted(),
+		Downloaded:    done,
 		Progress:      progress,
+		Complete:      info != nil && done >= totalSize,
 		Seeders:       stats.ConnectedSeeders,
 		Leechers:      stats.ActivePeers - stats.ConnectedSeeders,
-		DownloadSpeed: 0, // Would need rate tracking
-		UploadSpeed:   0, // Would need rate tracking
-		IsPaused:      isPaused,
+		Peers:         stats.ActivePeers,
+		DownloadSpeed: speed.Down,
+		UploadSpeed:   speed.Up,
+		IsPaused:      s.am.IsPaused(hash),
+		Paused:        paused,
+		LoadedAt:      s.loadedAt[hash],
+		LastActive:    lastActive,
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"github.com/shapedtime/momoshtrem/internal/activity"
 	"github.com/shapedtime/momoshtrem/internal/airdate"
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/artwork"
@@ -191,8 +192,9 @@ func main() {
 		slog.Info("Pruned expired TMDB cache entries", "rows", pruned)
 	}
 
-	// Initialize torrent storage
-	pieceStorage, _, pieceCompletion, err := torrent.InitStorage(
+	// Initialize torrent storage. The piece cache's fill and capacity go to
+	// the Activity summary.
+	pieceStorage, pieceCache, pieceCompletion, err := torrent.InitStorage(
 		cfg.Torrent.MetadataFolder,
 		cfg.Torrent.GlobalCacheSize,
 	)
@@ -256,7 +258,9 @@ func main() {
 
 	// Create torrent service. Each torrent's .torrent file is kept in
 	// {metadata_folder}/metainfo, so it loads again without waiting for
-	// peers, and its data can be deleted while it isn't loaded.
+	// peers, and its data can be deleted while it isn't loaded. The speed
+	// sampler reads its byte counters every 2 s.
+	speeds := torrent.NewSpeedSampler()
 	torrentService := torrent.NewService(
 		torrentClient,
 		activityManager,
@@ -264,7 +268,10 @@ func main() {
 		time.Duration(cfg.Torrent.ReadTimeout)*time.Second,
 		torrent.WithMetainfoStore(torrent.NewMetainfoStore(filepath.Join(cfg.Torrent.MetadataFolder, "metainfo"))),
 		torrent.WithPieceStorage(pieceStorage),
+		torrent.WithSpeedSampler(speeds),
 	)
+	stopSpeeds := make(chan struct{})
+	go speeds.Run(torrentService, stopSpeeds)
 	slog.Info("Torrent service initialized",
 		"add_timeout_seconds", cfg.Torrent.AddTimeout,
 		"read_timeout_seconds", cfg.Torrent.ReadTimeout,
@@ -482,6 +489,23 @@ func main() {
 		Tree:        libraryFS,
 	})
 
+	// Activity: the torrents the library knows merged with the client's,
+	// the summary, and pauses kept in app_settings. The stored pauses apply
+	// before anything loads a torrent (the workers and WebDAV start below).
+	activityService := activity.New(activity.Deps{
+		Torrents: torrentService,
+		Readers:  readerTracker,
+		Library:  library.NewAssignmentJobRepository(db),
+		Pauses:   settingsRepo,
+		Speeds:   speeds,
+		Cache:    pieceCache,
+		DiskPath: cfg.Torrent.MetadataFolder,
+	})
+	if err := activityService.RestorePauses(context.Background()); err != nil {
+		slog.Error("Failed to restore torrent pauses; paused torrents run until paused again", "error", err)
+	}
+	apiOpts.Activity = activityService
+
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
 	apiServer.SetReaderTracker(readerTracker)
@@ -572,10 +596,11 @@ func main() {
 	// Stop background colour computations
 	heroColors.Close()
 
-	// Stop activity manager
+	// Stop activity manager and the speed sampler
 	if activityManager != nil {
 		activityManager.Stop()
 	}
+	close(stopSpeeds)
 
 	// Stop air date sync service
 	if airDateSync != nil {

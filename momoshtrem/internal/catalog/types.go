@@ -35,6 +35,9 @@ const (
 	TorrentActive    TorrentState = "active"
 	TorrentIdle      TorrentState = "idle"
 	TorrentNotLoaded TorrentState = "not_loaded"
+	// TorrentPaused: the user paused it (B6), loaded or not. It wins over
+	// the others.
+	TorrentPaused TorrentState = "paused"
 )
 
 // WatchState comes from Trakt (B5); always null until then.
@@ -54,7 +57,7 @@ type WatchProgress struct {
 // DownloadProgress is what's being fetched for a title.
 type DownloadProgress struct {
 	Pct        int   `json:"pct"`         // 0–100
-	SpeedBps   int64 `json:"speed_bps"`   // 0 until B6
+	SpeedBps   int64 `json:"speed_bps"`   // smoothed; shows: summed over the torrents fetching
 	ETASeconds *int  `json:"eta_seconds"` // null: torrents fetch on demand
 	Seeders    int   `json:"seeders"`
 }
