@@ -14,6 +14,13 @@ export interface ToastOptions {
   action?: { label: string; onClick: () => void };
   /** Stay until dismissed. Defaults to true for errors; use it for "ready" moments too. */
   sticky?: boolean;
+  /** How long it stays before leaving on its own (5 s by default); Undo toasts use 10 s. */
+  durationMs?: number;
+  /**
+   * Runs once when the toast goes, however it goes: timeout, ✕, its action,
+   * or replaced by the next toast. A delayed commit (Undo) sends here.
+   */
+  onClose?: () => void;
   icon?: LucideIcon;
 }
 
@@ -40,30 +47,49 @@ export function useToast(): ToastContextValue {
 /**
  * One toast at a time; a new one replaces the current (HANDOFF §4.4).
  * Bottom-centre above the tab bar on phone, bottom-right on desktop.
- * Success and info leave after 5 s (paused while hovered or focused);
- * errors and sticky toasts stay until dismissed.
+ * Success and info leave after 5 s (or `durationMs`; paused while hovered or
+ * focused); errors and sticky toasts stay until dismissed. `onClose` runs
+ * once whichever way a toast goes.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<ActiveToast | null>(null);
+  // The toast on screen, outside React state, so onClose runs once per toast (never in an updater)
+  const shown = useRef<ActiveToast | null>(null);
   const nextId = useRef(1);
 
-  const dismiss = useCallback((id?: number) => {
-    setCurrent((active) => (id === undefined || active?.id === id ? null : active));
+  const show = useCallback((next: ActiveToast | null) => {
+    const previous = shown.current;
+    shown.current = next;
+    setCurrent(next);
+    previous?.onClose?.();
   }, []);
 
-  const toast = useCallback((options: ToastOptions) => {
-    const id = nextId.current++;
-    setCurrent({ ...options, id });
-    return id;
-  }, []);
+  const dismiss = useCallback(
+    (id?: number) => {
+      if (shown.current && (id === undefined || shown.current.id === id)) show(null);
+    },
+    [show]
+  );
+
+  const toast = useCallback(
+    (options: ToastOptions) => {
+      const id = nextId.current++;
+      show({ ...options, id });
+      return id;
+    },
+    [show]
+  );
 
   const value = useMemo(() => ({ toast, dismiss }), [toast, dismiss]);
+  // Stable per toast, so a re-render (navigating) doesn't restart its timer
+  const currentId = current?.id;
+  const dismissCurrent = useCallback(() => dismiss(currentId), [dismiss, currentId]);
 
   return (
     <ToastContext.Provider value={value}>
       {children}
       <div className="toast-region" aria-live="polite" aria-atomic="true">
-        {current && <ToastCard key={current.id} toast={current} onDismiss={() => dismiss(current.id)} />}
+        {current && <ToastCard key={current.id} toast={current} onDismiss={dismissCurrent} />}
       </div>
     </ToastContext.Provider>
   );
@@ -75,11 +101,12 @@ function ToastCard({ toast, onDismiss }: { toast: ActiveToast; onDismiss: () => 
   const Icon = toast.icon ?? DEFAULT_ICON[tone];
   const [paused, setPaused] = useState(false);
 
+  const duration = toast.durationMs ?? AUTO_DISMISS_MS;
   useEffect(() => {
     if (sticky || paused) return;
-    const timer = window.setTimeout(onDismiss, AUTO_DISMISS_MS);
+    const timer = window.setTimeout(onDismiss, duration);
     return () => window.clearTimeout(timer);
-  }, [sticky, paused, onDismiss]);
+  }, [sticky, paused, duration, onDismiss]);
 
   return (
     <div

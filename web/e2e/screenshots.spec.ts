@@ -373,3 +373,77 @@ test.describe('mapping review', () => {
     await shoot(page, testInfo, 'mapping/onepiece', { fullPage: true });
   });
 });
+
+test.describe('library', () => {
+  const ready = async (page: Page) => {
+    await page.locator('.lib-results').waitFor();
+    await page.waitForTimeout(500);
+  };
+  const more = (page: Page, title: string) => page.getByRole('button', { name: `${title}: more actions` });
+
+  test('default', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await ready(page);
+    await shoot(page, testInfo, 'library/default', { fullPage: true });
+  });
+
+  test('list', async ({ page }, testInfo) => {
+    await signIn(page, '/library?view=list');
+    await ready(page);
+    await shoot(page, testInfo, 'library/list', { fullPage: true });
+  });
+
+  test('menu', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await ready(page);
+    await more(page, 'Frieren: Beyond Journey’s End').click();
+    await page.getByText('Copy WebDAV path').waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'library/menu');
+  });
+
+  test('remove', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await ready(page);
+    await more(page, 'Interstellar').click();
+    await page.getByText('Remove from library…').click();
+    await page.getByRole('alertdialog').waitFor();
+    await page.waitForTimeout(500);
+    await shoot(page, testInfo, 'library/remove');
+  });
+
+  test('undo', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await ready(page);
+    await more(page, 'Interstellar').click();
+    await page.getByText('Remove from library…').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
+    await page.getByText('Undo within 10 seconds').waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'library/undo');
+  });
+
+  test('empty', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'library-empty'));
+    await signIn(page, '/library');
+    await page.getByRole('heading', { name: 'Your library is empty' }).waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'library/empty');
+  });
+
+  test('filtered empty', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'library-reviewed'));
+    await signIn(page, '/library?filter=review');
+    await page.getByRole('heading', { name: 'Nothing needs review' }).waitFor();
+    await page.waitForTimeout(400);
+    await shoot(page, testInfo, 'library/filtered-empty');
+  });
+
+  test('loading', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'library-loading'));
+    await signIn(page, '/library');
+    await page.locator('.skel').first().waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'library/loading');
+  });
+});

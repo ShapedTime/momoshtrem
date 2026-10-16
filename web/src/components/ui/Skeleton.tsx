@@ -103,12 +103,23 @@ interface EmptyStateProps {
   actions?: ReactNode;
   className?: string;
   headingLevel?: 'h1' | 'h2' | 'h3';
+  /** A small mark on the cat, e.g. a check for "nothing left to do". Decorative. */
+  badge?: ReactNode;
 }
 
-export function EmptyState({ cat = 'sit', title, children, actions, className, headingLevel: Heading = 'h3' }: EmptyStateProps) {
+export function EmptyState({ cat = 'sit', title, children, actions, className, headingLevel: Heading = 'h3', badge }: EmptyStateProps) {
   return (
     <div className={cx('empty', className)}>
-      <EmptyCat variant={cat} size={112} />
+      {badge ? (
+        <div className="relative">
+          <EmptyCat variant={cat} size={112} />
+          <span className="empty-badge" aria-hidden="true">
+            {badge}
+          </span>
+        </div>
+      ) : (
+        <EmptyCat variant={cat} size={112} />
+      )}
       <Heading className="t-title-3">{title}</Heading>
       {children && <p>{children}</p>}
       {actions && <div className="actions">{actions}</div>}

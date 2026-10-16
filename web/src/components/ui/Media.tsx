@@ -58,14 +58,23 @@ interface PosterCardProps {
   watchedPct?: number;
   /** Inline feedback buttons under the meta. */
   footer?: ReactNode;
+  /**
+   * Overflow control at the artwork's top right, visible without hover: a
+   * 32 px "…" button (`pcard-action` gives it a 44 px hit area) that opens an
+   * ActionMenu. The pill makes room for it, and on narrow cards moves to the
+   * bottom so it never hides under it.
+   */
+  action?: ReactNode;
+  /** Lines under the title instead of the subtitle, e.g. a status and a watch line. */
+  lines?: ReactNode;
   dismissed?: boolean;
   className?: string;
 }
 
 /** Title and year are always visible (never hover-only), clamped to 2 lines. */
-export function PosterCard({ href, title, subtitle, reason, posterSrc, badge, watchedPct, footer, dismissed, className }: PosterCardProps) {
+export function PosterCard({ href, title, subtitle, reason, posterSrc, badge, watchedPct, footer, action, lines, dismissed, className }: PosterCardProps) {
   return (
-    <article className={cx('pcard', dismissed && 'is-dismissed', className)}>
+    <article className={cx('pcard', dismissed && 'is-dismissed', action !== undefined && 'has-action', className)}>
       <Link href={href} className="flex flex-col gap-2 rounded-md" aria-label={subtitle ? `${title}, ${subtitle}` : title}>
         <Media shape="poster" src={posterSrc} alt="">
           {badge && <span className="badge-tl">{badge}</span>}
@@ -76,11 +85,12 @@ export function PosterCard({ href, title, subtitle, reason, posterSrc, badge, wa
           )}
         </Media>
       </Link>
+      {action && <div className="pcard-action">{action}</div>}
       <div className="meta">
         <Link href={href} className="title" tabIndex={-1}>
           {title}
         </Link>
-        {reason ? <p className="reason">{reason}</p> : subtitle ? <p className="sub">{subtitle}</p> : null}
+        {lines ?? (reason ? <p className="reason">{reason}</p> : subtitle ? <p className="sub">{subtitle}</p> : null)}
       </div>
       {footer && <div className="feedback">{footer}</div>}
     </article>

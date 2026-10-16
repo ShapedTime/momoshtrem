@@ -1,17 +1,32 @@
-import { http, HttpResponse } from 'msw';
-import type { Paginated, LibraryItem } from '@/lib/api/contract';
+import { delay, http, HttpResponse } from 'msw';
+import type { LibraryItem, LibraryPage } from '@/lib/api/contract';
+import { parseLibrarySearch, queryLibrary } from '@/lib/library/query';
 import { libraryItems } from '../fixtures/library';
+import { scenario } from '../scenario';
 import { mockLibrary } from './titles';
-import { latency } from './util';
+import { apiError, latency } from './util';
 
+/** The page's library, as the `library-*` scenarios shape it. */
+function items(): LibraryItem[] {
+  switch (scenario()) {
+    case 'library-empty':
+      return [];
+    case 'library-reviewed':
+      return libraryItems(mockLibrary()).map((item) => ({ ...item, needs_review: 0, review_job_id: null }));
+    default:
+      return libraryItems(mockLibrary());
+  }
+}
+
+/** GET /library over the page's library: filters, sorts, pages, counts, summary and the ids lookup (lib/library/query.ts). */
 export const libraryHandlers = [
   http.get('*/api/library', async ({ request }) => {
+    if (scenario() === 'library-loading') await delay('infinite');
     await latency();
-    const url = new URL(request.url);
-    const type = url.searchParams.get('type');
-    const q = url.searchParams.get('q')?.toLowerCase();
-    const items = libraryItems(mockLibrary()).filter((item) => (!type || item.media_type === type) && (!q || item.title.toLowerCase().includes(q)));
-    const body: Paginated<LibraryItem> = { items, total: items.length, page: 1, page_size: 50 };
-    return HttpResponse.json(body);
+    if (scenario() === 'library-error') return apiError(500, 'internal_error', 'The library query failed.');
+    const parsed = parseLibrarySearch(new URL(request.url).searchParams);
+    if (!parsed.ok) return apiError(400, 'bad_request', parsed.message);
+    const page: LibraryPage = queryLibrary(items(), parsed.params);
+    return HttpResponse.json(page);
   }),
 ];

@@ -1,0 +1,30 @@
+'use client';
+
+import { useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { LibraryItem, LibraryRef, MediaType } from '@/lib/api/contract';
+import { libraryIds, libraryLookupQuery, MAX_LIBRARY_IDS } from '@/lib/api/endpoints';
+import { visibleItems } from '@/lib/library/pending';
+import { usePendingRemovals } from './useUndoableRemoval';
+
+/**
+ * Which of these TMDB titles are in your library, for TMDB cards (Discover,
+ * Search, the palette): one `/library?ids=` call per set of titles (a page of
+ * results), cached by the ids. Titles waiting out a removal's Undo window
+ * count as gone. Pass at most 200 refs; more are ignored.
+ */
+export function useLibraryLookup(refs: LibraryRef[]) {
+  const ids = libraryIds(refs.slice(0, MAX_LIBRARY_IDS));
+  const query = useQuery(libraryLookupQuery(ids));
+  const pending = usePendingRemovals();
+
+  const byKey = useMemo(() => {
+    const items = visibleItems(query.data?.items ?? [], pending);
+    return new Map(items.map((item) => [`${item.media_type}:${item.tmdb_id}`, item]));
+  }, [query.data, pending]);
+
+  /** The library item for a TMDB title, or undefined when it isn't in the library (or isn't known yet). */
+  const get = useCallback((mediaType: MediaType, tmdbId: number): LibraryItem | undefined => byKey.get(`${mediaType}:${tmdbId}`), [byKey]);
+
+  return { get, isPending: ids !== '' && query.isPending, error: query.error };
+}

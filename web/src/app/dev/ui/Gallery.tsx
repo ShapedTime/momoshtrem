@@ -5,6 +5,8 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Info,
+  ListChecks,
   LogOut,
   Ellipsis,
   Plus,
@@ -17,7 +19,10 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { CatAvatar, CatEyes, EmptyCat, Lockup, Mark, MarkMono, Wordmark } from '@/components/brand';
+import { LibraryPill } from '@/components/library/LibraryPill';
 import {
+  ActionMenu,
+  type ActionMenuItem,
   Banner,
   Button,
   Chip,
@@ -118,6 +123,15 @@ const TYPE_SCALE = [
   ['t-micro', 'Micro · Integrations'],
   ['t-mono', 'Frieren.Beyond.Journeys.End.S01E29.1080p.WEB-DL.mkv'],
 ] as const;
+
+/** The ActionMenu demo's items: links, a hint, an action and the quiet destructive one last. */
+const GALLERY_MENU: ActionMenuItem[] = [
+  { key: 'open', label: 'Open details', icon: Info, href: '#' },
+  { key: 'review', label: 'Review mapping', icon: ListChecks, href: '#', hint: '2 files' },
+  { key: 'find', label: 'Find missing episodes', icon: Search, hint: '10', onSelect: () => undefined },
+  { key: 'copy', label: 'Copy WebDAV path', icon: Copy, onSelect: () => undefined },
+  { key: 'remove', label: 'Remove from library…', icon: Trash2, danger: true, separator: true, onSelect: () => undefined },
+];
 
 /** One movie per stage, from the mock fixtures (Past Lives, One Battle After Another, Interstellar, Dune: Part Two). */
 const PANEL_STAGES = (
@@ -414,6 +428,46 @@ export function Gallery() {
           <PosterCard href="#" title="Bluey" subtitle="2018 · Series" badge={<StatusPill status="needs_review" label="Review" onArt />} />
           <PosterCard href="#" title="One Battle After Another" subtitle="2025 · 2h 42m" badge={<StatusPill status="needs_torrent" label="No torrent" onArt />} />
         </PosterGrid>
+        <Frame label="PosterCard with an overflow action (Library): the pill keeps clear of the “…”, and on narrow cards moves to the bottom">
+          <PosterGrid>
+            {(['No torrent', 'Review', '42%'] as const).map((label) => (
+              <PosterCard
+                key={label}
+                href="#"
+                title="One Battle After Another"
+                lines={<p className="sub">2h 42m</p>}
+                badge={
+                  label === 'Review' ? (
+                    <StatusPill status="needs_review" label="Review" onArt />
+                  ) : label === '42%' ? (
+                    <StatusPill status="downloading" label="42%" pct={42} onArt />
+                  ) : (
+                    <StatusPill status="needs_torrent" label="No torrent" onArt />
+                  )
+                }
+                watchedPct={label === '42%' ? 46 : undefined}
+                action={
+                  <ActionMenu items={GALLERY_MENU} label="More actions" sheetTitle="One Battle After Another" sheetDescription="Needs a torrent">
+                    <IconButton aria-label={`One Battle After Another (${label}): more actions`} size="sm">
+                      <Ellipsis size={18} aria-hidden="true" />
+                    </IconButton>
+                  </ActionMenu>
+                }
+              />
+            ))}
+          </PosterGrid>
+        </Frame>
+        <Frame label="LibraryPill: a TMDB title’s place in your library (none outside it)">
+          <div className="flex flex-wrap items-center gap-3">
+            <LibraryPill library={{ availability_stage: 'ready' }} />
+            <LibraryPill library={{ availability_stage: 'downloading' }} />
+            <LibraryPill library={{ availability_stage: 'needs_torrent' }} />
+            <span className="t-small text-fg-3">
+              not in library: <LibraryPill library={null} />
+              (nothing)
+            </span>
+          </div>
+        </Frame>
         <Rail title="Up next" subtitle="Rail with arrows on fine pointers" seeAllHref="#">
           {Array.from({ length: 12 }, (_, i) => (
             <RailItem key={i}>
@@ -576,6 +630,38 @@ export function Gallery() {
           <Button onClick={() => toast({ tone: 'ready', sticky: true, title: 'Frieren S01E29–E38 are ready', body: 'They’ll appear in Infuse after its next library refresh.', action: { label: 'How to play', onClick: () => undefined } })}>
             Show “ready”
           </Button>
+          <Button
+            onClick={() => {
+              let undone = false;
+              toast({
+                tone: 'info',
+                icon: Trash2,
+                title: 'Removed Severance',
+                body: 'Undo within 10 seconds',
+                durationMs: 10_000,
+                action: {
+                  label: 'Undo',
+                  onClick: () => {
+                    undone = true;
+                  },
+                },
+                // Runs however the toast goes; a delayed commit sends the removal here
+                onClose: () => {
+                  if (!undone) window.setTimeout(() => toast({ tone: 'info', title: 'Sent the removal' }), 0);
+                },
+              });
+            }}
+          >
+            Show Undo (10 s)
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <ActionMenu items={GALLERY_MENU} label="More actions" sheetTitle="Frieren: Beyond Journey’s End" sheetDescription="28/38 ready · 37.8 GB">
+            <Button>
+              <Ellipsis size={18} aria-hidden="true" /> ActionMenu
+            </Button>
+          </ActionMenu>
+          <span className="t-small text-fg-3">A popover on desktop, a sheet on phone; focus returns to the trigger.</span>
         </div>
 
         <Sheet

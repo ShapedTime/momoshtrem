@@ -128,7 +128,7 @@ test.describe('URL-driven sheets', () => {
     // The badge comes from a client query: the shell hydrated and is still standing
     const nav = isDesktop(testInfo.project.name) ? page.locator('header.topbar') : page.locator('nav.tabbar');
     await expect(nav.getByLabel('1 downloading')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'My Library' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Library', level: 1 })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'This page didn’t load' })).toHaveCount(0);
   });
