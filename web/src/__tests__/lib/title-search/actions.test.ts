@@ -1,4 +1,4 @@
-import type { AssignmentJob } from '@/lib/api/contract';
+import type { AssignmentJob, TraktIntegration } from '@/lib/api/contract';
 import { findTorrentHref, matchingActions, type PaletteActionInput, paletteActions } from '@/lib/title-search/actions';
 import { libraryItem, libraryShow } from '@/mocks/fixtures/library-item';
 
@@ -67,6 +67,37 @@ describe('paletteActions', () => {
     const quiet = paletteActions(input({ torrentCounts: { streaming: 0, downloading: 0, paused: 1, idle: 3 } }));
     expect(quiet.find((action) => action.key === 'activity')?.sub).toBe('Nothing active right now');
     expect(quiet.find((action) => action.key === 'library')?.sub).toBe('Everything you’ve added');
+  });
+});
+
+describe('the Trakt action', () => {
+  const NOW = Date.parse('2026-10-16T21:44:00Z');
+  const trakt = (overrides: Partial<TraktIntegration> = {}): TraktIntegration =>
+    ({
+      configured: true,
+      state: 'connected',
+      username: 'teymur',
+      last_sync_at: new Date(NOW - 4 * 60_000).toISOString(),
+      sync: { status: 'idle' },
+      ...overrides,
+    }) as TraktIntegration;
+  const traktAction = (value: TraktIntegration | null) => paletteActions(input({ trakt: value, now: NOW })).find((action) => action.key === 'trakt');
+
+  it('syncs now in place while connected, between Discover and settings', () => {
+    expect(traktAction(trakt())).toEqual({ key: 'trakt', label: 'Sync Trakt now', sub: 'Last synced 4 min ago', icon: 'sync', target: { kind: 'trakt-sync' } });
+    expect(labels(paletteActions(input({ trakt: trakt() }))).slice(2, 5)).toEqual(['Go to Discover', 'Sync Trakt now', 'Open settings']);
+  });
+
+  it('opens Settings › Trakt to connect, or to sign in again', () => {
+    const section = { kind: 'href', href: '/settings?section=trakt' };
+    expect(traktAction(trakt({ state: 'off' }))).toMatchObject({ label: 'Connect Trakt', sub: 'Personal picks and Up next', target: section });
+    expect(traktAction(trakt({ state: 'off', configured: false }))).toMatchObject({ label: 'Connect Trakt', target: section });
+    expect(traktAction(trakt({ state: 'pending' }))).toMatchObject({ label: 'Connect Trakt', sub: 'A code is waiting for you on trakt.tv' });
+    expect(traktAction(trakt({ state: 'reauth' }))).toMatchObject({ label: 'Reconnect Trakt', sub: 'Trakt needs you to sign in again', target: section });
+  });
+
+  it('is left out until the integration is known', () => {
+    expect(traktAction(null)).toBeUndefined();
   });
 });
 

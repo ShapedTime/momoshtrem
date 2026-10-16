@@ -315,6 +315,7 @@ function startingAccount(from: MockScenario | null, now: number): MockTraktAccou
   switch (from) {
     case 'trakt-off':
     case 'trakt-denied':
+    case 'trakt-pending':
     case 'first-time':
       return { ...account, ...off };
     case 'trakt-unconfigured':
@@ -432,14 +433,15 @@ function advance(a: MockTraktAccount, now: number): void {
 
 /**
  * GET /integrations/trakt. Reading moves the machine on: the second read after
- * a connect approves the code (`trakt-denied`: denies it) and starts the
- * initial import; every later read imports one step.
+ * a connect approves the code (`trakt-denied`: denies it; `trakt-pending`:
+ * never) and starts the initial import; every later read imports one step.
  */
 export function readTraktIntegration(library: MockLibrary, now = Date.now()): TraktIntegration {
   const a = current(now);
   if (a.state === 'pending' && a.pending) {
     const expired = Date.parse(a.pending.expires_at) <= now;
-    if (expired || ++a.reads >= 2) {
+    // `trakt-pending`: Trakt never answers the code
+    if (expired || (a.scenario !== 'trakt-pending' && ++a.reads >= 2)) {
       a.pending = null;
       if (expired || a.scenario === 'trakt-denied') {
         a.state = a.linked ? 'reauth' : 'off';
@@ -463,7 +465,7 @@ export type TraktResult<T> = { ok: true; value: T } | { ok: false; status: numbe
 export function connectTrakt(now = Date.now()): TraktResult<TraktConnect> {
   const a = current(now);
   if (!a.configured) {
-    return { ok: false, status: 503, code: 'unavailable', message: 'Trakt isn’t set up: set TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET and SECRET_KEY.' };
+    return { ok: false, status: 503, code: 'unavailable', message: 'Trakt isn’t set up: set TRAKT_CLIENT_ID and SECRET_KEY.' };
   }
   if (a.state === 'connected') return { ok: false, status: 409, code: 'conflict', message: 'Trakt is already connected.' };
   if (a.state === 'pending' && a.pending && Date.parse(a.pending.expires_at) > now) return { ok: true, value: a.pending };

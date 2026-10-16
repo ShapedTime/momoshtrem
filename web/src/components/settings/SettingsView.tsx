@@ -7,8 +7,10 @@ import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useSignOut } from '@/components/shell/signOut';
 import { qualityProfileQuery } from '@/lib/api/endpoints/search';
 import { statusQuery } from '@/lib/api/endpoints/system';
-import type { QualityProfile, SystemStatus } from '@/lib/api/contract';
+import { traktIntegrationQuery } from '@/lib/api/endpoints/trakt';
+import type { QualityProfile, SystemStatus, TraktIntegration } from '@/lib/api/contract';
 import { qualitySummary } from '@/lib/settings/quality';
+import { traktNavSummary } from '@/lib/settings/trakt';
 import { cx } from '@/lib/utils/cx';
 import { PlaceholderSection } from './PlaceholderSection';
 import { PlaybackSection } from './PlaybackSection';
@@ -16,26 +18,28 @@ import { QualitySection } from './QualitySection';
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections';
 import { StatusSection } from './StatusSection';
 import { serviceRows, summarize, versionLabel } from './status-model';
+import { TraktSection } from './TraktSection';
 
 const GROUPS = ['Integrations', 'Preferences', 'Playback', 'System'] as const;
 
-function navSummary(
-  id: SectionId,
-  status: SystemStatus | undefined,
-  statusFailed: boolean,
-  quality: QualityProfile | undefined
-): { text: string; attention?: boolean } {
+interface NavData {
+  status: SystemStatus | undefined;
+  statusFailed: boolean;
+  quality: QualityProfile | undefined;
+  trakt: TraktIntegration | undefined;
+}
+
+function navSummary(id: SectionId, { status, statusFailed, quality, trakt }: NavData): { text: string; attention?: boolean } {
   if (id === 'quality') return { text: quality ? qualitySummary(quality) : '' };
+  if (id === 'trakt') return traktNavSummary(trakt);
   if (id === 'status') {
     if (statusFailed) return { text: 'Can’t reach the server', attention: true };
     if (!status) return { text: 'Checking…' };
-    const summary = summarize(serviceRows(status));
+    const summary = summarize(serviceRows(status, trakt));
     return { text: summary.short, attention: summary.attention };
   }
   if (!status) return { text: '' };
   switch (id) {
-    case 'trakt':
-      return { text: status.trakt.connected ? 'Connected' : 'Not connected' };
     case 'ai':
       return { text: status.ai.configured ? (status.ai.mtd_cost_usd !== null ? `$${status.ai.mtd_cost_usd.toFixed(2)} this month` : 'Key configured') : 'Off' };
     case 'playback':
@@ -56,6 +60,8 @@ export function SettingsView() {
   const current = SECTIONS.find((s) => s.id === active)!;
   const { data: status, isError } = useQuery(statusQuery());
   const { data: quality } = useQuery(qualityProfileQuery());
+  // The Trakt section polls while a code waits or a sync runs; the nav just reads along
+  const { data: trakt } = useQuery({ ...traktIntegrationQuery(), refetchInterval: false });
 
   return (
     <div className="page py-6 lg:py-8">
@@ -69,7 +75,7 @@ export function SettingsView() {
               <ul className="overflow-hidden rounded-lg border border-line-1 bg-surface-1 max-lg:divide-y max-lg:divide-line-1 lg:border-0 lg:bg-transparent">
                 {SECTIONS.filter((s) => s.group === group).map((s) => {
                   const Icon = s.icon;
-                  const summary = navSummary(s.id, status, isError, quality);
+                  const summary = navSummary(s.id, { status, statusFailed: isError, quality, trakt });
                   const isActive = s.id === active;
                   return (
                     <li key={s.id}>
@@ -116,7 +122,7 @@ export function SettingsView() {
           </p>
         </nav>
 
-        <section aria-labelledby="section-h" className={cx('flex min-w-0 flex-col gap-5', !section && 'hidden lg:flex')}>
+        <section aria-labelledby="section-h" className={cx('set-content flex min-w-0 flex-col gap-5', !section && 'hidden lg:flex')}>
           <Link href="/settings" className="btn btn-ghost btn-sm -ml-3 self-start lg:hidden">
             <ChevronLeft size={16} aria-hidden="true" /> Settings
           </Link>
@@ -126,10 +132,12 @@ export function SettingsView() {
             </h2>
             <p className="text-fg-2">{current.description}</p>
           </header>
-          {active === 'playback' ? (
+          {active === 'trakt' ? (
+            <TraktSection />
+          ) : active === 'playback' ? (
             <PlaybackSection />
           ) : active === 'status' ? (
-            <StatusSection />
+            <StatusSection trakt={trakt} />
           ) : active === 'quality' ? (
             <QualitySection />
           ) : (

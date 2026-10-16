@@ -1,5 +1,6 @@
 import { Captions, Globe, Link2, type LucideIcon, MonitorPlay, Search, Server, Sparkles, Tv } from 'lucide-react';
-import type { IndexerHealth, ProbeStatus, SystemStatus } from '@/lib/api/contract';
+import type { IndexerHealth, ProbeStatus, SystemStatus, TraktIntegration } from '@/lib/api/contract';
+import { timeAgo } from '@/lib/settings/trakt';
 import type { StatusKey } from '@/lib/status';
 import { formatBytes } from '@/lib/title/format';
 
@@ -24,6 +25,8 @@ export interface ServiceRow {
   indexers?: IndexerRow[];
   /** What the summary banner says when this row is the only warning. */
   note?: string;
+  /** A link in place of the pill, e.g. Trakt's "Connect" while it isn't. */
+  action?: { label: string; href: string };
 }
 
 /**
@@ -94,8 +97,51 @@ function withIndexers(row: ServiceRow, indexers: IndexerHealth[], checkedAt: str
 
 const latency = (ms?: number) => (ms !== undefined ? ` · ${ms} ms` : '');
 
-/** Turn GET /status into the System status rows (screens/settings/status). */
-export function serviceRows(status: SystemStatus): ServiceRow[] {
+const TRAKT_SECTION = '/settings?section=trakt';
+
+/**
+ * Trakt's row: GET /status says whether it's set up and connected; the
+ * integration, once loaded (Settings reads it for its nav), adds who and
+ * when ("Connected as teymur · synced 4 min ago") and a sign-in that lapsed.
+ */
+function traktRow(status: SystemStatus['trakt'], integration: TraktIntegration | undefined, now: number): ServiceRow {
+  const row = { id: 'trakt', name: 'Trakt', icon: Link2 };
+  if (!(integration?.configured ?? status.configured)) {
+    return { ...row, detail: 'No Trakt app keys yet', health: 'off', pill: { status: 'not_configured' } };
+  }
+  const state = integration?.state ?? (status.connected ? 'connected' : 'off');
+  const username = integration?.username;
+  if (state === 'connected') {
+    const synced = integration?.last_sync_at ? ` · synced ${timeAgo(integration.last_sync_at, now)}` : '';
+    const detail = `${username ? `Connected as ${username}` : 'Connected'}${synced}`;
+    if (integration?.sync.status === 'error') {
+      return { ...row, detail, health: 'warning', pill: { status: 'warning', label: 'Sync failed' }, note: 'Trakt’s last sync didn’t finish. Retry it in Settings › Trakt.' };
+    }
+    return { ...row, detail, health: 'ok', pill: { status: 'ok' } };
+  }
+  if (state === 'reauth') {
+    return {
+      ...row,
+      detail: `${username ? `${username} · ` : ''}needs you to sign in again`,
+      health: 'warning',
+      pill: { status: 'warning', label: 'Sign in again' },
+      note: 'Trakt needs you to sign in again. Your imported history is still here.',
+    };
+  }
+  return {
+    ...row,
+    detail: state === 'pending' ? 'Waiting for approval on trakt.tv' : 'Not connected',
+    health: 'off',
+    pill: { status: 'not_configured', label: 'Not connected' },
+    action: { label: state === 'pending' ? 'Continue' : 'Connect', href: TRAKT_SECTION },
+  };
+}
+
+/**
+ * Turn GET /status into the System status rows (screens/settings/status).
+ * `trakt`, when loaded, details Trakt's row.
+ */
+export function serviceRows(status: SystemStatus, trakt?: TraktIntegration, now = Date.now()): ServiceRow[] {
   const rows: ServiceRow[] = [];
 
   rows.push({
@@ -136,14 +182,7 @@ export function serviceRows(status: SystemStatus): ServiceRow[] {
   }
   rows.push(probe('tmdb', 'TMDB', Globe, status.tmdb, 'API v3', 'Not set up: titles and artwork need TMDB_API_KEY'));
 
-  rows.push({
-    id: 'trakt',
-    name: 'Trakt',
-    icon: Link2,
-    detail: !status.trakt.configured ? 'No Trakt app keys yet' : status.trakt.connected ? 'Connected' : 'Not connected',
-    health: status.trakt.connected ? 'ok' : 'off',
-    pill: status.trakt.connected ? { status: 'ok' } : { status: 'not_configured', label: status.trakt.configured ? 'Not connected' : undefined },
-  });
+  rows.push(traktRow(status.trakt, trakt, now));
 
   const cost = status.ai.mtd_cost_usd;
   rows.push({

@@ -1,7 +1,8 @@
-import type { AssignmentJob, LibraryItem, MediaType, TorrentState } from '@/lib/api/contract';
+import type { AssignmentJob, LibraryItem, MediaType, TorrentState, TraktIntegration } from '@/lib/api/contract';
 import { isJobWorking } from '@/lib/api/contract/assignment';
 import { activityHref, type FindTarget } from '@/lib/library/actions';
 import { shortTitle } from '@/lib/mapping/review';
+import { lastSyncedLine, REAUTH_TITLE } from '@/lib/settings/trakt';
 import { plural } from '@/lib/title/format';
 import { titleHref } from '@/lib/title/href';
 import { findTarget, lacksFile, missingSubject } from './library-row';
@@ -10,13 +11,19 @@ import { hasEveryWord, queryWords } from './text';
 /**
  * The palette's actions (js/screens/search.js `ACTIONS`), in order: review
  * each open mapping job, find what library titles lack, go to Activity,
- * Library and Discover, settings, Infuse setup, log out. Pure: the palette
- * adds icons and runs them. Ask (#9) and Trakt (#8) join when they land.
+ * Library and Discover, Trakt (connect, or sync now), settings, Infuse
+ * setup, log out. Pure: the palette adds icons and runs them. Ask (#9)
+ * joins when it lands.
  */
 
-export type PaletteActionIcon = 'review' | 'find' | 'activity' | 'library' | 'discover' | 'settings' | 'infuse' | 'logout';
+export type PaletteActionIcon = 'review' | 'find' | 'activity' | 'library' | 'discover' | 'trakt' | 'sync' | 'settings' | 'infuse' | 'logout';
 
-export type PaletteActionTarget = { kind: 'href'; href: string } | { kind: 'sheet'; name: string; params?: Record<string, string> } | { kind: 'logout' };
+/** `trakt-sync` runs in place: POST /integrations/trakt/sync and a toast. */
+export type PaletteActionTarget =
+  | { kind: 'href'; href: string }
+  | { kind: 'sheet'; name: string; params?: Record<string, string> }
+  | { kind: 'trakt-sync' }
+  | { kind: 'logout' };
 
 export interface PaletteAction {
   key: string;
@@ -37,6 +44,10 @@ export interface PaletteActionInput {
   libraryTotal: number | null;
   /** The torrent sheet is registered: Find opens it instead of the title page. */
   torrentSheet: boolean;
+  /** GET /integrations/trakt; without it there's no Trakt action. */
+  trakt?: TraktIntegration | null;
+  /** For "Last synced 4 min ago". */
+  now?: number;
 }
 
 /** At most this many Find actions, so they don't bury the rest. */
@@ -67,7 +78,24 @@ function activitySub(counts: Record<TorrentState, number> | null): string {
   return parts.length ? parts.join(' · ') : 'Nothing active right now';
 }
 
-export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, torrentSheet }: PaletteActionInput): PaletteAction[] {
+const TRAKT_SECTION = '/settings?section=trakt';
+
+/** Connected: Sync Trakt now, in place. Otherwise the Trakt section, to connect (or sign in again). */
+function traktAction(trakt: TraktIntegration, now: number): PaletteAction {
+  const open: PaletteActionTarget = { kind: 'href', href: TRAKT_SECTION };
+  switch (trakt.configured ? trakt.state : 'off') {
+    case 'connected':
+      return { key: 'trakt', label: 'Sync Trakt now', sub: lastSyncedLine(trakt, now), icon: 'sync', target: { kind: 'trakt-sync' } };
+    case 'reauth':
+      return { key: 'trakt', label: 'Reconnect Trakt', sub: REAUTH_TITLE, icon: 'trakt', target: open };
+    case 'pending':
+      return { key: 'trakt', label: 'Connect Trakt', sub: 'A code is waiting for you on trakt.tv', icon: 'trakt', target: open };
+    default:
+      return { key: 'trakt', label: 'Connect Trakt', sub: 'Personal picks and Up next', icon: 'trakt', target: open };
+  }
+}
+
+export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, torrentSheet, trakt, now = Date.now() }: PaletteActionInput): PaletteAction[] {
   const reviews = jobs.map(
     (job): PaletteAction => ({
       key: `review:${job.id}`,
@@ -95,6 +123,7 @@ export function paletteActions({ jobs, incomplete, torrentCounts, libraryTotal, 
       target: { kind: 'href', href: '/library' },
     },
     { key: 'discover', label: 'Go to Discover', sub: 'Browse with filters', icon: 'discover', target: { kind: 'href', href: '/discover' } },
+    ...(trakt ? [traktAction(trakt, now)] : []),
     { key: 'settings', label: 'Open settings', sub: 'Integrations, AI, quality, playback', icon: 'settings', target: { kind: 'href', href: '/settings' } },
     { key: 'infuse', label: 'Infuse setup', sub: 'Copy the WebDAV address', icon: 'infuse', target: { kind: 'sheet', name: 'infuse-setup' } },
     { key: 'logout', label: 'Log out', sub: 'Sign out on this device', icon: 'logout', target: { kind: 'logout' } },

@@ -135,6 +135,15 @@ describe('scenarios', () => {
     expect((await traktApi.integration()).connect_error).toBeNull();
   });
 
+  it('trakt-pending: the code is never approved, until Cancel', async () => {
+    setMockScenario('trakt-pending');
+    expect(await traktApi.integration()).toMatchObject({ state: 'off', username: null });
+    const code = await traktApi.connect();
+    for (let i = 0; i < 4; i++) expect(await traktApi.integration()).toMatchObject({ state: 'pending', pending: code, connect_error: null });
+    await traktApi.disconnect();
+    expect(await traktApi.integration()).toMatchObject({ state: 'off', pending: null });
+  });
+
   it('trakt-syncing holds the first import at details, with Up next in', async () => {
     setMockScenario('trakt-syncing');
     for (let i = 0; i < 3; i++) expect((await traktApi.integration()).sync).toMatchObject({ status: 'syncing', kind: 'initial', step: 'details' });

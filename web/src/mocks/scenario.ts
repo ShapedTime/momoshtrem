@@ -50,6 +50,8 @@
  * - `first-time`: Trakt off and an empty library.
  * - `up-next-empty`: connected and synced, with nothing up next.
  * - `me-error`: every /me read answers 500.
+ * - `trakt-pending`: off, and a device code from Connect is never approved, so the code and waiting
+ *   screens hold (until Cancel or the code expires).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -90,7 +92,8 @@ export type MockScenario =
   | 'trakt-denied'
   | 'first-time'
   | 'up-next-empty'
-  | 'me-error';
+  | 'me-error'
+  | 'trakt-pending';
 
 let override: MockScenario | null = null;
 
