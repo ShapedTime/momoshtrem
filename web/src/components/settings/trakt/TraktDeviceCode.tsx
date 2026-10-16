@@ -3,9 +3,9 @@
 import { Check, Copy, ExternalLink } from 'lucide-react';
 import { CatEyes } from '@/components/brand';
 import { Button, Panel, Progress, useCopy } from '@/components/ui';
+import { useNow } from '@/hooks/useNow';
 import type { TraktConnect } from '@/lib/api/contract';
 import { displayCode, displayUrl, expiryPct, formatCountdown, secondsLeft, spokenCode, spokenTimeLeft } from '@/lib/settings/trakt';
-import { useNow } from './useNow';
 
 interface TraktDeviceCodeProps {
   code: TraktConnect;

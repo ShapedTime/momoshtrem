@@ -82,8 +82,8 @@ func TestSettingsRepository_AISettings(t *testing.T) {
 
 	t.Run("a stored document keeps the defaults it doesn't have", func(t *testing.T) {
 		reset(t)
-		// #5's document: the classifier's fields only.
-		if err := repo.Set(ctx, AISettingsKey, json.RawMessage(`{"classifier_enabled": false, "rec_schedule_cron": "0 4 * * *"}`)); err != nil {
+		// #5's document: the classifier's fields only, and one nothing reads.
+		if err := repo.Set(ctx, AISettingsKey, json.RawMessage(`{"classifier_enabled": false, "unknown_field": "kept, never read"}`)); err != nil {
 			t.Fatal(err)
 		}
 		want := DefaultAISettings()

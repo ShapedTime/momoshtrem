@@ -135,6 +135,8 @@ See [`.env.example`](.env.example) for all available variables.
 | `OPENSUBTITLES_API_KEY` | No | OpenSubtitles API key for subtitle search |
 | `OPENSUBTITLES_USERNAME` | No | OpenSubtitles account username |
 | `OPENSUBTITLES_PASSWORD` | No | OpenSubtitles account password |
+| `ANTHROPIC_API_KEY` | No | Turns on the AI features: personal picks on For You, Ask momoshtrem and the episode-mapping AI. They share one monthly budget, set in Settings › AI & picks |
+| `TZ` | No | momoshtrem's time zone, an IANA name such as `Europe/Berlin` (UTC when unset). The picks are written at 03:00 in this zone, and Ask's daily limit and the AI budget's month follow it too |
 
 ### Streaming Tuning
 

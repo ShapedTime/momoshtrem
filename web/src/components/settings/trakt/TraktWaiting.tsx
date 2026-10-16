@@ -1,9 +1,9 @@
 'use client';
 
 import { Button, Loader, Panel, Steps } from '@/components/ui';
+import { useNow } from '@/hooks/useNow';
 import type { TraktConnect } from '@/lib/api/contract';
 import { secondsLeft, spokenCode, spokenTimeLeft, waitingLine } from '@/lib/settings/trakt';
-import { useNow } from './useNow';
 
 interface TraktWaitingProps {
   code: TraktConnect;

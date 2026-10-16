@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { Bookmark, History, Link2Off, RefreshCw, Star } from 'lucide-react';
 import { Banner, Button, ButtonLink, Panel, StatusPill, Steps, Switch } from '@/components/ui';
+import { useNow } from '@/hooks/useNow';
 import type { TraktIntegration, TraktSettings } from '@/lib/api/contract';
 import { importSteps, isFirstSync, lastSyncLine, REAUTH_TITLE, reauthBody, syncErrorCopy, watchlistHelp } from '@/lib/settings/trakt';
 import { formatNumber } from '@/lib/title/format';
 import { SettingRow, SettingsCard } from '../SettingsCard';
-import { useNow } from './useNow';
 
 interface TraktConnectedProps {
   integration: TraktIntegration;

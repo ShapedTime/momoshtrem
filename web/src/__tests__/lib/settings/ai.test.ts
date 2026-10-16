@@ -301,10 +301,10 @@ describe('personal picks', () => {
       title: 'Couldn’t start a run',
       body: 'Something broke. Try again in a moment.',
     });
-    // A 503 with a key set (before the runs are served) is the server's own reason, never "No Anthropic key"
-    expect(runNowProblem({ status: 503, code: 'unavailable', message: 'Recommendations aren’t available yet.' }, null)).toEqual({
+    // A 503 while a key is set says the server's own reason, never "No Anthropic key"
+    expect(runNowProblem({ status: 503, code: 'unavailable', message: 'The service is unavailable.' }, null)).toEqual({
       title: 'Couldn’t start a run',
-      body: 'Recommendations aren’t available yet. Try again in a moment.',
+      body: 'The service is unavailable. Try again in a moment.',
     });
   });
 });

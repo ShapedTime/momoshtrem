@@ -5,7 +5,7 @@ import { clearFilters, type DiscoverFilters, type MoodId, normalizeFilters } fro
  * filters, which stay editable. The type and the sort are yours, so a mood
  * works for movies, shows or both. A mood shows as selected only while the
  * filters equal its preset; `mood` in the URL is just for a readable link.
- * #9 can swap in AI picks later.
+ * They stay presets (#9 dropped AI picks here); the empty state offers Ask momoshtrem.
  */
 
 type PresetKey = 'genres' | 'from' | 'to' | 'rating' | 'runtime' | 'lang' | 'country' | 'anime' | 'status';

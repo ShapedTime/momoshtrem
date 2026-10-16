@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { MessageCircle, Plus } from 'lucide-react';
-import { useNow } from '@/components/settings/trakt/useNow';
 import { ButtonLink, Progress, Skeleton } from '@/components/ui';
+import { useNow } from '@/hooks/useNow';
 import { aiUsageQuery, askThreadsQuery } from '@/lib/api/endpoints';
 import { formatUsd, threadWhen } from '@/lib/ask/copy';
 import { ASK_ROUTE, askThreadHref } from '@/lib/recommendations/ask-href';

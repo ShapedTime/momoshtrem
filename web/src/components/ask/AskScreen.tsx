@@ -9,7 +9,7 @@ import { Banner, Button, ButtonLink, EmptyState, IconButton, LoadingRegion, Skel
 import { useAskConversation } from '@/hooks/useAskConversation';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { DESKTOP_QUERY } from '@/hooks/useMediaQuery';
-import { useNow } from '@/components/settings/trakt/useNow';
+import { useNow } from '@/hooks/useNow';
 import { isApiError } from '@/lib/api/client';
 import { recommendationsHomeQuery, traktIntegrationQuery } from '@/lib/api/endpoints';
 import { askAnnouncement, askProblem, type ComposerBlock, composerPlaceholder, costNote, headerLine } from '@/lib/ask/copy';

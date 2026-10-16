@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import { Banner, Button, LoadingRegion, Skeleton, useToast } from '@/components/ui';
+import { useNow } from '@/hooks/useNow';
 import { isApiError } from '@/lib/api/client';
 import type { AiSettingsPatch } from '@/lib/api/contract';
 import { isActiveRun, recApi, recKeys, recRunQuery } from '@/lib/api/endpoints/recommendations';
@@ -26,7 +27,6 @@ import { BudgetCard } from './ai/BudgetCard';
 import { MappingCard } from './ai/MappingCard';
 import { PicksCard } from './ai/PicksCard';
 import { SaveBar } from './SaveBar';
-import { useNow } from './trakt/useNow';
 
 /** Where a problem with each field shows: its row (scrolled to) and its control (focused). */
 const FIELD_TARGET: Record<AiField, { row: string; control: string }> = {

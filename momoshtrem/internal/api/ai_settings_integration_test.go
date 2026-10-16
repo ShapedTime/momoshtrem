@@ -27,7 +27,7 @@ func TestAISettings_Integration(t *testing.T) {
 	}
 
 	// Partial: what's sent, nothing else; unknown fields are ignored.
-	rec := doBody(t, s, "PUT", "/api/settings/ai", `{"rec_schedule":"weekly","classifier_enabled":false,"rec_schedule_cron":"0 4 * * *"}`)
+	rec := doBody(t, s, "PUT", "/api/settings/ai", `{"rec_schedule":"weekly","classifier_enabled":false,"unknown_field":"ignored"}`)
 	want := `{"rec_enabled":true,"rec_model":"claude-opus-5-5","rec_schedule":"weekly","monthly_budget_usd":15,` +
 		`"classifier_enabled":false,"classifier_model":"claude-haiku-5-5","auto_apply_high_confidence":true}`
 	if rec.Code != 200 || rec.Body.String() != want {

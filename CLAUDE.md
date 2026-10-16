@@ -96,7 +96,7 @@ AppleTV/Infuse ─────────────────────�
 
 The v2 target architecture is in PLAN.md §4.
 
-**For You** (`/`): Trakt (read-only, synced every 30 min) drives Up next, New episodes and the watchlist, each card with what it needs next (Play in Infuse, Find, Add…); without Trakt it falls back to trending.
+**For You** (`/`): Trakt (read-only, synced every 30 min) drives Up next, New episodes and the watchlist, each card with what it needs next (Play in Infuse, Find, Add…); without Trakt it falls back to trending. With `ANTHROPIC_API_KEY`, Noir's picks join them: a Claude agent run (nightly at 03:00 server-local by default, or weekly or manual) reads the Trakt taste profile, TMDB and the web and writes AI shelves and Tonight's pick, each card taking feedback; **Ask momoshtrem** (`/ask`) answers a request over SSE with picks and refine chips, in saved threads. Every AI feature shares one monthly budget (Settings › AI & picks, $15 by default).
 
 **Flow**: Browse TMDB → Add to library → Search torrents (the search sheet, `?sheet=torrent`; momoshtrem queries Jackett and ranks releases by the quality profile) → Assign torrent (a mapping job: rules, then AI for unsure files; review at `/mapping/{id}` unless all high) → Stream via WebDAV (Infuse)
 
@@ -137,8 +137,17 @@ POST /api/integrations/trakt/connect|sync  # Device-code connect (the backend po
 PUT  /api/integrations/trakt/settings      # use_ratings, show_watchlist, include_paused (kept across a disconnect)
 DELETE /api/integrations/trakt             # Disconnect: revoke the token, purge everything imported
 GET  /api/me/up-next|new-episodes?days=|watchlist?type=|history   # From what Trakt imported, with the library's files; empty without Trakt, but new episodes of library shows
+GET  /api/recommendations/home             # For You's picks: the newest succeeded run's shelves and the day's hero picks, the active run (poll 3 s while set); always 200 (configured/enabled false without a key or with picks off)
+POST /api/recommendations/refresh          # A manual picks run: 202 {run_id}, joining an active one; 409 recs_disabled|no_history, 429 budget_exceeded, 503 without a key
+GET  /api/recommendations/runs[/{id}]      # Runs, newest first (?limit= 1–50); one run's steps, shelves done and usage (poll 2 s while queued or running)
+POST /api/recommendations/feedback         # like|dislike|not_interested|seen on a title, an upsert (the negative ones hide it from every AI surface); DELETE /feedback/{media_type}/{tmdb_id} clears it
+POST /api/recommendations/ask              # Ask momoshtrem: JSON errors first (thread_full, ask_busy, ask_limit, budget_exceeded…), then SSE start, status, text, item, error|done; a disconnect cancels the turn
+GET  /api/recommendations/threads[/{id}]   # Ask's threads (≤ 50, newest first); one thread with its turns' saved views
+GET  /api/recommendations/debug/profile    # Dev only, with RECS_DEBUG: R1's taste profile and candidate pool, built now, stored nowhere
+GET|PUT /api/settings/ai                   # rec_enabled, rec_model, rec_schedule (nightly|weekly|manual), monthly_budget_usd ($15; null: no cap), the classifier's settings; PUT is partial, a 422 names the field
+GET  /api/settings/ai/usage                # The month's AI spend by feature (recs, ask, classifier) against the budget, the last, active and next run, estimates, asks today
 ```
-Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)"; Trakt, `/me` and watch state: "Trakt (B5)" and "Watch state rules").
+Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)"; Trakt, `/me` and watch state: "Trakt (B5)" and "Watch state rules"; picks, Ask and the AI settings: "Recommendations (R1–R3)").
 
 ### Jackett Torznab API (port 9117)
 Only momoshtrem calls it (`internal/torznab/`): the indexer list, then one search per indexer:
@@ -190,6 +199,13 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `internal/secret/` - AES-256-GCM box for secrets at rest under `SECRET_KEY` (64 hex chars, or ≥ 32 chars hashed)
 - `internal/trakt/` - Trakt, read-only (PLAN §6 B5): `client.go` (auth and API hosts, rate limits, 429/5xx retries, `Paginate`), `auth.go` the connection (device-code connect, sealed rotating tokens, `Token`/`Invalidate`/`Get`, reauth, disconnect, `Hooks` for the sync); `trakttest/` a fake Trakt; `library/trakt_auth_repo.go` stores and purges
 - `internal/trakt/sync*.go` - The Trakt sync (#132): `sync.go` the `Syncer` (one sync at a time, one queued; the 30-minute schedule, nightly reconcile, `Nudge`, the `Hooks`), `sync_run.go` the steps (initial import = reconcile, incremental from `last_activities`, `details` artwork through `tmdb.Cached`), `sync_items.go` Trakt's answers as rows; `library/trakt_sync_store.go` writes them, each write guarded by the connection's `connected_at`
+- `internal/aicore/` - The Claude core every AI feature shares (#154): our own streaming tool loop (`Client.Run`: strict custom tools one at a time, server tools, `pause_turn`, refusal fallbacks, caps on calls, tokens, cost, tool calls and web searches, `AllowFinal`), prices per model plus web searches, `Ledger` (`ai_usage` rows, the monthly budget check), `MonthBounds`/`DayBounds` in `TZ`, `CountTokens`/`RequestBody`; `fake/` a scripted Anthropic SSE server that records requests, for tests
+- `internal/aisettings/` - `/settings/ai` and its usage: partial PUTs on the `ai` document, spend by feature; the picks and Ask add their parts with `SetRecs`/`SetAsk`, and `SetOnChange` reschedules runs
+- `internal/recommend/` - Picks and Ask (PLAN §6 "Recommendations (R1–R3)"): `types.go` the wire shapes, `feedback.go` (`FeedbackService`), `debug.go` (`RECS_DEBUG`'s route); `profile/` the taste profile (R1: weights, loved, dropped, aversions, `CheckHistory`), `candidates/` the candidate pool (≤ 150, the `Exclusion` rule: watched, rated, hidden, negative feedback), `tools/` the agent's strict tools (`get_taste_profile`, `get_candidates`, `tmdb_search`, `tmdb_details`, `check_seen`; goldens in `testdata/`), `agent/` the `Tool` type
+- `internal/recommend/runs/` + `schedule/` - Picks runs (R2, #157): `runs` the prompt, `submit_shelf`/`submit_hero_picks` with their validation (`validate.go`), progress steps, `Runner.Execute` (web search 5 a call, 20 a run; one nudge turn), and the reads (`/home`, runs, the title pages' reason, the day's hero picks); `schedule` the `Scheduler` (03:00 slots, catch-up, one worker, refresh, `FirstSync` from Trakt's initial import, `NextRunAt`); `cmd/momoshtrem/recommend_run.go` is `recommend-run`
+- `internal/recommend/ask/` - Ask momoshtrem (R3, #158): turns over SSE (`turn.go`), the step events (`steps.go`), `show_picks` (`picks.go`), thread titles and views, the limits (30 a day, 20 a thread, one at a time), append-only `ask_messages` replay, `Close` on shutdown
+- `internal/library/taste_reads.go`, `taste_profile_repo.go`, `rec_feedback_repo.go`, `rec_runs_repo.go`, `ask_repo.go` - Migration 006's stores: what the profile reads (`TasteRepository`, `TitleStates`), stored profiles, feedback, runs with their shelves and hero picks, Ask's threads and turns
+- `cmd/momoshtrem/wire_{ai,recs,ask}.go` - Wiring the AI core, the picks and Ask, with or without a key
 
 **web (Next.js, `web/`):**
 - `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)
@@ -205,10 +221,11 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `src/lib/undo/removals.ts` + `src/hooks/useUndoableRemoval.ts` - Undo as a delayed commit: the item hides at once and the DELETE goes when the 10 s toast closes (or on `pagehide`)
 - `src/components/discover/` + `src/lib/discover/` - Discover (`/discover`; `/movies` and `/tv-shows` redirect): filters in the URL (nuqs, `url.ts`), the genre table, mood presets (`moods.ts`), TMDB params (`tmdb-query.ts`); web route `src/app/api/discover/`
 - `src/components/title-search/` + `src/lib/title-search/` - Search (`/search`) and the ⌘K palette's data: ranking (`rank.ts`), library rows, palette actions, recent searches; web route `src/app/api/title-search/` (TMDB movie, tv and person searches)
-- `src/components/ask/` + `src/lib/ask/` - Ask momoshtrem (`/ask`, `/ask/{thread}`, #156): the screen lives in `app/(protected)/ask/layout.tsx` so a stream survives `start` moving the URL; `lib/ask/turns.ts` folds the SSE events into turns (pure reducer), `copy.ts` has each failure's card; `hooks/useAskConversation.ts` sends, stops and retries `ask_busy` after Stop. `AskEntry` + `hooks/useAskAvailable.ts` (`/home` `configured`) gate every entry point
+- `src/components/ask/` + `src/lib/ask/` - Ask momoshtrem (`/ask`, `/ask/{thread}`, #156): the screen lives in `app/(protected)/ask/layout.tsx` so a stream survives `start` moving the URL; `lib/ask/turns.ts` folds the SSE events into turns (pure reducer), `copy.ts` has each failure's card, `route.ts` the thread in the URL; `hooks/useAskConversation.ts` sends, stops and retries `ask_busy` after Stop; `useAskLibrary.ts` the cards' library state (`/library?ids=`, keeping its last answer) and per-title adds. `AskEntry` + `hooks/useAskAvailable.ts` (`/home` `configured`) gate every entry point
+- `src/components/recommendations/` + `src/lib/recommendations/` - What For You and Ask share: `RecPosterCard` (`cards.ts`), feedback (`useRecFeedback`, `FeedbackRow`, `FeedbackSheet`; `feedback.ts` the rules, `feedback-store.ts` per title, so every card of a title agrees; Undo restores the previous signal), `useAddRecTitle`, the run and Ask step labels (`steps.ts`), `askHref(q)` (`ask-href.ts`)
 - `src/components/activity/` + `src/lib/activity/` - Activity (`/activity`, `/activity/{hash}`; `/torrents` redirects): summary strip and sparkline, sections by state, torrent cards, the detail with health in plain words (`health.ts`), files and the Advanced piece map; offline keeps the last known data
-- `src/components/for-you/` + `src/lib/for-you/` - For You (`/`): its states (`state.ts`: first time, Trakt off, first sync, personal), the hero's deterministic picks (`hero.ts`; #9's `hero_picks` plug into `HomeHero`), the Up next, New episodes and watchlist rails; `components/ui/EpisodeCard.tsx` with one action per availability (`episode-card.ts`)
-- `src/components/settings/` - Settings: Trakt (`TraktSection.tsx`, `trakt/`: off, device code, waiting, connected; `lib/settings/trakt.ts`; `hooks/useTraktIntegration.ts` polls while pending or syncing, `useTraktActions.ts`), AI & picks (`AiSection.tsx`, `ai/`: picks with Run now, the budget and spend bar, episode mapping; `lib/settings/ai.ts`: partial PUTs, budget input, projection, schedule help), Quality profile, Playback, System status (`status-model.ts`, Jackett's indexers)
+- `src/components/for-you/` + `src/lib/for-you/` - For You (`/`): its states (`state.ts`: first time, Trakt off, first sync, personal), the hero (`hero.ts`: Noir's Tonight's pick from `/home`'s `hero_picks`, else its own deterministic picks), the Up next, New episodes and watchlist rails, Noir's shelves in the design's order (`shelves.ts`, `Picks.tsx`: the Ask band, the refreshing banner, the failed-refresh note and the picks footer from `picks.ts`); `components/ui/EpisodeCard.tsx` with one action per availability (`episode-card.ts`)
+- `src/components/settings/` - Settings: Trakt (`TraktSection.tsx`, `trakt/`: off, device code, waiting, connected; `lib/settings/trakt.ts`; `hooks/useTraktIntegration.ts` polls while pending or syncing, `useTraktActions.ts`), AI & picks (`AiSection.tsx`, `ai/`: `PicksCard` with the schedule, the model cards and Run now, `BudgetCard` with the spend bar, `MappingCard`; `lib/settings/ai.ts`: partial PUTs, budget input, projection, schedule help), Quality profile, Playback, System status (`status-model.ts`, Jackett's indexers)
 - `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
 - `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
 - `src/lib/api/` - Server-side clients (momoshtrem, tmdb)
@@ -230,8 +247,11 @@ DATABASE_URL=...              # Postgres (momoshtrem)
 TORRENT_LISTEN_PORT=...       # Optional: the torrent client's port (blank keeps 42069; 0 picks a free one)
 TRAKT_CLIENT_ID=...           # Optional: Trakt, read-only (an API app, redirect URI urn:ietf:wg:oauth:2.0:oob); TRAKT_CLIENT_SECRET is optional, new apps get none
 SECRET_KEY=...                # Encrypts Trakt's tokens at rest (openssl rand -hex 32); Trakt stays off without it, and changing it means connecting again
+ANTHROPIC_API_KEY=...         # Optional: the AI features (picks, Ask, the episode-mapping AI); without it they're off and /recommendations/home says configured: false
+TZ=...                        # Optional: momoshtrem's zone, an IANA name (compose passes UTC when unset): the 03:00 picks run, the hero's day, Ask's daily limit and the budget month
+RECS_DEBUG=...                # Dev only: true serves GET /api/recommendations/debug/profile; keep it off in production
 ```
 
-v2 adds more (Anthropic, backend token, CORS, the WebDAV public URL); see PLAN.md §4.
+v2 adds more (backend token, CORS, the WebDAV public URL); see PLAN.md §4.
 
 Keep in mind that you're not working in the actual server but rather in a local development environment.

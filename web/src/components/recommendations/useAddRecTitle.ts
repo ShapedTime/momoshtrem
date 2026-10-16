@@ -4,11 +4,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui';
 import type { MediaType } from '@/lib/api/contract';
 import { libraryKeys, recKeys, titleKeys, titlesApi, traktKeys } from '@/lib/api/endpoints';
+import { plural } from '@/lib/title/format';
 
 interface AddTarget {
   media_type: MediaType;
   tmdb_id: number;
   title: string;
+  /** A show's season count, for Ask's toast ("The Good Place · 4 seasons"). */
+  seasons?: number | null;
 }
 
 interface AddOptions {
@@ -35,7 +38,12 @@ export function useAddRecTitle({ findTorrent }: AddOptions = {}) {
       ]);
       toast(
         findTorrent
-          ? { tone: 'ready', title: 'Added to library', body: target.title, action: { label: 'Find a torrent', onClick: () => findTorrent(target) } }
+          ? {
+              tone: 'ready',
+              title: 'Added to library',
+              body: target.seasons ? `${target.title} · ${plural(target.seasons, 'season')}` : target.title,
+              action: { label: 'Find a torrent', onClick: () => findTorrent(target) },
+            }
           : { tone: 'ready', title: 'Added to library', body: `${target.title} · next, find a torrent` }
       );
     },

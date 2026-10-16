@@ -32,6 +32,13 @@ ops/deploy/deploy.sh momoshtrem-v2 <commit>      # deploy a given main commit, s
 
 `.env` is managed by hand, so add any new variable to it before you say yes: `ssh momoshtrem-v2`, then edit `/opt/momoshtrem/.env` there. Never print it or paste it anywhere.
 
+**The AI features** (v2 #9) need two of them:
+- `ANTHROPIC_API_KEY` turns on the personal picks, Ask momoshtrem and the episode-mapping AI. Without it they stay off.
+- `TZ` sets momoshtrem's zone, an IANA name such as `TZ=Europe/Berlin`. compose passes `UTC` when it's unset.
+  - With `TZ` set, the nightly picks run at 03:00 local time, not 03:00 UTC.
+  - Ask's daily limit and the AI budget's month follow it too.
+  - It's read at startup, so the deploy that adds it applies it.
+
 The script then asks before deploying. If the target is already running, it stops.
 
 **On the VM.** One SSH session does the steps below while holding `/run/lock/momoshtrem.lock`. The backups (#35) take the same lock, so the two never overlap.
@@ -103,7 +110,8 @@ In `/opt/momoshtrem`:
 1. **`.env`.** Write it from `.env.example`, with `chmod 600`:
    - the data paths from HOST.md §4, and `MOMOSHTREM_TAG`;
    - `JACKETT_API_KEY` must match the key in the restored `Jackett/ServerConfig.json`;
-   - keep `WEBDAV_USER` and `WEBDAV_PASSWORD_HASH`, or Infuse needs new credentials.
+   - keep `WEBDAV_USER` and `WEBDAV_PASSWORD_HASH`, or Infuse needs new credentials;
+   - `ANTHROPIC_API_KEY` for the AI features, and `TZ` so the 03:00 picks run is local time (§1).
 2. **`compose.yml` and `Caddyfile`** from the target commit. Postgres has to start alone first, so this deploy is by hand. On the Mac:
    ```bash
    SHA=<full sha>
