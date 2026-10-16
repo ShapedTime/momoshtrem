@@ -48,6 +48,7 @@ The service refuses to start without a database URL, with a port outside 1–655
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. |
 | `SECRET_KEY` | `security.secret_key` | Encrypts Trakt tokens at rest. |
 | `METRICS_ENABLED`, `METRICS_PORT` | `metrics.*` | Prometheus endpoint. |
+| `TORRENT_LISTEN_PORT` | `torrent.listen_port` | BitTorrent port, TCP and uTP. Default `42069`; `0` picks a free port, so two instances can run side by side. |
 
 Optional integrations that aren't configured are disabled, and `GET /api/status` reports them as `configured: false`.
 
@@ -144,6 +145,15 @@ Apply writes the assignments in one transaction and rebuilds the WebDAV tree. A 
 
 - **AI settings** are the `ai` key of `app_settings`, with defaults: the classifier on, `claude-haiku-5-5`, auto-apply at high confidence, no monthly budget. #9 serves the endpoints to change them.
 - **Accuracy** is measured on the corpus in `internal/identify/testdata/`: `go test ./internal/identify` checks the gates (≥ 95% exact, zero wrong `high`). `go run ./cmd/classifier-eval` runs the golden torrents through the rules and the AI and reports accuracy, cost and latency. Its AI modes cost cents; `-modes rules` and `-dry-run` are free.
+
+## Torrent activity
+
+What the torrents are doing, for the Activity screen (`internal/activity`; the contract is in [PLAN §6 "Torrents and activity (B6)"](../redesign/PLAN.md)).
+
+- **`GET /api/torrents`** lists every torrent the library knows (active assignments and open mapping jobs), loaded or not, plus loaded torrents nothing references. Torrents stream on demand and load on their first WebDAV read, so one that isn't loaded is `idle` with null progress, and there's no ETA.
+- **`GET /api/torrents/summary`** has the total speeds, the last minute of them, how many torrents are in each state, and the disk under `metadata_folder` with the piece cache's fill.
+- **Speeds** come from a sampler that reads each loaded torrent's byte counters every 2 s and smooths them.
+- **`POST /api/torrents/{hash}/pause`** and **`/resume`**, and **`/pause-all`** and **`/resume-all`**. A pause is sticky: it's kept in `app_settings` (key `torrents`) across restarts, reads don't wake the torrent, and a torrent that isn't loaded is paused when it loads.
 
 ## Removing torrents and titles
 

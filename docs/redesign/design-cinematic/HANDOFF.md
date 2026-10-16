@@ -190,12 +190,18 @@ A four-segment step bar (done green, current amber) sits above, labelled "Add ·
 | Torrent search | `age` or `published_at` (exists) and `release.why_short` (≤ 4 short phrases, e.g. from `score_reasons`) | The best-match "why" line |
 | Library | `size_bytes`, `last_watched_at`, `added_at` and `needs_review` count per item | Sort and list view |
 | Mapping review | Now in PLAN §6 "Assignment": the job's `item`, `torrent` facts, `progress` step details, `suggested_hints`, `ai_available` and live `counts`; per proposal its `group`, `targets`, `replaces`, `updated`/`hinted` and `extra_type`; `GET /shows/{id}/episodes` for the picker | Header facts, named steps, summary line, rows, Re-check chips, picker tags |
-| Activity | `GET /torrents/summary` → `{down_bps, up_bps, active, idle, paused, disk: {used, free}}` | Summary strip |
-| Activity | Per torrent: `readers: [{client: "Infuse", device, file, episode, offset, rate_bps}]` (from WebDAV request User-Agent and range reads), `pieces: bitfield`, `priority_pieces` | "Streaming now", active readers, piece map |
+| Activity | Now in PLAN §6 "Torrents and activity (B6)": `GET /torrents/summary` → speeds, a 60 s `history`, `counts` per state and `disk`; `GET /torrents` items with `state`, `loaded`, `titles` (with `scope`) and `open_job` | Summary strip, the four sections |
+| Activity | Per torrent: `readers: [{client: "Infuse", device, file, episode, offset, rate_bps}]` (from WebDAV request User-Agent and range reads), `pieces: bitfield`, `priority_pieces` | "Streaming now", active readers, piece map (#99: streaming sessions and the detail) |
 | Ask | `POST /recommendations/ask` events: add `refinements: [string]` in `done` and `match_tag` per `item` | Refine chips and the one-line match tag on cards |
 | Settings | `GET /status` per-indexer health; `GET /settings/ai/usage` → `budget_usd`, `by_feature` | Status list, budget bar |
 | Settings | Quality profile preview: `GET /settings/quality-profile/preview` → a one-line summary | "Best match would prefer…" |
 | Subtitles | `match: exact_release \| same_source \| different_timing` and `downloads` per result | Ranked results with match pills |
+
+**Activity and on-demand torrents (B6).** Torrents don't download in the background: pieces are fetched around what's being played and kept in a cache (4 GB by default) that drops the oldest, so a torrent's progress can go down, and one the library knows may not be loaded at all. So:
+- **No ETA**, anywhere: there's no finish time to promise.
+- **The fourth section is Idle**, not Seeding. It holds torrents that are loaded but quiet, and torrents that aren't loaded (`loaded: false`). Show those without a progress bar, peers or speeds (they're null), not as "0%".
+- **The pill says "Complete" only when `complete` is true.** A loaded torrent that's idle and incomplete is just "Idle".
+- **Pause is sticky.** A paused torrent stays paused across restarts, and playing it in Infuse doesn't wake it; only Resume does. Pause all covers the streaming and downloading torrents.
 
 ## 7. Prototype routes (for reference while building)
 
