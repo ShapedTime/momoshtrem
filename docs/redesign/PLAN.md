@@ -1381,14 +1381,15 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 - On `422 not_downloadable`: "This plays from HDRezka, so it can't be kept on disk. Pick a torrent for it to keep it."
 - Existing keeps offer Change duration and Stop keeping.
 
-**Settings › Storage:**
-- The bar is "Kept · Smart · Cache · Free", with a marker at the limit.
+**Settings › Storage** (P7, #205: `components/settings/StorageSection.tsx` and `storage/`, the rules in `lib/settings/storage.ts`):
+- The bar is "Kept · Smart · Cache · Other files · Free", with a marker at the limit. "Other files" is what's neither free nor the cache (`disk.total_bytes − disk.free_bytes −` the cache's fill), so the bar adds up to the disk.
+- Sizes are decimal (`formatBytes`), so the VM's 147.2 GiB auto limit reads "158 GB" and config.yaml's 53760 MiB "56.4 GB". The size inputs take GB.
 - The limit reads by `source`:
-  - `auto`: "Auto (75% of the disk) · 148 GB";
+  - `auto`: "Auto (75% of the disk) · 158 GB";
   - `setting`: "Custom";
-  - `config`: "From config.yaml · 52 GB", with a "Use auto" action (`PUT {limit_bytes: null}`).
+  - `config`: "From config.yaml · 56.4 GB", with a "Use auto" action (`PUT {limit_bytes: null}`, sent with Save).
 - The limit control sends `limit_bytes` only when it changes.
-- While `floored`, the note reads "Holding the cache at X to keep 5 GB of the disk free".
+- While `floored`, the note reads "Holding the cache at X to keep 5.4 GB of the disk free" (`floor_free_bytes`).
 - `409 limit_below_committed`: "Kept downloads need X. Stop keeping some, or set a limit that leaves room for them."
 
 ### System
