@@ -145,6 +145,16 @@ Apply writes the assignments in one transaction and rebuilds the WebDAV tree. A 
 - **AI settings** are the `ai` key of `app_settings`, with defaults: the classifier on, `claude-haiku-5-5`, auto-apply at high confidence, no monthly budget. #9 serves the endpoints to change them.
 - **Accuracy** is measured on the corpus in `internal/identify/testdata/`: `go test ./internal/identify` checks the gates (≥ 95% exact, zero wrong `high`). `go run ./cmd/classifier-eval` runs the golden torrents through the rules and the AI and reports accuracy, cost and latency. Its AI modes cost cents; `-modes rules` and `-dry-run` are free.
 
+## Removing torrents and titles
+
+The deletes clean up after themselves (`internal/service/removal.go`; the contract is in [PLAN §6 "Torrents and activity (B6)"](../redesign/PLAN.md)).
+
+- **`DELETE /api/torrents/{hash}?delete_data=true`.** It cancels the torrent's open jobs and deactivates its assignments, keeping the rows as history. It deletes its torrent subtitles and drops it from the client. With `delete_data=true` it also deletes its pieces from the cache.
+- **`DELETE /api/movies/{id}` and `/shows/{id}`** take `delete_data` too. They delete every subtitle of the title, rows and files, and release the torrents nothing else uses.
+- **Unassigning a file** deletes the subtitles that came with it and releases its torrent when it's unused, never its data.
+
+Each torrent's metainfo is kept in `{metadata_folder}/metainfo/<hash>.torrent` when its metadata arrives. A torrent added again loads without waiting for peers, and one that isn't loaded can still have its data deleted. The torrent service serialises add, wait, drop and remove per hash, so a WebDAV read and a mapping job never fight over one torrent.
+
 ## Tests
 
 `go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service` and `internal/subtitle`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):

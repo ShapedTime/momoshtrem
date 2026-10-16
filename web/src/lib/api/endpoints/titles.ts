@@ -16,8 +16,11 @@ export const titlesApi = {
   season: (tmdbId: number, seasonNumber: number) => apiJson<SeasonDetail>(`/api/titles/tv/${tmdbId}/seasons/${seasonNumber}`),
   addMovie: (tmdbId: number) => apiJson<AddTitleResult>('/api/movies', { method: 'POST', json: { tmdb_id: tmdbId } }),
   addShow: (tmdbId: number) => apiJson<AddTitleResult>('/api/shows', { method: 'POST', json: { tmdb_id: tmdbId } }),
-  removeMovie: (movieId: number) => apiJson<void>(`/api/movies/${movieId}`, { method: 'DELETE' }),
-  removeShow: (showId: number) => apiJson<void>(`/api/shows/${showId}`, { method: 'DELETE' }),
+  /** Removes the title, its subtitles and the torrents nothing else uses; deleteData also deletes their data (B6). */
+  removeMovie: (movieId: number, deleteData = false) =>
+    apiJson<void>(`/api/movies/${movieId}${deleteData ? '?delete_data=true' : ''}`, { method: 'DELETE' }),
+  removeShow: (showId: number, deleteData = false) =>
+    apiJson<void>(`/api/shows/${showId}${deleteData ? '?delete_data=true' : ''}`, { method: 'DELETE' }),
   /** The answer is informational: refetch the title afterwards. */
   refreshMovie: (movieId: number) => apiJson<void>(`/api/movies/${movieId}/refresh`, { method: 'POST' }),
   refreshShow: (showId: number) => apiJson<void>(`/api/shows/${showId}/refresh`, { method: 'POST' }),

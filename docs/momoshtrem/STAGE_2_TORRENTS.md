@@ -187,6 +187,8 @@ DELETE /api/episodes/:id/assign          # Unassign episode
 
 ## Step 2.6: Torrent Management API
 
+> **Superseded (#96).** `DELETE /api/torrents/:hash?delete_data=true|false` cancels the torrent's jobs, deactivates its assignments (keeping them as history), deletes its torrent subtitles and drops it, with its data when asked. Unassigning a file and deleting a title release torrents nothing else uses. See PLAN §6 "Torrents and activity (B6)".
+
 Direct torrent operations.
 
 **Endpoints**:
