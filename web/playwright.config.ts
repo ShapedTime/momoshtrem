@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
-const PORT = 3100;
+// Parallel agents each run their own server: E2E_PORT=31xx npx playwright test
+const PORT = Number(process.env.E2E_PORT) || 3100;
 
 /**
  * E2E against a dedicated dev server (own port and build dir, so it can run

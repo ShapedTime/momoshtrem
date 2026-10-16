@@ -40,7 +40,7 @@ export type SheetDefinition = ContentSheet | SelfRenderingSheet;
 
 /**
  * Sheets that open from the URL (`?sheet=<name>`). Feature issues register
- * theirs here: `torrent` (#6), `inspect` (#6), `episode` (#4), …
+ * theirs here: `torrent` (#6), `episode` (#4), … (Inspect is a sheet nested in `torrent`, not a URL sheet.)
  * `torrent` and `hdrezka` are the source sheet's tabs: same params, same head
  * (`components/source`), swapped with `useSheet().swap`.
  */

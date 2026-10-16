@@ -1,6 +1,14 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { apiJson, toQuery } from '../client';
-import type { InspectRequest, JobAccepted, QualityProfile, SearchTorrentsParams, SearchTorrentsResponse } from '../contract';
+import type {
+  InspectRequest,
+  JobAccepted,
+  QualityProfile,
+  ResolveRequest,
+  ResolveResponse,
+  SearchTorrentsParams,
+  SearchTorrentsResponse,
+} from '../contract';
 
 /** Torrent search and quality profile (PLAN §6 "Search"; #6). */
 export const searchKeys = {
@@ -10,6 +18,8 @@ export const searchKeys = {
 
 export const searchApi = {
   torrents: (params: SearchTorrentsParams) => apiJson<SearchTorrentsResponse>(`/api/search/torrents${toQuery(params)}`),
+  /** A release without a magnet: the server fetches its .torrent (the Jackett key never leaves it). */
+  resolve: (body: ResolveRequest) => apiJson<ResolveResponse>('/api/search/torrents/resolve', { method: 'POST', json: body }),
   inspect: (body: InspectRequest) => apiJson<JobAccepted>('/api/search/torrents/inspect', { method: 'POST', json: body }),
   qualityProfile: () => apiJson<QualityProfile>('/api/settings/quality-profile'),
   putQualityProfile: (profile: QualityProfile) =>

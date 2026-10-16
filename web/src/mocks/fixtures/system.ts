@@ -7,7 +7,16 @@ export function systemStatus(): SystemStatus {
     checked_at: new Date().toISOString(),
     db: { ok: true, size_bytes: 48_000_000 },
     webdav: { url: 'https://momoshtrem.duckdns.org:36911/', port: 36911, auth_enabled: true, username: 'teymur', active_readers: 1 },
-    jackett: { configured: true, reachable: true, latency_ms: 210 },
+    jackett: {
+      configured: true,
+      reachable: true,
+      latency_ms: 210,
+      indexers: [
+        { name: 'Nyaa', status: 'ok', ms: 210, since: null },
+        { name: 'TorrentLeech', status: 'ok', ms: 340, since: null },
+        { name: 'The Pirate Bay', status: 'unknown', ms: null, since: null },
+      ],
+    },
     tmdb: { configured: true, reachable: true, latency_ms: 112 },
     trakt: { configured: true, connected: false },
     ai: { configured: true, mtd_cost_usd: 3.12 },
