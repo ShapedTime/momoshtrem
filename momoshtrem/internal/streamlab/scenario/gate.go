@@ -414,13 +414,16 @@ PriorityReader.Close resets the whole file's priorities when its reader was open
 var dualReaderOpen = &Scenario{
 	Name: "dual-reader-open",
 	Tier: Gate,
-	Doc: `Reader A plays a movie from the start and pauses (its window holds still); reader B then opens a footer probe.
+	Doc: `Reader A plays a movie from 20 MiB before its end and pauses (its window holds still); reader B then opens a header probe.
 
-Every new reader runs InitialPrioritize, which sets the file's header and footer to explicit High (F13, #209): where A's Now and Readahead window overlaps them, A's incomplete pieces drop. open-keeps-windows compares their effective priority just before B opened and just after B's InitialPrioritize; stall_time_after is A's stall time once it resumes. The seeder runs slower here (still above the bitrate) so A's window is still incomplete when B opens.`,
+Every new reader runs InitialPrioritize, which sets the file's header and footer to explicit High (F13, #209). A's Readahead window runs to the end of the file, so it holds the footer: B's open lowers A's incomplete footer pieces from Readahead to High, beyond what A's own anacrolix reader asks for. open-keeps-windows compares the effective priority of A's incomplete pieces just before B opened and just after B's InitialPrioritize; stall_time_after is A's stall time once it resumes. The seeder runs slower here (still above the bitrate) so A's window is still incomplete when B opens.
+
+At the start of the file the overlap is the header's last pieces, which the server's read-ahead into the socket usually reaches first: too few to measure every time.`,
 	Guards: []string{"F13"},
 	Params: []Param{
 		{Name: "seeder_rate", Kind: Bytes, Default: "1536KiB"},
 		{Name: "a_watch", Kind: Duration, Default: "1s", Doc: "How much A plays before it pauses."},
+		{Name: "a_tail", Kind: Bytes, Default: "20MiB", Doc: "Where A starts: this far before the end of the file."},
 		{Name: "watch_after", Kind: Duration, Default: "6s", Doc: "How much A plays after B opened."},
 	},
 	Checks: []string{"open-keeps-windows"},
@@ -428,7 +431,7 @@ Every new reader runs InitialPrioritize, which sets the file's header and footer
 	Script: func(e *Env) error {
 		t := e.Titles[0]
 		devA, devB := e.Device("infuse-a"), e.Device("infuse-b")
-		a, err := e.Player(devA, t).Open(e.Ctx, e.Conn(devA), 0)
+		a, err := e.Player(devA, t).Open(e.Ctx, e.Conn(devA), max(t.Size-e.P.Bytes("a_tail"), 0)&^(64<<10-1))
 		if err := e.Live(err); err != nil {
 			return err
 		}
@@ -444,7 +447,7 @@ Every new reader runs InitialPrioritize, which sets the file's header and footer
 		created := e.ReadersCreated()
 		n := e.P.Bytes("probe_bytes")
 		probed := make(chan error, 1)
-		go func() { probed <- e.Probe(e.Conn(devB), t, t.Size-n, n) }()
+		go func() { probed <- e.Probe(e.Conn(devB), t, 0, n) }()
 		opened := e.WaitReadersCreated(created+1, 10*time.Second)
 		after := e.Snapshot(t)
 		if err := <-probed; err != nil {

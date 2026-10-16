@@ -169,7 +169,7 @@ var Issues = []Issue{
 	{
 		ID:      "F6",
 		Title:   "Closing a reader open 30 s or more resets the whole file's priorities, other readers' windows too",
-		Ref:     "#171 (PLAN §3 F6)",
+		Ref:     "#216",
 		Checks:  []string{"close-keeps-windows"},
 		MaxRate: Always,
 		Doc:     "PriorityReader.Close calls ResetPriorities over the file's every piece: another reader's Now and Readahead windows drop to None.",
@@ -187,7 +187,7 @@ var Issues = []Issue{
 	{
 		ID:      "F12",
 		Title:   "A handler blocked in a read outlives its client's abort",
-		Ref:     "#171 (PLAN §3 F12)",
+		Ref:     "#217",
 		Checks:  []string{"abort-lag"},
 		MaxRate: Always,
 		Doc: "seekAndReadAtLeast and readWithTimeout read under context.Background() and read_timeout, not the request's " +
