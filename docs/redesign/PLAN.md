@@ -330,8 +330,8 @@ Every table is Trakt's: a disconnect purges them all in one transaction, and the
   - Cost: one more query for a title page or a season; `/library` reads it in its one query.
 - **Watch state rules** (B5, #133). They read what the Trakt sync imported (§5 `005_trakt.sql`); without Trakt every `watch_state` is null and nothing is `watched`.
   - **Matching** a Trakt episode to a library episode: `episodes.tmdb_episode_id` against Trakt's `episode_tmdb_id` first; season and number only when either id is missing, so an episode TMDB numbers differently never borrows another's watched state. One rule, everywhere.
-  - **`watch_state`** is null when Trakt knows nothing about the title (no play, rating or progress). A movie: `watched_at` (its last play), `plays`, `rating`. A show: `watched_at` (its last watched episode), `plays` (the sum of its episodes' plays), `rating` (the show's), `progress` (Trakt's, regular episodes) and `next_episode`.
-  - **`next_episode`** is the episode Up next names for the show (§6 "Trakt (B5)"), whether or not Up next lists the show (dropped, hidden and idle shows keep theirs); null when there's none. It drives `default_season` and the page's next-up highlight, with the frontier (`missing`) as the fallback.
+  - **`watch_state`** is null when Trakt knows nothing about the title (no play, rating or progress). A movie: `watched_at` (its last play), `plays`, `rating`; no `progress` or `next_episode`. A show: `watched_at` (its last watched episode), `plays` (the sum of its episodes' plays), `rating` (the show's), `progress` (Trakt's, regular episodes; left out until the import's `progress` step brings it) and `next_episode` (always there, maybe null).
+  - **`next_episode`** is the episode Up next names for the show (§6 "Trakt (B5)"), whether or not Up next lists the show (dropped, hidden and idle shows keep theirs); null when there's none. Watchlist starts don't count: a show nobody has started has no watch state. It's in the library's numbering when the library lists it, so it drives `default_season` and the page's next-up highlight, with the frontier (`missing`) as the fallback.
   - An episode with a play is `watched`, whatever else is true; `pct`, `webdav_path`, `source` and `stream` still describe its file. `SeasonSummary.ready` counts episodes with a file (watched ones too); `missing`, `needs_review`, `upcoming` and `EpisodeRange.missing` leave watched ones out.
   - Cost: one more query for a title page; seasons and `/library` don't grow.
 - `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today).
@@ -780,13 +780,15 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
     review_job_id                      // while needs_review: the newest job that wants the episode (review rules)
   }
   ```
-  - **The next episode** is Trakt progress's `next_episode`; else (caught up) the first regular calendar entry after `last_episode`, `airs_on` while it hasn't aired; else the show is left out. Specials are never next. Absolute numbers, names and stills come from the library's episode when it has one, else from Trakt (HANDOFF §6: the landscape card's still, name and `#1124`).
+  - **The next episode** is Trakt progress's `next_episode`; else (caught up) the first regular calendar entry after `last_episode`, `airs_on` while it hasn't aired; else the show is left out. Specials are never next: a special progress names is skipped like a caught-up show. When the library lists the episode (the matching rule), the card has its season, number, absolute number, name and still, so it opens the episode the title page shows; else Trakt's, the calendar filling in what progress lacks (HANDOFF §6: the landscape card's still, name and `#1124`). The show's title and artwork are the library's when it's there, else Trakt's.
+  - **Aired** is checked at read time: by the calendar's `first_aired` when it lists the episode, else the library's air date. Progress's next episode with neither has aired (Trakt names only aired episodes next, and the calendar lists the ones about to air).
   - **Shows**: every `trakt_show_progress` row except dropped or hidden ones (`trakt_hidden`, always left out) and those last watched over 180 days ago (left out unless `include_paused`).
-  - **Watchlist starts**, only with `show_watchlist`: S01E01 of a watchlisted library show with no plays, once it has aired; at most 3, newest listed first.
+  - **Watchlist starts**, only with `show_watchlist`: S01E01 of a watchlisted library show with no plays, once it has aired (the library lists it, by its air date); at most 3, newest listed first. A show with Trakt progress, or dropped or hidden, is no start.
   - **Availability**, first match: the episode has a file → `ready` or `downloading`; a mapping job wants it → `needs_review` (the review rules); it hasn't aired → `airs_on`; the show is in the library → `needs_torrent` (an episode the library doesn't list yet too); else `not_in_library`. It reads the file and review facts, never `watched`.
   - **Order**: the shows that aren't `airs_on` by `last_watched_at`, newest first; then watchlist starts; then `airs_on` by `airs_at` (unknown last).
-  - Reading it starts an incremental sync in the background when the last check is over 5 minutes old (#132).
+  - Reading it starts an incremental sync in the background when the last check is over 5 minutes old (#132; `api.Options.TraktNudge`).
   - No `backdrop_dominant_color` (HANDOFF §6 lists one for up-next): the hero loads the title, which has it.
+  - Cost: at most 4 queries (the settings, the candidates, their episodes in the library). New episodes 3, the watchlist 2, the history 1.
 - **`GET /me/new-episodes?days=7`** → `{items: [NewEpisodeItem]}`, at most 30, newest first (HANDOFF §6's "New episodes" row):
   ```
   NewEpisodeItem {
@@ -796,7 +798,7 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
     webdav_path, webdav_url, download, review_job_id   // as Up next's
   }
   ```
-  - Regular episodes that aired in the last `days` days (1–30, default 7; anything else is `400 bad_request`) and haven't been watched: the library shows' episodes plus the Trakt calendar's, once each. Dropped and hidden shows never show.
+  - Regular episodes that aired in the last `days` days (1–30, default 7; anything else is `400 bad_request`) and haven't been watched: the library shows' episodes plus the Trakt calendar's, once each. Dropped and hidden shows never show. The window runs from 00:00 UTC `days` days before today until now, by `aired_at`; a calendar entry the library lists (the matching rule) is that episode, aired when the calendar says.
 - **`GET /me/watchlist?type=movie|tv`** → `{items: [WatchlistItem]}`, newest listed first: `{media_type, tmdb_id, title, year, poster_path, listed_at, library}`, where `library` is `SimilarTitle.library` (`{library_id, availability_stage, episodes_total, episodes_ready} | null`) from one batch lookup. Another `type` is `400 bad_request`.
 - **`GET /me/history?page=&page_size=`** → `Paginated<HistoryItem>`, 50 a page by default (at most 200; otherwise `400 bad_request`), newest first (`watched_at DESC, id DESC`): `{id, media_type, tmdb_id, title, year, season, episode, episode_name, watched_at}`. `id` is Trakt's history event id and `tmdb_id` the movie's or the show's; `season`, `episode` and `episode_name` are null for movies.
 - **Without Trakt** (nothing imported: `off`, or `pending` before the first import) every `/me/*` answers `200` with no items, except new episodes, where the library's shows still count. In `reauth` they answer what was imported.

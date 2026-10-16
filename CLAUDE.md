@@ -129,6 +129,7 @@ POST /api/search/torrents/resolve          # A release without a magnet: the ser
 POST /api/search/torrents/inspect          # Inspect: a dry-run mapping job for a release or magnet (202 {job_id})
 GET|PUT /api/settings/quality-profile      # The quality profile search ranks by
 GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
+GET  /api/me/up-next|new-episodes?days=|watchlist?type=|history   # From what Trakt imported, with the library's files; empty without Trakt, but new episodes of library shows
 ```
 Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)").
 
@@ -159,6 +160,7 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `internal/api/router.go` - REST API endpoints
 - `internal/library/` - Models, repositories, embedded migrations
 - `internal/catalog/` - Title pages, seasons and `/library`: availability stages, episode states, ranges, "more like this"
+- `internal/me/` - `/me` (B5): Up next (`upnext.go`, pure rules), new episodes, watchlist, history; `library/trakt_reads.go` reads the Trakt tables, with the one episode matching rule (`sameEpisode`) and `EpisodesByKeys`
 - `internal/metadata/` - TMDB sync into the library (specials, absolute numbering, anime detection) and `backfill-metadata`
 - `internal/tmdb/` - TMDB client with retries, rate limit and the `tmdb_cache` cache
 - `internal/artwork/` - Backdrop dominant colour for the hero glow
