@@ -161,6 +161,11 @@ func (r *TraktAuthRepository) Purge(ctx context.Context) error {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
+	// The connection's row first, as a sync write takes it
+	// (TraktSyncStore): a write in flight finishes before the purge.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM trakt_auth WHERE id = 1 FOR UPDATE`); err != nil {
+		return fmt.Errorf("failed to lock the Trakt connection: %w", err)
+	}
 	if err := purgeTrakt(ctx, tx); err != nil {
 		return err
 	}
