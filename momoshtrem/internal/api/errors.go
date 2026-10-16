@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,6 +34,17 @@ const (
 	// CodeTorrentUnavailable is a 502: the indexer's link for a search
 	// result gave no torrent.
 	CodeTorrentUnavailable = "torrent_unavailable"
+	// Recommendations and Ask (#9): 409 recs_disabled (refresh while
+	// rec_enabled is off), 409 no_history (refresh without enough Trakt
+	// history), 429 budget_exceeded (the month's AI budget is spent), 409
+	// ask_busy (another turn is streaming), 409 thread_full (20 turns), 429
+	// ask_limit (30 asks today). The 429s carry resets_at.
+	CodeRecsDisabled   = "recs_disabled"
+	CodeNoHistory      = "no_history"
+	CodeBudgetExceeded = "budget_exceeded"
+	CodeAskBusy        = "ask_busy"
+	CodeThreadFull     = "thread_full"
+	CodeAskLimit       = "ask_limit"
 )
 
 // StatusClientClosedRequest (nginx's 499) answers a request the client
@@ -52,6 +64,14 @@ type ErrorDetail struct {
 	// endpoint says so (the quality profile), so the UI can show the
 	// message next to it.
 	Field string `json:"field,omitempty"`
+	// ResetsAt is when a 429's limit lifts (the AI budget, Ask's daily
+	// limit).
+	ResetsAt *time.Time `json:"resets_at,omitempty"`
+}
+
+// limitResponse writes a 429 that lifts at resetsAt.
+func limitResponse(c *gin.Context, code, message string, resetsAt time.Time) {
+	c.JSON(http.StatusTooManyRequests, ErrorBody{Error: ErrorDetail{Code: code, Message: message, ResetsAt: &resetsAt}})
 }
 
 // errorResponse writes an error with a code derived from the HTTP status.
