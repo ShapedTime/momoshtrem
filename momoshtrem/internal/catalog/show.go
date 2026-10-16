@@ -11,9 +11,9 @@ import (
 )
 
 // ShowTitle builds GET /titles/tv/{tmdb_id}. Queries: the show, its episodes
-// (one lean query however many there are), its mapping review, the TMDB
-// cache, the similar titles' library state and the colour cache. Episodes
-// themselves load per season (Season).
+// (one lean query however many there are), its mapping review, its watch
+// state, the TMDB cache, the similar titles' library state and the colour
+// cache. Episodes themselves load per season (Season).
 //
 // TMDB failures for a show in the library fall back to its stored metadata
 // (no cast, creators, networks or similar titles); for one that isn't,
@@ -33,6 +33,10 @@ func (s *Service) ShowTitle(ctx context.Context, tmdbID int) (*ShowTitle, error)
 			return nil, err
 		}
 	}
+	watch, err := s.showWatchState(ctx, tmdbID)
+	if err != nil {
+		return nil, err
+	}
 
 	details, err := s.tmdb.ShowDetails(ctx, tmdbID)
 	if err != nil {
@@ -51,12 +55,14 @@ func (s *Service) ShowTitle(ctx context.Context, tmdbID int) (*ShowTitle, error)
 	}
 	color := s.colorAsync(ctx, deref(title.BackdropPath))
 
+	title.WatchState = watch
 	if show != nil {
 		s.applyLibraryShow(title, show, seasons, rev)
 	} else {
 		title.Seasons = tmdbSeasons(details.Seasons)
 		title.DefaultSeason = firstSeason(title.Seasons)
 	}
+	preferNextSeason(title)
 
 	if details != nil {
 		if title.Similar, err = s.similar(ctx, "tv", details.Recommendations.Results, details.Similar.Results); err != nil {
@@ -196,6 +202,7 @@ func (s *Service) applyLibraryShow(title *ShowTitle, show *library.Show, seasons
 				HasFile:     ep.Assignment != nil,
 				Downloading: downloading,
 				UnderReview: rev.underReview(ep.ID),
+				Watched:     ep.Watched,
 			})
 		}
 		if visible {

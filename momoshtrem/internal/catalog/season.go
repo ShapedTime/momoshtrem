@@ -15,8 +15,9 @@ const arcsBudget = 3 * time.Second
 
 // Season builds GET /titles/tv/{tmdb_id}/seasons/{n}: one season's episodes
 // with their state and, for seasons over 20 episodes, jump ranges. Queries:
-// the season (one, with the show), the show's mapping review, plus two TMDB
-// cache reads for story arcs when a regular season is long. Returns
+// the season (one, with the show and Trakt's plays), the show's mapping
+// review, plus two TMDB cache reads for story arcs when a regular season is
+// long. Returns
 // ErrNotInLibrary when the show isn't in the library and ErrSeasonNotFound
 // for an unknown season, or specials while they're switched off.
 func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*SeasonDetail, error) {
@@ -37,7 +38,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 
 	today := s.today()
 	tv := s.torrentView()
-	paths := episodePaths(view.ShowTitle, view.ShowYear, seasonNumber, view.Season.Episodes)
+	paths := EpisodePaths(view.ShowTitle, view.ShowYear, seasonNumber, view.Season.Episodes)
 	episodes := make([]EpisodeSummary, 0, len(view.Season.Episodes))
 	for _, ep := range view.Season.Episodes {
 		downloading, done, length, _ := tv.fileProgress(ep.Assignment)
@@ -52,7 +53,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 			StillPath:      strPtr(ep.StillPath),
 			Runtime:        positive(ep.Runtime),
 			EpisodeType:    episodeType(ep.EpisodeType),
-			State:          EpisodeStateOf(ep.Assignment != nil, downloading, rev.underReview(ep.ID), ep.AirDate, today),
+			State:          EpisodeStateOf(ep.Watched, ep.Assignment != nil, downloading, rev.underReview(ep.ID), ep.AirDate, today),
 		}
 		if downloading {
 			summary.Pct = intPtr(pct(done, length))
@@ -105,10 +106,10 @@ func (s *Service) storyArcs(ctx context.Context, tmdbID, seasonNumber int) []Arc
 	return ArcsForSeason(group, seasonNumber)
 }
 
-// episodePaths is each assigned episode's WebDAV path, by episode id, as
+// EpisodePaths is each assigned episode's WebDAV path, by episode id, as
 // the tree names it: a file a job mapped to several episodes is one
 // "S01E01-E02" entry they share (vfs.SeasonEntries).
-func episodePaths(showTitle string, showYear, season int, episodes []library.Episode) map[int64]string {
+func EpisodePaths(showTitle string, showYear, season int, episodes []library.Episode) map[int64]string {
 	var ids []int64
 	var eps []vfs.SeasonEpisode
 	for _, ep := range episodes {

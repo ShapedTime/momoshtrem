@@ -27,8 +27,11 @@ type fakeStore struct {
 	// reviews answers ReviewState by "tv:<id>" or "movie:<id>"; none is
 	// an empty review.
 	reviews map[string]*library.ReviewState
-	calls   map[string]int
-	err     error
+	// watch answers WatchState by "tv:<tmdb_id>" or "movie:<tmdb_id>";
+	// none is nil (Trakt knows nothing).
+	watch map[string]*library.TraktWatchState
+	calls map[string]int
+	err   error
 }
 
 func newFakeStore() *fakeStore {
@@ -37,8 +40,16 @@ func newFakeStore() *fakeStore {
 		shows:   map[int]*library.Show{},
 		seasons: map[int64][]library.Season{},
 		reviews: map[string]*library.ReviewState{},
+		watch:   map[string]*library.TraktWatchState{},
 		calls:   map[string]int{},
 	}
+}
+
+func (f *fakeStore) WatchState(_ context.Context, mediaType string, tmdbID int) (*library.TraktWatchState, error) {
+	if err := f.count("watch"); err != nil {
+		return nil, err
+	}
+	return f.watch[fmt.Sprintf("%s:%d", mediaType, tmdbID)], nil
 }
 
 func (f *fakeStore) ReviewState(_ context.Context, mediaType string, id int64) (*library.ReviewState, error) {

@@ -74,8 +74,8 @@
     "torrent": null,
     "stream": null
   },
-  "watch_state": null,
   "recommendation_reason": null,
+  "watch_state": null,
   "status": "Returning Series",
   "is_anime": true,
   "episode_ordering": "absolute",

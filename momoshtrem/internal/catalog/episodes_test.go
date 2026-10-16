@@ -14,7 +14,8 @@ const (
 
 // season builds SeasonFacts from a compact spec, one rune per episode:
 // 'f' file, 'd' file downloading, 'm' aired without file, 'u' upcoming,
-// '?' no air date.
+// '?' no air date, 'w' watched without a file, 'W' watched with a file,
+// 'r' aired, no file, under review.
 func season(n int, spec string, absoluteFrom int) SeasonFacts {
 	s := SeasonFacts{Number: n}
 	for i, r := range spec {
@@ -32,6 +33,12 @@ func season(n int, spec string, absoluteFrom int) SeasonFacts {
 		case 'u':
 			ep.AirDate = future
 		case '?':
+		case 'w':
+			ep.Watched, ep.AirDate = true, past
+		case 'W':
+			ep.Watched, ep.HasFile, ep.AirDate = true, true, past
+		case 'r':
+			ep.UnderReview, ep.AirDate = true, past
 		}
 		s.Episodes = append(s.Episodes, ep)
 	}
@@ -65,6 +72,15 @@ func TestFirstMissingRun(t *testing.T) {
 		{"downloading counts as a file", []SeasonFacts{season(1, "fdm", 0)}, true, run(1, 3, 3, 1, nil, nil)},
 		{"no seasons", nil, false, nil},
 		{"no aired episodes", []SeasonFacts{season(1, "uu", 0)}, false, nil},
+		// A play covers an episode like a file (B5).
+		{"watched without files: after the last watched", []SeasonFacts{season(1, "wwmmu", 1)}, true, run(1, 3, 4, 2, intPtr(3), intPtr(4))},
+		{"a play after the last file", []SeasonFacts{season(1, "fwm", 0)}, true, run(1, 3, 3, 1, nil, nil)},
+		{"a file after the last play", []SeasonFacts{season(1, "wfm", 0)}, true, run(1, 3, 3, 1, nil, nil)},
+		{"gaps before the last play don't count", []SeasonFacts{season(1, "mmwu", 0)}, false, nil},
+		{"all watched", []SeasonFacts{season(1, "ww", 0), season(2, "w", 0)}, false, nil},
+		{"watched with a file", []SeasonFacts{season(1, "Wm", 0)}, true, run(1, 2, 2, 1, nil, nil)},
+		{"a watched special isn't the last play", []SeasonFacts{season(0, "w", 0), season(1, "mm", 0)}, true, run(1, 1, 2, 2, nil, nil)},
+		{"under review stays in the frontier", []SeasonFacts{season(1, "frm", 0)}, true, run(1, 2, 3, 2, nil, nil)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,6 +156,27 @@ func TestSummarizeShow(t *testing.T) {
 	empty := SummarizeShow(nil, today)
 	if empty.Seasons == nil || len(empty.Seasons) != 0 || empty.DefaultSeason != nil || empty.AnyFile {
 		t.Errorf("empty show = %+v", empty)
+	}
+}
+
+// Watched episodes (B5): ready counts those with a file; missing,
+// needs_review and upcoming leave them out; the frontier starts after the
+// last one.
+func TestSummarizeShow_Watched(t *testing.T) {
+	// E1 watched with a file, E2–E3 watched (E3 also under review), E4
+	// under review, E5 missing, E6 watched before TMDB says it airs.
+	s1 := season(1, "Wwwrmw", 0)
+	s1.Episodes[2].UnderReview = true
+	s1.Episodes[5].AirDate = future
+
+	got := SummarizeShow([]SeasonFacts{s1}, today)
+	want := SeasonSummary{SeasonNumber: 1, Name: "Season 1", EpisodesTotal: 6, Ready: 1, Missing: 1, NeedsReview: 1}
+	if !reflect.DeepEqual(got.Seasons, []SeasonSummary{want}) {
+		t.Errorf("season = %+v, want %+v", got.Seasons, want)
+	}
+	// E5 is missing, but before the last play (E6): the frontier is empty.
+	if got.Frontier || got.Missing != nil || got.EpisodesReady != 1 || !got.AnyFile {
+		t.Errorf("summary = %+v", got)
 	}
 }
 

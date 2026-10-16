@@ -26,6 +26,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/identify"
 	"github.com/shapedtime/momoshtrem/internal/identify/ai"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/me"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
@@ -565,6 +566,17 @@ func main() {
 		slog.Error("Failed to restore torrent pauses; paused torrents run until paused again", "error", err)
 	}
 	apiOpts.Activity = activityService
+
+	// /me (B5): Up next, new episodes, the watchlist and the history, from
+	// what the Trakt sync imported, with the title pages' library state and
+	// download progress. Without Trakt the lists are empty, but new
+	// episodes of the library's shows.
+	apiOpts.Me = me.New(me.Deps{
+		Store:           library.NewCatalogRepository(db),
+		Settings:        settingsRepo,
+		Catalog:         catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db), Torrents: torrentService}),
+		WebDAVPublicURL: webdavPublicURL,
+	})
 
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)

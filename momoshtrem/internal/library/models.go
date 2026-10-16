@@ -133,6 +133,9 @@ type Episode struct {
 
 	// Loaded on demand
 	Assignment *TorrentAssignment
+	// Watched: Trakt has a play of it (B5; the matching rule of PLAN §6
+	// "Watch state rules"). CatalogRepository's episode reads set it.
+	Watched bool
 }
 
 // AssignmentKind is where an assignment's file comes from.

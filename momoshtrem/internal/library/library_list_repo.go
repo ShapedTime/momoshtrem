@@ -17,8 +17,7 @@ const (
 	LibrarySortSize        = "size"
 )
 
-// Library status filters the database can answer. Watching needs B5's
-// watch history: until then it matches nothing.
+// Library status filters the database can answer.
 const (
 	LibraryStatusReady       = "ready"
 	LibraryStatusIncomplete  = "incomplete"
@@ -67,10 +66,17 @@ type LibraryItem struct {
 	PosterPath string
 	CreatedAt  time.Time
 	// Shows only (nil for movies): regular episodes that aired or have a
-	// file, and those with a file.
-	EpisodesTotal *int
-	EpisodesReady *int
-	SizeBytes     int64
+	// file, those with a file, and those Trakt has a play of.
+	EpisodesTotal   *int
+	EpisodesReady   *int
+	EpisodesWatched *int
+	// LastWatchedAt is the movie's last play, or the show's last watched
+	// episode, on Trakt; nil without one.
+	LastWatchedAt *time.Time
+	// Watching: a show with 0 < watched < total that isn't dropped or
+	// hidden on Trakt (status=watching).
+	Watching  bool
+	SizeBytes int64
 	// NeedsReview counts the files of the title's open mapping jobs that
 	// need a look (PLAN §6 "Review rules").
 	NeedsReview int
@@ -97,7 +103,7 @@ type LibraryItem struct {
 
 // FrontierRun is the first run of a show's frontier (PLAN §6 "Availability
 // rules"): consecutive aired regular episodes of one season, after the last
-// one with a file.
+// one with a file or a play.
 type FrontierRun struct {
 	SeasonNumber int
 	From, To     int  // in-season episode numbers
@@ -110,6 +116,7 @@ type FrontierRun struct {
 // IDs, never the type or status.
 type LibraryCounts struct {
 	All, Movies, Shows int
+	Watching           int
 	Ready, Incomplete  int
 	NeedsReview        int
 }
@@ -137,10 +144,10 @@ type LibraryListing struct {
 //   - movie: needs_torrent without an active assignment, downloading while
 //     its file is being fetched, else ready;
 //   - show: needs_torrent with nothing assigned or a non-empty frontier
-//     (a regular episode aired after the last assigned one), downloading
-//     while any assigned file is being fetched, else ready. Specials never
-//     count towards the frontier, and are left out entirely while the show's
-//     include_specials is off.
+//     (a regular episode aired after the last one with a file or a play),
+//     downloading while any assigned file is being fetched, else ready.
+//     Specials never count towards the frontier, and are left out entirely
+//     while the show's include_specials is off.
 //
 // An item has a file when it has an active assignment (its row id): an
 // HDRezka row has no info hash. Only torrent files are ever downloading.
@@ -151,8 +158,14 @@ type LibraryListing struct {
 // ReviewState, and review_job_id is the newest of its review jobs.
 //
 // missing_* is a show's first frontier run (catalog.FirstMissingRun): from
-// the first aired regular episode after the last assigned one, up to the
-// next one in that season that hasn't aired.
+// the first aired regular episode after the last one with a file or a play
+// (last_covered), up to the next one in that season that hasn't aired.
+//
+// The watch state is Trakt's (PLAN §6 "Watch state rules"): an episode is
+// watched by the matching rule (episodeWatchedSQL), episodes_watched counts
+// the regular ones, and last_watched_at is the movie's last play or the
+// show's last watched episode. watching is a show with 0 < episodes_watched
+// < episodes_total that Trakt doesn't list as dropped or hidden.
 //
 // Episode positions are encoded as season·10⁶ + episode so MAX can compare
 // them.
@@ -186,8 +199,10 @@ movie_items AS (
 	       CASE WHEN dl.fetching THEN jsonb_build_array(jsonb_build_object('h', ta.info_hash, 'p', ta.file_path))
 	            ELSE '[]'::jsonb END AS downloading,
 	       NULL::int AS missing_season, NULL::int AS missing_from, NULL::int AS missing_to,
-	       NULL::int AS missing_absolute_from, NULL::int AS missing_absolute_to, NULL::bigint AS missing_count
+	       NULL::int AS missing_absolute_from, NULL::int AS missing_absolute_to, NULL::bigint AS missing_count,
+	       NULL::bigint AS episodes_watched, wm.last_watched_at, FALSE AS watching
 	FROM movies m
+	LEFT JOIN trakt_watched_movies wm ON wm.tmdb_id = m.tmdb_id
 	LEFT JOIN LATERAL (
 		SELECT t.id, t.kind, t.info_hash, t.file_path, t.file_size, t.resolution
 		FROM torrent_assignments t
@@ -206,6 +221,7 @@ show_episodes AS (
 	       ta.id AS ta_id, ta.kind, ta.info_hash, ta.file_path, ta.file_size,
 	       COALESCE(ta.kind = 'torrent' AND (ta.info_hash, ta.file_path) IN (SELECT info_hash, file_path FROM downloading),
 	                FALSE) AS fetching,
+	       ` + episodeWatchedSQL("s.tmdb_id", libraryEpisode, `NOT $3::boolean OR w.show_tmdb_id = ANY($5::int[])`) + ` AS watched,
 	       sn.season_number::bigint * 1000000 + e.episode_number AS position
 	FROM shows s
 	JOIN seasons sn ON sn.show_id = s.id AND (sn.season_number > 0 OR s.include_specials)
@@ -223,8 +239,9 @@ show_stats AS (
 	SELECT show_id,
 	       COUNT(*) FILTER (WHERE season_number > 0 AND (ta_id IS NOT NULL OR air_date <= $6)) AS episodes_total,
 	       COUNT(*) FILTER (WHERE season_number > 0 AND ta_id IS NOT NULL) AS episodes_ready,
+	       COUNT(*) FILTER (WHERE season_number > 0 AND watched) AS episodes_watched,
 	       COUNT(ta_id) AS assigned,
-	       MAX(position) FILTER (WHERE season_number > 0 AND ta_id IS NOT NULL) AS last_assigned,
+	       MAX(position) FILTER (WHERE season_number > 0 AND (ta_id IS NOT NULL OR watched)) AS last_covered,
 	       MAX(position) FILTER (WHERE season_number > 0 AND air_date <= $6) AS last_aired,
 	       BOOL_OR(fetching) AS downloading,
 	       COALESCE(jsonb_agg(DISTINCT jsonb_build_object('h', info_hash, 'p', file_path)) FILTER (WHERE fetching),
@@ -240,7 +257,7 @@ show_sizes AS (
 frontier AS (
 	SELECT se.show_id, se.season_number, se.episode_number, se.absolute_number, se.air_date, se.position
 	FROM show_episodes se JOIN show_stats st ON st.show_id = se.show_id
-	WHERE se.season_number > 0 AND se.position > COALESCE(st.last_assigned, -1)
+	WHERE se.season_number > 0 AND se.position > COALESCE(st.last_covered, -1)
 ),
 frontier_start AS (
 	SELECT DISTINCT ON (show_id) show_id, season_number, position
@@ -271,7 +288,7 @@ show_items AS (
 	SELECT 'tv'::text, s.id, s.tmdb_id, s.title, s.year, COALESCE(s.poster_path, ''), s.created_at,
 	       COALESCE(st.episodes_total, 0), COALESCE(st.episodes_ready, 0), COALESCE(sz.size_bytes, 0),
 	       COALESCE((SELECT rc.needs_review FROM review_counts rc WHERE rc.show_id = s.id), 0)::bigint,
-	       CASE WHEN COALESCE(st.assigned, 0) = 0 OR st.last_aired > COALESCE(st.last_assigned, -1) THEN 'needs_torrent'
+	       CASE WHEN COALESCE(st.assigned, 0) = 0 OR st.last_aired > COALESCE(st.last_covered, -1) THEN 'needs_torrent'
 	            WHEN st.downloading THEN 'downloading'
 	            ELSE 'ready' END,
 	       (SELECT rn.job_id FROM review_newest rn WHERE rn.show_id = s.id),
@@ -283,7 +300,11 @@ show_items AS (
 	           WHERE sa.show_id = s.id
 	       ),
 	       COALESCE(st.files, '[]'::jsonb),
-	       mr.season_number, mr.episode_from, mr.episode_to, mr.absolute_from, mr.absolute_to, mr.episodes
+	       mr.season_number, mr.episode_from, mr.episode_to, mr.absolute_from, mr.absolute_to, mr.episodes,
+	       COALESCE(st.episodes_watched, 0),
+	       (SELECT max(w.last_watched_at) FROM trakt_watched_episodes w WHERE w.show_tmdb_id = s.tmdb_id),
+	       COALESCE(st.episodes_watched, 0) > 0 AND st.episodes_watched < st.episodes_total
+	           AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = s.tmdb_id)
 	FROM shows s
 	LEFT JOIN show_stats st ON st.show_id = s.id
 	LEFT JOIN show_sizes sz ON sz.show_id = s.id
@@ -297,10 +318,9 @@ SELECT * FROM show_items`
 // librarySorts are the whitelisted ORDER BY clauses, each ending in a unique
 // tie-break so pages don't overlap.
 var librarySorts = map[string]string{
-	LibrarySortAdded: `created_at DESC, media_type, id`,
-	LibrarySortTitle: `lower(title), year, media_type, id`,
-	// No watch history until B5: newest first, like added.
-	LibrarySortLastWatched: `created_at DESC, media_type, id`,
+	LibrarySortAdded:       `created_at DESC, media_type, id`,
+	LibrarySortTitle:       `lower(title), year, media_type, id`,
+	LibrarySortLastWatched: `last_watched_at DESC NULLS LAST, created_at DESC, media_type, id`,
 	LibrarySortSize:        `size_bytes DESC, created_at DESC, media_type, id`,
 }
 
@@ -310,7 +330,7 @@ var libraryStatusFilters = map[string]string{
 	LibraryStatusReady:       ` AND stage = 'ready'`,
 	LibraryStatusIncomplete:  ` AND stage <> 'ready'`,
 	LibraryStatusNeedsReview: ` AND needs_review > 0`,
-	LibraryStatusWatching:    ` AND FALSE`, // B5
+	LibraryStatusWatching:    ` AND watching`,
 }
 
 // ListLibrary returns one page of library items, how many match in all, the
@@ -318,19 +338,47 @@ var libraryStatusFilters = map[string]string{
 // summary ride on a row of their own, so an empty page (filtered to
 // nothing, or past the end) still has them.
 func (r *CatalogRepository) ListLibrary(ctx context.Context, q LibraryQuery) (*LibraryListing, error) {
+	query, args, err := listLibraryQuery(q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list library: %w", err)
+	}
+	defer rows.Close()
+
+	listing := &LibraryListing{Items: []LibraryItem{}}
+	for rows.Next() {
+		item, err := scanLibraryRow(rows, listing)
+		if err != nil {
+			return nil, err
+		}
+		if item != nil {
+			listing.Items = append(listing.Items, *item)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read library: %w", err)
+	}
+	return listing, nil
+}
+
+// listLibraryQuery is ListLibrary's query and its arguments.
+func listLibraryQuery(q LibraryQuery) (string, []any, error) {
 	if q.MediaType != "" && q.MediaType != "movie" && q.MediaType != "tv" {
-		return nil, fmt.Errorf("unknown media type %q", q.MediaType)
+		return "", nil, fmt.Errorf("unknown media type %q", q.MediaType)
 	}
 	if q.Sort == "" {
 		q.Sort = LibrarySortAdded
 	}
 	order, ok := librarySorts[q.Sort]
 	if !ok {
-		return nil, fmt.Errorf("unknown library sort %q", q.Sort)
+		return "", nil, fmt.Errorf("unknown library sort %q", q.Sort)
 	}
 	statusFilter, ok := libraryStatusFilters[q.Status]
 	if !ok {
-		return nil, fmt.Errorf("unknown library status %q", q.Status)
+		return "", nil, fmt.Errorf("unknown library status %q", q.Status)
 	}
 
 	hashes, paths := splitFileRefs(q.Downloading)
@@ -352,8 +400,8 @@ func (r *CatalogRepository) ListLibrary(ctx context.Context, q LibraryQuery) (*L
 	// in_scope: the search and IDs, which the counts honour. matches adds
 	// the type and status.
 	matches := `in_scope AND ($7 = '' OR media_type = $7)` + statusFilter
-	rows, err := r.db.QueryContext(ctx, `
-		WITH items AS (`+libraryItemsSQL+`),
+	return `
+		WITH items AS (` + libraryItemsSQL + `),
 		scoped AS (
 			SELECT items.*,
 			       ($8 = '' OR title ILIKE $8 ESCAPE '\')
@@ -363,10 +411,11 @@ func (r *CatalogRepository) ListLibrary(ctx context.Context, q LibraryQuery) (*L
 			FROM items
 		),
 		stats AS (
-			SELECT count(*) FILTER (WHERE `+matches+`) AS total,
+			SELECT count(*) FILTER (WHERE ` + matches + `) AS total,
 			       count(*) FILTER (WHERE in_scope) AS c_all,
 			       count(*) FILTER (WHERE in_scope AND media_type = 'movie') AS c_movies,
 			       count(*) FILTER (WHERE in_scope AND media_type = 'tv') AS c_shows,
+			       count(*) FILTER (WHERE in_scope AND watching) AS c_watching,
 			       count(*) FILTER (WHERE in_scope AND stage = 'ready') AS c_ready,
 			       count(*) FILTER (WHERE in_scope AND stage <> 'ready') AS c_incomplete,
 			       count(*) FILTER (WHERE in_scope AND needs_review > 0) AS c_needs_review,
@@ -376,40 +425,22 @@ func (r *CatalogRepository) ListLibrary(ctx context.Context, q LibraryQuery) (*L
 			FROM scoped
 		),
 		page AS (
-			SELECT scoped.*, row_number() OVER (ORDER BY `+order+`) AS rn
+			SELECT scoped.*, row_number() OVER (ORDER BY ` + order + `) AS rn
 			FROM scoped
-			WHERE `+matches+`
-			ORDER BY `+order+`
+			WHERE ` + matches + `
+			ORDER BY ` + order + `
 			LIMIT $9 OFFSET $10
 		)
-		SELECT st.total, st.c_all, st.c_movies, st.c_shows, st.c_ready, st.c_incomplete, st.c_needs_review,
+		SELECT st.total, st.c_all, st.c_movies, st.c_shows, st.c_watching, st.c_ready, st.c_incomplete, st.c_needs_review,
 		       st.s_total, st.s_size, st.s_ready,
 		       p.media_type, p.id, p.tmdb_id, p.title, p.year, p.poster_path, p.created_at,
 		       p.episodes_total, p.episodes_ready, p.size_bytes, p.needs_review, p.stage, p.review_job_id,
 		       p.runtime, p.resolution, p.file_path, p.has_file, p.downloading,
-		       p.missing_season, p.missing_from, p.missing_to, p.missing_absolute_from, p.missing_absolute_to, p.missing_count
+		       p.missing_season, p.missing_from, p.missing_to, p.missing_absolute_from, p.missing_absolute_to, p.missing_count,
+		       p.episodes_watched, p.last_watched_at, p.watching
 		FROM stats st LEFT JOIN page p ON TRUE
 		ORDER BY p.rn
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list library: %w", err)
-	}
-	defer rows.Close()
-
-	listing := &LibraryListing{Items: []LibraryItem{}}
-	for rows.Next() {
-		item, err := scanLibraryRow(rows, listing)
-		if err != nil {
-			return nil, err
-		}
-		if item != nil {
-			listing.Items = append(listing.Items, *item)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read library: %w", err)
-	}
-	return listing, nil
+	`, args, nil
 }
 
 // LibraryItems returns one page of library items and how many match in all
@@ -432,20 +463,22 @@ func scanLibraryRow(rows *sql.Rows, listing *LibraryListing) (*LibraryItem, erro
 		resolution, filePath            sql.NullString
 		id, tmdbID, year, size, review  sql.NullInt64
 		episodesTotal, episodesReady    sql.NullInt64
+		episodesWatched                 sql.NullInt64
 		reviewJob, runtime              sql.NullInt64
-		created                         sql.NullTime
-		hasFile                         sql.NullBool
+		created, lastWatched            sql.NullTime
+		hasFile, watching               sql.NullBool
 		downloading                     []byte
 		missingSeason, missingFrom      sql.NullInt64
 		missingTo, missingCount         sql.NullInt64
 		missingAbsFrom, missingAbsTo    sql.NullInt32
 	)
-	if err := rows.Scan(&listing.Total, &c.All, &c.Movies, &c.Shows, &c.Ready, &c.Incomplete, &c.NeedsReview,
+	if err := rows.Scan(&listing.Total, &c.All, &c.Movies, &c.Shows, &c.Watching, &c.Ready, &c.Incomplete, &c.NeedsReview,
 		&s.Total, &s.SizeBytes, &s.Ready,
 		&mediaType, &id, &tmdbID, &title, &year, &poster, &created,
 		&episodesTotal, &episodesReady, &size, &review, &stage, &reviewJob,
 		&runtime, &resolution, &filePath, &hasFile, &downloading,
-		&missingSeason, &missingFrom, &missingTo, &missingAbsFrom, &missingAbsTo, &missingCount); err != nil {
+		&missingSeason, &missingFrom, &missingTo, &missingAbsFrom, &missingAbsTo, &missingCount,
+		&episodesWatched, &lastWatched, &watching); err != nil {
 		return nil, fmt.Errorf("failed to scan library item: %w", err)
 	}
 	if !id.Valid {
@@ -457,10 +490,11 @@ func scanLibraryRow(rows *sql.Rows, listing *LibraryListing) (*LibraryItem, erro
 		Year: int(year.Int64), PosterPath: poster.String, CreatedAt: created.Time,
 		SizeBytes: size.Int64, NeedsReview: int(review.Int64), ReviewJobID: nullInt64Ptr(reviewJob), Stage: stage.String,
 		Runtime: int(runtime.Int64), Resolution: resolution.String, FilePath: filePath.String, HasFile: hasFile.Bool,
+		LastWatchedAt: nullTimePtr(lastWatched), Watching: watching.Bool,
 	}
 	if episodesTotal.Valid {
-		n, m := int(episodesTotal.Int64), int(episodesReady.Int64)
-		item.EpisodesTotal, item.EpisodesReady = &n, &m
+		n, m, w := int(episodesTotal.Int64), int(episodesReady.Int64), int(episodesWatched.Int64)
+		item.EpisodesTotal, item.EpisodesReady, item.EpisodesWatched = &n, &m, &w
 	}
 	var files []struct {
 		Hash string `json:"h"`

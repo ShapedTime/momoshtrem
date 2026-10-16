@@ -14,8 +14,8 @@ import (
 const maxCast = 20
 
 // MovieTitle builds GET /titles/movie/{tmdb_id}. Queries: the movie with its
-// assignment, its mapping review, the TMDB cache, the similar titles'
-// library state and the colour cache.
+// assignment, its mapping review, its watch state, the TMDB cache, the
+// similar titles' library state and the colour cache.
 //
 // TMDB failures for a movie in the library fall back to its stored metadata
 // (no cast or similar titles); for one that isn't, they're returned
@@ -30,6 +30,10 @@ func (s *Service) MovieTitle(ctx context.Context, tmdbID int) (*MovieTitle, erro
 		if rev, err = s.reviewOf(ctx, string(library.JobMovie), movie.ID); err != nil {
 			return nil, err
 		}
+	}
+	watch, err := s.movieWatchState(ctx, tmdbID)
+	if err != nil {
+		return nil, err
 	}
 
 	details, err := s.tmdb.MovieDetails(ctx, tmdbID)
@@ -49,6 +53,7 @@ func (s *Service) MovieTitle(ctx context.Context, tmdbID int) (*MovieTitle, erro
 	}
 	color := s.colorAsync(ctx, deref(title.BackdropPath))
 
+	title.WatchState = watch
 	title.Library = s.movieLibrary(movie, s.torrentView())
 	rev.setOn(&title.Library)
 	if details != nil {

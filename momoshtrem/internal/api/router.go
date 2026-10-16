@@ -86,6 +86,12 @@ type Options struct {
 	// Trakt serves /integrations/trakt: connect, disconnect, settings and
 	// sync (B5). Nil makes those routes return 503.
 	Trakt Trakt
+	// Me serves /me: Up next, new episodes, the watchlist and the history
+	// (B5). Nil makes those routes return 503.
+	Me MeLists
+	// TraktNudge is nudged by GET /me/up-next (#132). Nil: reading Up next
+	// never starts a sync.
+	TraktNudge TraktNudger
 }
 
 // NewServer creates a new API server
@@ -211,6 +217,7 @@ func (s *Server) setupRoutes() {
 	s.registerInspectRoutes(api)    // Inspect: dry runs of a search result or magnet
 	s.registerSearchRoutes(api)     // Torrent search and resolve
 	s.registerTraktRoutes(api)      // Trakt connect, disconnect, settings and sync
+	s.registerMeRoutes(api)         // Up next, new episodes, watchlist and history (B5)
 }
 
 // Handler returns the HTTP handler
