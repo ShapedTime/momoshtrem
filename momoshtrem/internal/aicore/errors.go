@@ -80,6 +80,7 @@ const (
 	CapCost          = "cost"
 	CapToolCalls     = "tool_calls"
 	CapContinuations = "continuations"
+	CapWebSearches   = "web_searches"
 )
 
 // CapError is ErrCapReached naming the cap.

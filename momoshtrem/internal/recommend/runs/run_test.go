@@ -2,11 +2,13 @@ package runs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/aicore"
 	"github.com/shapedtime/momoshtrem/internal/aicore/fake"
@@ -24,7 +26,7 @@ import (
 func TestExecute_FullRun(t *testing.T) {
 	first := shelfOf("because-severance", "because", 1002, 8)
 	items := first["items"].([]map[string]any)
-	items[0]["title"] = "Wrong Title"                             // 1002: another title's name
+	items[0]["title"] = "Wrong Title"                                    // 1002: another title's name
 	items = append([]map[string]any{item(1001, "Watched it")}, items...) // 1001: watched
 	items = append(items, item(9999, "Not on TMDB"))
 	first["items"] = items
@@ -90,7 +92,7 @@ func TestExecute_FullRun(t *testing.T) {
 		t.Fatalf("requests = %d", len(reqs))
 	}
 	results := toolResults(t, reqs[2])
-	for _, want := range []string{`"why":"can't be picked: watched"`, `on TMDB, not “Wrong Title”`, `TMDB has no movie 9999`,
+	for _, want := range []string{`"why":"can't be picked: watched"`, `on TMDB, not “Wrong Title (2024)”`, `TMDB has no movie 9999`,
 		`"saved":"because-severance"`, `"titles":7`, `"shelves_done":1`} {
 		if !strings.Contains(results["toolu_2"], want) {
 			t.Errorf("submit_shelf's result lacks %s:\n%s", want, results["toolu_2"])
@@ -325,6 +327,106 @@ func TestExecute_APIError(t *testing.T) {
 	out := h.execute(t)
 	if out.Status != recommend.StatusFailed || h.store.failed != "Anthropic is unavailable (529 overloaded_error); the next run tries again." {
 		t.Errorf("outcome = %+v, failed %q", out, h.store.failed)
+	}
+}
+
+func fourShelves() []fake.Block {
+	var calls []fake.Block
+	for i, slug := range []string{"a", "b", "c", "d"} {
+		calls = append(calls, fake.ToolUse("toolu_"+slug, NameSubmitShelf, shelfOf(slug, "other", 1002+10*i, 6)))
+	}
+	return calls
+}
+
+// A run that reaches its own deadline publishes what it saved, as at a
+// cap, its final writes made past the deadline; short of shelves it fails
+// saying so. Only shutdown (the parent context) fails it outright.
+func TestExecute_Deadline(t *testing.T) {
+	saved := Timeout
+	t.Cleanup(func() { Timeout = saved })
+	Timeout = 300 * time.Millisecond
+
+	t.Run("enough shelves", func(t *testing.T) {
+		h := newHarness(t,
+			fake.Response{Blocks: fourShelves()},
+			fake.Response{Blocks: []fake.Block{fake.Text("Now the hero")}, Hang: true},
+		)
+		out := h.execute(t)
+		if out.Status != recommend.StatusSucceeded || !h.store.published || len(h.store.shelves) != 4 {
+			t.Errorf("outcome = %+v, store = %+v", out, h.store)
+		}
+	})
+	t.Run("short of shelves", func(t *testing.T) {
+		h := newHarness(t, fake.Response{Blocks: []fake.Block{fake.Text("Thinking")}, Hang: true})
+		out := h.execute(t)
+		if out.Status != recommend.StatusFailed || !strings.HasPrefix(h.store.failed, "The run took longer than") {
+			t.Errorf("outcome = %+v, failed %q", out, h.store.failed)
+		}
+	})
+	t.Run("shutdown", func(t *testing.T) {
+		Timeout = time.Minute
+		h := newHarness(t,
+			fake.Response{Blocks: fourShelves()},
+			fake.Response{Blocks: []fake.Block{fake.Text("Now the hero")}, Hang: true},
+		)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		out, err := h.runner.Execute(ctx, library.RecRun{ID: 42, Kind: "manual", Status: "queued", Model: "claude-opus-5-5"})
+		if err != nil || out.Status != recommend.StatusFailed || h.store.published || h.store.failed != "momoshtrem stopped during the run." {
+			t.Errorf("outcome = %+v, %v, store = %+v", out, err, h.store)
+		}
+	})
+}
+
+// A final write that fails is tried again, so the run doesn't stay active
+// (refreshing) until a restart.
+func TestExecute_FinalWriteRetried(t *testing.T) {
+	saved := writeRetries
+	t.Cleanup(func() { writeRetries = saved })
+	writeRetries = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
+
+	h := newHarness(t, fake.Response{Blocks: append(fourShelves(), fake.ToolUse("toolu_h", NameSubmitHeroPicks, heroOf(1002, 1012, 1022)))},
+		fake.Response{Blocks: []fake.Block{fake.Text("Done.")}})
+	h.store.failWrites = 2
+	if out := h.execute(t); out.Status != recommend.StatusSucceeded || !h.store.published || h.store.writes != 3 {
+		t.Errorf("outcome = %+v, writes %d", out, h.store.writes)
+	}
+
+	h = newHarness(t, fake.Response{Blocks: []fake.Block{fake.Text("Nothing.")}}, fake.Response{Blocks: []fake.Block{fake.Text("Still nothing.")}})
+	h.store.failWrites = 10
+	out, err := h.runner.Execute(context.Background(), library.RecRun{ID: 42, Kind: "manual", Status: "queued", Model: "claude-opus-5-5"})
+	if err == nil || out.Status != recommend.StatusFailed || h.store.writes != len(writeRetries)+1 {
+		t.Errorf("a write that keeps failing = %+v, %v after %d tries", out, err, h.store.writes)
+	}
+}
+
+// Web searches are capped per run, counted from usage (max_uses bounds one
+// call only); the web step's tally comes from usage too.
+func TestExecute_WebSearchCap(t *testing.T) {
+	saved := Caps
+	t.Cleanup(func() { Caps = saved })
+	Caps.WebSearches = 3
+	h := newHarness(t,
+		fake.Response{Blocks: append([]fake.Block{
+			fake.ServerToolUse("srvtoolu_1", "web_search", map[string]any{"query": "new"}),
+			fake.WebSearchResult("srvtoolu_1", "https://example.com"),
+		}, fourShelves()...), Usage: fake.Usage{InputTokens: 100, WebSearchRequests: 3, WebFetchRequests: 1}},
+	)
+	out := h.execute(t)
+	if out.Status != recommend.StatusSucceeded || len(h.srv.Requests()) != 1 || out.Usage.WebSearches != 3 {
+		t.Errorf("outcome = %+v after %d requests", out, len(h.srv.Requests()))
+	}
+	for _, st := range h.store.final.Steps {
+		if st.Step == recommend.StepWeb && deref(st.Detail) != "3 searches · 1 page" {
+			t.Errorf("web step = %q", deref(st.Detail))
+		}
+	}
+	if _, reached := remaining(Caps, &aicore.Result{Usage: aicore.Usage{WebSearches: 3}}); reached != aicore.CapWebSearches {
+		t.Errorf("remaining reached = %q", reached)
+	}
+	if left, reached := remaining(aicore.Caps{Calls: 5}, &aicore.Result{Usage: aicore.Usage{Calls: 2, WebSearches: 9}}); reached != "" ||
+		left != (aicore.Caps{Calls: 3}) {
+		t.Errorf("zero caps = %+v, %q; want them kept as no cap", left, reached)
 	}
 }
 

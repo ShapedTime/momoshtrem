@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -138,6 +139,26 @@ func (s *fakeStore) FailActiveRecRuns(_ context.Context, msg string) (int64, err
 	return n, nil
 }
 
+func (s *fakeStore) FailRecRun(_ context.Context, id int64, msg string, _ json.RawMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := &s.runs[id-1]
+	if r.Status != recommend.StatusQueued && r.Status != recommend.StatusRunning {
+		return library.ErrRecRunNotActive
+	}
+	r.Status, r.Error = recommend.StatusFailed, &msg
+	return nil
+}
+
+// add stores a run as another process would.
+func (s *fakeStore) add(r library.RecRun) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r.ID = int64(len(s.runs) + 1)
+	s.runs = append(s.runs, r)
+	return r.ID
+}
+
 func (s *fakeStore) set(id int64, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -151,16 +172,20 @@ func (s *fakeStore) all() []library.RecRun {
 }
 
 // The runs.ReadStore the usage page reads.
-func (s *fakeStore) GetRecRun(context.Context, int64) (*library.RecRun, error)          { return nil, nil }
-func (s *fakeStore) ListRecRuns(context.Context, int) ([]library.RecRun, error)         { return nil, nil }
-func (s *fakeStore) RecRunShelves(context.Context, int64) ([]library.RecShelfRow, error) { return nil, nil }
+func (s *fakeStore) GetRecRun(context.Context, int64) (*library.RecRun, error)  { return nil, nil }
+func (s *fakeStore) ListRecRuns(context.Context, int) ([]library.RecRun, error) { return nil, nil }
+func (s *fakeStore) RecRunShelves(context.Context, int64) ([]library.RecShelfRow, error) {
+	return nil, nil
+}
 func (s *fakeStore) RecRunHeroPicks(context.Context, int64) ([]library.RecHeroPickRow, error) {
 	return nil, nil
 }
 func (s *fakeStore) RecommendationReason(context.Context, library.TitleRef) (*string, error) {
 	return nil, nil
 }
-func (s *fakeStore) RecRunCostMeans(context.Context, int) (map[string]float64, error) { return nil, nil }
+func (s *fakeStore) RecRunCostMeans(context.Context, int) (map[string]float64, error) {
+	return nil, nil
+}
 
 // fakeExecutor runs a run by marking it succeeded; hold blocks it until
 // released.
@@ -269,7 +294,6 @@ func (e *env) waitWaiting(t *testing.T, n int) {
 	t.Helper()
 	waitUntil(t, "the schedule to wait", func() bool { return e.clock.afterCalls() >= n })
 }
-
 
 func TestSlots(t *testing.T) {
 	berlin, err := time.LoadLocation("Europe/Berlin")
@@ -544,6 +568,75 @@ func TestFirstSync(t *testing.T) {
 	if len(off.store.all())+len(unconfigured.store.all()) != 0 {
 		t.Error("a first run with picks off or without a key")
 	}
+}
+
+// A pending catch-up follows the schedule: switched to manual, it's
+// dropped (next_run_at null) and never runs.
+func TestSchedule_CatchUpDroppedOnManual(t *testing.T) {
+	friday1000 := friday0200.Add(8 * time.Hour)
+	before := library.RecRun{ID: 1, Kind: "scheduled", Status: "succeeded", CreatedAt: friday0200.Add(-23 * time.Hour)}
+	e := newEnv(t, friday1000, true, before)
+	e.start(t)
+	e.waitWaiting(t, 1)
+	if next, _ := e.s.NextRunAt(context.Background()); next == nil || !next.Equal(friday1000.Add(CatchUpDelay)) {
+		t.Fatalf("next run = %v, want the catch-up", next)
+	}
+	e.settings.update(func(s *library.AISettings) { s.RecSchedule = recommend.ScheduleManual })
+	if next, _ := e.s.NextRunAt(context.Background()); next != nil {
+		t.Errorf("manual: next run = %v", next)
+	}
+	e.s.Reschedule()
+	e.waitWaiting(t, 2)
+	e.s.mu.Lock()
+	pending := e.s.catchUp
+	e.s.mu.Unlock()
+	if !pending.IsZero() {
+		t.Errorf("catch-up still pending at %v", pending)
+	}
+	e.clock.Advance(CatchUpDelay)
+	time.Sleep(20 * time.Millisecond)
+	if e.exec.count() != 0 || len(e.store.all()) != 1 {
+		t.Errorf("a manual schedule caught up: %+v", e.store.all())
+	}
+	// Back to nightly: tomorrow's slot, not the dropped catch-up.
+	e.settings.update(func(s *library.AISettings) { s.RecSchedule = recommend.ScheduleNightly })
+	if next, _ := e.s.NextRunAt(context.Background()); next == nil || !next.Equal(time.Date(2026, 10, 17, 3, 0, 0, 0, time.UTC)) {
+		t.Errorf("nightly again: next run = %v", next)
+	}
+}
+
+// A run left running by another process is failed once it's older than a
+// run may be (runs.Timeout and a margin); a younger one (recommend-run in
+// another process) is joined. Startup's sweep doesn't see either: they're
+// written after it.
+func TestReap(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, friday0200, true)
+	e.start(t)
+	young := e.clock.Now().Add(-5 * time.Minute)
+	id := e.store.add(library.RecRun{Kind: "manual", Status: "running", Model: "claude-opus-5-5", CreatedAt: young, StartedAt: &young})
+	if got, err := e.s.Refresh(ctx); err != nil || got != id {
+		t.Fatalf("refresh during another process's run = %d, %v; want it joined", got, err)
+	}
+	e.clock.Advance(runs.Timeout + staleMargin)
+	fresh, err := e.s.Refresh(ctx)
+	if err != nil || fresh == id {
+		t.Fatalf("refresh after it went stale = %d, %v", fresh, err)
+	}
+	stale := e.store.all()[id-1]
+	if stale.Status != recommend.StatusFailed || *stale.Error != staleMessage {
+		t.Errorf("stale run = %+v", stale)
+	}
+	waitUntil(t, "the new run", func() bool { return e.exec.count() == 1 })
+
+	// A queued run nobody runs (its process died before starting it) is
+	// picked up by the worker.
+	waitUntil(t, "the run to finish", func() bool { return e.store.all()[fresh-1].Status == recommend.StatusSucceeded })
+	queued := e.store.add(library.RecRun{Kind: "manual", Status: "queued", Model: "claude-opus-5-5", CreatedAt: e.clock.Now()})
+	if got, _ := e.s.Refresh(ctx); got != queued {
+		t.Errorf("refresh = %d, want %d joined", got, queued)
+	}
+	waitUntil(t, "the orphaned run", func() bool { return e.exec.count() == 2 })
 }
 
 // Startup fails what a crash left active, with or without a key; without

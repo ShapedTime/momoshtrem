@@ -2,6 +2,7 @@ package aicore_test
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"github.com/shapedtime/momoshtrem/internal/aicore"
+	"github.com/shapedtime/momoshtrem/internal/aicore/fake"
 )
 
 // CountTokens sends Run's first request, less the fallbacks, to the free
@@ -61,6 +63,32 @@ func TestCountTokens(t *testing.T) {
 
 	if _, err := client.CountTokens(t.Context(), aicore.Request{Model: "gpt-5", Feature: "recs"}); err == nil {
 		t.Error("an invalid request was counted")
+	}
+}
+
+// Caps.WebSearches bounds a run's web searches in all, as usage counts
+// them: the call that reaches it still has its tools run, then the run
+// stops.
+func TestCaps_WebSearches(t *testing.T) {
+	srv := fake.New(t, fake.Response{
+		Blocks: []fake.Block{
+			fake.ServerToolUse("srvtoolu_1", "web_search", map[string]any{"query": "new films"}),
+			fake.WebSearchResult("srvtoolu_1", "https://example.com"),
+			fake.ToolUse("toolu_1", "get_candidates", map[string]any{"q": "x"}),
+		},
+		Usage: fake.Usage{InputTokens: 10, OutputTokens: 5, WebSearchRequests: 3},
+	})
+	var ran []string
+	req := request(tool{name: "get_candidates", log: &ran})
+	req.WebSearchMaxUses = 8
+	req.Caps = aicore.Caps{WebSearches: 3}
+	res, err := newClient(t, srv, nil).Run(t.Context(), req)
+	var capErr *aicore.CapError
+	if !errors.As(err, &capErr) || capErr.Cap != aicore.CapWebSearches || res.Usage.WebSearches != 3 || len(ran) != 1 {
+		t.Errorf("Run = %v (usage %+v, tools %v), want the web search cap after the tools ran", err, res.Usage, ran)
+	}
+	if len(srv.Requests()) != 1 {
+		t.Errorf("requests = %d", len(srv.Requests()))
 	}
 }
 

@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -35,6 +36,8 @@ type fakeStore struct {
 	failed    string
 	skipped   string
 	pruned    int
+	// failWrites fails that many final writes; writes counts them.
+	failWrites, writes int
 }
 
 func (s *fakeStore) StartRecRun(_ context.Context, _ int64, progress json.RawMessage) error {
@@ -64,12 +67,31 @@ func (s *fakeStore) SyncRecRunUsage(context.Context, int64) error {
 	return nil
 }
 
-func (s *fakeStore) PublishRecRun(_ context.Context, _ int64, progress json.RawMessage, shelves []library.RecShelfRow, picks []library.RecHeroPickRow) error {
+// flaky fails a final write while failWrites lasts, and counts the tries.
+func (s *fakeStore) flaky(ctx context.Context) error {
+	s.writes++
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if s.failWrites > 0 {
+		s.failWrites--
+		return errors.New("db down")
+	}
+	return nil
+}
+
+func (s *fakeStore) PublishRecRun(ctx context.Context, _ int64, progress json.RawMessage, shelves []library.RecShelfRow, picks []library.RecHeroPickRow) error {
+	if err := s.flaky(ctx); err != nil {
+		return err
+	}
 	s.published, s.shelves, s.picks, s.final = true, shelves, picks, DecodeProgress(progress)
 	return nil
 }
 
-func (s *fakeStore) FailRecRun(_ context.Context, _ int64, message string, progress json.RawMessage) error {
+func (s *fakeStore) FailRecRun(ctx context.Context, _ int64, message string, progress json.RawMessage) error {
+	if err := s.flaky(ctx); err != nil {
+		return err
+	}
 	s.failed = message
 	if progress != nil {
 		s.final = DecodeProgress(progress)
@@ -228,7 +250,7 @@ func (h *harness) execute(t *testing.T) Outcome {
 
 // item is a submitted title.
 func item(id int, reason string) map[string]any {
-	return map[string]any{"media_type": "movie", "tmdb_id": id, "title": movieTitle(id), "reason": reason}
+	return map[string]any{"media_type": "movie", "tmdb_id": id, "title": movieTitle(id), "year": 2024, "reason": reason}
 }
 
 // shelfInput is a submit_shelf input of movies from..from+n-1.
@@ -243,7 +265,7 @@ func shelfOf(slug, kind string, from, n int) map[string]any {
 func heroOf(ids ...int) map[string]any {
 	picks := []map[string]any{}
 	for _, id := range ids {
-		picks = append(picks, map[string]any{"media_type": "movie", "tmdb_id": id, "title": movieTitle(id),
+		picks = append(picks, map[string]any{"media_type": "movie", "tmdb_id": id, "title": movieTitle(id), "year": 2024,
 			"kicker": "Tonight's pick", "reason": "A quiet, strange workplace story like Severance."})
 	}
 	return map[string]any{"picks": picks}

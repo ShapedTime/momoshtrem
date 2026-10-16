@@ -151,6 +151,7 @@ func TestSubmitHeroPicks(t *testing.T) {
 		t.Errorf("message = %q", msg)
 	}
 	in := heroOf(1002, 1003, 1999)
+	in["picks"].([]map[string]any)[2]["year"] = 2027
 	in["picks"] = append(in["picks"].([]map[string]any), map[string]any{"media_type": "tv", "tmdb_id": 2001, "title": "Show 2001",
 		"kicker": strings.Repeat("Kicker ", 10), "reason": "Back next month."})
 	res, msg := runTool(t, submit, in)
@@ -195,6 +196,36 @@ func TestBadges(t *testing.T) {
 	} {
 		if got := deref(badge(tt.day, "2026-10-16")); got != tt.want {
 			t.Errorf("badge(%q) = %q, want %q", tt.day, got, tt.want)
+		}
+	}
+}
+
+// Each title comes with its year: more than a year off TMDB's is another
+// title (a remake, "Dark" for "Dark Matter"); 0 is unsure and passes.
+func TestSubmitYear(t *testing.T) {
+	b, _ := newTestBoard(&fakeTitles{})
+	in := shelfOf("years", "other", 1002, 6)
+	items := in["items"].([]map[string]any)
+	items[0]["year"] = 2019 // TMDB: 2024
+	items[1]["year"] = 0
+	items[2]["year"] = 2025
+	items = append(items, item(1020, "x"), item(1021, "y"))
+	in["items"] = items
+	res, msg := runTool(t, b.tools()[0], in)
+	if msg != "" || res["titles"] != 7.0 {
+		t.Fatalf("result = %v %s", res, msg)
+	}
+	d := res["dropped"].([]any)
+	if len(d) != 1 || d[0].(map[string]any)["tmdb_id"] != 1002.0 ||
+		d[0].(map[string]any)["why"] != "that tmdb_id is “Movie 1002 (2024)” on TMDB, not “Movie 1002 (2019)”: look the title up with tmdb_search" {
+		t.Errorf("dropped = %v", d)
+	}
+	for _, tt := range []struct {
+		given, actual int
+		want          bool
+	}{{2024, 2024, true}, {2023, 2024, true}, {2025, 2024, true}, {2022, 2024, false}, {0, 2024, true}, {2024, 0, true}} {
+		if got := sameYear(tt.given, tt.actual); got != tt.want {
+			t.Errorf("sameYear(%d, %d) = %v", tt.given, tt.actual, got)
 		}
 	}
 }

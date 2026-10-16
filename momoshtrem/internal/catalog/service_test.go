@@ -735,8 +735,6 @@ func TestReleaseName(t *testing.T) {
 	}
 }
 
-// Every JSON shape carries exactly the fields of the TypeScript contract
-// (web/src/lib/api/contract/titles.ts and library.ts).
 // fakeReasons answers the picks' reason for one title; err fails every
 // lookup.
 type fakeReasons struct {
@@ -780,6 +778,8 @@ func TestRecommendationReason(t *testing.T) {
 	}
 }
 
+// Every JSON shape carries exactly the fields of the TypeScript contract
+// (web/src/lib/api/contract/titles.ts and library.ts).
 func TestContractFields(t *testing.T) {
 	f := newFixture()
 	movie, err := f.svc.MovieTitle(context.Background(), duneTMDB)

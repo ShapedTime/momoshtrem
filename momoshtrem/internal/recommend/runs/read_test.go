@@ -79,9 +79,13 @@ type fakeReadStore struct {
 	picks                       []library.RecHeroPickRow
 }
 
-func (f *fakeReadStore) ActiveRecRun(context.Context) (*library.RecRun, error)          { return f.active, nil }
-func (f *fakeReadStore) LatestSucceededRecRun(context.Context) (*library.RecRun, error) { return f.succeeded, nil }
-func (f *fakeReadStore) LatestFinishedRecRun(context.Context) (*library.RecRun, error)  { return f.finished, nil }
+func (f *fakeReadStore) ActiveRecRun(context.Context) (*library.RecRun, error) { return f.active, nil }
+func (f *fakeReadStore) LatestSucceededRecRun(context.Context) (*library.RecRun, error) {
+	return f.succeeded, nil
+}
+func (f *fakeReadStore) LatestFinishedRecRun(context.Context) (*library.RecRun, error) {
+	return f.finished, nil
+}
 func (f *fakeReadStore) GetRecRun(_ context.Context, id int64) (*library.RecRun, error) {
 	if f.succeeded != nil && f.succeeded.ID == id {
 		return f.succeeded, nil

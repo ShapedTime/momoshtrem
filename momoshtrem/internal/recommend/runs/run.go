@@ -48,8 +48,6 @@ const (
 	// per API call; the prompt asks for a few searches in all.
 	WebSearchMaxUses = 8
 	WebFetchMaxUses  = 4
-	// Timeout bounds a run, its pre-checks and profile included.
-	Timeout = 20 * time.Minute
 	// KeepRuns is how many runs are kept (the newest succeeded one always
 	// is).
 	KeepRuns = 30
@@ -57,9 +55,19 @@ const (
 	storeTimeout = 10 * time.Second
 )
 
-// Caps bound one run (its nudge turn included). A design run on Opus is
-// about $0.36; the cost cap leaves room for web searches.
-var Caps = aicore.Caps{Calls: 30, Tokens: 3_000_000, CostUSD: 1.50, ToolCalls: 80}
+var (
+	// Caps bound one run (its nudge turn included). A design run on Opus
+	// is about $0.36; the cost cap leaves room for web searches, which
+	// WebSearches bounds per run (max_uses bounds one call only).
+	Caps = aicore.Caps{Calls: 30, Tokens: 3_000_000, CostUSD: 1.50, ToolCalls: 80, WebSearches: 20}
+	// Timeout bounds a run, its pre-checks and profile included. A run
+	// that reaches it publishes what it saved, as at a cap.
+	Timeout = 20 * time.Minute
+	// writeRetries are the waits between tries of a run's final write
+	// (succeeded, failed, skipped): a run left active shows as refreshing
+	// and every refresh would join it.
+	writeRetries = []time.Duration{time.Second, 4 * time.Second, 15 * time.Second}
+)
 
 // AI runs tool loops (aicore.Client).
 type AI interface {
@@ -149,23 +157,29 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 	defer cancel()
 	log := r.log.With("run", run.ID, "kind", run.Kind, "model", run.Model)
 
+	// How a run ends is written past its own deadline, and retried: a run
+	// left active shows as refreshing until a restart.
 	fail := func(msg string, err error, progress json.RawMessage) (Outcome, error) {
 		log.Warn("Picks run failed", "error", err, "message", msg)
-		wctx, done := context.WithTimeout(context.WithoutCancel(parent), storeTimeout)
-		defer done()
-		if serr := r.d.Store.FailRecRun(wctx, run.ID, msg, progress); serr != nil {
-			return Outcome{Status: recommend.StatusFailed, Error: msg}, serr
+		out := Outcome{Status: recommend.StatusFailed, Error: msg}
+		if serr := r.finalWrite(parent, func(wctx context.Context) error {
+			return r.d.Store.FailRecRun(wctx, run.ID, msg, progress)
+		}); serr != nil {
+			return out, serr
 		}
-		r.prune(wctx)
-		return Outcome{Status: recommend.StatusFailed, Error: msg}, nil
+		r.prune(parent)
+		return out, nil
 	}
 	skip := func(reason string) (Outcome, error) {
 		log.Info("Picks run skipped", "reason", reason)
-		if err := r.d.Store.SkipRecRun(ctx, run.ID, reason); err != nil {
-			return Outcome{Status: recommend.StatusSkipped, SkipReason: reason}, err
+		out := Outcome{Status: recommend.StatusSkipped, SkipReason: reason}
+		if err := r.finalWrite(parent, func(wctx context.Context) error {
+			return r.d.Store.SkipRecRun(wctx, run.ID, reason)
+		}); err != nil {
+			return out, err
 		}
-		r.prune(ctx)
-		return Outcome{Status: recommend.StatusSkipped, SkipReason: reason}, nil
+		r.prune(parent)
+		return out, nil
 	}
 
 	// Before it starts: the request, the budget, the history.
@@ -200,7 +214,10 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 	track := newTracker(ShelvesTarget, nil)
 	track.reach(recommend.StepHistory)
 	if err := r.d.Store.StartRecRun(ctx, run.ID, mustJSON(track.progress())); err != nil {
-		return Outcome{Status: recommend.StatusFailed}, err
+		if errors.Is(err, library.ErrRecRunNotActive) {
+			return Outcome{Status: recommend.StatusFailed}, err
+		}
+		return fail("Couldn't start the run.", err, nil)
 	}
 	track.save = func(p Progress) {
 		if err := r.d.Store.SetRecRunProgress(ctx, run.ID, mustJSON(p)); err != nil && ctx.Err() == nil {
@@ -230,7 +247,7 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 		track.detail(recommend.StepTMDB, fmt.Sprintf("%s · %s already seen",
 			plural(pool.Stats.Kept, "candidate", "candidates"), thousands(pool.Stats.Excluded)))
 	case ctx.Err() == nil && errors.Is(err, candidates.ErrNoSources):
-		log.Warn("No candidate pool tonight: TMDB answered none of its sources")
+		log.Warn("No candidate pool: TMDB answered none of its sources")
 		pool = nil
 	default:
 		return fail(stoppedOr(ctx, parent, "Couldn't build the candidate pool."), err, mustJSON(track.finish()))
@@ -243,7 +260,10 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 		return fail("Couldn't write the run's first message.", err, mustJSON(track.finish()))
 	}
 	req := r.request(run.Model, aicore.UserText(first), append(r.d.Tools(tools.Fixed{P: p, C: pool}), b.tools()...), track, run.ID)
-	req.Hooks.Call = func(aicore.CallInfo) {
+	var prior aicore.Usage // the loop's usage before the nudge turn
+	req.Hooks.Call = func(info aicore.CallInfo) {
+		total := prior.Add(info.Total)
+		track.webUsage(total.WebSearches, total.WebFetches)
 		wctx, done := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
 		defer done()
 		if err := r.d.Store.SyncRecRunUsage(wctx, run.ID); err != nil {
@@ -260,6 +280,7 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 		if next.Caps, reached = remaining(Caps, res); reached != "" {
 			err = &aicore.CapError{Cap: reached}
 		} else {
+			prior = usage
 			var more *aicore.Result
 			more, err = r.d.AI.Run(ctx, next)
 			usage = usage.Add(more.Usage)
@@ -269,40 +290,75 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 		err = errTooFewShelves
 	}
 	out := Outcome{Shelves: b.done(), HeroPicks: len(b.picks), Usage: usage}
-	if serr := r.d.Store.SyncRecRunUsage(context.WithoutCancel(ctx), run.ID); serr != nil {
+	if serr := r.syncUsage(parent, run.ID); serr != nil {
 		log.Warn("Failed to sum the run's usage", "error", serr)
 	}
 
-	// Publish what passed, or fail.
+	// Publish what passed, or fail. Shutdown fails the run; its own
+	// deadline, like a cap or an API error, publishes it when enough
+	// shelves passed.
 	switch {
-	case ctx.Err() != nil:
-		o, serr := fail(stoppedOr(ctx, parent, ""), ctx.Err(), mustJSON(track.finish()))
+	case parent.Err() != nil:
+		o, serr := fail(stoppedOr(ctx, parent, ""), parent.Err(), mustJSON(track.finish()))
 		o.Shelves, o.HeroPicks, o.Usage = out.Shelves, out.HeroPicks, usage
 		return o, serr
 	case b.done() < MinShelves:
-		o, serr := fail(runError(err, b.done()), err, mustJSON(track.finish()))
+		msg := runError(err, b.done())
+		if ctx.Err() != nil {
+			msg = stoppedOr(ctx, parent, "")
+		}
+		o, serr := fail(msg, err, mustJSON(track.finish()))
 		o.Shelves, o.HeroPicks, o.Usage = out.Shelves, out.HeroPicks, usage
 		return o, serr
 	case err != nil:
-		// Enough shelves passed before the loop stopped: they're worth
-		// publishing.
 		log.Warn("Picks run stopped early; publishing what it saved", "error", err, "shelves", b.done())
 	}
 	shelves, picks, err := b.rows()
 	if err != nil {
 		return fail("Couldn't store the shelves.", err, mustJSON(track.finish()))
 	}
-	if err := r.d.Store.PublishRecRun(ctx, run.ID, mustJSON(track.finish()), shelves, picks); err != nil {
+	if err := r.finalWrite(parent, func(wctx context.Context) error {
+		return r.d.Store.PublishRecRun(wctx, run.ID, mustJSON(track.finish()), shelves, picks)
+	}); err != nil {
 		if errors.Is(err, library.ErrRecRunNotActive) {
 			return Outcome{Status: recommend.StatusFailed}, err
 		}
 		return fail("Couldn't store the shelves.", err, nil)
 	}
-	r.prune(ctx)
+	r.prune(parent)
 	out.Status = recommend.StatusSucceeded
 	log.Info("Picks run succeeded", "shelves", out.Shelves, "hero_picks", out.HeroPicks, "api_calls", usage.Calls,
-		"cost_usd", usage.CostUSD)
+		"web_searches", usage.WebSearches, "cost_usd", usage.CostUSD)
 	return out, nil
+}
+
+// finalWrite writes how a run ended, past the run's own deadline, trying
+// again after writeRetries; a run gone from queued or running
+// (ErrRecRunNotActive) isn't tried again, nor is anything once parent
+// ends (shutdown: startup marks the run failed).
+func (r *Runner) finalWrite(parent context.Context, write func(context.Context) error) error {
+	var err error
+	for i := 0; ; i++ {
+		wctx, done := context.WithTimeout(context.WithoutCancel(parent), storeTimeout)
+		err = write(wctx)
+		done()
+		if err == nil || errors.Is(err, library.ErrRecRunNotActive) || i == len(writeRetries) {
+			return err
+		}
+		r.log.Warn("Failed to record how a picks run ended; trying again", "error", err, "in", writeRetries[i])
+		select {
+		case <-parent.Done():
+			return err
+		case <-time.After(writeRetries[i]):
+		}
+	}
+}
+
+// syncUsage sums the run's usage a last time, past its deadline.
+func (r *Runner) syncUsage(parent context.Context, id int64) error {
+	wctx, done := context.WithTimeout(context.WithoutCancel(parent), storeTimeout)
+	defer done()
+	return r.d.Store.SyncRecRunUsage(wctx, id)
 }
 
 // request is a run's request: the model, the byte-stable system prompt and
@@ -326,8 +382,8 @@ func (r *Runner) request(model string, first aicore.Message, list []agent.Tool, 
 	if track != nil {
 		req.Hooks = aicore.Hooks{
 			BlockStart: func(b aicore.Block) {
-				if b.Type == "server_tool_use" {
-					track.web(b.Name)
+				if b.Type == "server_tool_use" && (b.Name == "web_search" || b.Name == "web_fetch") {
+					track.reach(recommend.StepWeb) // the tally comes from usage, when the call ends
 				}
 			},
 			ToolStart: func(c aicore.ToolCall) { track.reach(stepOf(c.Name)) },
@@ -377,7 +433,10 @@ func (r *Runner) Prepare(ctx context.Context, model string) (*Prepared, error) {
 	return &Prepared{Request: req, Readiness: ready, Profile: p, Pool: pool, FirstTurn: first, SystemSize: len(systemPrompt)}, nil
 }
 
-func (r *Runner) prune(ctx context.Context) {
+// prune keeps the newest runs, past the run's deadline.
+func (r *Runner) prune(parent context.Context) {
+	ctx, done := context.WithTimeout(context.WithoutCancel(parent), storeTimeout)
+	defer done()
 	if n, err := r.d.Store.PruneRecRuns(ctx, KeepRuns); err != nil {
 		r.log.Warn("Failed to prune old runs", "error", err)
 	} else if n > 0 {
@@ -386,26 +445,31 @@ func (r *Runner) prune(ctx context.Context) {
 }
 
 // remaining is what's left of caps after res, for the nudge turn, and the
-// cap already reached, if one is ("" when none: a zero cap would mean no
-// cap at all).
+// cap already reached, if one is (""). A zero cap is no cap, and stays
+// zero.
 func remaining(caps aicore.Caps, res *aicore.Result) (aicore.Caps, string) {
-	left := aicore.Caps{
-		Calls:     caps.Calls - res.Usage.Calls,
-		Tokens:    caps.Tokens - res.Usage.Total(),
-		CostUSD:   caps.CostUSD - res.Usage.CostUSD,
-		ToolCalls: caps.ToolCalls - res.ToolCalls,
+	var left aicore.Caps
+	reached := ""
+	sub := func(limit, used int64, cap string) int64 {
+		if limit <= 0 {
+			return 0
+		}
+		if limit-used <= 0 && reached == "" {
+			reached = cap
+		}
+		return limit - used
 	}
-	switch {
-	case left.Calls <= 0:
-		return left, aicore.CapCalls
-	case left.Tokens <= 0:
-		return left, aicore.CapTokens
-	case left.CostUSD <= 0:
-		return left, aicore.CapCost
-	case left.ToolCalls <= 0:
-		return left, aicore.CapToolCalls
+	left.Calls = int(sub(int64(caps.Calls), int64(res.Usage.Calls), aicore.CapCalls))
+	left.Tokens = sub(caps.Tokens, res.Usage.Total(), aicore.CapTokens)
+	if caps.CostUSD > 0 {
+		left.CostUSD = caps.CostUSD - res.Usage.CostUSD
+		if left.CostUSD <= 0 && reached == "" {
+			reached = aicore.CapCost
+		}
 	}
-	return left, ""
+	left.ToolCalls = int(sub(int64(caps.ToolCalls), int64(res.ToolCalls), aicore.CapToolCalls))
+	left.WebSearches = sub(caps.WebSearches, res.Usage.WebSearches, aicore.CapWebSearches)
+	return left, reached
 }
 
 // historyDetail is the history step's tally: "2,184 plays · 312 ratings",
@@ -434,7 +498,7 @@ func stoppedOr(ctx, parent context.Context, msg string) string {
 // capNames name the caps for the user.
 var capNames = map[string]string{
 	aicore.CapCalls: "API calls", aicore.CapTokens: "tokens", aicore.CapCost: "cost",
-	aicore.CapToolCalls: "tool calls", aicore.CapContinuations: "web search rounds",
+	aicore.CapToolCalls: "tool calls", aicore.CapContinuations: "web search rounds", aicore.CapWebSearches: "web searches",
 }
 
 // runError is the failed run's message for the user.

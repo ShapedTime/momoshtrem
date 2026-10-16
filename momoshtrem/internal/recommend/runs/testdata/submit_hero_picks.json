@@ -24,6 +24,10 @@
               "description": "The title as TMDB names it: the server checks the id against it.",
               "type": "string"
             },
+            "year": {
+              "description": "Its release (or first air) year, as TMDB has it: the server checks the id against it too. 0 when unsure.",
+              "type": "integer"
+            },
             "kicker": {
               "description": "A short line above the title, at most 40 characters: A slow-burn mystery, From the makers of Dark.",
               "type": "string"
@@ -37,6 +41,7 @@
             "media_type",
             "tmdb_id",
             "title",
+            "year",
             "kicker",
             "reason"
           ],

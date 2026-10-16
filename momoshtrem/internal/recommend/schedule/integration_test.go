@@ -64,7 +64,9 @@ func (movieDetails) MovieDetails(_ context.Context, id int) (*tmdb.MovieDetails,
 		VoteAverage: 7, VoteCount: 100}, nil
 }
 
-func (movieDetails) ShowDetails(context.Context, int) (*tmdb.ShowDetails, error) { return nil, tmdb.ErrNotFound }
+func (movieDetails) ShowDetails(context.Context, int) (*tmdb.ShowDetails, error) {
+	return nil, tmdb.ErrNotFound
+}
 func (movieDetails) Search(context.Context, string, string, int) (*tmdb.ResultsPage, error) {
 	return &tmdb.ResultsPage{}, nil
 }

@@ -69,12 +69,16 @@ var submitShelfSchema = compact(`{
 						"description": "The title as TMDB names it: the server checks the id against it.",
 						"type": "string"
 					},
+					"year": {
+						"description": "Its release (or first air) year, as TMDB has it: the server checks the id against it too. 0 when unsure.",
+						"type": "integer"
+					},
 					"reason": {
 						"description": "Why this user will like it, in one line of at most 140 characters, grounded in their profile (a title they loved, a creator, a theme, a habit). No spoilers, no generic praise.",
 						"type": "string"
 					}
 				},
-				"required": ["media_type", "tmdb_id", "title", "reason"],
+				"required": ["media_type", "tmdb_id", "title", "year", "reason"],
 				"additionalProperties": false
 			}
 		}
@@ -98,6 +102,10 @@ var submitHeroPicksSchema = compact(`{
 						"description": "The title as TMDB names it: the server checks the id against it.",
 						"type": "string"
 					},
+					"year": {
+						"description": "Its release (or first air) year, as TMDB has it: the server checks the id against it too. 0 when unsure.",
+						"type": "integer"
+					},
 					"kicker": {
 						"description": "A short line above the title, at most 40 characters: A slow-burn mystery, From the makers of Dark.",
 						"type": "string"
@@ -107,7 +115,7 @@ var submitHeroPicksSchema = compact(`{
 						"type": "string"
 					}
 				},
-				"required": ["media_type", "tmdb_id", "title", "kicker", "reason"],
+				"required": ["media_type", "tmdb_id", "title", "year", "kicker", "reason"],
 				"additionalProperties": false
 			}
 		}
@@ -167,7 +175,7 @@ func (b *board) tools() []agent.Tool {
 		&submitTool{
 			name: NameSubmitShelf,
 			description: "Save one shelf of For You. Call it once per shelf, as soon as that shelf is ready: the user watches the shelves " +
-				"come in (2 of 5). The server checks every title: it must exist on TMDB under the title you give, and not be watched, " +
+				"come in (2 of 5). The server checks every title: it must exist on TMDB under the title and year you give, and not be watched, " +
 				"started, rated, hidden or dropped on Trakt, or turned down; the result lists what it dropped and why. A shelf left with " +
 				"fewer than 6 titles isn't saved. Submitting a slug again replaces that shelf, dropped titles and all: use it to replace " +
 				"them. At most 6 shelves.",
@@ -200,6 +208,7 @@ type titleInput struct {
 	MediaType string `json:"media_type"`
 	TMDBID    int    `json:"tmdb_id"`
 	Title     string `json:"title"`
+	Year      int    `json:"year"` // 0: unsure
 	Kicker    string `json:"kicker"`
 	Reason    string `json:"reason"`
 }
@@ -357,7 +366,7 @@ func (b *board) validate(ctx context.Context, in []titleInput, comingSoon bool, 
 			drops = append(drops, d)
 			continue
 		}
-		checks = append(checks, proposed{Ref: ref, Title: t.Title})
+		checks = append(checks, proposed{Ref: ref, Title: t.Title, Year: t.Year})
 		inputs = append(inputs, t)
 	}
 	verdicts, err := b.v.check(ctx, checks, comingSoon)

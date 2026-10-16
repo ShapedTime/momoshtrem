@@ -18,6 +18,7 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -41,6 +42,11 @@ const (
 	closeTimeout = 15 * time.Second
 	// restartedMessage is a run's error when startup finds it active.
 	restartedMessage = "momoshtrem restarted during the run."
+	// staleMargin is how long past runs.Timeout a run another process (or a
+	// lost final write) left running counts as stale, and staleMessage its
+	// error then.
+	staleMargin  = 10 * time.Minute
+	staleMessage = "The run stopped without finishing."
 )
 
 // Clock is the scheduler's time; tests drive a fake one.
@@ -63,6 +69,7 @@ type Store interface {
 	LatestSucceededRecRun(ctx context.Context) (*library.RecRun, error)
 	LatestRecRunCreatedAt(ctx context.Context) (at time.Time, ok bool, err error)
 	FailActiveRecRuns(ctx context.Context, message string) (int64, error)
+	FailRecRun(ctx context.Context, id int64, message string, progress json.RawMessage) error
 }
 
 var _ Store = (*library.RecRunRepository)(nil)
@@ -99,11 +106,12 @@ type Scheduler struct {
 	wake chan struct{} // the settings changed: plan again
 	work chan struct{} // a run was queued
 
-	mu      sync.Mutex
-	started bool
-	catchUp time.Time // a missed slot's run, pending
-	cancel  context.CancelFunc
-	done    chan struct{}
+	mu        sync.Mutex
+	started   bool
+	catchUp   time.Time // a missed slot's run, pending
+	executing int64     // the run the worker executes, 0 when idle
+	cancel    context.CancelFunc
+	done      chan struct{}
 }
 
 // New creates a Scheduler; Start runs it.
@@ -196,7 +204,7 @@ func (s *Scheduler) Refresh(ctx context.Context) (int64, error) {
 	if !settings.RecEnabled {
 		return 0, recommend.ErrDisabled
 	}
-	active, err := s.d.Store.ActiveRecRun(ctx)
+	active, err := s.reap(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -251,6 +259,9 @@ func (s *Scheduler) FirstSync(ctx context.Context) {
 		}
 		return
 	}
+	if _, err := s.reap(ctx); err != nil {
+		s.log.Warn("Couldn't check the active picks run", "error", err)
+	}
 	id, queued, err := s.d.Store.QueueRecRun(ctx, recommend.KindFirstSync, settings.RecModel)
 	if err != nil {
 		s.log.Warn("Failed to queue the first picks run", "error", err)
@@ -275,15 +286,15 @@ func (s *Scheduler) NextRunAt(ctx context.Context) (*time.Time, error) {
 	if !settings.RecEnabled {
 		return nil, nil
 	}
+	next, ok := NextSlot(settings.RecSchedule, s.d.Clock.Now())
+	if !ok {
+		return nil, nil // manual: a pending catch-up won't run either
+	}
 	s.mu.Lock()
 	catchUp := s.catchUp
 	s.mu.Unlock()
 	if !catchUp.IsZero() {
 		return &catchUp, nil
-	}
-	next, ok := NextSlot(settings.RecSchedule, s.d.Clock.Now())
-	if !ok {
-		return nil, nil
 	}
 	return &next, nil
 }
@@ -334,8 +345,16 @@ func (s *Scheduler) loop(ctx context.Context) {
 		next, scheduled := NextSlot(settings.RecSchedule, now)
 		scheduled = scheduled && settings.RecEnabled
 		s.mu.Lock()
+		if err == nil && !scheduled && !s.catchUp.IsZero() {
+			// Manual now, or off: the missed slot isn't run.
+			s.catchUp = time.Time{}
+			s.log.Info("Missed picks run dropped: the schedule is manual or picks are off")
+		}
 		catchUp := s.catchUp
 		s.mu.Unlock()
+		if _, err := s.reap(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("Couldn't check the active picks run", "error", err)
+		}
 
 		if scheduled {
 			wait = min(wait, next.Sub(now))
@@ -366,16 +385,19 @@ func (s *Scheduler) loop(ctx context.Context) {
 	}
 }
 
-// queueScheduled queues a scheduled run, unless picks are off; one already
-// active is joined.
+// queueScheduled queues a scheduled run, unless picks are off or the
+// schedule is manual; one already active is joined.
 func (s *Scheduler) queueScheduled(ctx context.Context) {
 	settings, err := s.d.Settings.AISettings(ctx)
 	if err != nil {
 		s.log.Warn("Scheduled picks run not queued: couldn't read the AI settings", "error", err)
 		return
 	}
-	if !settings.RecEnabled {
+	if _, ok := NextSlot(settings.RecSchedule, s.d.Clock.Now()); !ok || !settings.RecEnabled {
 		return
+	}
+	if _, err := s.reap(ctx); err != nil {
+		s.log.Warn("Couldn't check the active picks run", "error", err)
 	}
 	id, queued, err := s.d.Store.QueueRecRun(ctx, recommend.KindScheduled, settings.RecModel)
 	if err != nil {
@@ -410,12 +432,54 @@ func (s *Scheduler) worker(ctx context.Context) {
 			if run == nil || run.Status != recommend.StatusQueued {
 				break
 			}
-			if _, err := s.d.Runner.Execute(ctx, *run); err != nil {
+			s.mu.Lock()
+			s.executing = run.ID
+			s.mu.Unlock()
+			_, err = s.d.Runner.Execute(ctx, *run)
+			s.mu.Lock()
+			s.executing = 0
+			s.mu.Unlock()
+			if err != nil {
+				// Left active: reap fails it once it's stale.
 				s.log.Error("Failed to record the picks run", "run", run.ID, "error", err)
 				break
 			}
 		}
 	}
+}
+
+// reap is the active run, after failing one that's stale: running for
+// longer than a run may (runs.Timeout and a margin) while this process
+// isn't executing it, so its process died or lost its final write. Another
+// process's live run (recommend-run) is younger and kept. A queued run
+// this process isn't executing wakes the worker.
+func (s *Scheduler) reap(ctx context.Context) (*library.RecRun, error) {
+	active, err := s.d.Store.ActiveRecRun(ctx)
+	if err != nil || active == nil {
+		return active, err
+	}
+	s.mu.Lock()
+	mine := s.executing == active.ID
+	s.mu.Unlock()
+	if mine {
+		return active, nil
+	}
+	if active.Status == recommend.StatusQueued {
+		s.kick()
+		return active, nil
+	}
+	since := active.CreatedAt
+	if active.StartedAt != nil {
+		since = *active.StartedAt
+	}
+	if s.d.Clock.Now().Sub(since) <= runs.Timeout+staleMargin {
+		return active, nil
+	}
+	if err := s.d.Store.FailRecRun(ctx, active.ID, staleMessage, nil); err != nil && !errors.Is(err, library.ErrRecRunNotActive) {
+		return nil, err
+	}
+	s.log.Warn("Marked a stale picks run failed", "run", active.ID, "started", since)
+	return s.d.Store.ActiveRecRun(ctx)
 }
 
 // ---- The API and the usage page ----

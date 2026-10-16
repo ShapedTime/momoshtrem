@@ -34,10 +34,12 @@ type Titles interface {
 // detailWorkers is how many titles are resolved on TMDB at once.
 const detailWorkers = 4
 
-// proposed is a title the agent submitted: its id and the name it gave.
+// proposed is a title the agent submitted: its id, and the name and year
+// it gave (0: unsure).
 type proposed struct {
 	Ref   library.TitleRef
 	Title string
+	Year  int
 }
 
 // verdict is what validation made of a proposed title: kept with its
@@ -140,8 +142,8 @@ func (v *validator) resolve(ctx context.Context, t proposed, comingSoon bool, to
 		if err != nil {
 			return recommend.ItemMeta{}, tmdbDrop(err, what)
 		}
-		if !sameTitle(t.Title, d.Title, d.OriginalTitle) {
-			return recommend.ItemMeta{}, mismatch(t.Title, d.Title, d.Year())
+		if !sameTitle(t.Title, d.Title, d.OriginalTitle) || !sameYear(t.Year, d.Year()) {
+			return recommend.ItemMeta{}, mismatch(t, d.Title, d.Year())
 		}
 		return movieMeta(d, today), ""
 	}
@@ -149,10 +151,21 @@ func (v *validator) resolve(ctx context.Context, t proposed, comingSoon bool, to
 	if err != nil {
 		return recommend.ItemMeta{}, tmdbDrop(err, what)
 	}
-	if !sameTitle(t.Title, d.Name, d.OriginalName) {
-		return recommend.ItemMeta{}, mismatch(t.Title, d.Name, d.Year())
+	if !sameTitle(t.Title, d.Name, d.OriginalName) || !sameYear(t.Year, d.Year()) {
+		return recommend.ItemMeta{}, mismatch(t, d.Name, d.Year())
 	}
 	return showMeta(d, comingSoon, today), ""
+}
+
+// sameYear reports whether the agent's year fits TMDB's: a year apart is
+// fine (release dates differ by country); either one unknown (0) passes.
+// With the title it tells a remake from its original ("Dark" from "Dark
+// Matter" too, which the loose title check lets through).
+func sameYear(given, actual int) bool {
+	if given == 0 || actual == 0 {
+		return true
+	}
+	return given-actual <= 1 && actual-given <= 1
 }
 
 func tmdbDrop(err error, what string) string {
@@ -162,12 +175,15 @@ func tmdbDrop(err error, what string) string {
 	return "TMDB didn't answer for " + what + "; pick another title or submit it again later"
 }
 
-func mismatch(given, actual string, year int) string {
-	name := actual
+func mismatch(given proposed, actual string, year int) string {
+	name, want := actual, given.Title
 	if year > 0 {
 		name = fmt.Sprintf("%s (%d)", actual, year)
 	}
-	return fmt.Sprintf("that tmdb_id is “%s” on TMDB, not “%s”: look the title up with tmdb_search", name, given)
+	if given.Year > 0 {
+		want = fmt.Sprintf("%s (%d)", given.Title, given.Year)
+	}
+	return fmt.Sprintf("that tmdb_id is “%s” on TMDB, not “%s”: look the title up with tmdb_search", name, want)
 }
 
 func validRef(r library.TitleRef) bool {
@@ -265,7 +281,8 @@ func nonEmpty(s string) *string {
 // title or original title), loosely: case, accents and punctuation aside,
 // or one holding the other as whole words of four characters or more. It
 // catches an id that names another title altogether, not a sequel ("Dune"
-// passes for "Dune: Part Two"); the snapshot is TMDB's either way.
+// passes for "Dune: Part Two"); sameYear catches more. The snapshot is
+// TMDB's either way.
 func sameTitle(given string, names ...string) bool {
 	g := normalizeTitle(given)
 	if g == "" {

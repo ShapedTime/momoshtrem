@@ -93,10 +93,14 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 	}
 
 	if f.dryRun {
-		return recommendDryRun(ctx, os.Stdout, w, client, settings.RecModel)
+		return recommendDryRun(ctx, os.Stdout, w, client, settings.RecModel, settings.RecEnabled)
 	}
 	if client == nil {
 		slog.Error("ANTHROPIC_API_KEY is required for a run (try -dry-run without one)")
+		return 1
+	}
+	if !settings.RecEnabled {
+		slog.Error(`Personal picks are off (rec_enabled): turn them on in Settings › AI & picks, or PUT /api/settings/ai {"rec_enabled": true}`)
 		return 1
 	}
 	id, queued, err := w.runs.QueueRecRun(ctx, recommend.KindManual, settings.RecModel)
@@ -123,7 +127,7 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 
 // recommendDryRun builds the request a run would send first and reports
 // its size, and with a key its tokens (count_tokens is free).
-func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *aicore.Client, model string) int {
+func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *aicore.Client, model string, enabled bool) int {
 	prep, err := w.runner.Prepare(ctx, model)
 	if err != nil {
 		slog.Error("Couldn't build the run's request", "error", err)
@@ -141,6 +145,7 @@ func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *
 	if prep.Readiness.Enough() {
 		ready = "yes"
 	}
+	fmt.Fprintf(out, "  picks on:         %v (rec_enabled; a run needs them on)\n", enabled)
 	fmt.Fprintf(out, "  trakt connected:  %v\n", prep.Readiness.Connected)
 	fmt.Fprintf(out, "  loved titles:     %d (a run needs %d); goes ahead: %s\n", prep.Readiness.Counts.Loved, profile.MinLoved, ready)
 	fmt.Fprintf(out, "  profile:          %d bytes (budget %d); %d plays, %d ratings, %d loved\n", len(profileJSON), profile.MaxBytes,

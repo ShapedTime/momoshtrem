@@ -52,8 +52,6 @@ func stepOf(tool string) string {
 type tracker struct {
 	p    Progress
 	save func(Progress)
-
-	searches, fetches int
 }
 
 func newTracker(target int, save func(Progress)) *tracker {
@@ -93,23 +91,20 @@ func (t *tracker) detail(step, detail string) {
 	}
 }
 
-// web counts a server tool call: "3 searches · 1 page".
-func (t *tracker) web(tool string) {
-	switch tool {
-	case "web_search":
-		t.searches++
-	case "web_fetch":
-		t.fetches++
-	default:
+// webUsage is the run's web searches and fetches so far, as usage counts
+// them (server-side filtering may search more than the blocks show): "3
+// searches · 1 page".
+func (t *tracker) webUsage(searches, fetches int64) {
+	if searches <= 0 && fetches <= 0 {
 		return
 	}
 	t.reach(recommend.StepWeb)
 	parts := []string{}
-	if t.searches > 0 {
-		parts = append(parts, plural(t.searches, "search", "searches"))
+	if searches > 0 {
+		parts = append(parts, plural(int(searches), "search", "searches"))
 	}
-	if t.fetches > 0 {
-		parts = append(parts, plural(t.fetches, "page", "pages"))
+	if fetches > 0 {
+		parts = append(parts, plural(int(fetches), "page", "pages"))
 	}
 	t.detail(recommend.StepWeb, strings.Join(parts, " · "))
 }
