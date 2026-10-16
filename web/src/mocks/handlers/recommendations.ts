@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { AskEvent, MediaType, RecFeedbackSource, RecSignal } from '@/lib/api/contract';
+import { ASK_MESSAGE_MAX, askMessageLength } from '@/lib/recommendations/ask-href';
 import {
-  ASK_MESSAGE_MAX,
   clearRecFeedback,
   endAskTurn,
   listRuns,
@@ -107,7 +107,7 @@ export const recommendationsHandlers = [
     const body = await jsonBody(request);
     const message = isRecord(body) && typeof body.message === 'string' ? body.message.trim() : '';
     const threadId = isRecord(body) ? body.thread_id : undefined;
-    if (!message || message.length > ASK_MESSAGE_MAX || (threadId !== undefined && threadId !== null && !isPositiveInt(threadId))) {
+    if (!message || askMessageLength(message) > ASK_MESSAGE_MAX || (threadId !== undefined && threadId !== null && !isPositiveInt(threadId))) {
       return apiError(400, 'bad_request', 'Send a message of 1–500 characters, and thread_id to follow up.');
     }
     const result = startAsk(mockLibrary(), { message, thread_id: typeof threadId === 'number' ? threadId : undefined });

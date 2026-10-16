@@ -64,8 +64,10 @@ const DAY = 24 * HOUR;
 
 export const ASK_DAILY_LIMIT = 30;
 export const THREAD_MAX_TURNS = 20;
-export const ASK_MESSAGE_MAX = 500;
 const THREADS_LISTED = 50;
+/** A new thread's title (PLAN §6): at most 60 characters, cut back to a space past index 30, then "…". */
+const THREAD_TITLE_MAX = 60;
+const THREAD_TITLE_MIN_CUT = 30;
 const HERO_PER_DAY = 3;
 const SHELVES_TARGET = 5;
 /** Reads a run takes: queued → history → web → tmdb → writing (2 of 5) → writing (4 of 5) → done. */
@@ -930,12 +932,13 @@ function heroPicksOf(feedback: MockRecs['feedback'], run: MockRun, now: number):
 /** GET /recommendations/home. Reading moves the active run on. */
 export function recommendationsHome(library: MockLibrary, now = Date.now()): RecommendationsHome {
   const s = current(now);
-  if (!picksEnabled()) return { enabled: false, run: null, active_run: null, hero_picks: [], shelves: [] };
+  if (!picksEnabled()) return { configured: aiConfigured(), enabled: false, run: null, active_run: null, hero_picks: [], shelves: [] };
   advance(s, now);
   const run = newestSucceeded(s);
   const active = activeRun(s);
   const ctx = readContext(s, library);
   return {
+    configured: true,
     enabled: true,
     run: run ? summary(run) : null,
     active_run: active ? progress(active) : null,
@@ -980,13 +983,21 @@ function asksToday(s: MockRecs, now: number): number {
   return s.threads.flatMap((t) => t.turns).filter((turn) => localDay(turn.created) === today).length;
 }
 
-/** A new thread's title: the message, first letter up, cut at a word to 60 characters. */
+/**
+ * A new thread's title, exactly as PLAN §6 has it: the trimmed message,
+ * its first character upper-cased; over 60 characters, its first 60 cut
+ * back to their last space when that space's index is over 30, trailing
+ * whitespace trimmed, plus "…".
+ */
 function threadTitle(message: string): string {
-  const text = message.charAt(0).toUpperCase() + message.slice(1);
-  if (text.length <= 60) return text;
-  const cut = text.slice(0, 60);
+  // Code points, as Go's runes: an emoji is one character and is never split
+  const chars = Array.from(message);
+  const upper = chars[0]?.toUpperCase();
+  if (upper !== undefined && Array.from(upper).length === 1) chars[0] = upper; // unicode.ToUpper keeps one rune ("ß" stays)
+  if (chars.length <= THREAD_TITLE_MAX) return chars.join('');
+  const cut = chars.slice(0, THREAD_TITLE_MAX);
   const space = cut.lastIndexOf(' ');
-  return `${(space > 30 ? cut.slice(0, space) : cut).trimEnd()}…`;
+  return `${(space > THREAD_TITLE_MIN_CUT ? cut.slice(0, space) : cut).join('').trimEnd()}…`;
 }
 
 function threadSummary(thread: MockThread): AskThreadSummary {
@@ -1128,6 +1139,8 @@ export function endAskTurn(turn: MockTurn, status: Exclude<AskTurnStatus, 'strea
   turn.elapsed_ms ??= now - turn.created;
   // A turn cut short still paid for what it read
   if (status !== 'done' && turn.steps.length > 0) turn.cost = 0.01;
+  // An ended turn never shows a spinner: the step still active when it failed or stopped is dropped (PLAN §6)
+  turn.steps = turn.steps.filter((step) => step.state !== 'active');
   s.spend.ask.cost_usd += turn.cost;
   s.spend.ask.requests += status === 'done' ? ASK_REQUESTS : 1;
   const thread = s.threads.find((t) => t.turns.includes(turn));

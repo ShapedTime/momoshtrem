@@ -49,7 +49,7 @@ async function readUntilIdle(): Promise<RecommendationsHome> {
 describe('GET /recommendations/home', () => {
   it('serves last night’s picks: the design’s shelves, three hero picks and live library state', async () => {
     const home = await recApi.home();
-    expect(home).toMatchObject({ enabled: true, active_run: null, run: { id: 42, kind: 'scheduled', status: 'succeeded', model: 'claude-opus-5-5', cost_usd: 0.36 } });
+    expect(home).toMatchObject({ configured: true, enabled: true, active_run: null, run: { id: 42, kind: 'scheduled', status: 'succeeded', model: 'claude-opus-5-5', cost_usd: 0.36 } });
     expect(home.shelves.map((s) => [s.slug, s.kind])).toEqual([
       ['because-severance', 'because'],
       ['new-this-month', 'new'],
@@ -143,7 +143,7 @@ describe('runs', () => {
 
   it('queues the first_sync run once Trakt’s first import finishes', async () => {
     setMockScenario('trakt-off');
-    expect(await recApi.home()).toMatchObject({ enabled: true, run: null, active_run: null, shelves: [] });
+    expect(await recApi.home()).toMatchObject({ configured: true, enabled: true, run: null, active_run: null, shelves: [] });
     await traktApi.connect();
     for (let i = 0; i < 8; i++) await traktApi.integration(); // approve, then import every step
     const home = await recApi.home();
@@ -231,7 +231,7 @@ describe('AI settings', () => {
 
   it('rec_enabled off empties /home and refuses refresh; on again brings the picks back', async () => {
     await settingsApi.putAi({ rec_enabled: false });
-    expect(await recApi.home()).toEqual({ enabled: false, run: null, active_run: null, hero_picks: [], shelves: [] });
+    expect(await recApi.home()).toEqual({ configured: true, enabled: false, run: null, active_run: null, hero_picks: [], shelves: [] });
     expect(await failure(recApi.refresh())).toEqual({ status: 409, code: 'recs_disabled' });
     await settingsApi.putAi({ rec_enabled: true });
     expect((await recApi.home()).shelves).toHaveLength(5);
@@ -271,6 +271,20 @@ describe('Ask momoshtrem', () => {
     expect((await settingsApi.aiUsage()).asks_today).toBe(4);
   });
 
+  it('titles a new thread by PLAN §6’s rule: first letter up, cut at a space past 30, else hard at 60, then “…”', async () => {
+    const titleOf = async (message: string) => {
+      const start = (await collect(message))[0];
+      return start.event === 'start' ? start.data.title : null;
+    };
+    expect(await titleOf('ébauche of a cosy show')).toBe('Ébauche of a cosy show');
+    // 63 characters: the first 60 end mid-word ("hum"), and their last space is at index 56
+    expect(await titleOf('something like severance but lighter and warmer with dry humour')).toBe('Something like severance but lighter and warmer with dry…');
+    // No space past index 30: a hard cut at 60
+    expect(await titleOf(`${'a'.repeat(10)} ${'b'.repeat(70)}`)).toBe(`${'A'.repeat(1)}${'a'.repeat(9)} ${'b'.repeat(49)}…`);
+    // Code points: emoji count as one and aren't split
+    expect(await titleOf(`${'🎬'.repeat(59)}xy`)).toBe(`${'🎬'.repeat(59)}x…`);
+  });
+
   it('thread reads join feedback: a hidden title leaves the thread too', async () => {
     const before = await recApi.thread(12);
     expect(before.turns[0].items.map((i) => i.title)).toContain('The Good Place');
@@ -281,6 +295,9 @@ describe('Ask momoshtrem', () => {
   it('answers JSON errors before the stream: 400, 404 and 409 thread_full', async () => {
     expect(await failure(collect(''))).toEqual({ status: 400, code: 'bad_request' });
     expect(await failure(collect('x'.repeat(501)))).toEqual({ status: 400, code: 'bad_request' });
+    // 500 characters are code points, as Go counts runes: 500 emoji fit, 501 don't
+    expect(await failure(collect('🎬'.repeat(501)))).toEqual({ status: 400, code: 'bad_request' });
+    expect((await collect('🎬'.repeat(500))).at(-1)?.event).toBe('done');
     expect(await failure(collect('more like this', 999))).toEqual({ status: 404, code: 'not_found' });
     for (let i = 0; i < THREAD_MAX_TURNS - 2; i++) await collect('Lighter', 12);
     expect(await failure(collect('Lighter', 12))).toEqual({ status: 409, code: 'thread_full' });
@@ -290,7 +307,7 @@ describe('Ask momoshtrem', () => {
 describe('scenarios', () => {
   it('recs-none: no run yet (For You keeps trending); refresh starts the first one', async () => {
     setMockScenario('recs-none');
-    expect(await recApi.home()).toEqual({ enabled: true, run: null, active_run: null, hero_picks: [], shelves: [] });
+    expect(await recApi.home()).toEqual({ configured: true, enabled: true, run: null, active_run: null, hero_picks: [], shelves: [] });
     expect((await recApi.runs()).items).toEqual([]);
     expect((await settingsApi.aiUsage()).recs.last_run).toBeNull();
     await recApi.refresh();
@@ -330,7 +347,8 @@ describe('scenarios', () => {
   it('recs-off: picks are off, Ask still answers', async () => {
     setMockScenario('recs-off');
     expect((await settingsApi.ai()).rec_enabled).toBe(false);
-    expect((await recApi.home()).enabled).toBe(false);
+    // Picks off, but there's a key: the Ask entries stay
+    expect(await recApi.home()).toMatchObject({ configured: true, enabled: false });
     expect(await failure(recApi.refresh())).toEqual({ status: 409, code: 'recs_disabled' });
     expect((await settingsApi.aiUsage()).recs.next_run_at).toBeNull();
     expect((await collect('a 90-minute thriller for tonight')).at(-1)?.event).toBe('done');
@@ -338,7 +356,8 @@ describe('scenarios', () => {
 
   it('ai-off: no key: /home is disabled, refresh and Ask answer 503, settings still read and save', async () => {
     setMockScenario('ai-off');
-    expect((await recApi.home()).enabled).toBe(false);
+    // No key: the Ask entries hide too
+    expect(await recApi.home()).toMatchObject({ configured: false, enabled: false });
     expect(await failure(recApi.refresh())).toEqual({ status: 503, code: 'unavailable' });
     expect(await failure(collect('anything'))).toEqual({ status: 503, code: 'unavailable' });
     expect(await settingsApi.putAi({ monthly_budget_usd: 20 })).toMatchObject({ monthly_budget_usd: 20 });
@@ -372,7 +391,8 @@ describe('scenarios', () => {
     const start = events[0].event === 'start' ? events[0].data : null;
     const turn = (await recApi.thread(start!.thread_id)).turns[0];
     expect(turn).toMatchObject({ status: 'error', error: { code: 'upstream' }, items: [] });
-    expect(turn.steps.map((s) => `${s.step}:${s.state}`)).toEqual(['history:done', 'web:active']);
+    // The step it failed in is dropped, so an old failed turn never shows a spinner
+    expect(turn.steps.map((s) => `${s.step}:${s.state}`)).toEqual(['history:done']);
   });
 
   it('ask-hold: the stream never finishes; another ask is busy; Stop cancels the turn', async () => {
@@ -389,7 +409,7 @@ describe('scenarios', () => {
     controller.abort();
     await stream.return(undefined);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect((await recApi.thread(threadId)).turns[0]).toMatchObject({ status: 'cancelled' });
+    expect((await recApi.thread(threadId)).turns[0]).toMatchObject({ status: 'cancelled', steps: [{ step: 'history', state: 'done' }] });
     expect((await settingsApi.aiUsage()).by_feature[1].cost_usd).toBe(0.54); // the usage already spent
   });
 });

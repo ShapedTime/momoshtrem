@@ -47,7 +47,7 @@ export interface StepRow {
   step: StepId;
   state: StepRowState;
   label: string;
-  /** Shown once the step is done (the design hides it while active). */
+  /** As reported: a run's active step has a running tally ("2 of 5 shelves"); Ask sends it with `done` only. Pending steps have none. */
   detail: string | null;
 }
 
@@ -62,7 +62,7 @@ export function stepRows(reported: ReadonlyArray<AskStep | RunStep>, order: read
     step: s.step,
     state: s.state,
     label: stepLabel(s.step, s.state, context),
-    detail: s.state === 'done' ? s.detail : null,
+    detail: s.detail,
   }));
   for (const step of order) {
     if (!seen.has(step)) rows.push({ step, state: 'pending', label: stepLabel(step, 'pending', context), detail: null });

@@ -1,4 +1,4 @@
-import { askHref, askThreadHref } from '@/lib/recommendations/ask-href';
+import { askHref, askMessageLength, askThreadHref } from '@/lib/recommendations/ask-href';
 
 describe('askHref', () => {
   it('is /ask without a question', () => {
@@ -16,6 +16,16 @@ describe('askHref', () => {
   it('keeps at most 500 characters, as Ask takes', () => {
     const q = decodeURIComponent(askHref('x'.repeat(600)).slice('/ask?q='.length));
     expect(q).toHaveLength(500);
+  });
+
+  it('counts and cuts emoji as one character each, never splitting a surrogate pair', () => {
+    // 499 letters then emoji: a UTF-16 cut at 500 would leave half a 🎬 and encodeURIComponent would throw
+    const href = askHref(`${'x'.repeat(499)}🎬🍿`);
+    const q = decodeURIComponent(href.slice('/ask?q='.length));
+    expect(askMessageLength(q)).toBe(500);
+    expect(q.endsWith('x🎬')).toBe(true);
+    expect(askMessageLength('🎬🍿 tonight')).toBe(10);
+    expect(askHref('🎬'.repeat(600))).toBe(`/ask?q=${encodeURIComponent('🎬'.repeat(500))}`);
   });
 });
 

@@ -22,11 +22,11 @@ describe('stepLabel', () => {
 });
 
 describe('stepRows', () => {
-  it('lists what the server reported, then the rest as pending; details only once done', () => {
+  it('lists what the server reported, details included, then the rest as pending', () => {
     const rows = stepRows(
       [
         { step: 'history', state: 'done', detail: '2,184 plays' },
-        { step: 'web', state: 'active', detail: '3 searches so far' },
+        { step: 'web', state: 'active', detail: null },
       ],
       ASK_STEPS
     );
@@ -36,6 +36,18 @@ describe('stepRows', () => {
       ['tmdb', 'pending', 'Checking TMDB…', null],
       ['write', 'pending', 'Writing reasons…', null],
     ]);
+  });
+
+  it('keeps an active step’s running tally: “Writing your shelves · 2 of 5”', () => {
+    const rows = stepRows(
+      [
+        { step: 'history', state: 'done', detail: '2,184 plays · 312 ratings' },
+        { step: 'write', state: 'active', detail: '2 of 5 shelves' },
+      ],
+      RUN_STEPS,
+      'run'
+    );
+    expect(rows.find((r) => r.step === 'write')).toEqual({ step: 'write', state: 'active', label: 'Writing your shelves…', detail: '2 of 5 shelves' });
   });
 
   it('a refinement shows its own steps; a run’s rows use the run labels', () => {

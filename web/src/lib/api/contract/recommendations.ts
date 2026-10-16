@@ -139,6 +139,9 @@ export interface RunDetail extends RunProgress {
  * succeeded run `run` is null and the web keeps its trending fallback.
  */
 export interface RecommendationsHome {
+  /** ANTHROPIC_API_KEY is set. False: hide the Ask entries too; true with `enabled` false: picks are switched off, Ask still works. */
+  configured: boolean;
+  /** `configured` and `rec_enabled`. */
   enabled: boolean;
   /** The newest succeeded run: `hero_picks` and `shelves` are its. */
   run: RunSummary | null;
@@ -212,7 +215,7 @@ export interface AskTurn {
   id: number;
   message: string;
   status: AskTurnStatus;
-  /** What the turn showed, saved when it ended: a streaming turn has none of it yet. */
+  /** What the turn showed, saved when it ended: a streaming turn has none of it yet. An ended turn has no `active` step (the one it failed or stopped in is dropped). */
   steps: AskStep[];
   /** The turn's streamed text. */
   intro: string;
