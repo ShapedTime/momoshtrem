@@ -10,7 +10,6 @@ import type { TorrentDetail, TorrentListItem } from '@/lib/api/contract';
 import { libraryKeys, removeTorrentUrl, titleKeys, torrentKeys, torrentsApi } from '@/lib/api/endpoints';
 import { torrentLabel } from '@/lib/activity/format';
 import { removeTorrentCopy, torrentRemovalKey } from '@/lib/activity/remove';
-import { isActive } from '@/lib/activity/sections';
 import { plural } from '@/lib/title/format';
 
 /** What a torrent action changes: the torrents, and the library and title pages that show its state. */
@@ -125,7 +124,5 @@ export function useTorrentActions() {
     remove,
     /** A pause or resume of this torrent is on its way. */
     busy,
-    /** Pause for streaming and downloading torrents, Resume for paused ones; idle ones get neither. */
-    toggle: (torrent: TorrentListItem) => (torrent.state === 'paused' ? resume.mutate(torrent) : isActive(torrent) ? pause.mutate(torrent) : undefined),
   };
 }
