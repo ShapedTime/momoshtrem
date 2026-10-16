@@ -2,9 +2,11 @@ import type { AiSettings, AiUsage, RunSummary } from '@/lib/api/contract';
 import {
   aiChanges,
   aiNavSummary,
+  BUDGET_ERRORS,
   budgetMonth,
   classifierHelp,
   draftOf,
+  fieldErrorCopy,
   formatBudgetInput,
   formatDuration,
   hasChanges,
@@ -19,6 +21,7 @@ import {
   spendBar,
   spendLine,
   spendProjection,
+  withEdits,
 } from '@/lib/settings/ai';
 import { AI_SETTINGS } from '@/mocks/fixtures/settings';
 
@@ -66,6 +69,9 @@ describe('the draft and the partial PUT', () => {
   it('shows the budget with cents, and no cap as empty', () => {
     expect(formatBudgetInput(15)).toBe('15.00');
     expect(formatBudgetInput(7.5)).toBe('7.50');
+    expect(formatBudgetInput(7.125)).toBe('7.13');
+    expect(formatBudgetInput(1250)).toBe('1250.00');
+    expect(formatBudgetInput(1e21)).toBe('1000000000000000000000.00');
     expect(formatBudgetInput(null)).toBe('');
     expect(draftOf(SETTINGS)).toEqual({
       rec_enabled: true,
@@ -77,39 +83,72 @@ describe('the draft and the partial PUT', () => {
     });
   });
 
-  it('reads dollars; empty is no cap; leaves the range to the server', () => {
+  it('reads dollars, rounded to cents, from 0 to the cap; empty is no cap', () => {
     expect(parseBudget('')).toEqual({ ok: true, value: null });
     expect(parseBudget('   ')).toEqual({ ok: true, value: null });
     expect(parseBudget('20')).toEqual({ ok: true, value: 20 });
     expect(parseBudget(' $7.50 ')).toEqual({ ok: true, value: 7.5 });
     expect(parseBudget('.5')).toEqual({ ok: true, value: 0.5 });
-    expect(parseBudget('-5')).toEqual({ ok: true, value: -5 });
-    expect(parseBudget('ten')).toMatchObject({ ok: false });
-    expect(parseBudget('1,000')).toMatchObject({ ok: false });
-    expect(parseBudget('1.2.3')).toMatchObject({ ok: false });
+    expect(parseBudget('0')).toEqual({ ok: true, value: 0 });
+    expect(parseBudget('7.125')).toEqual({ ok: true, value: 7.13 });
+    expect(parseBudget('9.999')).toEqual({ ok: true, value: 10 });
+    expect(parseBudget('10000')).toEqual({ ok: true, value: 10_000 });
+    expect(parseBudget('-5')).toEqual({ ok: false, error: BUDGET_ERRORS.negative });
+    expect(parseBudget('10000.01')).toEqual({ ok: false, error: BUDGET_ERRORS.tooHigh });
+    expect(parseBudget(`1${'0'.repeat(400)}`)).toEqual({ ok: false, error: BUDGET_ERRORS.tooHigh });
+    expect(parseBudget('ten')).toEqual({ ok: false, error: BUDGET_ERRORS.format });
+    expect(parseBudget('1e3')).toEqual({ ok: false, error: BUDGET_ERRORS.format });
+    expect(parseBudget('1,000')).toEqual({ ok: false, error: BUDGET_ERRORS.format });
+    expect(parseBudget('1.2.3')).toEqual({ ok: false, error: BUDGET_ERRORS.format });
   });
 
-  it('sends only what changed', () => {
-    const draft = draftOf(SETTINGS);
-    expect(aiChanges(draft, SETTINGS)).toEqual({ patch: {}, budgetError: null });
-    expect(hasChanges(aiChanges(draft, SETTINGS))).toBe(false);
-    // The same amount, typed differently, isn't a change
-    expect(hasChanges(aiChanges({ ...draft, budget: '15' }, SETTINGS))).toBe(false);
+  it('shows the saved settings with this page’s edits on top', () => {
+    expect(withEdits(SETTINGS, {})).toEqual(draftOf(SETTINGS));
+    expect(withEdits({ ...SETTINGS, rec_model: 'claude-sonnet-5-5' }, { rec_schedule: 'weekly' })).toMatchObject({
+      rec_model: 'claude-sonnet-5-5',
+      rec_schedule: 'weekly',
+    });
+  });
 
-    const changed = aiChanges({ ...draft, rec_schedule: 'weekly', rec_model: 'claude-sonnet-5-5', budget: '' }, SETTINGS);
+  it('sends only the edited fields that changed', () => {
+    expect(aiChanges({}, SETTINGS)).toEqual({ patch: {}, budgetError: null });
+    expect(hasChanges(aiChanges({}, SETTINGS))).toBe(false);
+    // Edited back to the saved value, or the same amount typed differently, isn't a change
+    expect(hasChanges(aiChanges({ rec_schedule: 'nightly', budget: '15' }, SETTINGS))).toBe(false);
+
+    const changed = aiChanges({ rec_schedule: 'weekly', rec_model: 'claude-sonnet-5-5', budget: '' }, SETTINGS);
     expect(changed).toEqual({ patch: { rec_schedule: 'weekly', rec_model: 'claude-sonnet-5-5', monthly_budget_usd: null }, budgetError: null });
-    expect(aiChanges({ ...draft, classifier_enabled: false, auto_apply_high_confidence: false, rec_enabled: false }, SETTINGS).patch).toEqual({
+    expect(aiChanges({ classifier_enabled: false, auto_apply_high_confidence: false, rec_enabled: false }, SETTINGS).patch).toEqual({
       rec_enabled: false,
       classifier_enabled: false,
       auto_apply_high_confidence: false,
     });
   });
 
-  it('holds a budget that does not parse, and counts it as a change', () => {
-    const result = aiChanges({ ...draftOf(SETTINGS), budget: 'lots', rec_schedule: 'manual' }, SETTINGS);
+  it('never sends a field it didn’t edit, so a change made elsewhere stays', () => {
+    const elsewhere = { ...SETTINGS, rec_model: 'claude-sonnet-5-5' as const, monthly_budget_usd: 30 };
+    expect(aiChanges({ rec_schedule: 'weekly' }, elsewhere).patch).toEqual({ rec_schedule: 'weekly' });
+  });
+
+  it('round-trips a saved budget the input shows rounded', () => {
+    const saved = { ...SETTINGS, monthly_budget_usd: 7.125 };
+    expect(aiChanges({ budget: formatBudgetInput(7.125) }, saved)).toEqual({ patch: {}, budgetError: null });
+    expect(aiChanges({ budget: '7.12' }, saved).patch).toEqual({ monthly_budget_usd: 7.12 });
+    const huge = { ...SETTINGS, monthly_budget_usd: 1e21 };
+    expect(hasChanges(aiChanges({ budget: formatBudgetInput(1e21) }, huge))).toBe(false);
+  });
+
+  it('holds a budget it can’t send, and counts it as a change', () => {
+    const result = aiChanges({ budget: 'lots', rec_schedule: 'manual' }, SETTINGS);
     expect(result.patch).toEqual({ rec_schedule: 'manual' });
-    expect(result.budgetError).toMatch(/leave it empty for no cap/);
-    expect(hasChanges(aiChanges({ ...draftOf(SETTINGS), budget: 'lots' }, SETTINGS))).toBe(true);
+    expect(result.budgetError).toBe(BUDGET_ERRORS.format);
+    expect(aiChanges({ budget: '-5' }, SETTINGS).budgetError).toBe(BUDGET_ERRORS.negative);
+    expect(hasChanges(aiChanges({ budget: 'lots' }, SETTINGS))).toBe(true);
+  });
+
+  it('words a server 422 on the budget for people', () => {
+    expect(fieldErrorCopy('monthly_budget_usd', 'monthly_budget_usd must be 0 or more, or null for no cap')).toBe(BUDGET_ERRORS.server);
+    expect(fieldErrorCopy('rec_schedule', 'rec_schedule must be nightly, weekly or manual')).toBe('rec_schedule must be nightly, weekly or manual');
   });
 });
 
@@ -196,9 +235,12 @@ describe('personal picks', () => {
     expect(formatDuration(41_000)).toBe('41 s');
     expect(formatDuration(120_000)).toBe('2 min');
     expect(formatDuration(125_400)).toBe('2 min 5 s');
-    expect(nextRunPhrase(iso(local(10, 17, 3)), NOW)).toBe('tonight');
-    expect(nextRunPhrase(iso(local(10, 17, 14)), local(10, 17, 9))).toBe('at 14:00');
-    expect(nextRunPhrase(iso(local(10, 18, 3)), NOW)).toBe('on Sunday');
+    expect(nextRunPhrase(iso(local(10, 17, 3)), NOW)).toBe('tonight at 03:00');
+    expect(nextRunPhrase(iso(local(10, 17, 3)), local(10, 17, 1))).toBe('tonight at 03:00');
+    // A server in another zone: its 03:00 is this browser's 07:00
+    expect(nextRunPhrase(iso(local(10, 17, 7)), NOW)).toBe('tomorrow at 07:00');
+    expect(nextRunPhrase(iso(local(10, 17, 14)), local(10, 17, 9))).toBe('today at 14:00');
+    expect(nextRunPhrase(iso(local(10, 18, 3)), NOW)).toBe('on Sunday at 03:00');
   });
 
   const help = (overrides: Partial<Parameters<typeof scheduleHelp>[0]> = {}) =>
@@ -212,27 +254,31 @@ describe('personal picks', () => {
     });
 
   it('builds the schedule help from the next run and the last one', () => {
-    expect(help()).toBe('Nightly runs at 03:00, weekly on Sunday. Next run tonight; the last one took 41 s and cost $0.36.');
-    // A schedule change on screen: the next run is known once it's saved
+    // A known next run says its own day and time, in this browser's time
+    expect(help()).toBe('Next run tonight at 03:00; the last one took 41 s and cost $0.36.');
+    expect(help({ recs: { ...usage().recs, next_run_at: iso(local(10, 17, 7)) } })).toBe('Next run tomorrow at 07:00; the last one took 41 s and cost $0.36.');
+    // Without one, the slots in server time. A schedule change on screen: the next run is known once it's saved
     expect(help({ draft: { rec_enabled: true, rec_schedule: 'weekly' } })).toBe(
-      'Nightly runs at 03:00, weekly on Sunday. The last run took 41 s and cost $0.36.'
+      'Nightly runs at 03:00 server time, weekly on Sunday. The last run took 41 s and cost $0.36.'
     );
     expect(help({ draft: { rec_enabled: true, rec_schedule: 'manual' } })).toBe(
-      'Nightly runs at 03:00, weekly on Sunday. Manual: only when you press Run now; the last one took 41 s and cost $0.36.'
+      'Nightly runs at 03:00 server time, weekly on Sunday. Manual: only when you press Run now; the last one took 41 s and cost $0.36.'
     );
-    expect(help({ draft: { rec_enabled: false, rec_schedule: 'nightly' } })).toMatch(/Picks are off, so nothing runs; the last one/);
-    expect(help({ recs: { last_run: null, active_run: null, next_run_at: null } })).toBe('Nightly runs at 03:00, weekly on Sunday.');
-    expect(help({ configured: false, recs: { last_run: null, active_run: null, next_run_at: null } })).toBe('Nightly runs at 03:00, weekly on Sunday.');
+    expect(help({ draft: { rec_enabled: false, rec_schedule: 'nightly' } })).toMatch(/server time, weekly on Sunday\. Picks are off, so nothing runs; the last one/);
+    expect(help({ recs: { last_run: null, active_run: null, next_run_at: null } })).toBe('Nightly runs at 03:00 server time, weekly on Sunday.');
+    expect(help({ configured: false, recs: { last_run: null, active_run: null, next_run_at: null } })).toBe(
+      'Nightly runs at 03:00 server time, weekly on Sunday.'
+    );
   });
 
   it('says when the last run failed or was skipped', () => {
     const failed = { ...LAST_RUN, status: 'failed' as const, error: 'The Anthropic API didn’t answer (overloaded).' };
     expect(help({ recs: { last_run: failed, active_run: null, next_run_at: null } })).toBe(
-      'Nightly runs at 03:00, weekly on Sunday. The last run didn’t finish: The Anthropic API didn’t answer (overloaded).'
+      'Nightly runs at 03:00 server time, weekly on Sunday. The last run didn’t finish: The Anthropic API didn’t answer (overloaded).'
     );
     const skipped = { ...LAST_RUN, status: 'skipped' as const, started_at: null, skip_reason: 'budget_exceeded' as const };
     expect(help({ recs: { last_run: skipped, active_run: null, next_run_at: iso(local(10, 17, 3)) } })).toBe(
-      'Nightly runs at 03:00, weekly on Sunday. Next run tonight; the last one was skipped: the budget was used up.'
+      'Next run tonight at 03:00; the last one was skipped: the budget was used up.'
     );
   });
 
@@ -254,6 +300,11 @@ describe('personal picks', () => {
     expect(runNowProblem({ status: 500, code: 'internal', message: 'Something broke.' }, null)).toEqual({
       title: 'Couldn’t start a run',
       body: 'Something broke. Try again in a moment.',
+    });
+    // A 503 with a key set (before the runs are served) is the server's own reason, never "No Anthropic key"
+    expect(runNowProblem({ status: 503, code: 'unavailable', message: 'Recommendations aren’t available yet.' }, null)).toEqual({
+      title: 'Couldn’t start a run',
+      body: 'Recommendations aren’t available yet. Try again in a moment.',
     });
   });
 });

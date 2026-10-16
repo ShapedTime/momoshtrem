@@ -120,10 +120,11 @@
   .set-spend-bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; background: var(--surface-3); overflow: hidden; }
   .set-spend-bar i { display: block; height: 100%; flex-shrink: 0; }
   .set-spend-bar i:last-child { border-radius: 0 3px 3px 0; }
-  /* One hue for one budget, each feature a step lighter (alphas checked for contrast and separation) */
+  /* One hue for one budget, each feature a step fainter: every step ≥ 3:1 on the track and the card
+     (adjacent ΔE ≥ 13); the 2 px gaps and the legend's labels and values carry which is which */
   .set-spend-recs { background: var(--accent); }
-  .set-spend-ask { background: rgb(242 179 61 / 0.7); }
-  .set-spend-classifier { background: rgb(242 179 61 / 0.42); }
+  .set-spend-ask { background: rgb(242 179 61 / 0.75); }
+  .set-spend-classifier { background: rgb(242 179 61 / 0.5); }
   .set-spend-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); font-size: var(--t-small); color: var(--text-2); }
   .set-spend-legend li { display: inline-flex; align-items: center; gap: 6px; }
   .set-spend-legend i { width: 10px; height: 10px; border-radius: 2px; }

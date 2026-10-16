@@ -14,12 +14,13 @@ import {
   type AiDraft,
   type AiField,
   budgetMonth,
-  draftOf,
   FIELD_LABELS,
+  fieldErrorCopy,
   hasChanges,
   isAiField,
   runNowProblem,
   runToastBody,
+  withEdits,
 } from '@/lib/settings/ai';
 import { BudgetCard } from './ai/BudgetCard';
 import { MappingCard } from './ai/MappingCard';
@@ -27,18 +28,23 @@ import { PicksCard } from './ai/PicksCard';
 import { SaveBar } from './SaveBar';
 import { useNow } from './trakt/useNow';
 
-/** Where a 422 about each field shows (and what to scroll to). */
-const FIELD_TARGET: Record<AiField, string> = {
-  rec_enabled: 'ai-recs',
-  rec_model: 'ai-model',
-  rec_schedule: 'ai-schedule',
-  monthly_budget_usd: 'ai-budget',
-  classifier_enabled: 'ai-classifier',
-  classifier_model: 'ai-classifier',
-  auto_apply_high_confidence: 'ai-autoapply',
+/** Where a problem with each field shows: its row (scrolled to) and its control (focused). */
+const FIELD_TARGET: Record<AiField, { row: string; control: string }> = {
+  rec_enabled: { row: 'ai-recs', control: '#ai-recs-input' },
+  rec_model: { row: 'ai-model', control: '#ai-model input:checked' },
+  rec_schedule: { row: 'ai-schedule', control: '#ai-schedule button[aria-pressed="true"]' },
+  monthly_budget_usd: { row: 'ai-budget', control: '#ai-budget-input' },
+  classifier_enabled: { row: 'ai-classifier', control: '#ai-classifier-input' },
+  classifier_model: { row: 'ai-classifier', control: '#ai-classifier-input' },
+  auto_apply_high_confidence: { row: 'ai-autoapply', control: '#ai-autoapply-input' },
 };
 
-const scrollTo = (field: AiField) => document.getElementById(FIELD_TARGET[field])?.scrollIntoView?.({ block: 'center' });
+/** Bring a field with a problem into view and move focus to it (from Save). */
+function showField(field: AiField) {
+  const { row, control } = FIELD_TARGET[field];
+  document.getElementById(row)?.scrollIntoView?.({ block: 'center' });
+  document.querySelector<HTMLElement>(control)?.focus({ preventScroll: true });
+}
 
 function AiSkeleton() {
   return (
@@ -65,8 +71,8 @@ export function AiSection() {
   const settings = useQuery(aiSettingsQuery());
   const usage = useQuery(aiUsageQuery());
   const now = useNow(60_000);
-  // Null until something is edited, so a refetch shows through while nothing is
-  const [draft, setDraft] = useState<AiDraft | null>(null);
+  // Only the fields touched here: the rest follows the server, so a stale page never sends them back
+  const [edits, setEdits] = useState<Partial<AiDraft>>({});
   // A budget that doesn't parse shows once Save was pressed, not while it's typed
   const [triedSave, setTriedSave] = useState(false);
   const [startedRunId, setStartedRunId] = useState<number | null>(null);
@@ -103,7 +109,7 @@ export function AiSection() {
     mutationFn: (patch: AiSettingsPatch) => settingsApi.putAi(patch),
     onSuccess: (saved) => {
       queryClient.setQueryData(settingsKeys.ai, saved);
-      setDraft(null);
+      setEdits({});
       setTriedSave(false);
       // Why Run now couldn't start (picks off, the budget) may no longer hold
       refresh.reset();
@@ -113,7 +119,7 @@ export function AiSection() {
       void queryClient.invalidateQueries({ queryKey: recKeys.home });
     },
     onError: (error) => {
-      if (isApiError(error) && isAiField(error.field)) scrollTo(error.field);
+      if (isApiError(error) && isAiField(error.field)) showField(error.field);
     },
   });
 
@@ -137,9 +143,9 @@ export function AiSection() {
   }
 
   const saved = settings.data;
-  const current = draft ?? draftOf(saved);
-  const changes = aiChanges(current, saved);
-  const dirty = draft !== null && hasChanges(changes);
+  const current = withEdits(saved, edits);
+  const changes = aiChanges(edits, saved);
+  const dirty = hasChanges(changes);
   // Unknown when the usage didn't load: keep the controls on, the server still says no
   const configured = usage.data?.configured ?? true;
 
@@ -149,7 +155,7 @@ export function AiSection() {
   const budgetError = triedSave ? changes.budgetError : null;
   const errorFor = (field: AiField): string | null => {
     if (field === 'monthly_budget_usd' && budgetError) return budgetError;
-    return serverField === field && apiError ? apiError.message : null;
+    return serverField === field && apiError ? fieldErrorCopy(field, apiError.message) : null;
   };
   // A field's problem shows there; the bar points at it. Anything else shows in the bar.
   const problemField = budgetError ? 'monthly_budget_usd' : serverField;
@@ -162,7 +168,7 @@ export function AiSection() {
       : null;
 
   const change = (next: Partial<AiDraft>) => {
-    setDraft({ ...current, ...next });
+    setEdits((previous) => ({ ...previous, ...next }));
     if (save.error) save.reset();
   };
 
@@ -211,14 +217,14 @@ export function AiSection() {
           note="Saved settings apply from the next run or mapping."
           error={barError}
           onDiscard={() => {
-            setDraft(null);
+            setEdits({});
             setTriedSave(false);
             save.reset();
           }}
           onSave={() => {
             if (changes.budgetError) {
               setTriedSave(true);
-              scrollTo('monthly_budget_usd');
+              showField('monthly_budget_usd');
               return;
             }
             save.mutate(changes.patch);

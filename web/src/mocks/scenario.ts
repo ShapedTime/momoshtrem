@@ -34,6 +34,7 @@
  * - `indexers-degraded`: /status lists a Jackett indexer timing out for 2 h and one failing for
  *   5 min, so Settings › Status says Degraded.
  * - `quality-invalid`: saving the quality profile answers 422 naming `avoid_terms`.
+ * - `ai-budget-invalid`: saving AI settings with a budget answers 422 naming `monthly_budget_usd`.
  * - `discover-error`: /api/discover answers 502 `tmdb_unavailable`.
  * - `discover-loading`: /api/discover never answers (the loading state).
  * - `title-search-error`: /api/title-search answers 502 `tmdb_unavailable`.
@@ -105,6 +106,7 @@ export type MockScenario =
   | 'search-down'
   | 'indexers-degraded'
   | 'quality-invalid'
+  | 'ai-budget-invalid'
   | 'discover-error'
   | 'discover-loading'
   | 'title-search-error'

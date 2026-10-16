@@ -79,9 +79,11 @@ export function isAiField(value: unknown): value is AiField {
   return typeof value === 'string' && value in FIELD_LABELS;
 }
 
-/** The budget as the input shows it: 15 → "15.00", null (no cap) → "". */
+const BUDGET_INPUT = new Intl.NumberFormat('en-US', { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** The budget as the input shows it: 15 → "15.00", null (no cap) → "" (never "1e+21"). */
 export function formatBudgetInput(value: number | null): string {
-  return value === null ? '' : value.toFixed(2);
+  return value === null ? '' : BUDGET_INPUT.format(value);
 }
 
 export function draftOf(settings: AiSettings): AiDraft {
@@ -95,41 +97,73 @@ export function draftOf(settings: AiSettings): AiDraft {
   };
 }
 
-export const BUDGET_FORMAT_ERROR = 'Enter an amount in dollars, like 15 or 7.50, or leave it empty for no cap.';
+/** What's on screen: the saved settings with this page's edits on top (untouched fields follow the server). */
+export function withEdits(saved: AiSettings, edits: Partial<AiDraft>): AiDraft {
+  return { ...draftOf(saved), ...edits };
+}
+
+/** A month's budget above this is a typo, not a cap. */
+export const BUDGET_MAX = 10_000;
+
+export const BUDGET_ERRORS = {
+  format: 'Enter an amount in dollars, like 15 or 7.50, or leave it empty for no cap.',
+  negative: 'The budget can’t be negative. Enter 0 or more, or leave it empty for no cap.',
+  tooHigh: `Keep it to ${BUDGET_MAX.toLocaleString('en-US')} dollars or less, or leave it empty for no cap.`,
+  /** A 422 on the budget from the server, in words (its own message is for developers). */
+  server: 'momoshtrem didn’t accept that budget. Enter 0 or more, or leave it empty for no cap.',
+} as const;
 
 export type BudgetInput = { ok: true; value: number | null } | { ok: false; error: string };
 
 /**
  * Read the budget input: empty is no cap (null); "15", "7.50", "$20" are
- * dollars. Anything else can't be sent. The range (0 or more) is the
- * server's to check: its 422 shows on the field.
+ * dollars, rounded to cents, from 0 to BUDGET_MAX. Anything else stays here
+ * with a reason.
  */
 export function parseBudget(text: string): BudgetInput {
   const value = text.trim().replace(/^\$\s*/, '');
   if (value === '') return { ok: true, value: null };
-  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(value)) return { ok: false, error: BUDGET_FORMAT_ERROR };
-  return { ok: true, value: Number(value) };
+  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(value)) return { ok: false, error: BUDGET_ERRORS.format };
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return { ok: false, error: BUDGET_ERRORS.tooHigh };
+  if (amount < 0) return { ok: false, error: BUDGET_ERRORS.negative };
+  if (amount > BUDGET_MAX) return { ok: false, error: BUDGET_ERRORS.tooHigh };
+  return { ok: true, value: Math.round(amount * 100) / 100 };
 }
 
 export interface AiChanges {
-  /** Only the fields that differ from what was loaded. */
+  /** Only the edited fields that differ from what was loaded. */
   patch: AiSettingsPatch;
   /** The budget input doesn't parse: nothing can be saved until it does. */
   budgetError: string | null;
 }
 
-/** What Save would send: a partial PUT of the changed fields. */
-export function aiChanges(draft: AiDraft, saved: AiSettings): AiChanges {
+/**
+ * What Save would send: a partial PUT of the fields this page edited and
+ * that differ from the server's. Untouched fields are never sent, so a
+ * change made elsewhere meanwhile stays. A budget still showing the saved
+ * value as the input formats it is unchanged, so 7.125 isn't re-sent as 7.13.
+ */
+export function aiChanges(edits: Partial<AiDraft>, saved: AiSettings): AiChanges {
   const patch: AiSettingsPatch = {};
-  if (draft.rec_enabled !== saved.rec_enabled) patch.rec_enabled = draft.rec_enabled;
-  if (draft.rec_model !== saved.rec_model) patch.rec_model = draft.rec_model;
-  if (draft.rec_schedule !== saved.rec_schedule) patch.rec_schedule = draft.rec_schedule;
-  if (draft.classifier_enabled !== saved.classifier_enabled) patch.classifier_enabled = draft.classifier_enabled;
-  if (draft.auto_apply_high_confidence !== saved.auto_apply_high_confidence) patch.auto_apply_high_confidence = draft.auto_apply_high_confidence;
-  const budget = parseBudget(draft.budget);
-  if (!budget.ok) return { patch, budgetError: budget.error };
-  if (budget.value !== saved.monthly_budget_usd) patch.monthly_budget_usd = budget.value;
+  if (edits.rec_enabled !== undefined && edits.rec_enabled !== saved.rec_enabled) patch.rec_enabled = edits.rec_enabled;
+  if (edits.rec_model !== undefined && edits.rec_model !== saved.rec_model) patch.rec_model = edits.rec_model;
+  if (edits.rec_schedule !== undefined && edits.rec_schedule !== saved.rec_schedule) patch.rec_schedule = edits.rec_schedule;
+  if (edits.classifier_enabled !== undefined && edits.classifier_enabled !== saved.classifier_enabled) patch.classifier_enabled = edits.classifier_enabled;
+  if (edits.auto_apply_high_confidence !== undefined && edits.auto_apply_high_confidence !== saved.auto_apply_high_confidence) {
+    patch.auto_apply_high_confidence = edits.auto_apply_high_confidence;
+  }
+  if (edits.budget !== undefined && edits.budget !== formatBudgetInput(saved.monthly_budget_usd)) {
+    const budget = parseBudget(edits.budget);
+    if (!budget.ok) return { patch, budgetError: budget.error };
+    if (budget.value !== saved.monthly_budget_usd) patch.monthly_budget_usd = budget.value;
+  }
   return { patch, budgetError: null };
+}
+
+/** A 422's message for the field it names: the budget's in words, others as the server says. */
+export function fieldErrorCopy(field: AiField, message: string): string {
+  return field === 'monthly_budget_usd' ? BUDGET_ERRORS.server : message;
 }
 
 /** Something differs from what was loaded (a budget that doesn't parse counts). */
@@ -260,12 +294,22 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(seconds / 60)} min${rest ? ` ${rest} s` : ''}`;
 }
 
-/** "tonight", "at 14:00" (today, in daylight), "on Sunday". */
+const startOfDay = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
+
+/**
+ * When the next run starts, day and time both in this browser's time (the
+ * server's 03:00 is another hour in another zone): "tonight at 03:00",
+ * "today at 14:00", "tomorrow at 07:00", "on Sunday at 03:00".
+ */
 export function nextRunPhrase(at: string, now: number): string {
   const date = new Date(at);
+  const time = CLOCK.format(date);
   const hour = date.getHours();
-  if (date.getTime() - now <= DAY) return hour >= 18 || hour < 6 ? 'tonight' : `at ${CLOCK.format(date)}`;
-  return `on ${WEEKDAY.format(date)}`;
+  if (date.getTime() - now <= DAY && (hour >= 18 || hour < 6)) return `tonight at ${time}`;
+  const days = Math.round((startOfDay(date.getTime()) - startOfDay(now)) / DAY);
+  if (days <= 0) return `today at ${time}`;
+  if (days === 1) return `tomorrow at ${time}`;
+  return `on ${WEEKDAY.format(date)} at ${time}`;
 }
 
 const sentence = (text: string) => text.replace(/[.\s]+$/, '');
@@ -297,24 +341,28 @@ export interface ScheduleHelpInput {
   now: number;
 }
 
+/** The slots, in the server's time: said only when the next run's own time isn't known. */
+const SLOTS = 'Nightly runs at 03:00 server time, weekly on Sunday.';
+
 /**
  * The schedule's help (the design's "Nightly runs at 03:00, weekly on
  * Sunday. Next run tonight; the last one took 41 s and cost $0.36."), from
- * the usage's `next_run_at` and last run.
+ * the usage's `next_run_at` and last run. A known next run says its own day
+ * and time in this browser's time ("Next run tonight at 03:00; …"); without
+ * one, the slots are said in server time.
  */
 export function scheduleHelp({ draft, saved, configured, recs, now }: ScheduleHelpInput): string {
   const unsaved = draft.rec_enabled !== saved.rec_enabled || draft.rec_schedule !== saved.rec_schedule;
-  let next: string | null = null;
-  if (!configured) next = null;
-  else if (!draft.rec_enabled) next = 'Picks are off, so nothing runs';
-  else if (draft.rec_schedule === 'manual') next = 'Manual: only when you press Run now';
-  else if (!unsaved && recs?.next_run_at) next = `Next run ${nextRunPhrase(recs.next_run_at, now)}`;
   const last = lastRunClause(recs?.last_run ?? null);
-  const parts = ['Nightly runs at 03:00, weekly on Sunday.'];
-  if (next && last) parts.push(`${next}; ${last}.`);
-  else if (next) parts.push(`${next}.`);
-  else if (last) parts.push(`${capitalize(last.replace('the last one', 'the last run'))}.`);
-  return parts.join(' ');
+  const withLast = (lead: string) => (last ? `${lead}; ${last}.` : `${lead}.`);
+  if (configured && draft.rec_enabled && draft.rec_schedule !== 'manual' && !unsaved && recs?.next_run_at) {
+    return withLast(`Next run ${nextRunPhrase(recs.next_run_at, now)}`);
+  }
+  let lead: string | null = null;
+  if (configured && !draft.rec_enabled) lead = 'Picks are off, so nothing runs';
+  else if (configured && draft.rec_schedule === 'manual') lead = 'Manual: only when you press Run now';
+  if (lead) return `${SLOTS} ${withLast(lead)}`;
+  return last ? `${SLOTS} ${capitalize(last.replace('the last one', 'the last run'))}.` : SLOTS;
 }
 
 /** "Opus 5.5"; a model this page doesn't know (a fallback's) as the server names it. */
@@ -350,9 +398,8 @@ export function runNowProblem(error: { status?: number; code?: string; message: 
         title: 'This month’s budget is used up',
         body: `AI is paused${resets ? ` until ${resets}` : ' until the 1st'}. Raise the budget below to run now.`,
       };
-    case 'unavailable':
-      return { title: 'No Anthropic key', body: 'Picks need ANTHROPIC_API_KEY on the server.' };
     default:
+      // Including 503 unavailable: without a key Run now is disabled, so it's the server's own reason
       return { title: 'Couldn’t start a run', body: `${sentence(error.message)}. Try again in a moment.` };
   }
 }

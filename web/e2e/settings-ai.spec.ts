@@ -7,7 +7,7 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
  * Settings › AI & picks (#159), against the MSW mocks: a fresh install's
  * settings (picks on, Opus 5.5 nightly, $15 budget) and the design's month
  * ($3.12 spent; last night's run took 41 s and cost $0.36). Scenarios in
- * src/mocks/scenario.ts (ai-off, recs-off, recs-refreshing, ask-budget, trakt-off).
+ * src/mocks/scenario.ts (ai-off, ai-budget-invalid, recs-off, recs-refreshing, ask-budget, trakt-off).
  */
 
 /** axe and no sideways scrolling at this width and at 320 px. */
@@ -48,7 +48,7 @@ test.describe('Settings › AI & picks', () => {
   test('change the schedule and the model; Save sends only those, and the nav follows', async ({ page }) => {
     await openSection(page);
     await expect(page.getByText('When Noir writes your picks, which model it uses, and what it may spend.')).toBeVisible();
-    await expect(scheduleHelp(page)).toHaveText('Nightly runs at 03:00, weekly on Sunday. Next run tonight; the last one took 41 s and cost $0.36.');
+    await expect(scheduleHelp(page)).toHaveText('Next run tonight at 03:00; the last one took 41 s and cost $0.36.');
     await expect(segment(page, 'Nightly')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('radio', { name: 'Opus 5.5' })).toBeChecked();
     await expect(page.getByRole('radio', { name: 'Opus 5.5' })).toHaveAccessibleDescription('Sharper reasons, reads more of your history. ≈ $0.36 a run');
@@ -68,7 +68,7 @@ test.describe('Settings › AI & picks', () => {
     await page.getByRole('radio', { name: 'Sonnet 5.5' }).check();
     await expect(saveBar(page)).toBeVisible();
     // The next run is known once the schedule is saved
-    await expect(scheduleHelp(page)).toHaveText('Nightly runs at 03:00, weekly on Sunday. The last run took 41 s and cost $0.36.');
+    await expect(scheduleHelp(page)).toHaveText('Nightly runs at 03:00 server time, weekly on Sunday. The last run took 41 s and cost $0.36.');
     await expectAccessibleAndContained(page);
 
     const put = page.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/api/settings/ai'));
@@ -76,7 +76,7 @@ test.describe('Settings › AI & picks', () => {
     expect((await put).postDataJSON()).toEqual({ rec_schedule: 'weekly', rec_model: 'claude-sonnet-5-5' });
     await expect(page.getByText('Settings saved')).toBeVisible();
     await expect(saveBar(page)).toBeHidden();
-    await expect(scheduleHelp(page)).toContainText(/Next run (tonight|on Sunday); the last one took 41 s/);
+    await expect(scheduleHelp(page)).toContainText(/Next run (tonight|on Sunday) at 03:00; the last one took 41 s/);
 
     await expect((await sectionNav(page)).getByRole('link', { name: /AI & picks/ })).toContainText('Weekly · $3.12 of $15.00');
   });
@@ -177,7 +177,7 @@ test.describe('Settings › AI & picks', () => {
     await expect(link.getByRole('img', { name: 'Needs attention' })).toBeVisible();
   });
 
-  test('the budget: text it can’t read stays here, a 422 shows on the field, and empty is no cap', async ({ page }) => {
+  test('the budget: what it can’t send stays here, on the field, and empty is no cap', async ({ page }) => {
     await openSection(page);
     let puts = 0;
     page.on('request', (request) => {
@@ -188,16 +188,16 @@ test.describe('Settings › AI & picks', () => {
     await saveBar(page).getByRole('button', { name: 'Save' }).click();
     await expect(saveBar(page).getByRole('alert')).toHaveText('Check “Budget” above.');
     await expect(budgetInput(page)).toHaveAccessibleDescription(/^Enter an amount in dollars, like 15 or 7\.50, or leave it empty for no cap\./);
-    expect(puts).toBe(0);
+    await expect(budgetInput(page)).toBeFocused();
 
-    // The range is the server's to check
     await budgetInput(page).fill('-5');
     await saveBar(page).getByRole('button', { name: 'Save' }).click();
-    await expect(saveBar(page).getByRole('alert')).toHaveText('Check “Budget” above.');
     await expect(budgetInput(page)).toHaveAttribute('aria-invalid', 'true');
-    await expect(budgetInput(page)).toHaveAccessibleDescription(/^monthly_budget_usd must be 0 or more, or null for no cap/);
+    await expect(budgetInput(page)).toHaveAccessibleDescription(/^The budget can’t be negative\. Enter 0 or more, or leave it empty for no cap\./);
+    await expect(budgetInput(page)).toBeFocused();
     await expect(budgetInput(page)).toBeInViewport();
     await expectAccessibleAndContained(page);
+    expect(puts).toBe(0);
 
     await budgetInput(page).fill('');
     await expect(budgetInput(page)).not.toHaveAttribute('aria-invalid');
@@ -206,6 +206,21 @@ test.describe('Settings › AI & picks', () => {
     await expect(page.getByRole('img', { name: /^Spent \$3\.12 this month, no cap: / })).toBeVisible();
     await expect(page.getByText('There’s no cap, so AI never pauses.', { exact: false })).toBeVisible();
     await expect((await sectionNav(page)).getByRole('link', { name: /AI & picks/ })).toContainText('Nightly · $3.12 this month');
+  });
+
+  test('a 422 on the budget shows on the field in plain words, and focus moves there', async ({ page }) => {
+    await scenario(page, 'ai-budget-invalid');
+    await openSection(page);
+    await budgetInput(page).fill('20');
+    const save = saveBar(page).getByRole('button', { name: 'Save' });
+    await save.click();
+    await expect(saveBar(page).getByRole('alert')).toHaveText('Check “Budget” above.');
+    await expect(budgetInput(page)).toHaveAttribute('aria-invalid', 'true');
+    await expect(budgetInput(page)).toHaveAccessibleDescription(/^momoshtrem didn’t accept that budget\. Enter 0 or more, or leave it empty for no cap\./);
+    await expect(page.getByText('monthly_budget_usd', { exact: false })).toHaveCount(0);
+    await expect(budgetInput(page)).toBeFocused();
+    await expect(budgetInput(page)).toBeInViewport();
+    await expectAccessibleAndContained(page);
   });
 
   test('without an Anthropic key (ai-off): picks are off, the classifier still saves', async ({ page }) => {

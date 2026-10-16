@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/components/ui';
 import { AiSection } from '@/components/settings/AiSection';
@@ -82,7 +82,7 @@ describe('AiSection', () => {
     expect(puts).toEqual([{ rec_schedule: 'weekly', classifier_enabled: false }]);
   });
 
-  it('keeps a budget it can’t read, and shows a 422 on the field', async () => {
+  it('keeps a budget it can’t send here, and words a server 422 on the field, focusing it', async () => {
     const puts = renderSection({
       put: () => answer(422, { error: { code: 'validation_error', message: 'monthly_budget_usd must be 0 or more, or null for no cap', field: 'monthly_budget_usd' } }),
     });
@@ -93,14 +93,54 @@ describe('AiSection', () => {
     fireEvent.click(within(bar()!).getByRole('button', { name: 'Save' }));
     expect(within(bar()!).getByRole('alert')).toHaveTextContent('Check “Budget” above.');
     expect(input).toHaveAccessibleDescription(/^Enter an amount in dollars/);
-    expect(puts).toEqual([]);
+    expect(input).toHaveFocus();
 
     fireEvent.change(input, { target: { value: '-5' } });
     fireEvent.click(within(bar()!).getByRole('button', { name: 'Save' }));
+    expect(input).toHaveAccessibleDescription(/^The budget can’t be negative\. Enter 0 or more, or leave it empty for no cap\./);
+    expect(puts).toEqual([]);
+
+    fireEvent.change(input, { target: { value: '20' } });
+    within(bar()!).getByRole('button', { name: 'Save' }).focus();
+    fireEvent.click(within(bar()!).getByRole('button', { name: 'Save' }));
     expect(await within(bar()!).findByRole('alert')).toHaveTextContent('Check “Budget” above.');
     expect(input).toHaveAttribute('aria-invalid', 'true');
-    expect(input).toHaveAccessibleDescription(/^monthly_budget_usd must be 0 or more/);
-    expect(puts).toEqual([{ monthly_budget_usd: -5 }]);
+    expect(input).toHaveAccessibleDescription(/^momoshtrem didn’t accept that budget\. Enter 0 or more, or leave it empty for no cap\./);
+    expect(input).toHaveFocus();
+    expect(puts).toEqual([{ monthly_budget_usd: 20 }]);
+  });
+
+  it('sends only what was edited, so a change made elsewhere stays', async () => {
+    let served: AiSettings = { ...AI_SETTINGS };
+    const puts: AiSettingsPatch[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body)) as AiSettingsPatch;
+        puts.push(body);
+        served = { ...served, ...body };
+        return Promise.resolve(answer(200, served));
+      }
+      if (String(input).endsWith('/api/settings/ai/usage')) return Promise.resolve(answer(200, usage()));
+      return Promise.resolve(answer(200, served));
+    }) as typeof fetch;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <AiSection />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    fireEvent.click(within(await screen.findByRole('group', { name: 'Recommendation schedule' })).getByRole('button', { name: 'Weekly' }));
+    // Another device switches the model meanwhile; this page refetches
+    served = { ...served, rec_model: 'claude-sonnet-5-5' };
+    await act(() => client.refetchQueries({ queryKey: ['settings', 'ai'], exact: true }));
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Sonnet 5.5' })).toBeChecked());
+
+    fireEvent.click(within(bar()!).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+    expect(puts).toEqual([{ rec_schedule: 'weekly' }]);
+    expect(served.rec_model).toBe('claude-sonnet-5-5');
   });
 
   it('without a key, turns the picks controls off and still saves the classifier', async () => {
