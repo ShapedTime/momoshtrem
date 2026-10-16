@@ -5,14 +5,17 @@ import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useSignOut } from '@/components/shell/signOut';
+import { useHydrated } from '@/hooks/useHydrated';
 import { qualityProfileQuery } from '@/lib/api/endpoints/search';
+import { aiSettingsQuery, aiUsageQuery } from '@/lib/api/endpoints/settings';
 import { statusQuery } from '@/lib/api/endpoints/system';
 import { traktIntegrationQuery } from '@/lib/api/endpoints/trakt';
-import type { QualityProfile, SystemStatus, TraktIntegration } from '@/lib/api/contract';
+import type { AiSettings, AiUsage, QualityProfile, SystemStatus, TraktIntegration } from '@/lib/api/contract';
+import { aiNavSummary } from '@/lib/settings/ai';
 import { qualitySummary } from '@/lib/settings/quality';
 import { traktNavSummary } from '@/lib/settings/trakt';
 import { cx } from '@/lib/utils/cx';
-import { PlaceholderSection } from './PlaceholderSection';
+import { AiSection } from './AiSection';
 import { PlaybackSection } from './PlaybackSection';
 import { QualitySection } from './QualitySection';
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections';
@@ -27,10 +30,13 @@ interface NavData {
   statusFailed: boolean;
   quality: QualityProfile | undefined;
   trakt: TraktIntegration | undefined;
+  ai: { settings: AiSettings | undefined; usage: AiUsage | undefined; hydrated: boolean };
 }
 
-function navSummary(id: SectionId, { status, statusFailed, quality, trakt }: NavData): { text: string; attention?: boolean } {
+function navSummary(id: SectionId, { status, statusFailed, quality, trakt, ai }: NavData): { text: string; attention?: boolean } {
   if (id === 'quality') return { text: quality ? qualitySummary(quality) : '' };
+  // Not before hydration: the server's HTML has no summary (#148)
+  if (id === 'ai') return ai.hydrated ? aiNavSummary(ai.settings, ai.usage) : { text: '' };
   if (id === 'trakt') return traktNavSummary(trakt);
   if (id === 'status') {
     if (statusFailed) return { text: 'Can’t reach the server', attention: true };
@@ -38,13 +44,8 @@ function navSummary(id: SectionId, { status, statusFailed, quality, trakt }: Nav
     const summary = summarize(serviceRows(status, trakt));
     return { text: summary.short, attention: summary.attention };
   }
-  if (!status) return { text: '' };
-  switch (id) {
-    case 'ai':
-      return { text: status.ai.configured ? (status.ai.mtd_cost_usd !== null ? `$${status.ai.mtd_cost_usd.toFixed(2)} this month` : 'Key configured') : 'Off' };
-    case 'playback':
-      return { text: 'WebDAV ready' };
-  }
+  // playback
+  return { text: status ? 'WebDAV ready' : '' };
 }
 
 /**
@@ -62,6 +63,10 @@ export function SettingsView() {
   const { data: quality } = useQuery(qualityProfileQuery());
   // The Trakt section polls while a code waits or a sync runs; the nav just reads along
   const { data: trakt } = useQuery({ ...traktIntegrationQuery(), refetchInterval: false });
+  // AI & picks polls the usage while a run works; the nav reads along
+  const { data: aiSettings } = useQuery(aiSettingsQuery());
+  const { data: aiUsage } = useQuery({ ...aiUsageQuery(), refetchInterval: false });
+  const hydrated = useHydrated();
 
   return (
     <div className="page py-6 lg:py-8">
@@ -75,7 +80,7 @@ export function SettingsView() {
               <ul className="overflow-hidden rounded-lg border border-line-1 bg-surface-1 max-lg:divide-y max-lg:divide-line-1 lg:border-0 lg:bg-transparent">
                 {SECTIONS.filter((s) => s.group === group).map((s) => {
                   const Icon = s.icon;
-                  const summary = navSummary(s.id, { status, statusFailed: isError, quality, trakt });
+                  const summary = navSummary(s.id, { status, statusFailed: isError, quality, trakt, ai: { settings: aiSettings, usage: aiUsage, hydrated } });
                   const isActive = s.id === active;
                   return (
                     <li key={s.id}>
@@ -141,7 +146,7 @@ export function SettingsView() {
           ) : active === 'quality' ? (
             <QualitySection />
           ) : (
-            <PlaceholderSection id={active} />
+            <AiSection />
           )}
         </section>
       </div>

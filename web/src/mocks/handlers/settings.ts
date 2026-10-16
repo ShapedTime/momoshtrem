@@ -58,6 +58,9 @@ export const settingsHandlers = [
     await latency();
     const body = await jsonBody(request);
     if (!isRecord(body)) return apiError(400, 'bad_request', 'Send the settings to change as a JSON object.');
+    if (scenario() === 'ai-budget-invalid' && 'monthly_budget_usd' in body) {
+      return apiError(422, 'validation_error', CHECKS.monthly_budget_usd(-1) ?? 'monthly_budget_usd is invalid', { field: 'monthly_budget_usd' });
+    }
     const patch: Record<string, unknown> = {};
     for (const [field, check] of Object.entries(CHECKS)) {
       if (!(field in body)) continue;

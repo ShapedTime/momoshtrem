@@ -113,6 +113,8 @@
   .switch input:checked ~ .track { background: var(--accent); }
   .switch input:checked ~ .thumb { transform: translateX(20px); background: var(--accent-ink); }
   .switch input:focus-visible ~ .track { box-shadow: var(--focus-ring); }
+  .switch:has(input:disabled) { opacity: 0.45; }
+  .switch input:disabled { cursor: not-allowed; }
 
   /* Range (dual-thumb appearance, single for prototype) */
   .range { display: flex; flex-direction: column; gap: var(--sp-2); }
