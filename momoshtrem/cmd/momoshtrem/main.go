@@ -34,6 +34,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/subtitle"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
+	"github.com/shapedtime/momoshtrem/internal/torznab"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 	"github.com/shapedtime/momoshtrem/internal/webdav"
 )
@@ -358,9 +359,6 @@ func main() {
 		AICost:                  aiStore.MonthToDateCost,
 		OpenSubtitlesConfigured: cfg.OpenSubtitles.APIKey != "",
 	}
-	if cfg.Jackett.URL != "" && cfg.Jackett.APIKey != "" {
-		statusOpts.Jackett = status.JackettProber(&http.Client{}, cfg.Jackett.URL, cfg.Jackett.APIKey)
-	}
 	if cfg.TMDB.APIKey != "" {
 		statusOpts.TMDB = tmdbClient.Ping
 	}
@@ -406,6 +404,14 @@ func main() {
 		apiOpts.HDRezka = hdrezkaService
 		statusOpts.HDRezka = hdrezkaService.Ping
 		slog.Info("HDRezka enabled", "mirror", client.BaseURL())
+	}
+	// Jackett over Torznab: the status probe and per-indexer health. Torrent
+	// search (#6) reuses jackettClient; nil when Jackett isn't configured.
+	var jackettClient *torznab.Client
+	if cfg.Jackett.URL != "" && cfg.Jackett.APIKey != "" {
+		jackettClient = torznab.New(cfg.Jackett.URL, cfg.Jackett.APIKey)
+		statusOpts.Jackett = status.JackettProber(jackettClient)
+		slog.Info("Jackett Torznab client configured")
 	}
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo

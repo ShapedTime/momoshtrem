@@ -29,6 +29,10 @@ const (
 // user, so they must never contain secrets.
 type Prober func(ctx context.Context) error
 
+// JackettProbe is a Prober that also lists Jackett's indexers with their
+// latest search outcome.
+type JackettProbe func(ctx context.Context) ([]IndexerStatus, error)
+
 // Database is the subset of the library DB the report needs.
 type Database interface {
 	PingContext(ctx context.Context) error
@@ -53,9 +57,9 @@ type Options struct {
 	// ActiveReaders returns the number of open streaming readers. Optional.
 	ActiveReaders func() int
 
-	Jackett Prober // nil when JACKETT_URL or JACKETT_API_KEY is unset
-	TMDB    Prober // nil when TMDB_API_KEY is unset
-	HDRezka Prober // nil when HDREZKA_ENABLED is off
+	Jackett JackettProbe // nil when JACKETT_URL or JACKETT_API_KEY is unset
+	TMDB    Prober       // nil when TMDB_API_KEY is unset
+	HDRezka Prober       // nil when HDREZKA_ENABLED is off
 
 	TraktConfigured         bool
 	AIConfigured            bool
@@ -77,7 +81,7 @@ type Report struct {
 	CheckedAt     string              `json:"checked_at"` // RFC 3339, when the checks ran
 	DB            DBStatus            `json:"db"`
 	WebDAV        WebDAVStatus        `json:"webdav"`
-	Jackett       ProbeStatus         `json:"jackett"`
+	Jackett       JackettStatus       `json:"jackett"`
 	TMDB          ProbeStatus         `json:"tmdb"`
 	Trakt         TraktStatus         `json:"trakt"`
 	AI            AIStatus            `json:"ai"`
@@ -108,6 +112,23 @@ type ProbeStatus struct {
 	Reachable  bool   `json:"reachable"`
 	LatencyMS  *int64 `json:"latency_ms,omitempty"`
 	Error      string `json:"error,omitempty"`
+}
+
+// JackettStatus is the Jackett probe plus each configured indexer's health.
+// Indexers is omitted when Jackett isn't configured or isn't reachable.
+type JackettStatus struct {
+	ProbeStatus
+	Indexers []IndexerStatus `json:"indexers,omitzero"`
+}
+
+// IndexerStatus is one Jackett indexer's latest search outcome since
+// startup: ok, timeout, error, or unknown before any search.
+type IndexerStatus struct {
+	Name   string  `json:"name"`
+	Status string  `json:"status"`
+	MS     *int64  `json:"ms"`
+	Since  *string `json:"since"` // RFC 3339: when the current timeout or error streak began
+	Error  string  `json:"error,omitempty"`
 }
 
 // TraktStatus reports the Trakt integration. Connected is filled in by B5.
@@ -224,7 +245,7 @@ func (s *Service) check(ctx context.Context) Report {
 	var wg sync.WaitGroup
 	wg.Add(5)
 	go func() { defer wg.Done(); r.DB = s.checkDB(ctx) }()
-	go func() { defer wg.Done(); r.Jackett = s.runProbe(ctx, "jackett", s.opts.Jackett) }()
+	go func() { defer wg.Done(); r.Jackett = s.checkJackett(ctx) }()
 	go func() { defer wg.Done(); r.TMDB = s.runProbe(ctx, "tmdb", s.opts.TMDB) }()
 	go func() { defer wg.Done(); r.HDRezka = s.runProbe(ctx, "hdrezka", s.opts.HDRezka) }()
 	go func() { defer wg.Done(); r.AI.MTDCostUSD = s.aiCost(ctx) }()
@@ -296,6 +317,27 @@ func (s *Service) describeDBError(err error, fallback string) string {
 		return fmt.Sprintf("%s: timed out after %s", fallback, s.opts.ProbeTimeout)
 	}
 	return fallback
+}
+
+// checkJackett runs the Jackett probe. The indexers come only with a
+// reachable Jackett, as an empty list when it has none.
+func (s *Service) checkJackett(ctx context.Context) JackettStatus {
+	if s.opts.Jackett == nil {
+		return JackettStatus{}
+	}
+	var indexers []IndexerStatus
+	st := JackettStatus{ProbeStatus: s.runProbe(ctx, "jackett", func(ctx context.Context) error {
+		var err error
+		indexers, err = s.opts.Jackett(ctx)
+		return err
+	})}
+	if st.Reachable {
+		st.Indexers = indexers
+		if st.Indexers == nil {
+			st.Indexers = []IndexerStatus{}
+		}
+	}
+	return st
 }
 
 func (s *Service) runProbe(ctx context.Context, name string, probe Prober) ProbeStatus {
