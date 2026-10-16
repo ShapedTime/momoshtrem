@@ -1,6 +1,6 @@
 import type { LibraryItem } from '@/lib/api/contract';
 import { SHOWS } from './title-seeds';
-import { buildTitle, libraryKey, type MockLibrary } from './titles';
+import { buildTitle, episodesWatched, libraryKey, type MockLibrary } from './titles';
 
 /**
  * Titles Infuse is playing right now in the mock (`streaming` is false on the
@@ -30,7 +30,7 @@ export function libraryItems(library: MockLibrary): LibraryItem[] {
         availability_stage: state.availability_stage,
         episodes_total: state.episodes_total,
         episodes_ready: state.episodes_ready,
-        episodes_watched: title.media_type === 'tv' ? (watch_state?.progress?.completed ?? 0) : null,
+        episodes_watched: title.media_type === 'tv' ? episodesWatched(title.tmdb_id, library) : null,
         needs_review: state.needs_review,
         size_bytes: state.torrent?.size_bytes ?? state.stream?.size_bytes ?? (state.episodes_ready ?? 0) * EPISODE_BYTES,
         added_at: row.added_at,

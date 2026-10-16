@@ -26,8 +26,24 @@ describe('EpisodeRow', () => {
     const { onOpen } = renderRow(watched);
     expect(screen.getByText('Watched')).toBeInTheDocument();
     expect(screen.getByRole('listitem')).toHaveClass('is-watched');
-    fireEvent.click(screen.getByRole('button', { name: /^S01E01 options/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'S01E01 options: how to play, subtitles, replace, remove' }));
     expect(onOpen).toHaveBeenCalledWith(watched);
+  });
+
+  it('watched without a file (a Trakt play): the pill, and the sheet offers to find one', () => {
+    const watched = { ...episode(209867, 1, 1), webdav_path: null, source: null };
+    const { onOpen, onFind } = renderRow(watched);
+    expect(screen.getByText('Watched')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'S01E01 options: find a torrent' }));
+    expect(onOpen).toHaveBeenCalledWith(watched);
+    expect(onFind).not.toHaveBeenCalled();
+  });
+
+  it('up next on a watched or ready row: the amber rule and the label', () => {
+    renderRow(episode(209867, 1, 27), { isNext: true });
+    expect(screen.getByRole('listitem')).toHaveClass('is-next');
+    expect(screen.getByText('Up next')).toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
   });
 
   it('missing: finds a torrent for that episode', () => {

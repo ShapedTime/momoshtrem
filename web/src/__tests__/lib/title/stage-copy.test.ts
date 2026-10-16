@@ -137,7 +137,8 @@ describe('primaryActionFor: shows', () => {
   it.each([
     ['a run in absolute numbers (Frieren)', show(209867), 'Episodes 29–38 have no torrent', 'Find episodes 29–38'],
     ['one absolute episode (One Piece #1121)', show(37854, without(37854, [22, 36])), 'Episode 1121 has no torrent', 'Find episode 1121'],
-    ['one aired episode of a multi-season show (Severance)', show(95396, without(95396, [2, 9])), 'S02E09 has no torrent', 'Find S02E09'],
+    // Severance's are all watched: a watched episode without its file is still covered (B5)
+    ['one aired episode of a multi-season show (Doctor Who)', show(57243, without(57243, [4, 13])), 'S04E13 has no torrent', 'Find S04E13'],
   ])('needs a torrent: %s', (_name, t, panelTitle, button) => {
     const copy = primaryActionFor(t);
     expect([copy.stage, copy.title, copy.primary.label, copy.dock.button.label]).toEqual(['needs_torrent', panelTitle, button, button]);

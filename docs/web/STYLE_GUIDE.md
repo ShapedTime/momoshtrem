@@ -155,13 +155,15 @@ and the pure helpers in `lib/title/`. Build any page about one title from them.
   are confirmed with what goes and what stays.
 - **Episode rows** (`EpisodeRow`) are compact (60 px) or, with `?view=rich`, have a still
   (92 px). Each state gets its pill from `lib/status.ts` and one action: find (missing), ⋯ for the
-  episode sheet (has a file), a chevron to the mapping review (needs review), nothing until it
-  airs. The first frontier episode is "Up next" with the amber rule. With absolute ordering a row
+  episode sheet (has a file, or watched without one), a chevron to the mapping review (needs
+  review), nothing until it airs. "Up next" with the amber rule is Trakt's next episode
+  (`watch_state.next_episode`), else the first frontier episode (`nextUpEpisode`). Watched wins
+  the pill, and a watched episode's file keeps its actions. With absolute ordering a row
   reads `#1100 · S22E15`, unless the absolute number is the in-season one.
 - **Long seasons** (HANDOFF §5.4):
   - range chips from `SeasonDetail.ranges`, the frontier's pressed, each jumping to its start;
   - Jump to episode, which reads `29`, `1100` or `S02E05` (`parseJump`) and switches `?season=` when needed;
-  - leading watched runs (10 or more) collapse into "Show episodes 1–20 (all watched)";
+  - leading watched runs (10 or more) collapse into "Show episodes 1–20 (all watched)", never past the Up next row;
   - seasons over 60 rows render through the window virtualiser (`@tanstack/react-virtual`).
   Rows outside the window aren't in the DOM, so jump with `scrollToEpisode`, never by element id.
 - **URL state.** `?season=`, `?view=rich`, the sheets (`?sheet=episode&tmdb=&se=S01E05`,

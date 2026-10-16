@@ -57,9 +57,14 @@ export function watchedPct(item: LibraryItem): number {
   return item.last_watched_at ? 100 : 0;
 }
 
-/** The watch line: "28 of 38 watched", "Watched all", "Not started"; movies "Watched" or the runtime. */
-export function watchLine(item: LibraryItem): string {
+/**
+ * The watch line: "28 of 38 watched", "Watched all", "Not started"; movies
+ * "Watched" or the runtime. While Trakt isn't linked a show has none: every
+ * one would read "Not started".
+ */
+export function watchLine(item: LibraryItem, { trakt = true }: { trakt?: boolean } = {}): string {
   if (item.media_type === 'tv') {
+    if (!trakt) return '';
     const total = item.episodes_total ?? 0;
     const watched = item.episodes_watched ?? 0;
     if (total > 0 && watched >= total) return 'Watched all';

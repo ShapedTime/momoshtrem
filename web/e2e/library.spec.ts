@@ -53,7 +53,7 @@ test.describe('library', () => {
     await expect(page).toHaveTitle('Library · momoshtrem');
     await expect(page.getByText('9 titles · 699 GB · 5 ready in Infuse')).toBeVisible();
     await expect(titles(page)).toHaveCount(9);
-    for (const [name, count] of [['All', 9], ['Movies', 3], ['Shows', 6], ['Watching', 0], ['Ready', 5], ['Incomplete', 4], ['Needs review', 3]] as const) {
+    for (const [name, count] of [['All', 9], ['Movies', 3], ['Shows', 6], ['Watching', 4], ['Ready', 5], ['Incomplete', 4], ['Needs review', 3]] as const) {
       await expect(chip(page, new RegExp(`^${name} ${count}$`))).toBeVisible();
     }
     await expect(chip(page, /^All/)).toHaveAttribute('aria-pressed', 'true');
@@ -65,6 +65,11 @@ test.describe('library', () => {
     await expect(card(page, 'The Studio')).toContainText('Playing');
     await expect(card(page, 'Frieren: Beyond Journey’s End')).toContainText('Review');
     await expect(card(page, 'Frieren: Beyond Journey’s End')).toContainText('28/38 ready');
+    // What Trakt says was watched
+    await expect(card(page, 'Frieren: Beyond Journey’s End')).toContainText('26 of 38 watched');
+    await expect(card(page, 'Severance')).toContainText('Watched all');
+    await expect(card(page, 'Bluey')).toContainText('Not started');
+    await expect(card(page, 'Dune: Part Two')).toContainText('Watched');
     await expect(card(page, 'Dune: Part Two')).toContainText('Ready');
     await expect(moreActions(page, 'Dune: Part Two')).toBeVisible();
     await expectAccessibleAndContained(page);
@@ -84,9 +89,12 @@ test.describe('library', () => {
     await expect(page).toHaveURL(/filter=review&sort=title/);
     await expect(titles(page)).toHaveText(['Doctor Who', 'Frieren: Beyond Journey’s End', 'One Piece']);
 
+    // Shows partway through (Trakt): not Severance (caught up) or Bluey (not started)
     await chip(page, /^Watching/).click();
-    await expect(page.getByRole('heading', { name: 'Nothing under Watching' })).toBeVisible();
-    await page.getByRole('button', { name: 'Show all titles' }).click();
+    await expect(page).toHaveURL(/filter=watching&sort=title/);
+    await expect(titles(page)).toHaveText(['Doctor Who', 'Frieren: Beyond Journey’s End', 'One Piece', 'The Studio']);
+    await expect(card(page, 'The Studio')).toContainText('9 of 10 watched');
+    await chip(page, /^All/).click();
     await expect(page).toHaveURL(/\/library\?sort=title$/);
 
     await page.getByRole('button', { name: 'List' }).click();
@@ -104,6 +112,42 @@ test.describe('library', () => {
     await page.reload();
     await expect(page.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByLabel('Sort by')).toHaveValue('title');
+  });
+
+  test('Last watched sorts by Trakt’s last play, never-watched titles last', async ({ page }) => {
+    await signIn(page, '/library?sort=last_watched');
+    await expect(page.getByLabel('Sort by')).toHaveValue('last_watched');
+    // Dune and Frieren were last played the same day: then the newest added first
+    await expect(titles(page).first()).toHaveText('The Studio');
+    await expect(titles(page).nth(1)).toHaveText('Dune: Part Two');
+    await expect(titles(page).nth(2)).toHaveText('Frieren: Beyond Journey’s End');
+    await expect(titles(page).last()).toHaveText(/Bluey|One Battle After Another/);
+  });
+
+  test('Trakt off: no watch lines, and Watching says how to fill it', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'trakt-off'));
+    await signIn(page, '/library');
+    await expect(chip(page, /^Watching 0$/)).toBeVisible();
+    // A show would read "Not started" whatever you'd watched; a movie keeps its runtime
+    await expect(card(page, 'Frieren: Beyond Journey’s End')).toContainText('28/38 ready');
+    await expect(card(page, 'Frieren: Beyond Journey’s End')).not.toContainText('watched');
+    await expect(card(page, 'Bluey')).not.toContainText('Not started');
+    await expect(card(page, 'Dune: Part Two')).toContainText('2h 47m');
+    await expect(page.locator('article.libcard .progress--watched')).toHaveCount(0);
+
+    await chip(page, /^Watching/).click();
+    await expect(page.getByRole('heading', { name: 'Connect Trakt to see what you’re watching' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Connect Trakt' })).toHaveAttribute('href', '/settings?section=trakt');
+    await expectAccessibleAndContained(page);
+    await page.getByRole('button', { name: 'Show all titles' }).click();
+    await expect(page).toHaveURL(/\/library$/);
+
+    await page.getByRole('button', { name: 'List' }).click();
+    const rows = page.getByRole('list', { name: 'Your library' }).getByRole('listitem');
+    await expect(rows.filter({ hasText: 'Bluey' })).not.toContainText('Not started');
+    await expect(rows.filter({ hasText: 'One Battle After Another' })).not.toContainText('Never');
+    await expect(rows.filter({ hasText: 'The Studio' })).toContainText('Now');
+    if (isDesktop(testInfo)) await expectAccessibleAndContained(page);
   });
 
   test('searches the library, and offers to search everywhere when nothing matches', async ({ page }) => {

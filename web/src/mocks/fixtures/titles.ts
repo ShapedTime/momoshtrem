@@ -20,6 +20,7 @@ import type {
   TitleLibraryState,
   TitleStream,
   TitleTorrent,
+  WatchState,
 } from '@/lib/api/contract';
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
 import { type CatalogEntry, findTitle, iso } from './catalog';
@@ -27,6 +28,7 @@ import {
   absoluteNumbers,
   type EpisodeKey,
   episodeIdFor,
+  hasPlay,
   MOVIES,
   type MovieSeed,
   type SeasonSeed,
@@ -35,11 +37,13 @@ import {
   type ShowSeed,
   type TitleSeed,
 } from './title-seeds';
+import { traktImported } from './trakt';
 
 /**
  * Title and season answers built from the seeds (title-seeds.ts) and the
  * page's library: what's added, unassigned or changed lives in a `MockLibrary`
- * that handlers/titles.ts keeps per page.
+ * that handlers/titles.ts keeps per page. Watch state is what the mock Trakt
+ * account has imported so far (fixtures/trakt.ts): nothing while it's off.
  */
 
 /** The mock WEBDAV_PUBLIC_URL. */
@@ -176,20 +180,42 @@ export function findEpisode(id: number): { tmdbId: number; season: number; episo
 
 // ---- Builders ---------------------------------------------------------------
 
-const hasFile = (state: EpisodeState) => state === 'watched' || state === 'ready' || state === 'downloading';
+/** A seed with a file: `watched` ones have one too. */
+const seededFile = (state: EpisodeState) => state === 'watched' || state === 'ready' || state === 'downloading';
+/** A built episode with a file, watched or not (PLAN §6: `pct`, `webdav_path` and `source` describe it). */
+const hasFile = (episode: Pick<EpisodeSummary, 'webdav_path'>) => episode.webdav_path !== null;
 const aired = (airDate: string | null) => airDate !== null && airDate <= TODAY;
+
+/** What the library holds for an episode, plays aside. */
+type FileState = Exclude<EpisodeState, 'watched'>;
 
 /**
  * A file wins (seeded, or from an applied job); without one, an episode an open
  * mapping job wants to review is needs_review, otherwise missing or upcoming.
  */
-function episodeState(seed: SeasonSeed['episodes'][number], id: number, row: MockLibraryEntry | undefined): EpisodeState {
+function fileState(seed: SeasonSeed['episodes'][number], id: number, row: MockLibraryEntry | undefined): FileState {
   const kept = row !== undefined && !row.unassigned.has(id);
-  if (kept && row.files && hasFile(seed.state)) return seed.state;
+  if (kept && row.files && seededFile(seed.state)) return seed.state === 'downloading' ? 'downloading' : 'ready';
   if (kept && (row.filed.has(id) || row.streamed.has(id))) return 'ready';
   if (row?.review.episode_ids.has(id)) return 'needs_review';
   if (seed.state === 'missing' || seed.state === 'upcoming') return seed.state;
   return aired(seed.air_date) ? 'missing' : 'upcoming';
+}
+
+/**
+ * A seed's watch state, as far as Trakt's import has come (PLAN §6 "Watch
+ * state rules"): null before its history; the rating with the ratings; a
+ * show's progress and next episode with the progress step (next_episode is
+ * then always there, maybe null).
+ */
+function watchState(seed: TitleSeed | ShowSeed): WatchState | null {
+  const state = seed.watch_state;
+  if (!state || !traktImported('history')) return null;
+  const { progress, ...plays } = state;
+  const base: WatchState = { ...plays, rating: traktImported('ratings') ? plays.rating : null };
+  if (!('seasons' in seed)) return base;
+  if (!traktImported('progress')) return { ...base, next_episode: null };
+  return { ...base, ...(progress ? { progress } : {}), next_episode: seed.next_up ? nextEpisodeOf(seed, seed.next_up) : null };
 }
 
 function notInLibrary(): TitleLibraryState {
@@ -220,13 +246,15 @@ interface BuiltSeason {
 function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry | undefined): BuiltSeason[] {
   const includeSpecials = row?.settings.include_specials ?? true;
   const absolute = absoluteNumbers(show);
+  const plays = traktImported('history');
   return show.seasons
     .map((season) => {
       const episodes = season.episodes.map((seed): EpisodeSummary => {
         const id = episodeIdFor(show.key, season.n, seed.n);
-        const state = episodeState(seed, id, row);
-        // Watched wins the state; the file is still the stream's
-        const stream = ((state === 'ready' || state === 'watched') && row?.streamed.get(id)) || null;
+        const file = fileState(seed, id, row);
+        const filed = file === 'ready' || file === 'downloading';
+        // A play wins the state (PLAN §6); pct, the path, source and stream still describe the file
+        const stream = (file === 'ready' && row?.streamed.get(id)) || null;
         return {
           id,
           season_number: season.n,
@@ -238,10 +266,10 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
           still_path: null,
           runtime: seed.runtime,
           episode_type: seed.episode_type ?? 'standard',
-          state,
-          pct: state === 'downloading' ? (seed.pct ?? 0) : null,
-          webdav_path: hasFile(state) ? episodePath(entry, season.n, seed.n, seed.name, stream ? '.mp4' : '.mkv') : null,
-          source: stream ? 'hdrezka' : hasFile(state) ? 'torrent' : null,
+          state: plays && hasPlay(show, season.n, seed) ? 'watched' : file,
+          pct: file === 'downloading' ? (seed.pct ?? 0) : null,
+          webdav_path: filed ? episodePath(entry, season.n, seed.n, seed.name, stream ? '.mp4' : '.mkv') : null,
+          source: stream ? 'hdrezka' : filed ? 'torrent' : null,
           stream,
         };
       });
@@ -250,17 +278,18 @@ function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry
     .filter((season) => includeSpecials || season.seed.n !== 0);
 }
 
+/** Watched episodes count as ready when they have a file, and never as missing, under review or upcoming. */
 function seasonSummary({ seed, episodes }: BuiltSeason, inLibrary: boolean): SeasonSummary {
-  const count = (match: (state: EpisodeState) => boolean) => (inLibrary ? episodes.filter((e) => match(e.state)).length : 0);
+  const count = (match: (episode: EpisodeSummary) => boolean) => (inLibrary ? episodes.filter(match).length : 0);
   const absolute = episodes.map((e) => e.absolute_number).filter((n): n is number => n !== null);
   return {
     season_number: seed.n,
     name: seed.name,
     episodes_total: episodes.length,
     ready: count(hasFile),
-    missing: count((state) => state === 'missing'),
-    needs_review: count((state) => state === 'needs_review'),
-    upcoming: count((state) => state === 'upcoming'),
+    missing: count((e) => e.state === 'missing'),
+    needs_review: count((e) => e.state === 'needs_review'),
+    upcoming: count((e) => e.state === 'upcoming'),
     absolute_from: inLibrary ? (absolute[0] ?? null) : null,
     absolute_to: inLibrary ? (absolute.at(-1) ?? null) : null,
   };
@@ -301,11 +330,12 @@ function ranges({ seed, episodes }: BuiltSeason): EpisodeRange[] {
 
 /**
  * The first run of the frontier: aired regular episodes after the last one
- * with a file. An episode under review has no file yet, so it belongs to it.
+ * with a file or watched. An episode under review has no file yet, so it
+ * belongs to it.
  */
 function frontierRun(seasons: BuiltSeason[]): MissingRun | null {
   const regular = seasons.filter((s) => s.seed.n > 0).flatMap((s) => s.episodes);
-  const rest = regular.slice(regular.findLastIndex((e) => hasFile(e.state)) + 1);
+  const rest = regular.slice(regular.findLastIndex((e) => hasFile(e) || e.state === 'watched') + 1);
   const unfiled = (e: EpisodeSummary | undefined) => e !== undefined && (e.state === 'missing' || (e.state === 'needs_review' && aired(e.air_date)));
   const start = rest.findIndex(unfiled);
   if (start < 0) return null;
@@ -325,10 +355,11 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
   if (!row) return notInLibrary();
   const all = seasons.flatMap((s) => s.episodes);
   const regular = all.filter((e) => e.season_number > 0);
-  const withFile = regular.filter((e) => hasFile(e.state));
-  const downloading = all.filter((e) => e.state === 'downloading');
+  const withFile = regular.filter(hasFile);
+  // pct is the file's: a watched episode can still be downloading
+  const downloading = all.filter((e) => e.pct !== null);
   const missing = frontierRun(seasons);
-  const path = all.some((e) => hasFile(e.state)) ? showPath(entry) : null;
+  const path = all.some(hasFile) ? showPath(entry) : null;
   return {
     in_library: true,
     library_id: row.library_id,
@@ -466,7 +497,7 @@ function base(entry: CatalogEntry, seed: TitleSeed, library: MockLibrary) {
     trailer_youtube_key: seed.trailer_youtube_key,
     similar: similarTitles(seed, library),
     library: libraryState(entry, library),
-    watch_state: seed.watch_state,
+    watch_state: watchState(seed),
     recommendation_reason: seed.recommendation_reason,
   };
 }
@@ -503,11 +534,13 @@ export function buildTitle(mediaType: MediaType, tmdbId: number, library: MockLi
   const settings = row?.settings ?? defaultSettings(entry);
   const regular = seasons.filter((s) => s.seed.n > 0);
   const specials = seasons.filter((s) => s.seed.n === 0);
-  const withFile = regular.filter((s) => s.episodes.some((e) => hasFile(e.state)));
+  const withFile = regular.filter((s) => s.episodes.some(hasFile));
   const titleBase = base(entry, show, library);
+  // PLAN §6: Trakt's next episode's season when the title lists it, else the frontier's, …
+  const next = titleBase.watch_state?.next_episode;
+  const nextSeason = next && seasons.some((s) => s.seed.n === next.season) ? next.season : null;
   const title: ShowTitle = {
     ...titleBase,
-    watch_state: show.watch_state && { ...show.watch_state, next_episode: show.next_up ? nextEpisodeOf(show, show.next_up) : null },
     media_type: 'tv',
     status: show.status,
     is_anime: Boolean(entry.is_anime),
@@ -518,7 +551,7 @@ export function buildTitle(mediaType: MediaType, tmdbId: number, library: MockLi
     episode_run_time: show.episode_run_time,
     seasons: [...regular, ...specials].map((season) => seasonSummary(season, row !== undefined)),
     default_season:
-      titleBase.library.missing?.season_number ?? withFile.at(-1)?.seed.n ?? regular[0]?.seed.n ?? specials[0]?.seed.n ?? null,
+      nextSeason ?? titleBase.library.missing?.season_number ?? withFile.at(-1)?.seed.n ?? regular[0]?.seed.n ?? specials[0]?.seed.n ?? null,
   };
   return title;
 }
@@ -557,7 +590,7 @@ export function episodeFile(library: MockLibrary, id: number): EpisodeFile | nul
   const row = episode && library.get(libraryKey('tv', episode.tmdbId));
   if (!episode || !row) return null;
   const built = buildSeason(episode.tmdbId, episode.season, library)?.episodes.find((e) => e.id === id);
-  if (!built || !hasFile(built.state)) return null;
+  if (!built || !hasFile(built)) return null;
   // PLAN §6 "HDRezka": what a mapping proposal would replace
   const stream = row.streamed.get(id);
   if (stream) return { info_hash: '', release_name: `HDRezka · ${stream.translator} · ${stream.quality}`, file_path: '' };
@@ -588,7 +621,17 @@ export function showEpisodes(tmdbId: number, library: MockLibrary): ShowEpisodes
         absolute_number: e.absolute_number,
         name: e.name,
         air_date: e.air_date,
-        has_file: hasFile(e.state),
+        has_file: hasFile(e),
       })),
     }));
+}
+
+/** `LibraryItem.episodes_watched`: the show's regular episodes with a play (0 without Trakt). */
+export function episodesWatched(tmdbId: number, library: MockLibrary): number {
+  const entry = findTitle('tv', tmdbId);
+  const show = SHOWS[tmdbId];
+  if (!entry || !show) return 0;
+  return buildSeasons(entry, show, library.get(libraryKey('tv', tmdbId)))
+    .filter((season) => season.seed.n > 0)
+    .reduce((sum, season) => sum + season.episodes.filter((e) => e.state === 'watched').length, 0);
 }

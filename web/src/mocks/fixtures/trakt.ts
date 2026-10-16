@@ -22,8 +22,9 @@ import type {
 } from '@/lib/api/contract';
 import { type MockScenario, scenario } from '../scenario';
 import { findTitle, iso } from './catalog';
+// titles.ts reads traktImported() back: functions only, so the cycle is safe
 import { buildSeason, buildTitle, episodeFile, libraryKey, type MockLibrary, nextEpisodeOf, webdavUrl } from './titles';
-import { type EpisodeKey, MOVIES, seedEpisode, SHOWS, type ShowSeed } from './title-seeds';
+import { type EpisodeKey, hasPlay, MOVIES, SHOWS, type ShowSeed } from './title-seeds';
 
 /**
  * The mock Trakt account (teymur) and the integration's state machine
@@ -65,11 +66,6 @@ const WATCHLIST: Array<{ media_type: MediaType; tmdb_id: number; listed_days_ago
   { media_type: 'tv', tmdb_id: 66573, listed_days_ago: 60 }, // The Good Place: not in the library
 ];
 
-/** Plays the seeds can't hold: episodes the library has no file for. */
-const TRAKT_ONLY_PLAYS: Array<{ tmdb_id: number; season: number; episodes: number[] }> = [
-  { tmdb_id: 66573, season: 1, episodes: [1, 2, 3, 4, 5] },
-];
-
 const showSeeds = () => Object.entries(SHOWS).map(([id, show]) => [Number(id), show] as const);
 
 /** Shows with Trakt progress: Up next's candidates. */
@@ -85,11 +81,8 @@ function buildHistory(): HistoryItem[] {
     const last = show.watch_state?.watched_at;
     if (!entry || !last) continue;
     const watched = show.seasons.flatMap((season) =>
-      season.episodes.filter((e) => e.state === 'watched').map((e) => ({ season: season.n, episode: e.n, name: e.name }))
+      season.episodes.filter((e) => hasPlay(show, season.n, e)).map((e) => ({ season: season.n, episode: e.n, name: e.name }))
     );
-    for (const extra of TRAKT_ONLY_PLAYS.filter((p) => p.tmdb_id === tmdbId)) {
-      for (const n of extra.episodes) watched.push({ season: extra.season, episode: n, name: seedEpisode(show, [extra.season, n])?.name ?? `Episode ${n}` });
-    }
     watched.forEach((e, i) =>
       plays.push({
         media_type: 'tv',
@@ -144,9 +137,11 @@ function episodeCard(library: MockLibrary, tmdbId: number, key: EpisodeKey): Car
   const next = show && nextEpisodeOf(show, key);
   if (!entry || !next) return null;
   const row = library.get(libraryKey('tv', tmdbId));
+  // The title page's labels: an absolute number only for a library show with absolute ordering (PLAN §6)
+  const absolute = row?.settings.episode_ordering === 'absolute' ? next.absolute_number : null;
   const card: Card = {
     show: { tmdb_id: tmdbId, title: entry.title, poster_path: null, backdrop_path: null, library_id: row?.library_id ?? null },
-    episode: { ...next, still_path: null, tmdb_id: null },
+    episode: { ...next, absolute_number: absolute, still_path: null, tmdb_id: null },
     availability: 'needs_torrent',
     webdav_path: null,
     webdav_url: null,
@@ -155,7 +150,8 @@ function episodeCard(library: MockLibrary, tmdbId: number, key: EpisodeKey): Car
   };
   const episode = row && buildSeason(tmdbId, key[0], library)?.episodes.find((e) => e.episode_number === key[1]);
   if (episode?.webdav_path) {
-    const downloading = episode.state === 'downloading';
+    // The file's: a watched episode (a rewatch) can still be downloading
+    const downloading = episode.pct !== null;
     return {
       ...card,
       availability: downloading ? 'downloading' : 'ready',
@@ -217,7 +213,7 @@ export function newEpisodeItems(library: MockLibrary, days: number, withTrakt: b
   for (const tmdbId of shows) {
     for (const season of SHOWS[tmdbId].seasons.filter((s) => s.n > 0)) {
       for (const seed of season.episodes) {
-        if (!seed.air_date || seed.air_date < from || seed.air_date > TODAY || (withTrakt && seed.state === 'watched')) continue;
+        if (!seed.air_date || seed.air_date < from || seed.air_date > TODAY || (withTrakt && hasPlay(SHOWS[tmdbId], season.n, seed))) continue;
         const card = episodeCard(library, tmdbId, [season.n, seed.n]);
         if (!card || card.availability === 'airs_on') continue;
         items.push({ ...card, availability: card.availability as NewEpisodeAvailability, aired_at: midnight(seed.air_date) ?? '' });

@@ -257,6 +257,8 @@ test.describe('show page', () => {
     ['not-in-library', '/tv/66573', 'Not in your library'],
     ['onepiece', '/tv/37854', 'Ready in Infuse'],
     ['rich', '/tv/209867?view=rich', 'Episodes 29–38 have no torrent'],
+    // Watched rows (Trakt), then Up next on S03E04
+    ['watched', '/tv/57243', 'Ready in Infuse'],
   ] as const) {
     test(state, async ({ page }, testInfo) => {
       await signIn(page, path);
@@ -391,6 +393,12 @@ test.describe('library', () => {
     await signIn(page, '/library?view=list');
     await ready(page);
     await shoot(page, testInfo, 'library/list', { fullPage: true });
+  });
+
+  test('watching', async ({ page }, testInfo) => {
+    await signIn(page, '/library?filter=watching');
+    await ready(page);
+    await shoot(page, testInfo, 'library/watching', { fullPage: true });
   });
 
   test('menu', async ({ page }, testInfo) => {

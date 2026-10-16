@@ -1,12 +1,25 @@
-import { parseLibraryIds, parseLibrarySearch, queryLibrary } from '@/lib/library/query';
+import { isWatching, parseLibraryIds, parseLibrarySearch, queryLibrary } from '@/lib/library/query';
 import { libraryItem, libraryShow } from '@/mocks/fixtures/library-item';
 
 const items = [
-  libraryItem({ id: 1, tmdb_id: 693134, title: 'Dune: Part Two', added_at: '2026-10-01T00:00:00Z', size_bytes: 18_400_000_000 }),
+  libraryItem({ id: 1, tmdb_id: 693134, title: 'Dune: Part Two', added_at: '2026-10-01T00:00:00Z', size_bytes: 18_400_000_000, last_watched_at: '2026-10-12T20:00:00Z' }),
   libraryItem({ id: 2, tmdb_id: 157336, title: 'Interstellar', availability_stage: 'downloading', added_at: '2026-10-10T00:00:00Z', size_bytes: 63_100_000_000 }),
   libraryItem({ id: 3, tmdb_id: 1054867, title: 'One Battle After Another', availability_stage: 'needs_torrent', added_at: '2026-10-09T00:00:00Z', size_bytes: 0, webdav_path: null }),
-  libraryShow({ id: 1, tmdb_id: 209867, title: 'Frieren', needs_review: 2, added_at: '2026-06-01T00:00:00Z' }),
-  libraryShow({ id: 2, tmdb_id: 95396, title: 'Severance', availability_stage: 'ready', added_at: '2025-01-01T00:00:00Z', size_bytes: 25_000_000_000 }),
+  // 26 of 38 watched: watching
+  libraryShow({ id: 1, tmdb_id: 209867, title: 'Frieren', needs_review: 2, added_at: '2026-06-01T00:00:00Z', last_watched_at: '2026-10-13T20:00:00Z' }),
+  // Caught up: not watching
+  libraryShow({
+    id: 2,
+    tmdb_id: 95396,
+    title: 'Severance',
+    availability_stage: 'ready',
+    added_at: '2025-01-01T00:00:00Z',
+    size_bytes: 25_000_000_000,
+    episodes_total: 18,
+    episodes_ready: 18,
+    episodes_watched: 18,
+    last_watched_at: '2026-10-10T20:00:00Z',
+  }),
 ];
 
 const ids = (page: ReturnType<typeof queryLibrary>) => page.items.map((item) => item.title);
@@ -16,7 +29,7 @@ describe('queryLibrary', () => {
     const page = queryLibrary(items);
     expect(ids(page)).toEqual(['Interstellar', 'One Battle After Another', 'Dune: Part Two', 'Frieren', 'Severance']);
     expect(page).toMatchObject({ total: 5, page: 1, page_size: 50 });
-    expect(page.counts).toEqual({ all: 5, movie: 3, tv: 2, watching: 0, ready: 2, incomplete: 3, needs_review: 1 });
+    expect(page.counts).toEqual({ all: 5, movie: 3, tv: 2, watching: 1, ready: 2, incomplete: 3, needs_review: 1 });
     expect(page.summary).toEqual({ total: 5, size_bytes: 145_700_000_000, ready: 2 });
   });
 
@@ -26,8 +39,15 @@ describe('queryLibrary', () => {
     expect(page.counts.all).toBe(5);
     expect(queryLibrary(items, { status: 'needs_review' }).items.map((item) => item.title)).toEqual(['Frieren']);
     expect(queryLibrary(items, { status: 'ready' }).total).toBe(2);
-    // Nothing is watched until B5
-    expect(queryLibrary(items, { status: 'watching' })).toMatchObject({ items: [], total: 0, counts: { all: 5 } });
+    expect(queryLibrary(items, { status: 'watching' })).toMatchObject({ items: [{ title: 'Frieren' }], total: 1, counts: { all: 5, watching: 1 } });
+  });
+
+  it('watching: shows partway through, never movies, unstarted or caught-up shows', () => {
+    expect(isWatching(libraryShow())).toBe(true);
+    expect(isWatching(libraryShow({ episodes_watched: 0 }))).toBe(false);
+    expect(isWatching(libraryShow({ episodes_watched: 38 }))).toBe(false);
+    expect(isWatching(libraryShow({ episodes_watched: null }))).toBe(false);
+    expect(isWatching(libraryItem({ last_watched_at: '2026-10-12T20:00:00Z' }))).toBe(false);
   });
 
   it('searches titles, and the counts follow the search', () => {
@@ -37,10 +57,10 @@ describe('queryLibrary', () => {
     expect(page.summary.total).toBe(5);
   });
 
-  it('sorts by title, size and (until B5) last watched like added', () => {
+  it('sorts by title, size and last watched (newest first, never-watched last as added)', () => {
     expect(ids(queryLibrary(items, { sort: 'title' }))).toEqual(['Dune: Part Two', 'Frieren', 'Interstellar', 'One Battle After Another', 'Severance']);
     expect(ids(queryLibrary(items, { sort: 'size' }))[0]).toBe('Interstellar');
-    expect(ids(queryLibrary(items, { sort: 'last_watched' }))).toEqual(ids(queryLibrary(items)));
+    expect(ids(queryLibrary(items, { sort: 'last_watched' }))).toEqual(['Frieren', 'Dune: Part Two', 'Severance', 'Interstellar', 'One Battle After Another']);
   });
 
   it('pages, capping page_size at 200', () => {

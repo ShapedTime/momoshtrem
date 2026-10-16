@@ -196,7 +196,9 @@ describe('/me', () => {
     expect(by('ready').webdav_path).toMatch(/Season 01\/Frieren.* - S01E27 - An Ordinary Mage\.mkv$/);
     expect(by('ready').webdav_url).toMatch(/^https:\/\/momoshtrem\.local:36911\/TV%20Shows\//);
     expect(by('needs_review')).toMatchObject({ review_job_id: 102, next_episode: { absolute_number: 892 }, show: { library_id: 2 } });
-    expect(by('not_in_library')).toMatchObject({ show: { library_id: null }, webdav_path: null });
+    expect(by('not_in_library')).toMatchObject({ show: { library_id: null }, webdav_path: null, next_episode: { absolute_number: null } });
+    // Absolute numbers only for a library show with absolute ordering, as the title page labels its rows
+    expect(by('needs_torrent')).toMatchObject({ show: { title: 'Doctor Who' }, next_episode: { season: 3, episode: 4, absolute_number: null } });
     expect(by('airs_on').airs_at).toMatch(/^2026-10-21T00:00:00/);
     expect(items.filter((item) => item.availability !== 'airs_on').every((item) => item.airs_at === null)).toBe(true);
     expect(items.find((item) => item.source === 'watchlist')).toMatchObject({ last_watched_at: null, progress: { completed: 0, aired: 153 } });

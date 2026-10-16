@@ -7,15 +7,22 @@ import { cx } from '@/lib/utils/cx';
 import { LibraryItemMenu } from './LibraryItemMenu';
 import { LibraryStatusLine } from './LibraryStatusLine';
 
+interface LibraryCardProps {
+  item: LibraryItem;
+  onRemove: (item: LibraryItem) => void;
+  /** Trakt is linked, so the watch line means something (a show's would read "Not started" otherwise). */
+  trakt: boolean;
+}
+
 /**
  * A library title in the grid (library.js `card`): the pill only when
  * something wants attention, the "…" menu, the watched bar, and the status
  * and watch lines. Everything is visible without hover.
  */
-export function LibraryCard({ item, onRemove }: { item: LibraryItem; onRemove: (item: LibraryItem) => void }) {
+export function LibraryCard({ item, onRemove, trakt }: LibraryCardProps) {
   const badge = posterBadge(item);
   const watched = watchedPct(item);
-  const sub = watchLine(item);
+  const sub = watchLine(item, { trakt });
   return (
     <PosterCard
       href={titleHref(item.media_type, item.tmdb_id)}

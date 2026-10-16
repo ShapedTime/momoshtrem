@@ -111,14 +111,16 @@ describe('range chips', () => {
     expect(rangeLabel(block(21, 28), 'absolute')).toBe('21–28');
   });
 
-  it('presses the chip holding the frontier', () => {
+  it('presses the chip holding Trakt’s next episode, else the frontier', () => {
     const frieren = show(209867);
     const s1 = season(209867, 1);
     expect(s1.ranges.map((r) => r.label)).toEqual(['1–10', '11–20', '21–28', '29–38']);
-    expect(defaultRangeIndex(s1.ranges, frieren, 1)).toBe(3);
+    expect(defaultRangeIndex(s1.ranges, frieren, 1)).toBe(2); // S01E27
+    expect(defaultRangeIndex(s1.ranges, { ...frieren, watch_state: null }, 1)).toBe(3); // the frontier, E29
+    expect(defaultRangeIndex(season(37854, 21).ranges, show(37854), 21)).toBe(0); // One Piece's rewatch: Wano: Act 1
   });
 
-  it('presses none in a season without the frontier', () => {
+  it('presses none in a season without the next-up row', () => {
     const s22 = season(37854, 22);
     expect(defaultRangeIndex(s22.ranges, show(37854), 22)).toBeNull();
     expect(defaultRangeIndex(season(209867, 1).ranges, show(209867), 0)).toBeNull();
@@ -128,7 +130,8 @@ describe('range chips', () => {
     const library = seedLibrary();
     library.get(libraryKey('tv', 37854))?.unassigned.add(episodeId(37854, 22, 36)); // #1121; E37–E38 haven't aired
     const s22 = season(37854, 22, library);
-    expect(defaultRangeIndex(s22.ranges, show(37854, library), 22)).toBe(1); // Elbaph (31–38)
+    const onePiece = { ...show(37854, library), watch_state: null }; // without Trakt's rewatch at Wano
+    expect(defaultRangeIndex(s22.ranges, onePiece, 22)).toBe(1); // Elbaph (31–38)
   });
 });
 
@@ -136,6 +139,13 @@ describe('earlierWatched', () => {
   it('collapses a leading watched run of 10 or more in a long season', () => {
     expect(earlierWatched(season(209867, 1).episodes)).toEqual({ count: 26, from: 1, to: 26 });
     expect(earlierWatched(season(37854, 22).episodes)).toEqual({ count: 25, from: 1, to: 25 });
+  });
+
+  it('stops before the next-up row, so a rewatch’s next episode stays in view', () => {
+    const s1 = season(209867, 1).episodes;
+    expect(earlierWatched(s1, episodeId(209867, 1, 13))).toEqual({ count: 12, from: 1, to: 12 });
+    expect(earlierWatched(s1, episodeId(209867, 1, 8))).toBeNull(); // a run of 7
+    expect(earlierWatched(s1, episodeId(209867, 1, 27))).toEqual({ count: 26, from: 1, to: 26 });
   });
 
   it('leaves short seasons, short runs and fully watched seasons alone', () => {

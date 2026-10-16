@@ -6,9 +6,11 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { Banner, Button, LoadingRegion, PosterGrid, PosterSkeletons, Skeleton } from '@/components/ui';
 import { useLibraryRemove } from '@/hooks/useLibraryRemove';
 import { DOWNLOAD_POLL_MS } from '@/hooks/useTitle';
+import { useTraktIntegration } from '@/hooks/useTraktIntegration';
 import { usePendingRemovals } from '@/hooks/useUndoableRemoval';
 import type { LibraryPage } from '@/lib/api/contract';
 import { libraryPagesQuery } from '@/lib/api/endpoints';
+import { traktLinked } from '@/lib/for-you/state';
 import { totalsLine } from '@/lib/library/display';
 import { pendingLibraryItems, visibleItems } from '@/lib/library/pending';
 import { libraryParams, libraryViewQuery, type LibraryViewState, parseLibraryView, withoutPending } from '@/lib/library/view';
@@ -40,6 +42,9 @@ export function LibraryView() {
   const searchTimer = useRef<number | undefined>(undefined);
   const remove = useLibraryRemove();
   const pending = usePendingRemovals();
+  // The watch lines only mean something once Trakt is linked (unknown counts as not); a finished sync refetches the library
+  const integration = useTraktIntegration();
+  const trakt = integration.data ? traktLinked(integration.data) : false;
 
   // Reads the URL at call time, so a debounced search never undoes a newer change (a chip, a sheet)
   const update = useCallback(
@@ -124,20 +129,20 @@ export function LibraryView() {
             </p>
             <div className="lib-results" aria-busy={query.isPlaceholderData || undefined}>
               {items.length === 0 ? (
-                <LibraryFilteredEmpty q={state.q} filter={state.filter} onClearSearch={clearSearch} onShowAll={() => update({ filter: 'all' })} />
+                <LibraryFilteredEmpty q={state.q} filter={state.filter} trakt={trakt} onClearSearch={clearSearch} onShowAll={() => update({ filter: 'all' })} />
               ) : state.view === 'list' ? (
                 <>
                   <LibraryListHead />
                   <ul className="lrows" aria-label="Your library">
                     {items.map((item) => (
-                      <LibraryRow key={`${item.media_type}-${item.id}`} item={item} onRemove={remove} />
+                      <LibraryRow key={`${item.media_type}-${item.id}`} item={item} onRemove={remove} trakt={trakt} />
                     ))}
                   </ul>
                 </>
               ) : (
                 <PosterGrid className="lib-grid">
                   {items.map((item) => (
-                    <LibraryCard key={`${item.media_type}-${item.id}`} item={item} onRemove={remove} />
+                    <LibraryCard key={`${item.media_type}-${item.id}`} item={item} onRemove={remove} trakt={trakt} />
                   ))}
                 </PosterGrid>
               )}

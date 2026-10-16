@@ -146,7 +146,7 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
 describe('GET /library (#97)', () => {
   it('carries counts and the summary, and every item the card needs', async () => {
     const page = await libraryApi.list();
-    expect(page.counts).toEqual({ all: 9, movie: 3, tv: 6, watching: 0, ready: 5, incomplete: 4, needs_review: 3 });
+    expect(page.counts).toEqual({ all: 9, movie: 3, tv: 6, watching: 4, ready: 5, incomplete: 4, needs_review: 3 });
     expect(page.summary).toMatchObject({ total: 9, ready: 5 });
     expect(page.items.map((item) => item.title)[0]).toBe('Interstellar'); // newest first
     const byTitle = new Map(page.items.map((item) => [item.title, item]));
@@ -172,7 +172,34 @@ describe('GET /library (#97)', () => {
     const second = await libraryApi.list({ sort: 'title', page: 2, page_size: 4 });
     expect(second).toMatchObject({ page: 2, page_size: 4, total: 9 });
     expect(second.items).toHaveLength(4);
-    expect((await libraryApi.list({ status: 'watching' })).items).toEqual([]);
+    const watching = await libraryApi.list({ status: 'watching', sort: 'title' });
+    expect(watching.items.map((item) => [item.title, item.episodes_watched, item.episodes_total])).toEqual([
+      ['Doctor Who', 29, 52],
+      ['Frieren: Beyond Journey’s End', 26, 38],
+      ['One Piece', 175, 192],
+      ['The Studio', 9, 10],
+    ]);
+  });
+
+  it('watch state from the Trakt account: episodes with a play, the last play, and the last-watched sort', async () => {
+    const lastWatched = await libraryApi.list({ sort: 'last_watched' });
+    expect(lastWatched.items.slice(0, 4).map((item) => [item.title, item.last_watched_at !== null])).toEqual([
+      ['The Studio', true],
+      ['Dune: Part Two', true], // the same day as Frieren: then newest added first
+      ['Frieren: Beyond Journey’s End', true],
+      ['One Piece', true],
+    ]);
+    expect(lastWatched.items.at(-1)?.last_watched_at).toBeNull();
+    const byTitle = new Map(lastWatched.items.map((item) => [item.title, item]));
+    expect(byTitle.get('Severance')).toMatchObject({ episodes_watched: 18, episodes_total: 18 });
+    expect(byTitle.get('Bluey')).toMatchObject({ episodes_watched: 0, last_watched_at: null });
+
+    // Off or purged: nothing is watched
+    setMockScenario('trakt-off');
+    const off = await libraryApi.list();
+    expect(off.counts.watching).toBe(0);
+    expect(off.items.every((item) => !item.episodes_watched && item.last_watched_at === null)).toBe(true);
+    expect((await titlesApi.get('tv', 209867)).watch_state).toBeNull();
   });
 
   it('looks titles up by ids', async () => {
@@ -332,8 +359,20 @@ describe('the mock library keeps what the page changed', () => {
   });
 
   it('opens each show on its default season and orders anime by absolute number', async () => {
-    const shows = await Promise.all([209867, 57243, 37854, 95396].map((id) => titlesApi.get('tv', id)));
-    expect(shows.map((show) => show.media_type === 'tv' && [show.default_season, show.episode_ordering])).toEqual([
+    const defaults = async () => {
+      const shows = await Promise.all([209867, 57243, 37854, 95396].map((id) => titlesApi.get('tv', id)));
+      return shows.map((show) => show.media_type === 'tv' && [show.default_season, show.episode_ordering]);
+    };
+    // Trakt's next episode's season: Doctor Who S03E04, One Piece's rewatch at Wano (#892)
+    expect(await defaults()).toEqual([
+      [1, 'absolute'],
+      [3, 'aired'],
+      [21, 'absolute'],
+      [2, 'aired'],
+    ]);
+    // Without Trakt: the frontier's, else the latest season with a file
+    setMockScenario('trakt-off');
+    expect(await defaults()).toEqual([
       [1, 'absolute'],
       [4, 'aired'],
       [22, 'absolute'],
@@ -370,6 +409,7 @@ describe('the mock library keeps what the page changed', () => {
   });
 
   it('opens a frontier when the last episode loses its file, but not for a gap', async () => {
+    setMockScenario('trakt-off'); // Severance's episodes are all watched, and watched ones count as covered
     await titlesApi.unassignEpisode(302005); // Severance S02E05
     expect((await titlesApi.get('tv', 95396)).library).toMatchObject({ availability_stage: 'ready', missing: null });
     await titlesApi.unassignEpisode(302009); // S02E09; E10 hasn't aired
@@ -377,6 +417,16 @@ describe('the mock library keeps what the page changed', () => {
       availability_stage: 'needs_torrent',
       missing: { season_number: 2, from: 9, to: 9, count: 1 },
     });
+  });
+
+  it('keeps a watched episode that loses its file covered: watched, without a file, and no frontier', async () => {
+    await titlesApi.unassignEpisode(302009); // Severance S02E09
+    expect(await titlesApi.get('tv', 95396)).toMatchObject({
+      library: { availability_stage: 'ready', missing: null, episodes_ready: 17 },
+      seasons: [{ season_number: 1, ready: 9 }, { season_number: 2, ready: 8, missing: 0, upcoming: 1 }],
+    });
+    const season = await titlesApi.season(95396, 2);
+    expect(season.episodes[8]).toMatchObject({ state: 'watched', webdav_path: null, source: null, pct: null });
   });
 
   it('gives the missing run absolute numbers, so the hero can offer #1121 from the title alone', async () => {

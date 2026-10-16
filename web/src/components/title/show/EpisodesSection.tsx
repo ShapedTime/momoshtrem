@@ -76,7 +76,9 @@ function SeasonBody(props: SeasonBodyProps) {
   const { show, season, summary, view, onViewChange, onJumpToSeason, initialTarget, onFindSeason, onStreamSeason, onFindEpisode, onOpenEpisode, ref } = props;
   const { episodes, ranges, season_number: number } = season;
   const list = useRef<EpisodeListHandle>(null);
-  const collapsed = earlierWatched(episodes);
+  // Trakt's next episode, else the frontier's first; the watched run never folds it away
+  const nextUpId = nextUpEpisodeId(show, number, episodes);
+  const collapsed = earlierWatched(episodes, nextUpId);
   const initialEpisode = initialTarget ? resolveJump(initialTarget, episodes) : null;
 
   const [expanded, setExpanded] = useState(() => initialEpisode !== null && collapsed !== null && initialEpisode <= collapsed.to);
@@ -148,7 +150,7 @@ function SeasonBody(props: SeasonBodyProps) {
             label={`${seasonLabel(season)} episodes`}
             episodes={visible}
             ordering={show.episode_ordering}
-            nextUpId={nextUpEpisodeId(show, number, episodes)}
+            nextUpId={nextUpId}
             reviewHref={reviewJob === null ? null : `/mapping/${reviewJob}`}
             rich={view === 'rich'}
             onFind={onFindEpisode}
