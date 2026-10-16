@@ -4,7 +4,7 @@ import { hdrezkaHandlers, resetMockHDRezka } from './hdrezka';
 import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
 import { recommendationsHandlers } from './recommendations';
-import { searchHandlers } from './search';
+import { resetMockSearch, searchHandlers } from './search';
 import { resetMockSettings, settingsHandlers } from './settings';
 import { resetMockSubtitles, subtitlesHandlers } from './subtitles';
 import { systemHandlers } from './system';
@@ -39,5 +39,6 @@ export function resetMockState(): void {
   resetMockJobs();
   resetMockSubtitles();
   resetMockHDRezka();
+  resetMockSearch();
   setMockScenario(null);
 }
