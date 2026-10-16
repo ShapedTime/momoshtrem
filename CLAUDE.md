@@ -55,7 +55,7 @@ docker compose up -d --build
 cd web && npm run dev
 cd web && NEXT_PUBLIC_API_MOCKING=enabled npm run dev   # mock mode: MSW answers every PLAN §6 endpoint
 cd web && npm run lint && npx tsc --noEmit && npm test
-cd web && npx playwright test   # E2E (own dev server on :3100; first run: npx playwright install chromium)
+cd web && npx playwright test   # E2E (own dev server on :3100, or E2E_PORT=<port> to run beside another; first run: npx playwright install chromium)
 
 # Go service (momoshtrem)
 cd momoshtrem && go build -o momoshtrem ./cmd/momoshtrem
@@ -104,27 +104,32 @@ The v2 target architecture is in PLAN.md §4.
 ```
 GET  /api/titles/{movie|tv}/{tmdb_id}       # Title page: TMDB details, library state and availability stage
 GET  /api/titles/tv/{tmdb_id}/seasons/{n}   # One season's episodes and ranges
-GET  /api/library             # Library list with counts (filters, sort, search)
+GET  /api/library             # Library list with filter counts and a summary (filters, sort, search); ?ids=movie:603,tv:1399 looks up TMDB titles (≤200)
 POST /api/movies              # Add movie by TMDB ID
 POST /api/shows               # Add show by TMDB ID
-POST /api/{shows|movies}/{id}/assign-torrent   # Start a mapping job: 202 {job_id} (legacy ?wait=true applies it and answers the old shape)
+DELETE /api/{movies|shows}/{id}?delete_data=   # Remove a title: its subtitles go, torrents nothing else uses are released (with their data when asked)
+POST /api/{shows|movies}/{id}/assign-torrent   # Start a mapping job: 202 {job_id}; {info_hash} alone re-runs a known torrent (legacy ?wait=true applies it and answers the old shape)
 GET  /api/assignment-jobs/{id}                 # The job and one proposal per file; poll while it works
-GET  /api/assignment-jobs?status=open          # Open jobs, newest first (the /torrents banner)
+GET  /api/assignment-jobs?status=open          # Open jobs, newest first (the Activity banner)
 PATCH /api/assignment-jobs/{id}/proposals      # Accept, ignore or re-target files, in one batch
 POST /api/assignment-jobs/{id}/reclassify      # Re-check with AI, with a hint (503 without AI)
 POST /api/assignment-jobs/{id}/apply           # Write the assignments and rebuild the VFS (409 while anything blocks)
 POST /api/assignment-jobs/{id}/discard         # Cancel; drops the torrent when nothing else uses it
 PUT  /api/{episodes|movies}/{id}/assignment    # Manual override: one file of a torrent, outside any job
-GET  /api/torrents/{hash}/files                # A torrent's files and what each one is mapped to
+GET  /api/torrents/{hash}/files                # A torrent's files and what each one is mapped to (loads the torrent)
 GET  /api/shows/{id}/episodes                  # Every season's episodes, Specials included (the episode picker)
-GET  /api/torrents            # List active torrents
+GET  /api/torrents                         # Every torrent the library knows, loaded or not: state (streaming|downloading|paused|idle), speeds, titles, sessions
+GET  /api/torrents/summary                 # Speeds with 60 s of history, counts per state, disk, streaming sessions (Activity's strip, the nav badge)
+GET  /api/torrents/{hash}                  # Activity's detail: piece runs, files and what they play as, trackers, sessions; never loads the torrent
+POST /api/torrents/{hash}/pause|resume     # Sticky pause, kept across restarts (app_settings `torrents`); also /torrents/pause-all|resume-all
+DELETE /api/torrents/{hash}?delete_data=   # Drop it: open jobs cancelled, assignments deactivated (history kept), pieces deleted when asked
 GET  /api/search/torrents                  # Torrent search across Jackett's indexers: scored releases, facets, per-indexer progress (poll while complete=false)
 POST /api/search/torrents/resolve          # A release without a magnet: the server fetches its .torrent and answers the magnet
 POST /api/search/torrents/inspect          # Inspect: a dry-run mapping job for a release or magnet (202 {job_id})
 GET|PUT /api/settings/quality-profile      # The quality profile search ranks by
 GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
 ```
-Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search").
+Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)").
 
 ### Jackett Torznab API (port 9117)
 Only momoshtrem calls it (`internal/torznab/`): the indexer list, then one search per indexer:
@@ -168,8 +173,10 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `internal/hdrezka/` - HDRezka client: search, title pages and translations, CDN streams (MP4 qualities, subtitles), sizes, ranking against TMDB (`cmd/momoshtrem/probe.go`: `hdrezka-probe`); `resolver.go` caches signed links, `streamer.go` opens Range bodies on the CDN
 - `internal/service/hdrezka*.go` - HDRezka search, titles, streams and synchronous assigns (`_assign`); `hdrezka_source.go` streams stored streams for the VFS
 - `internal/vfs/library_fs.go` - Virtual filesystem; `remote_file.go` streams non-torrent (HDRezka) files
-- `internal/torrent/service.go` - Torrent service interface
-- `internal/streaming/prioritizer.go` - Piece prioritization
+- `internal/torrent/service.go` - Torrent service interface; `activity.go` the ActivityManager (idle unloading, sticky `StatePaused`), `hashlock.go` one add/wait/drop per hash, `metainfo_store.go` stored `.torrent`s (`{metadata_folder}/metainfo/`), `speed.go` the speed sampler, `detail.go` piece runs, files and trackers, `infohash.go` hex or base32 hashes
+- `internal/activity/` - Torrents and activity (PLAN §6 B6): the DB's known torrents merged with live state (`rules.go`: state order, titles, scope), the summary (speeds, counts, disk), pause and resume, the detail that never loads a torrent
+- `internal/sessions/` - Streaming sessions for every source: reads grouped by client, User-Agent and file, sniff reads skipped, client and device from the User-Agent (`useragent.go`), rate, position and buffer ahead; `request.go` carries the WebDAV request into `LibraryFS.Open`
+- `internal/streaming/prioritizer.go` - Piece prioritization (torrents stream on demand: pieces only around readers, kept in an LRU file cache)
 
 **web (Next.js, `web/`):**
 - `src/components/ui/`, `src/components/brand/` - Design-system primitives, logo and Noir (gallery: `/dev/ui`)
@@ -181,6 +188,11 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `src/components/source/` - The source sheet's shared head (Torrents · HDRezka tabs) and the Replace menu; `src/lib/source/context.ts` reads and builds its URL params (`movie=<tmdb>`, or `show=<tmdb>` with `season` / `se`)
 - `src/components/search/` - Torrent search (`?sheet=torrent`): `TorrentSearchSheet`, release cards, chips and the Filters, Sort and Inspect sheets, states; `src/hooks/useReleaseSearch.ts` (polling, resolve, Inspect) and `useAssignTorrent.ts` (Add → mapping job)
 - `src/lib/search/` - Pure search helpers: default query and scope, params, copy, filters and facets, size scale, session drafts, Inspect summaries
+- `src/components/library/` + `src/lib/library/` - Library (`/library`): grid and list, filter chips with counts, sort, the "…" menu (`actions.ts`), Remove with Undo; `LibraryPill` and `src/hooks/useLibraryLookup.ts` (`/library?ids=`) mark library titles on TMDB cards; `query.ts` is the `/library` filter the mocks and Jest share
+- `src/lib/undo/removals.ts` + `src/hooks/useUndoableRemoval.ts` - Undo as a delayed commit: the item hides at once and the DELETE goes when the 10 s toast closes (or on `pagehide`)
+- `src/components/discover/` + `src/lib/discover/` - Discover (`/discover`; `/movies` and `/tv-shows` redirect): filters in the URL (nuqs, `url.ts`), the genre table, mood presets (`moods.ts`), TMDB params (`tmdb-query.ts`); web route `src/app/api/discover/`
+- `src/components/title-search/` + `src/lib/title-search/` - Search (`/search`) and the ⌘K palette's data: ranking (`rank.ts`), library rows, palette actions, recent searches; web route `src/app/api/title-search/` (TMDB movie, tv and person searches)
+- `src/components/activity/` + `src/lib/activity/` - Activity (`/activity`, `/activity/{hash}`; `/torrents` redirects): summary strip and sparkline, sections by state, torrent cards, the detail with health in plain words (`health.ts`), files and the Advanced piece map; offline keeps the last known data
 - `src/components/settings/` - Settings: Quality profile, Playback, System status (`status-model.ts`, Jackett's indexers)
 - `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
 - `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
@@ -200,6 +212,7 @@ OPENSUBTITLES_API_KEY=...     # Optional: subtitles
 HDREZKA_ENABLED=...           # Optional: HDRezka as a second source (default false)
 HDREZKA_URL=...               # Optional: HDRezka mirror (default https://rezka.ag)
 DATABASE_URL=...              # Postgres (momoshtrem)
+TORRENT_LISTEN_PORT=...       # Optional: the torrent client's port (blank keeps 42069; 0 picks a free one)
 ```
 
 v2 adds more (Trakt, Anthropic, backend token); see PLAN.md §4.
