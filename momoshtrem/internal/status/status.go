@@ -61,7 +61,7 @@ type Options struct {
 	TMDB    Prober       // nil when TMDB_API_KEY is unset
 	HDRezka Prober       // nil when HDREZKA_ENABLED is off
 
-	// TraktConfigured: Trakt's client id and secret and a valid SECRET_KEY.
+	// TraktConfigured: Trakt's client id and a valid SECRET_KEY.
 	TraktConfigured bool
 	// TraktConnected reports whether Trakt's state is connected (B5), live
 	// rather than cached. Optional.

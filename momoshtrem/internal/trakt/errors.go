@@ -22,7 +22,7 @@ var (
 	ErrDeviceCodeExpired    = errors.New("the device code expired")            // 410
 	ErrDeviceCodeDenied     = errors.New("the user denied the device code")    // 418
 
-	// ErrNotConfigured means TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET or a valid
+	// ErrNotConfigured means TRAKT_CLIENT_ID or a valid
 	// SECRET_KEY is missing.
 	ErrNotConfigured = errors.New("trakt isn't configured")
 	// ErrConnected answers a connect while connected.

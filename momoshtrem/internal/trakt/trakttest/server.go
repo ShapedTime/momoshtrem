@@ -279,8 +279,15 @@ func (s *Server) deviceCode(w http.ResponseWriter, body map[string]string) {
 	})
 }
 
+// validApp: the client id, and the secret when one is sent (Trakt calls it
+// optional, and stopped issuing secrets to new apps).
+func validApp(body map[string]string) bool {
+	secret, sent := body["client_secret"]
+	return body["client_id"] == ClientID && (!sent || secret == ClientSecret)
+}
+
 func (s *Server) deviceToken(w http.ResponseWriter, body map[string]string) {
-	if body["client_id"] != ClientID || body["client_secret"] != ClientSecret {
+	if !validApp(body) {
 		reply(w, http.StatusUnauthorized, `{"error":"invalid_client"}`)
 		return
 	}
@@ -307,7 +314,7 @@ func (s *Server) deviceToken(w http.ResponseWriter, body map[string]string) {
 }
 
 func (s *Server) refreshToken(w http.ResponseWriter, body map[string]string) {
-	if body["client_id"] != ClientID || body["client_secret"] != ClientSecret {
+	if !validApp(body) {
 		reply(w, http.StatusUnauthorized, `{"error":"invalid_client"}`)
 		return
 	}
@@ -325,7 +332,7 @@ func (s *Server) refreshToken(w http.ResponseWriter, body map[string]string) {
 }
 
 func (s *Server) revoke(w http.ResponseWriter, body map[string]string) {
-	if body["client_id"] != ClientID || body["client_secret"] != ClientSecret {
+	if !validApp(body) {
 		reply(w, http.StatusUnauthorized, `{"error":"invalid_client"}`)
 		return
 	}

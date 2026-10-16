@@ -155,7 +155,7 @@ New and moved environment variables:
 | `BACKEND_API_TOKEN` | web + momoshtrem | Shared-secret header between web and backend |
 | `JACKETT_URL`, `JACKETT_API_KEY` | **moved** from web to momoshtrem | Search runs in the backend (B4). The web's Jackett route and env were removed in #95. |
 | `ANTHROPIC_API_KEY` | momoshtrem | Classifier and recommendations. The features are disabled when unset. |
-| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | momoshtrem | Trakt app, created at trakt.tv/oauth/applications |
+| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | momoshtrem | Trakt API app, created at app.trakt.tv/settings/apps/api/new (redirect URI `urn:ietf:wg:oauth:2.0:oob`). The secret is optional: Trakt no longer issues one to new apps, and the device flow, refresh and revoke work without it. |
 | `SECRET_KEY` | momoshtrem | AES-GCM key for encrypting Trakt tokens at rest |
 | `CORS_ALLOWED_ORIGINS` | momoshtrem | Optional comma-separated browser origins. Empty (the default) sends no CORS headers, since web calls the backend server-to-server. |
 | `WEBDAV_PUBLIC_URL` | momoshtrem | The WebDAV address Infuse uses (e.g. `https://momoshtrem.duckdns.org:36911/`), reported by `/status`. Defaults to `http://localhost:<webdav_port>/`. |
@@ -736,7 +736,7 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
 - **`GET /integrations/trakt`** → `200 TraktIntegration`:
   ```
   TraktIntegration {
-    configured,                        // TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET and a valid SECRET_KEY
+    configured,                        // TRAKT_CLIENT_ID and a valid SECRET_KEY (TRAKT_CLIENT_SECRET is optional)
     state: off | pending | connected | reauth,
     connected,                         // state = connected
     username,                          // while an account is linked: connected, reauth, or a code pending from reauth

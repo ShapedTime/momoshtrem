@@ -446,12 +446,13 @@ func main() {
 		slog.Info("Torrent search configured")
 	}
 	// Trakt (B5, read-only): the device-code connect and its tokens,
-	// sealed with SECRET_KEY. It's configured with TRAKT_CLIENT_ID,
-	// TRAKT_CLIENT_SECRET and a SECRET_KEY of 64 hex characters (or at
-	// least 32); without them the state is off and connect answers 503.
+	// sealed with SECRET_KEY. It's configured with TRAKT_CLIENT_ID and a
+	// SECRET_KEY of 64 hex characters (or at least 32); TRAKT_CLIENT_SECRET
+	// is optional (Trakt no longer issues one to new apps). Without them the
+	// state is off and connect answers 503.
 	var traktClient *trakt.Client
 	var traktBox *secret.Box
-	if cfg.Trakt.ClientID != "" && cfg.Trakt.ClientSecret != "" {
+	if cfg.Trakt.ClientID != "" {
 		if box, err := secret.New(cfg.Security.SecretKey); err != nil {
 			slog.Warn("Trakt disabled: SECRET_KEY can't encrypt its tokens", "error", err)
 		} else {

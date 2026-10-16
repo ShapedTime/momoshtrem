@@ -173,7 +173,7 @@ func (a *Auth) SetHooks(h Hooks) {
 	a.hooks = h
 }
 
-// Configured reports whether TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET and a
+// Configured reports whether TRAKT_CLIENT_ID and a
 // valid SECRET_KEY are set.
 func (a *Auth) Configured() bool { return a.client != nil }
 
