@@ -49,12 +49,6 @@ export function showSourceParams(tmdbId: number, scope: { season?: number; episo
   return sourceParams({ kind: 'show', tmdbId, season, episode: season === null ? null : episode, key: '' });
 }
 
-/** The legacy search's scope for this context (the Torrents tab until #6). */
-export function legacyScope(context: SourceContext): { season?: number; episode?: number } {
-  if (context.kind === 'movie' || context.season === null) return {};
-  return context.episode === null ? { season: context.season } : { season: context.season, episode: context.episode };
-}
-
 /**
  * The sheet's kicker and title: "Find a source · Interstellar" over
  * "2014 · 2h 49m", "Season 2" or "S01E29 · Let's go somewhere warm".

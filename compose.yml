@@ -167,8 +167,6 @@ services:
       - APP_PASSWORD=${APP_PASSWORD}
       - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
       - TMDB_API_KEY=${TMDB_API_KEY}
-      - JACKETT_URL=http://jackett:9117
-      - JACKETT_API_KEY=${JACKETT_API_KEY}
       - MOMOSHTREM_URL=http://momoshtrem:4444
       - BACKEND_API_TOKEN=${BACKEND_API_TOKEN:-}
       - SESSION_SECRET=${SESSION_SECRET}
@@ -179,8 +177,6 @@ services:
       - AUTH_BLOCK_MINUTES=${AUTH_BLOCK_MINUTES:-}
       - WEBDAV_INTERNAL_URL=${WEBDAV_INTERNAL_URL:-}
     depends_on:
-      jackett:
-        condition: service_healthy
       momoshtrem:
         condition: service_healthy
     restart: unless-stopped

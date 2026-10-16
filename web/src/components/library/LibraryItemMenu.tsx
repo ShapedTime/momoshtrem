@@ -5,7 +5,6 @@ import { ActionMenu, type ActionMenuItem, IconButton, useCopy } from '@/componen
 import type { LibraryItem } from '@/lib/api/contract';
 import { librarySize, statusLine } from '@/lib/library/display';
 import { type LibraryAction, libraryActions } from '@/lib/library/actions';
-import { TORRENT_SHEET_LIVE } from '@/lib/search/live';
 import { getSheet } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { formatNumber } from '@/lib/title/format';
@@ -40,8 +39,7 @@ function facts(item: LibraryItem): string {
 export function LibraryItemMenu({ item, onRemove, variant }: { item: LibraryItem; onRemove: (item: LibraryItem) => void; variant: 'card' | 'row' }) {
   const copy = useCopy();
   const sheet = useSheet();
-  // The torrent sheet is registered (#92) but stays hidden until TORRENT_SHEET_LIVE (#95)
-  const actions = libraryActions(item, { torrentSheet: TORRENT_SHEET_LIVE && getSheet('torrent') !== undefined });
+  const actions = libraryActions(item, { torrentSheet: getSheet('torrent') !== undefined });
 
   const items = actions.map((action): ActionMenuItem => {
     const base = { key: action.kind, label: action.label, icon: ICONS[action.kind] };

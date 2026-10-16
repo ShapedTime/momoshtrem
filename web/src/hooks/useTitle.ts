@@ -84,11 +84,6 @@ export function useTitleActions(title: Title) {
       });
       if (confirmed) remove.mutate(libraryId);
     },
-    /** After torrent search closes. */
-    refetch,
-    /** After torrent search assigns a torrent: subtitle matches were graded against the old release. */
-    torrentChanged: () =>
-      Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: subtitleKeys.all })]),
   };
 }
 

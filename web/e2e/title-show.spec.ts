@@ -58,11 +58,22 @@ test.describe('show page', () => {
   test('Find on a missing row opens the search for that episode', async ({ page }) => {
     await signIn(page, '/tv/209867');
     await page.getByRole('button', { name: 'Find a torrent for S01E30' }).click();
-    const search = page.getByRole('dialog', { name: `Search: ${FRIEREN} S01E30` });
-    await expect(search).toBeVisible();
-    await expect(search.getByRole('searchbox', { name: 'Search torrents' })).toHaveValue(`${FRIEREN} S01E30`);
-    await search.getByRole('button', { name: 'Close modal' }).click();
+    await expect(page).toHaveURL(/[?&]sheet=torrent&show=209867&season=1&se=S01E30$/);
+    const search = page.getByRole('dialog', { name: new RegExp(`^Find a source · ${FRIEREN} S01E30`) });
+    await expect(search.getByRole('button', { name: 'Episode', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(search.getByRole('searchbox', { name: 'Search releases' })).toHaveValue('Frieren 30');
+    await page.keyboard.press('Escape');
     await expect(search).toBeHidden();
+    await expect(page).toHaveURL(/\/tv\/209867$/);
+  });
+
+  test('Find episodes 29–38 searches season packs, with the batch as the best match', async ({ page }) => {
+    await signIn(page, '/tv/209867');
+    await page.getByRole('button', { name: 'Find episodes 29–38' }).click();
+    await expect(page).toHaveURL(/[?&]sheet=torrent&show=209867&season=1$/);
+    const search = page.getByRole('dialog', { name: new RegExp(`^Find a source · ${FRIEREN} Season 1`) });
+    await expect(search.getByRole('button', { name: 'Season pack', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(search.getByRole('article', { name: '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]' })).toContainText('Best match');
   });
 
   test('show settings save, and turning specials off hides their tab', async ({ page }) => {
@@ -106,10 +117,11 @@ test.describe('show page', () => {
     await expect(page.getByRole('region', { name: 'Episodes 28–38 have no torrent' })).toBeVisible();
   });
 
-  test('the episode sheet closes with Escape and with Back, and hands Replace to the search', async ({ page }, testInfo) => {
+  test('the episode sheet closes with Escape and with Back, and opens the search over it from Replace', async ({ page }, testInfo) => {
     await signIn(page, '/tv/209867');
     const options = page.getByRole('button', { name: /^S01E28 options/ });
-    const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again' });
+    // Exact: the search sheet's name ends with the episode's
+    const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again', exact: true });
     // Right after a sheet closes the router may still be settling its Back and drop a push: retry the open
     const openSheet = () =>
       expect(async () => {
@@ -132,10 +144,15 @@ test.describe('show page', () => {
     await sheet.getByRole('button', { name: 'Replace' }).click();
     if (testInfo.project.name === 'mobile') await page.getByRole('dialog', { name: 'Replace with' }).getByRole('button', { name: 'Find a torrent' }).click();
     else await page.getByRole('menuitem', { name: 'Find a torrent' }).click();
+    const search = page.getByRole('dialog', { name: new RegExp(`^Find a source · ${FRIEREN} S01E28`) });
+    await expect(search.getByRole('searchbox', { name: 'Search releases' })).toHaveValue('Frieren 28');
     await expect(sheet).toBeHidden();
-    const search = page.getByRole('dialog', { name: `Search: ${FRIEREN} S01E28` });
-    await expect(search).toBeVisible();
-    await expect(search.getByRole('searchbox', { name: 'Search torrents' })).toHaveValue(`${FRIEREN} S01E28`);
+    await expect(page).toHaveURL(/[?&]sheet=torrent&.*se=S01E28/);
+    // Over the episode sheet in history: closing the search comes back to it
+    await page.keyboard.press('Escape');
+    await expect(search).toBeHidden();
+    await expect(sheet).toBeVisible();
+    await expect(page).toHaveURL(/[?&]sheet=episode&.*se=S01E28/);
   });
 
   test('Doctor Who opens on its specials with ?season=0', async ({ page }) => {

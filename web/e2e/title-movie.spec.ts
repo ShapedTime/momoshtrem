@@ -43,20 +43,22 @@ test.describe('movie page', () => {
     await expectAccessibleAndContained(page);
   });
 
-  test('Find a torrent opens the search, and adding one starts the download', async ({ page }) => {
+  test('Find a torrent opens the search sheet, and adding one starts the download', async ({ page }) => {
     await signIn(page, '/movie/1054867');
     await expect(panel(page, 'In your library · no torrent yet')).toBeVisible();
     await expectAccessibleAndContained(page);
 
     await page.getByRole('button', { name: 'Find a torrent' }).click();
-    const search = page.getByRole('dialog', { name: 'Search Torrents: One Battle After Another (2025)' });
-    await expect(search).toBeVisible();
-    await expect(search.getByRole('searchbox', { name: 'Search torrents' })).toHaveValue('One Battle After Another 2025');
-    const release = 'One.Battle.After.Another.2025.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX';
-    await search.getByRole('button', { name: `Add ${release}` }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Torrent assigned to movie' })).toBeVisible();
-    await search.getByRole('button', { name: 'Close modal' }).click();
+    await expect(page).toHaveURL(/[?&]sheet=torrent&movie=1054867$/);
+    const search = page.getByRole('dialog', { name: 'Find a source · One Battle After Another 2025 · 2h 42m' });
+    await expect(search.getByRole('searchbox', { name: 'Search releases' })).toHaveValue('One Battle After Another 2025');
+    const best = search.getByRole('article', { name: 'One.Battle.After.Another.2025.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX' });
+    await expect(best).toContainText('Best match');
+    await best.getByRole('button', { name: 'Add & assign to movie' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Torrent assigned to movie' })).toBeVisible({ timeout: 20_000 });
+    await page.keyboard.press('Escape');
     await expect(search).toBeHidden();
+    await expect(page).toHaveURL(/\/movie\/1054867$/);
     await expect(panel(page, 'Downloading')).toContainText('Step 3 of 4');
   });
 

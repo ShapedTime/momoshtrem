@@ -22,7 +22,7 @@ Labels: `v2` (redesign and features), `ops` (deployment, CI/CD, backups and serv
 Self-hosted media streaming stack for Apple TV with library management:
 - **momoshtrem** (Go): Library-first torrent streaming service with WebDAV
 - **web** (Next.js, package `momoshtrem-web`): the momoshtrem UI for browsing TMDB, managing the library and searching torrents. Lives in `web/`.
-- **Jackett**: Torrent indexer aggregator
+- **Jackett**: Torrent indexer aggregator, queried by momoshtrem for torrent search
 - **Postgres**: Library database
 
 ## Redesign (v2)
@@ -79,22 +79,22 @@ ops/deploy/deploy.sh momoshtrem-v2 [<commit>]    # deploy; a rollback is an olde
                     │   Browse TMDB, manage library, search   │
                     └──────────────────┬──────────────────────┘
                                        │
-               ┌───────────────────────┼───────────────────────┐
-               ▼                       ▼                       ▼
-          TMDB API              Jackett (:9117)        momoshtrem (:4444)
-                                                              │
-                                                              ▼
-                                                     Postgres (library)
-                                                              │
-AppleTV/Infuse ─────────────────────────────────► WebDAV (:36911)
-                                                              │
-                                                              ▼
-                                                       OpenSubtitles API
+                        ┌──────────────┴──────────────┐
+                        ▼                             ▼
+                    TMDB API                 momoshtrem (:4444) ───► Jackett (:9117)
+                                                      │              (torrent search)
+                                                      ▼
+                                             Postgres (library)
+                                                      │
+AppleTV/Infuse ─────────────────────────────► WebDAV (:36911)
+                                                      │
+                                                      ▼
+                                               OpenSubtitles API
 ```
 
 The v2 target architecture is in PLAN.md §4.
 
-**Flow**: Browse TMDB → Add to library → Search torrents via Jackett → Assign torrent (a mapping job: rules, then AI for unsure files; review at `/mapping/{id}` unless all high) → Stream via WebDAV (Infuse)
+**Flow**: Browse TMDB → Add to library → Search torrents (the search sheet, `?sheet=torrent`; momoshtrem queries Jackett and ranks releases by the quality profile) → Assign torrent (a mapping job: rules, then AI for unsure files; review at `/mapping/{id}` unless all high) → Stream via WebDAV (Infuse)
 
 **Key design**: momoshtrem is library-first. The VFS structure is driven by the database (movies, shows, episodes), not by torrent contents. Migrations are embedded from `momoshtrem/internal/library/migrations/`. The root `momoshtrem/migrations/` folder is a legacy SQLite schema.
 
@@ -118,13 +118,19 @@ PUT  /api/{episodes|movies}/{id}/assignment    # Manual override: one file of a 
 GET  /api/torrents/{hash}/files                # A torrent's files and what each one is mapped to
 GET  /api/shows/{id}/episodes                  # Every season's episodes, Specials included (the episode picker)
 GET  /api/torrents            # List active torrents
+GET  /api/search/torrents                  # Torrent search across Jackett's indexers: scored releases, facets, per-indexer progress (poll while complete=false)
+POST /api/search/torrents/resolve          # A release without a magnet: the server fetches its .torrent and answers the magnet
+POST /api/search/torrents/inspect          # Inspect: a dry-run mapping job for a release or magnet (202 {job_id})
+GET|PUT /api/settings/quality-profile      # The quality profile search ranks by
 GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
 ```
-Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment").
+Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search").
 
 ### Jackett Torznab API (port 9117)
+Only momoshtrem calls it (`internal/torznab/`): the indexer list, then one search per indexer:
 ```
-GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
+GET /api/v2.0/indexers/all/results/torznab/api?apikey={key}&t=indexers&configured=true
+GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 ```
 
 ## Code Quality
@@ -172,9 +178,13 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `src/lib/title/` - Pure title helpers: stage copy (`primaryActionFor`), formats, facts, episodes (`parseJump`, ranges, next-up)
 - `src/components/mapping/` + `src/app/(protected)/mapping/[id]/` - Mapping review (`/mapping/{job_id}`): progress steps, grouped rows, the episode picker (desktop pane, phone sheet), sticky Apply foot, Applied state
 - `src/lib/mapping/` - Pure mapping-review rules: counts, conflicts, ranges, short file names, foot state (`review.ts`) and picker search and tags (`picker.ts`)
+- `src/components/source/` - The source sheet's shared head (Torrents · HDRezka tabs) and the Replace menu; `src/lib/source/context.ts` reads and builds its URL params (`movie=<tmdb>`, or `show=<tmdb>` with `season` / `se`)
+- `src/components/search/` - Torrent search (`?sheet=torrent`): `TorrentSearchSheet`, release cards, chips and the Filters, Sort and Inspect sheets, states; `src/hooks/useReleaseSearch.ts` (polling, resolve, Inspect) and `useAssignTorrent.ts` (Add → mapping job)
+- `src/lib/search/` - Pure search helpers: default query and scope, params, copy, filters and facets, size scale, session drafts, Inspect summaries
+- `src/components/settings/` - Settings: Quality profile, Playback, System status (`status-model.ts`, Jackett's indexers)
 - `src/lib/api/contract/`, `src/lib/api/endpoints/` - PLAN §6 types and typed TanStack Query calls (browser side)
 - `src/lib/api/backend-proxy.ts` + `src/app/api/[...path]/` - Session-checked proxy to the backend
-- `src/lib/api/` - Server-side clients (momoshtrem, jackett, tmdb)
+- `src/lib/api/` - Server-side clients (momoshtrem, tmdb)
 - `src/mocks/` - MSW handlers and fixtures for every §6 endpoint (mock mode, Jest, Playwright)
 - `src/lib/status.ts` - The one status vocabulary
 - `e2e/` - Playwright specs (390 phone + 1440 desktop)
@@ -183,7 +193,7 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 
 ```env
 TMDB_API_KEY=...              # themoviedb.org
-JACKETT_API_KEY=...           # From Jackett dashboard
+JACKETT_API_KEY=...           # From Jackett dashboard; momoshtrem uses it for torrent search (JACKETT_URL is set in compose)
 APP_USERNAME=...              # Sign-in username (defaults to admin)
 APP_PASSWORD=...              # Sign-in password
 OPENSUBTITLES_API_KEY=...     # Optional: subtitles

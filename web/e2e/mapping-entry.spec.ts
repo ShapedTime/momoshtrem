@@ -4,7 +4,7 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
 
 /**
  * Ways into the mapping review (#5) against the MSW mocks: adding a torrent
- * from the legacy search starts a mapping job (a show's goes to its review;
+ * from the search sheet starts a mapping job (a show's goes to its review;
  * a movie's goes to the review to pick a cut, or applies on the spot with one
  * plausible file, as title-movie.spec.ts checks), and Activity lists the open jobs.
  */
@@ -38,12 +38,12 @@ test.describe('mapping entry points', () => {
     // Held at classifying, so the progress shows however long the route takes to compile
     await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'job-hold:classifying'));
     await signIn(page, '/tv/209867');
-    await page.getByRole('button', { name: 'Find a torrent for S01E30' }).click();
-    const search = page.getByRole('dialog', { name: `Search: ${FRIEREN} S01E30` });
-    const release = 'Frieren.Beyond.Journeys.End.S01E30.1080p.BluRay.x264-SPARKS';
+    await page.getByRole('button', { name: 'Find a torrent for S01E29' }).click();
+    const search = page.getByRole('dialog', { name: new RegExp(`^Find a source · ${FRIEREN} S01E29`) });
+    const release = '[SubsPlease] Sousou no Frieren - 29 (1080p) [9E3C5D21].mkv';
     const assign = page.waitForRequest((request) => request.method() === 'POST' && /\/api\/shows\/1\/assign-torrent$/.test(request.url()));
-    await search.getByRole('button', { name: `Add ${release}` }).click();
-    expect((await assign).postDataJSON()).toMatchObject({ hint: { season: 1, episode: 30 }, indexer: 'IPTorrents' });
+    await search.getByRole('article', { name: release }).getByRole('button', { name: 'Add & review mapping' }).click();
+    expect((await assign).postDataJSON()).toMatchObject({ hint: { season: 1, episode: 29 }, indexer: 'Nyaa' });
 
     await expect(page).toHaveURL(/\/mapping\/\d+$/);
     await expect(search).toBeHidden();
@@ -62,9 +62,9 @@ test.describe('mapping entry points', () => {
   test('a movie: two cuts go to the review, where you use one, and it’s ready in Infuse', async ({ page }) => {
     await signIn(page, '/movie/1054867');
     await page.getByRole('button', { name: 'Find a torrent' }).click();
-    const search = page.getByRole('dialog', { name: `Search Torrents: ${OBAA} (2025)` });
+    const search = page.getByRole('dialog', { name: new RegExp(`^Find a source · ${OBAA}`) });
     const release = 'One.Battle.After.Another.2025.1080p.BluRay.x264-SPARKS';
-    await search.getByRole('button', { name: `Add ${release}` }).click();
+    await search.getByRole('article', { name: release }).getByRole('button', { name: 'Add & assign to movie' }).click();
 
     await expect(page).toHaveURL(/\/mapping\/\d+$/, { timeout: 15_000 });
     await expect(page.getByRole('heading', { name: 'Check the files', level: 1 })).toBeVisible();

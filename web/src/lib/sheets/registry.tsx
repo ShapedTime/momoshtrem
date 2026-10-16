@@ -59,7 +59,7 @@ export const SHEETS: Record<string, SheetDefinition> = {
   'show-settings': { params: ['tmdb'], Component: ShowSettingsSheet },
   // Find a source, HDRezka tab (#67): `movie`, or `show` with `season` (the page's tab, so it stays) and `se`
   hdrezka: { params: SOURCE_PARAMS, Component: HDRezkaSheet },
-  // Find a source, Torrents tab (#92), on the same params; nothing links here until TORRENT_SHEET_LIVE (#95)
+  // Find a source, Torrents tab (#92), on the same params
   torrent: { params: SOURCE_PARAMS, Component: TorrentSearchSheet },
 };
 

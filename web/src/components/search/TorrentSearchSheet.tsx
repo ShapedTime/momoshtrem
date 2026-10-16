@@ -4,7 +4,7 @@ import { type FormEvent, type ReactNode, type Ref, useCallback, useEffect, useMe
 import { History, Magnet, X } from 'lucide-react';
 import { SourceSheet, useSourceTitle, useSwitchSource } from '@/components/source';
 import { Button, copyText, IconButton, SearchInput, SegmentedControl, Sheet, Skeleton, Spinner, useToast } from '@/components/ui';
-import { useAssignTorrent } from '@/hooks/useAssignTorrent';
+import { assignTarget, useAssignTorrent } from '@/hooks/useAssignTorrent';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useInspect, useReleaseMagnet, useReleaseSearch } from '@/hooks/useReleaseSearch';
 import type { Release, SearchScope, Title } from '@/lib/api/contract';
@@ -15,8 +15,7 @@ import { defaultQuery, defaultScope, SCOPE_LABEL, scopeOptions, searchParams } f
 import { freshDraft, loadDraft, saveDraft, type SearchDraft } from '@/lib/search/session';
 import { bestRelease, packBanner, searchViewKind } from '@/lib/search/view';
 import type { SheetComponentProps } from '@/lib/sheets/registry';
-import { legacyScope, type SourceContext, sourceContext } from '@/lib/source/context';
-import { legacySearchContext } from '@/lib/title/legacy-search';
+import { type SourceContext, sourceContext } from '@/lib/source/context';
 import { FiltersSheet } from './FiltersSheet';
 import { InspectSheet } from './InspectSheet';
 import { ReleaseCard } from './ReleaseCard';
@@ -104,7 +103,7 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   const focusIndex = useRef<number | null>(null);
   const { toast } = useToast();
   const hdrezka = useHDRezkaEnabled();
-  const switchTo = useSwitchSource(context, close, title);
+  const switchTo = useSwitchSource();
 
   /** Every change is kept for the session (only changes: just opening and closing isn't "where you left off"). */
   const update = (patch: Partial<SearchDraft>) => {
@@ -143,11 +142,11 @@ function TorrentSearch({ context, title, close }: TorrentSearchProps) {
   };
 
   // Adding: resolve a magnet first when the release has none, then the mapping job (a show's review, or a movie's wait)
-  const assignContext = useMemo(() => legacySearchContext(title, legacyScope(context)), [title, context]);
+  const target = useMemo(() => assignTarget(title, context), [title, context]);
   const inspect = useInspect(context);
   // Navigating to the review drops `?sheet`, which closes the sheet (Back from the review reopens it);
   // a movie assigned from Inspect closes Inspect, back to its card saying Added
-  const { add, isAdding, isAdded } = useAssignTorrent(assignContext, { onLeave: () => {}, onApplied: inspect.close });
+  const { add, isAdding, isAdded } = useAssignTorrent(target, { onLeave: () => {}, onApplied: inspect.close });
   const magnets = useReleaseMagnet();
   const onAdd = async (release: Release) => {
     setAddingId(release.id);
@@ -383,9 +382,8 @@ function TorrentSearchContext({ context, close }: { context: SourceContext; clos
 
 /**
  * The Torrents tab of the source sheet (`?sheet=torrent&movie=<tmdb>`, or
- * `&show=<tmdb>&season=n&se=S01E29`; #92). Nothing opens it until
- * `TORRENT_SHEET_LIVE` (#95): the deep link works, the entry points still
- * open the legacy search.
+ * `&show=<tmdb>&season=n&se=S01E29`; #92), opened from the title pages, the
+ * episode sheet, the library and HDRezka's Torrents tab (#95).
  */
 export function TorrentSearchSheet({ params, close }: SheetComponentProps) {
   const context = sourceContext(params);

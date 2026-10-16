@@ -115,10 +115,13 @@ test.describe('HDRezka', () => {
     await expect(sheet(page).getByRole('radio', { name: 'HDrezka Studio, Director’s cut' })).toBeChecked();
 
     await sheet(page).getByRole('tab', { name: 'Torrents' }).click();
+    await expect(page).toHaveURL(/[?&]sheet=torrent&movie=1054867/);
+    await expect(sheet(page).getByRole('tab', { name: 'Torrents' })).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page).getByRole('searchbox', { name: 'Search releases' })).toHaveValue('One Battle After Another 2025');
+    // The tab swapped in place of the HDRezka entry, so Back closes the sheet
+    await page.goBack();
     await expect(sheet(page)).toBeHidden();
-    const search = page.getByRole('dialog', { name: 'Search Torrents: One Battle After Another (2025)' });
-    await expect(search).toBeVisible();
-    await expect(search.getByRole('searchbox', { name: 'Search torrents' })).toHaveValue('One Battle After Another 2025');
+    await expect(page).toHaveURL(/\/movie\/1054867$/);
   });
 
   test('a stream replaces a torrent after asking, from Replace in the current torrent', async ({ page }, testInfo) => {

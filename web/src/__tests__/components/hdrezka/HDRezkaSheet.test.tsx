@@ -16,6 +16,15 @@ import { buildTitle, episodeId, type MockLibrary, seedLibrary } from '@/mocks/fi
 
 const BATTLE = 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html';
 
+/** Switching to the Torrents tab swaps `sheet` in the URL (`useSheet().swap`): one router to watch. */
+const mockReplace = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: jest.fn(), replace: mockReplace, back: jest.fn(), forward: jest.fn(), refresh: jest.fn(), prefetch: jest.fn() }),
+  useSearchParams: () => new URLSearchParams('sheet=hdrezka&movie=1054867'),
+  usePathname: () => '/movie/1054867',
+}));
+const TORRENTS_TAB = '/movie/1054867?sheet=torrent&movie=1054867';
+
 const originalFetch = global.fetch;
 const answer = (status: number, body?: unknown) =>
   ({ ok: status < 300, status, json: async () => body, clone: () => answer(status, body) }) as unknown as Response;
@@ -87,6 +96,7 @@ beforeEach(() => {
 
 afterEach(() => {
   global.fetch = originalFetch;
+  mockReplace.mockReset();
   window.localStorage.clear();
   for (const key of ['movie:1054867', 'movie:157336', 'movie:693134', 'show:95396:2:', 'show:209867:1:', 'show:209867:1:30']) clearDraft(key);
 });
@@ -181,7 +191,8 @@ describe('HDRezkaSheet', () => {
     await waitFor(() => expect(searches().at(-1)?.path).toContain('q=zzz+Battle'));
     expect(field).toHaveValue('zzz Battle');
     fireEvent.click(await screen.findByRole('button', { name: 'Try torrents' }));
-    expect(close).toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith(TORRENTS_TAB, { scroll: false });
+    expect(close).not.toHaveBeenCalled();
   });
 
   it('goes straight to the title for a pasted link', async () => {
@@ -247,10 +258,11 @@ describe('HDRezkaSheet', () => {
     expect(screen.getByRole('radio', { name: 'HDrezka Studio' })).not.toBeChecked();
   });
 
-  it('leaves for torrents from the Torrents tab', async () => {
+  it('swaps to torrent search on the same params from the Torrents tab', async () => {
     const { close } = renderSheet('sheet=hdrezka&movie=1054867');
     fireEvent.click(await screen.findByRole('tab', { name: 'Torrents' }));
-    expect(close).toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith(TORRENTS_TAB, { scroll: false });
+    expect(close).not.toHaveBeenCalled();
   });
 });
 
