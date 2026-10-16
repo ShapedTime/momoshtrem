@@ -14,14 +14,11 @@ var Metrics = []report.MetricDef{
 	{Name: "open_files_left", Kind: report.Exact, Unit: "files", Better: report.Lower, Doc: "The open_files gauge after quiescence."},
 	{Name: "blocked_reads_left", Kind: report.Exact, Unit: "reads", Better: report.Lower, Doc: "The blocked_reads gauge after quiescence."},
 	{Name: "sessions_left", Kind: report.Exact, Unit: "sessions", Better: report.Lower, Doc: "Streaming sessions left after the sessions clock was skewed 31 s."},
-	{Name: "readers_created", Kind: report.Exact, Unit: "readers", Better: report.None, Doc: "PriorityReaders created: priority_updates_total{type=initial}, one InitialPrioritize each."},
+	{Name: "readers_created", Kind: report.Count, Unit: "readers", Better: report.None, Doc: "PriorityReaders created: priority_updates_total{type=initial}, one InitialPrioritize each. A count, not exact: every reconnect after a broken body adds one."},
 	{Name: "torrents_loaded_by_propfind", Kind: report.Exact, Unit: "torrents", Better: report.Lower, Doc: "Torrents a Depth 1 PROPFIND loaded (F3)."},
 	{Name: "sniff_readers", Kind: report.Exact, Unit: "readers", Better: report.Lower, Doc: "Readers created by PROPFINDs and HEADs: content sniffed at offset 0 (F1)."},
 	{Name: "etag_changes", Kind: report.Exact, Unit: "etags", Better: report.Lower, Doc: "Distinct ETags of one file over HEADs and PROPFINDs, less one (F2)."},
 	{Name: "if_range_honoured", Kind: report.Exact, Unit: "bool", Better: report.Higher, Doc: "1 when a Range GET with the file's ETag as If-Range answered 206 (F2)."},
-	{Name: "pieces_lowered_by_close", Kind: report.Exact, Unit: "pieces", Better: report.Lower, Doc: "Incomplete pieces of reader A's window whose effective priority dropped when reader B, open 30 s or more, closed (F6)."},
-	{Name: "pieces_lowered_by_open", Kind: report.Exact, Unit: "pieces", Better: report.Lower, Doc: "Incomplete pieces of reader A's window whose effective priority dropped when reader B opened (F13)."},
-	{Name: "evicted_complete_pieces", Kind: report.Exact, Unit: "pieces", Better: report.Lower, Doc: "Pieces anacrolix believes complete whose data the piece cache (the filecache LRU) has evicted (F11)."},
 
 	// Count: flagged past a noise floor.
 	{Name: "reads", Kind: report.Count, Unit: "reads", Better: report.None, Doc: "Streaming reads: reads_total."},
@@ -37,6 +34,9 @@ var Metrics = []report.MetricDef{
 	{Name: "read_timeouts", Kind: report.Count, Unit: "reads", Better: report.Lower, Doc: "Server reads that timed out: read_timeouts_total."},
 	{Name: "slow_reads", Kind: report.Count, Unit: "reads", Better: report.Lower, Doc: "Server reads that blocked over 500 ms: slow_reads_total."},
 	{Name: "over_read_bytes", Kind: report.Count, Unit: "bytes", Better: report.Lower, Doc: "Bytes the players received and never played: their buffers when they seeked or stopped."},
+	{Name: "pieces_lowered_by_close", Kind: report.Count, Unit: "pieces", Better: report.Lower, Doc: "Incomplete pieces of reader A's window whose effective priority dropped when reader B, open 30 s or more, closed (F6). How many are incomplete then depends on the download's progress."},
+	{Name: "pieces_lowered_by_open", Kind: report.Count, Unit: "pieces", Better: report.Lower, Doc: "Incomplete pieces of reader A's window whose effective priority dropped when reader B opened (F13)."},
+	{Name: "evicted_complete_pieces", Kind: report.Count, Unit: "pieces", Better: report.Lower, Doc: "Pieces anacrolix believes complete whose data the piece cache (the filecache LRU) has evicted (F11). How many depends on how far the readahead got."},
 	{Name: "next_header_prefetched_bytes", Kind: report.Count, Unit: "bytes", Better: report.Higher, Doc: "Bytes of the next episode's header complete when it opened: the prefetch at Normal (3907536)."},
 
 	// Timing: judged only by an interleaved A/B.

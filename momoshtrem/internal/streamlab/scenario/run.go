@@ -145,6 +145,8 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	e.Stack, e.Titles = s, titles
 
 	samples := startSampler(s)
+	e.watchCompletions()
+	defer e.completions.stopWatching()
 	scriptStart := time.Now()
 	scriptErr := runScript(sc, e)
 	wall := time.Since(scriptStart)

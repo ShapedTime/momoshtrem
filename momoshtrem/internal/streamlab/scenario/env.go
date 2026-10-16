@@ -68,30 +68,30 @@ type Env struct {
 	Stack  *stack.Stack
 	Titles []*Title
 
-	rngMu sync.Mutex
-	rec   recorder
+	rngMu       sync.Mutex
+	rec         recorder
+	completions *completions
 	// dir is the repetition's folder for artifacts; "" keeps none.
 	dir string
 }
 
 // recorder keeps what a repetition did.
 type recorder struct {
-	mu           sync.Mutex
-	devices      map[string]string // User-Agent -> device name
-	conns        []*client.Conn
-	connDevice   map[*client.Conn]client.Device
-	players      []playerRec
-	failures     []failure
-	httpErrors   []string
-	aborts       []clientAbort
-	propfinds    []time.Duration
-	probes       []time.Duration
-	metrics      map[string]float64
-	checks       map[string]report.RepCheck
-	notes        []string
-	timeoutsSeen float64
-	probesDone   int
-	artifacts    map[string]string
+	mu         sync.Mutex
+	devices    map[string]string // User-Agent -> device name
+	conns      []*client.Conn
+	connDevice map[*client.Conn]client.Device
+	players    []playerRec
+	failures   []failure
+	httpErrors []string
+	aborts     []clientAbort
+	propfinds  []time.Duration
+	probes     []time.Duration
+	metrics    map[string]float64
+	checks     map[string]report.RepCheck
+	notes      []string
+	probesDone int
+	artifacts  map[string]string
 }
 
 type playerRec struct {
@@ -100,43 +100,71 @@ type playerRec struct {
 	s      *player.Session
 }
 
-// failure is a body that broke: a playback's or a probe's, with what the
-// lab saw when it did.
+// quickBreak is the most silence before a break that F11's signature
+// allows: a read of an evicted piece fails at once, after anacrolix's
+// three tries (measured 0.9-1.5 s on a loaded machine), far from the
+// read timeout #195's signature needs half of.
+const quickBreak = 3 * time.Second
+
+// failure is a body that broke, or a request that failed: a playback's or
+// a probe's, with what the lab saw when it did.
 type failure struct {
-	device   string
-	title    *Title
-	at       time.Time
-	offset   int64
-	piece    int
-	err      string
-	timedOut bool // a server read timed out since the last failure
+	device string
+	title  *Title
+	at     time.Time
+	offset int64
+	piece  int
+	err    string
+	// silence is how long the body had been silent before it broke: since
+	// its last byte, or since the request when none came.
+	silence time.Duration
+	// timedOut: silent for half the read timeout or more, as a server read
+	// that timed out leaves a body (the server then ends it early).
+	timedOut bool
 	stalled  bool // swarm.Stalled: the piece wanted and incomplete, a seeder connected
-	evicted  bool // the piece cache doesn't hold the piece (F11)
-	broke    bool // a body that ended early, not a request that failed
+	// evicted: the piece cache doesn't hold the piece, and wasComplete:
+	// anacrolix had reported it complete before (F11).
+	evicted     bool
+	wasComplete bool
+	broke       bool // a body that ended early, not a request that failed
 }
 
 // known is the known issue whose signature the failure carries: #195's
-// stall, or F11's quick break at a piece the cache evicted.
+// stall (a body silent through a read timeout, at a wanted, incomplete
+// piece with the seeder connected), or F11's quick break at a piece
+// anacrolix had complete and the cache no longer holds.
 func (f failure) known() string {
 	switch {
 	case f.timedOut && f.stalled:
 		return "#195"
-	case !f.timedOut && f.evicted && f.broke:
+	case f.silence < quickBreak && f.broke && f.evicted && f.wasComplete:
 		return "F11"
 	}
 	return ""
 }
 
 func (f failure) diagnosis() string {
-	switch {
-	case f.timedOut && f.stalled:
-		return fmt.Sprintf("known stall (#195): a server read timed out, piece %d wanted and incomplete, seeder connected", f.piece)
-	case !f.timedOut && f.evicted && f.broke:
-		return fmt.Sprintf("F11: broke at once at piece %d, which the piece cache doesn't hold", f.piece)
-	case f.timedOut:
-		return fmt.Sprintf("a server read timed out, but piece %d isn't the known stall (not wanted, complete, or no seeder)", f.piece)
+	silent := fmt.Sprintf("silent %v", f.silence.Round(time.Millisecond))
+	switch f.known() {
+	case "#195":
+		return fmt.Sprintf("known stall (#195): %s, piece %d wanted and incomplete, seeder connected", silent, f.piece)
+	case "F11":
+		return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds", silent, f.piece)
 	}
-	return "no server read timed out"
+	var why []string
+	if f.timedOut {
+		why = append(why, "timed out")
+	}
+	if f.stalled {
+		why = append(why, "piece wanted and incomplete, seeder connected")
+	}
+	if f.evicted {
+		why = append(why, "piece not in the cache")
+	}
+	if f.wasComplete {
+		why = append(why, "piece was complete")
+	}
+	return fmt.Sprintf("no known signature: %s, piece %d (%s)", silent, f.piece, strings.Join(why, ", "))
 }
 
 // clientAbort is a request a script dropped outside a player.
@@ -205,7 +233,7 @@ func (e *Env) Player(d client.Device, t *Title) *player.Session {
 		Path:    t.Path,
 		Size:    t.Size,
 		Check:   func(off int64, p []byte) { t.Integrity.Check(t.File, off, p) },
-		OnError: func(off int64, err error) { e.failed(name, t, off, err) },
+		OnError: func(off int64, silence time.Duration, err error) { e.failed(name, t, off, silence, err) },
 		Retries: int(e.P.Int("retries")),
 	})
 	e.rec.mu.Lock()
@@ -214,19 +242,18 @@ func (e *Env) Player(d client.Device, t *Title) *player.Session {
 	return s
 }
 
-// failed records a body that broke at the file offset off, with what the
-// server and the torrent were doing at that moment.
-func (e *Env) failed(device string, t *Title, off int64, err error) {
+// failed records a body that broke (or a request that failed) at the
+// file offset off after silence without a byte, with what the torrent was
+// doing at that moment.
+func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, err error) {
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
-		broke: errors.Is(err, io.ErrUnexpectedEOF)}
-	timeouts := checks.Value(e.Stack.Registry, metricReadTimeouts)
+		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
 	if tor, ok := e.Stack.Torrent(t.Hash); ok {
 		f.stalled = swarm.Stalled(tor, f.piece)
 		f.evicted = !e.cached(tor, f.piece)
 	}
+	f.wasComplete = e.completions.was(t.Hash, f.piece)
 	e.rec.mu.Lock()
-	f.timedOut = timeouts > e.rec.timeoutsSeen
-	e.rec.timeoutsSeen = max(e.rec.timeoutsSeen, timeouts)
 	e.rec.failures = append(e.rec.failures, f)
 	n := len(e.rec.failures)
 	e.rec.mu.Unlock()
@@ -266,29 +293,58 @@ func (e *Env) httpError(err error) {
 // only a cancelled context is returned.
 func (e *Env) Probe(conn *client.Conn, t *Title, off, n int64) error {
 	start := time.Now()
-	resp, body, err := conn.Probe(e.Ctx, t.Path, off, n)
-	took := time.Since(start)
-	e.rec.mu.Lock()
-	e.rec.probes = append(e.rec.probes, took)
-	e.rec.probesDone++
-	e.rec.mu.Unlock()
-	if ctxErr := e.Ctx.Err(); ctxErr != nil {
-		return ctxErr
+	defer func() {
+		e.rec.mu.Lock()
+		e.rec.probes = append(e.rec.probes, time.Since(start))
+		e.rec.probesDone++
+		e.rec.mu.Unlock()
+	}()
+	device := e.deviceName(e.deviceOf(conn).UserAgent)
+	st, err := conn.Get(e.Ctx, t.Path, http.Header{"Range": {rangeOf(off, n)}})
+	if err != nil {
+		if ctxErr := e.Ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		e.failed(device, t, off, time.Since(start), fmt.Errorf("probe of %d bytes at %d: %w", n, off, err))
+		return nil
 	}
-	if resp != nil {
-		if herr := checks.RangeResponse(resp, off, off+n-1, t.Size); herr != nil {
-			e.httpError(herr)
+	defer st.Close()
+	if herr := checks.RangeResponse(st.Response, off, off+n-1, t.Size); herr != nil {
+		e.httpError(herr)
+		return nil
+	}
+	return e.body(device, t, st, off, n, start)
+}
+
+// body reads n bytes of st, a range from the file offset off requested at
+// start, checking every byte. A body that ends early is a failure, with
+// how long it had been silent; only a cancelled context is returned.
+func (e *Env) body(device string, t *Title, st *client.Stream, off, n int64, start time.Time) error {
+	buf := make([]byte, 32<<10)
+	var got int64
+	last := start
+	for {
+		m, err := st.Read(buf)
+		if m > 0 {
+			t.Integrity.Check(t.File, off+got, buf[:m])
+			got += int64(m)
+			last = time.Now()
+		}
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, io.EOF) && got == n {
 			return nil
 		}
+		if ctxErr := e.Ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
+		}
+		e.failed(device, t, off+got, time.Since(last), fmt.Errorf("range %d+%d: %d bytes, then: %w", off, n, got, err))
+		return nil
 	}
-	t.Integrity.Check(t.File, off, body)
-	if err == nil && int64(len(body)) != n {
-		err = fmt.Errorf("probe at %d: %d bytes, want %d", off, len(body), n)
-	}
-	if err != nil {
-		e.failed(e.deviceName(e.deviceOf(conn).UserAgent), t, off+int64(len(body)), err)
-	}
-	return nil
 }
 
 // Head asks for t's headers and checks them: 200, the size and

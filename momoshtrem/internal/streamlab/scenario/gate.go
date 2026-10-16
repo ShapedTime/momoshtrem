@@ -197,7 +197,7 @@ var scrub = &Scenario{
 	Tier: Gate,
 	Doc: `A player plays a few seconds, then scrubs: 10 seeks in 3 s to random positions, each reading for a moment before the next drops it, then plays from where it settled.
 
-A dropped request whose handler is blocked in a read lives on until the read returns (F12): its reader and Now window compete with the new position. abort-lag measures each handler's time after its client dropped it.`,
+A dropped request whose handler is blocked in a read lives on until the read returns (F12): its reader and Now window compete with the new position. abort-lag measures each handler's time after its client dropped it. It fails past abort_lag_max (1 s); F12's signature is a lag in (abort_lag_max, read_timeout + 1 s], a handler that did end once its read returned or timed out. A longer lag is a hang, not F12.`,
 	Guards: []string{"F12"},
 	Params: []Param{
 		{Name: "seeks", Kind: Int, Default: "10", Doc: "How many seeks the scrub makes."},
@@ -384,21 +384,32 @@ PriorityReader.Close resets the whole file's priorities when its reader was open
 		posA, ok := lowest(e.ServerPositions(t))
 		before := e.Snapshot(t)
 		b.Stop()
-		e.RequestsDone(func(r stack.Request) bool { return r.UserAgent == devB.UserAgent }, 10*time.Second)
+		closed := e.RequestsDone(func(r stack.Request) bool { return r.UserAgent == devB.UserAgent }, 10*time.Second)
 		after := e.Snapshot(t)
-		if !ok {
+		switch {
+		case !ok:
 			e.Check("close-keeps-windows", report.NA, "", "reader A had no open reader server side")
-		} else {
+		case !closed:
+			e.Check("close-keeps-windows", report.NA, "", "reader B's handler hadn't returned 10 s after its client closed")
+		default:
 			begin, end := e.window(t, posA)
 			ch := Compare(before, after, begin, end)
 			wanted := before.Above(begin, end, types.PiecePriorityNone)
 			e.Metric("pieces_lowered_by_close", float64(len(ch.Lowered)))
 			ev := fmt.Sprintf("A at %d, window pieces %d-%d (%d incomplete and wanted before B closed): %s", posA, begin, end-1, wanted, ch)
+			// F6's signature: ResetPriorities sets the file's every piece
+			// to None, so every lowered piece went to None.
+			toNone := !slices.ContainsFunc(ch.Lowered, func(i int) bool {
+				st, _ := after.state(i)
+				return st.Priority != types.PiecePriorityNone
+			})
 			switch {
 			case wanted == 0:
 				e.Check("close-keeps-windows", report.NA, "", ev)
-			case len(ch.Lowered) > 0:
+			case len(ch.Lowered) > 0 && toNone:
 				e.Check("close-keeps-windows", report.Fail, "F6", ev)
+			case len(ch.Lowered) > 0:
+				e.Check("close-keeps-windows", report.Fail, "", ev+" (not all to none: not F6's signature)")
 			default:
 				e.Check("close-keeps-windows", report.Pass, "", ev)
 			}
@@ -470,11 +481,18 @@ At the start of the file the overlap is the header's last pieces, which the serv
 			e.Metric("pieces_lowered_by_open", float64(len(ch.Lowered)))
 			ev := fmt.Sprintf("A at %d, window pieces %d-%d; %d of them incomplete above High where B prioritizes (header %d-%d, footer %d-%d) before B opened: %s",
 				posA, begin, end-1, exposed, hb, he-1, fb, fe-1, ch)
+			// F13's signature: InitialPrioritize touches the header and the
+			// footer only, so every lowered piece is in one of them.
+			inRanges := !slices.ContainsFunc(ch.Lowered, func(i int) bool {
+				return !(i >= hb && i < he) && !(i >= fb && i < fe)
+			})
 			switch {
 			case exposed == 0:
 				e.Check("open-keeps-windows", report.NA, "", ev)
-			case len(ch.Lowered) > 0:
+			case len(ch.Lowered) > 0 && inRanges:
 				e.Check("open-keeps-windows", report.Fail, "F13", ev)
+			case len(ch.Lowered) > 0:
+				e.Check("open-keeps-windows", report.Fail, "", ev+" (outside the header and footer: not F13's signature)")
 			default:
 				e.Check("open-keeps-windows", report.Pass, "", ev)
 			}
@@ -603,8 +621,9 @@ Opening episode 1 prefetches episode 2's header and footer at Normal priority (3
 		{Name: "tail", Kind: Bytes, Default: "10MiB", Doc: "How much of episode 1's end the player watches."},
 		{Name: "watch", Kind: Duration, Default: "5s", Doc: "How much of episode 2 to play."},
 	},
-	Media: func(p Params) Media { return SeasonMedia(p, int(p.Int("episodes")), p.Bytes("episode_size")) },
-	Key:   []string{"next_header_prefetched_bytes", "next_time_to_playable", "time_to_playable", "stall_count"},
+	Media:  func(p Params) Media { return SeasonMedia(p, int(p.Int("episodes")), p.Bytes("episode_size")) },
+	Checks: []string{"next-prefetch"},
+	Key:    []string{"next_header_prefetched_bytes", "next_time_to_playable", "time_to_playable", "stall_count"},
 	Script: func(e *Env) error {
 		ep1, ep2 := e.Titles[0], e.Titles[1]
 		dev := e.Device("infuse")
@@ -619,7 +638,14 @@ Opening episode 1 prefetches episode 2's header and footer at Normal priority (3
 		p.Stop()
 		snap := e.Snapshot(ep2)
 		hb, he := ep2.PieceRange(0, e.Stack.Streaming.HeaderPriorityBytes)
-		e.Metric("next_header_prefetched_bytes", float64(int64(snap.Complete(hb, he))*ep2.Layout.PieceLength()))
+		prefetched := int64(snap.Complete(hb, he)) * ep2.Layout.PieceLength()
+		e.Metric("next_header_prefetched_bytes", float64(prefetched))
+		ev := fmt.Sprintf("%s of episode 2's first %s complete when it opened", report.Bytes(prefetched), report.Bytes(e.Stack.Streaming.HeaderPriorityBytes))
+		if prefetched > 0 {
+			e.Check("next-prefetch", report.Pass, "", ev)
+		} else {
+			e.Check("next-prefetch", report.Fail, "", ev)
+		}
 		q, err := e.Player(dev, ep2).Open(e.Ctx, conn, 0)
 		if err := e.Live(err); err != nil {
 			return err
@@ -674,9 +700,13 @@ The filecache LRU evicts pieces anacrolix still believes complete (F11): cache-h
 		e.Metric("evicted_complete_pieces", float64(len(evicted)))
 		ev := fmt.Sprintf("%d pieces complete to anacrolix, %d of them evicted from the %s cache: %v",
 			complete, len(evicted), report.Bytes(e.P.Bytes("cache_size")), firstInts(evicted, 12))
-		if len(evicted) == 0 {
+		switch {
+		case int64(complete)*t.Layout.PieceLength() <= e.P.Bytes("cache_size"):
+			// Everything complete fits: nothing had to be evicted.
+			e.Check("cache-holds-complete", report.NA, "", ev+"; it all fits in the cache, so nothing was put to the test")
+		case len(evicted) == 0:
 			e.Check("cache-holds-complete", report.Pass, "", ev)
-		} else {
+		default:
 			e.Check("cache-holds-complete", report.Fail, "F11", ev)
 		}
 		p, err = s.Seek(e.Ctx, p, conn, 0)
@@ -757,21 +787,26 @@ The ETag comes from ModTime, which is time.Now() in every Stat (F2, #73): each r
 		}
 		n := e.P.Bytes("probe_bytes")
 		rng := rangeOf(0, n)
+		start := time.Now()
 		st, err := conn.Get(e.Ctx, t.Path, http.Header{"Range": {rng}, "If-Range": {etags[0]}})
 		if err != nil {
 			return fmt.Errorf("GET %s with If-Range: %w", t.Path, err)
 		}
 		status := st.Response.StatusCode
-		if status == http.StatusPartialContent {
-			body := make([]byte, n)
-			got, rerr := readFull(st, body)
-			t.Integrity.Check(t.File, 0, body[:got])
-			if rerr != nil {
-				e.failed("infuse", t, int64(got), rerr)
+		switch status {
+		case http.StatusPartialContent:
+			if herr := checks.RangeResponse(st.Response, 0, n-1, t.Size); herr != nil {
+				e.httpError(herr)
+			} else if err := e.body("infuse", t, st, 0, n, start); err != nil {
+				return err
 			}
 			st.Close()
-		} else {
-			// A 200 streams the whole file: drop it once the headers are in.
+		case http.StatusOK:
+			// The whole file: drop it once the headers are in.
+			e.Abandon(conn, t.Path, rng)
+			st.Abort()
+		default:
+			e.httpError(fmt.Errorf("GET %s with Range %s and If-Range answered %d, want 206 (or 200 when the ETag changed)", t.Path, rng, status))
 			e.Abandon(conn, t.Path, rng)
 			st.Abort()
 		}
@@ -786,29 +821,15 @@ The ETag comes from ModTime, which is time.Now() in every Stat (F2, #73): each r
 		switch {
 		case len(distinct) == 1 && distinct[0] != "" && status == http.StatusPartialContent:
 			e.Check("etag-stable", report.Pass, "", ev)
-		case len(distinct) > 1:
+		case len(distinct) > 1 && status == http.StatusOK && !slices.Contains(etags, ""):
+			// F2's signature: every request a new ETag, so If-Range
+			// misses and the server sends the whole file.
 			e.Check("etag-stable", report.Fail, "F2", ev)
 		default:
 			e.Check("etag-stable", report.Fail, "", ev)
 		}
 		return nil
 	},
-}
-
-// readFull reads len(p) bytes of st.
-func readFull(st *client.Stream, p []byte) (int, error) {
-	n := 0
-	for n < len(p) {
-		m, err := st.Read(p[n:])
-		n += m
-		if err != nil {
-			if n == len(p) {
-				return n, nil
-			}
-			return n, err
-		}
-	}
-	return n, nil
 }
 
 // lowest is the smallest of positions; ok is false without any.
