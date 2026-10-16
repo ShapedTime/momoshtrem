@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { JackettSearchResponse, TorrentResult, VideoQuality } from '@/types/jackett';
 import type { LibraryMovie, LibraryShow, RecentlyAiredResponse } from '@/types/momoshtrem';
-import type { GenreList, TrendingResults } from '@/types/tmdb';
+import type { TrendingResults } from '@/types/tmdb';
 import { CATALOG, iso } from '../fixtures/catalog';
 import { latency } from './util';
 
@@ -65,7 +65,6 @@ function jackettResults(query: string): TorrentResult[] {
 
 export const legacyHandlers = [
   http.get('*/api/tmdb/trending', () => HttpResponse.json(trending)),
-  http.get('*/api/tmdb/genres', () => HttpResponse.json<GenreList>({ genres: [{ id: 16, name: 'Animation' }, { id: 18, name: 'Drama' }] })),
   http.get('*/api/library/recently-aired', () => HttpResponse.json(recentlyAired)),
   http.get('*/api/library/movies', () => HttpResponse.json<{ movies: LibraryMovie[] }>({ movies: [] })),
   http.get('*/api/library/shows', () => HttpResponse.json<{ shows: LibraryShow[] }>({ shows: [] })),

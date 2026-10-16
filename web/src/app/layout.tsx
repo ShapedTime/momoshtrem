@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import './globals.css';
 
 const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' });
@@ -33,7 +34,10 @@ export default function RootLayout({
   return (
     // The font variables live on <html> because tokens.css reads them in :root
     <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable}`}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        {/* URL state for nuqs (Discover's filters, #100) */}
+        <NuqsAdapter>{children}</NuqsAdapter>
+      </body>
     </html>
   );
 }

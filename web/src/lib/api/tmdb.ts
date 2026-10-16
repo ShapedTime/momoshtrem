@@ -2,6 +2,19 @@ import { MovieDb } from 'moviedb-promise';
 import type { MovieResponse, ShowResponse, MovieResult, TvResult } from 'moviedb-promise';
 import { TRENDING_TIME_WINDOW, SEARCH_MAX_RESULTS } from '@/config/tmdb';
 import { APIError, NotFoundError } from '@/lib/errors';
+import type { DiscoverPage, DiscoverRelaxed } from '@/lib/api/contract';
+import { type DiscoverFilters, withoutFilter } from '@/lib/discover/filters';
+import {
+  type DiscoverRow,
+  type DiscoverStream,
+  discoverStreams,
+  isoDay,
+  MAX_TMDB_PAGE,
+  mergeStreams,
+  relaxKeys,
+  toDiscoverItem,
+  yearOf,
+} from '@/lib/discover/tmdb-query';
 import type {
   Movie,
   MovieDetails,
@@ -15,11 +28,6 @@ import type {
   TrendingResults,
   CastMember,
   CrewMember,
-  Genre,
-  DiscoverOptions,
-  DiscoverResults,
-  MovieSortOption,
-  TVSortOption,
 } from '@/types/tmdb';
 
 // ============================================
@@ -33,7 +41,7 @@ class TMDBClient {
     if (!this.client) {
       const apiKey = process.env.TMDB_API_KEY;
       if (!apiKey) {
-        throw new Error('TMDB_API_KEY environment variable is not set');
+        throw new APIError('TMDB_API_KEY isn’t set, so TMDB can’t be reached. Add it to .env and restart.', 503, 'tmdb_not_configured');
       }
       this.client = new MovieDb(apiKey);
     }
@@ -365,134 +373,85 @@ class TMDBClient {
   }
 
   // ----------------------------------------
-  // Genre Methods
+  // Discover (#100)
   // ----------------------------------------
 
   /**
-   * Get movie genres list.
+   * One page of Discover: a TMDB query per type that can match, interleaved
+   * by the sort key (lib/discover/tmdb-query.ts). `total` is the streams'
+   * sum and `total_pages` the larger, capped at TMDB's 500.
    */
-  async getMovieGenres(): Promise<Genre[]> {
-    try {
-      const response = await this.getClient().genreMovieList();
-      return (response.genres ?? []).map((g) => ({
-        id: g.id ?? 0,
-        name: g.name ?? '',
-      }));
-    } catch (error) {
-      throw this.handleError(error, 'Movie genres');
-    }
+  async discover(filters: DiscoverFilters, page: number): Promise<DiscoverPage> {
+    const streams = discoverStreams(filters, page, isoDay());
+    if (!streams.length) return { items: [], total: 0, page, total_pages: 0 };
+    const answers = await Promise.all(streams.map((stream) => this.discoverStream(stream)));
+    return {
+      items: mergeStreams(filters.sort, answers.map((answer) => answer.rows)).map(toDiscoverItem),
+      total: answers.reduce((sum, answer) => sum + answer.total, 0),
+      page,
+      total_pages: Math.min(MAX_TMDB_PAGE, Math.max(...answers.map((answer) => answer.totalPages))),
+    };
   }
 
-  /**
-   * Get TV genres list.
-   */
-  async getTVGenres(): Promise<Genre[]> {
-    try {
-      const response = await this.getClient().genreTvList();
-      return (response.genres ?? []).map((g) => ({
-        id: g.id ?? 0,
-        name: g.name ?? '',
-      }));
-    } catch (error) {
-      throw this.handleError(error, 'TV genres');
-    }
+  /** `relax=1`: the total without each active filter, page 1 only, all at once. */
+  async discoverRelaxed(filters: DiscoverFilters): Promise<DiscoverRelaxed> {
+    const relaxed = await Promise.all(
+      relaxKeys(filters).map(async (filter) => {
+        const streams = discoverStreams(withoutFilter(filters, filter), 1, isoDay());
+        const answers = await Promise.all(streams.map((stream) => this.discoverStream(stream)));
+        return { filter, would_be: answers.reduce((sum, answer) => sum + answer.total, 0) };
+      })
+    );
+    return { relaxed };
   }
 
-  // ----------------------------------------
-  // Discover Methods
-  // ----------------------------------------
-
-  /**
-   * Discover movies with filtering and sorting.
-   */
-  async discoverMovies(
-    options: DiscoverOptions = {}
-  ): Promise<DiscoverResults<MovieSearchResult>> {
+  private async discoverStream({ mediaType, params }: DiscoverStream): Promise<{ rows: DiscoverRow[]; total: number; totalPages: number }> {
+    const client = this.getClient();
+    const config = { timeout: TMDB_DISCOVER_TIMEOUT_MS };
     try {
-      const { genreId, sortBy = 'popularity.desc', page = 1, voteCountGte = 50 } = options;
-
-      const params: Record<string, unknown> = {
-        sort_by: sortBy as MovieSortOption,
-        page,
-        'vote_count.gte': voteCountGte,
-        include_adult: false,
-      };
-
-      if (genreId) {
-        params.with_genres = String(genreId);
-      }
-
-      const response = await this.getClient().discoverMovie(params);
-
-      const results: MovieSearchResult[] = ((response.results ?? []) as MovieResult[]).map(
-        (item) => ({
-          id: item.id ?? 0,
-          mediaType: 'movie' as const,
-          posterPath: item.poster_path ?? null,
-          backdropPath: item.backdrop_path ?? null,
-          voteAverage: item.vote_average ?? 0,
-          overview: item.overview ?? '',
+      if (mediaType === 'movie') {
+        const response = await client.discoverMovie(params, config);
+        const rows = ((response.results ?? []) as MovieResult[]).map((item) => ({
+          media_type: 'movie' as const,
+          tmdb_id: item.id ?? 0,
           title: item.title ?? '',
-          releaseDate: item.release_date ?? '',
-        })
-      );
-
-      return {
-        results,
-        page: response.page ?? 1,
-        totalPages: response.total_pages ?? 1,
-        totalResults: response.total_results ?? 0,
-      };
-    } catch (error) {
-      throw this.handleError(error, 'Movies');
-    }
-  }
-
-  /**
-   * Discover TV shows with filtering and sorting.
-   */
-  async discoverTVShows(
-    options: DiscoverOptions = {}
-  ): Promise<DiscoverResults<TVSearchResult>> {
-    try {
-      const { genreId, sortBy = 'popularity.desc', page = 1, voteCountGte = 50 } = options;
-
-      const params: Record<string, unknown> = {
-        sort_by: sortBy as TVSortOption,
-        page,
-        'vote_count.gte': voteCountGte,
-        include_adult: false,
-      };
-
-      if (genreId) {
-        params.with_genres = String(genreId);
+          year: yearOf(item.release_date),
+          poster_path: item.poster_path ?? null,
+          popularity: item.popularity ?? 0,
+          vote_average: item.vote_average ?? 0,
+          date: item.release_date ?? '',
+        }));
+        return { rows, total: response.total_results ?? 0, totalPages: response.total_pages ?? 0 };
       }
-
-      const response = await this.getClient().discoverTv(params);
-
-      const results: TVSearchResult[] = ((response.results ?? []) as TvResult[]).map(
-        (item) => ({
-          id: item.id ?? 0,
-          mediaType: 'tv' as const,
-          posterPath: item.poster_path ?? null,
-          backdropPath: item.backdrop_path ?? null,
-          voteAverage: item.vote_average ?? 0,
-          overview: item.overview ?? '',
-          name: item.name ?? '',
-          firstAirDate: item.first_air_date ?? '',
-        })
-      );
-
-      return {
-        results,
-        page: response.page ?? 1,
-        totalPages: response.total_pages ?? 1,
-        totalResults: response.total_results ?? 0,
-      };
+      const response = await client.discoverTv(params, config);
+      const rows = ((response.results ?? []) as TvResult[]).map((item) => ({
+        media_type: 'tv' as const,
+        tmdb_id: item.id ?? 0,
+        title: item.name ?? '',
+        year: yearOf(item.first_air_date),
+        poster_path: item.poster_path ?? null,
+        popularity: item.popularity ?? 0,
+        vote_average: item.vote_average ?? 0,
+        date: item.first_air_date ?? '',
+      }));
+      return { rows, total: response.total_results ?? 0, totalPages: response.total_pages ?? 0 };
     } catch (error) {
-      throw this.handleError(error, 'TV shows');
+      throw discoverError(error);
     }
   }
+}
+
+/** A hung TMDB mustn't hold the page: give up and say so. */
+const TMDB_DISCOVER_TIMEOUT_MS = 10_000;
+
+/**
+ * Discover's errors: a rejected key is 502 `tmdb_auth` (a 401 would send the
+ * browser to sign in), anything else TMDB does wrong is 502 `tmdb_unavailable`.
+ */
+function discoverError(error: unknown): APIError {
+  const status = Number(/status code (\d+)/.exec(error instanceof Error ? error.message : '')?.[1]);
+  if (status === 401 || status === 403) return new APIError('TMDB rejected the API key. Check TMDB_API_KEY.', 502, 'tmdb_auth');
+  return new APIError('TMDB didn’t answer. Try again in a moment.', 502, 'tmdb_unavailable');
 }
 
 // Export singleton instance

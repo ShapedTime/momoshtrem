@@ -1,0 +1,101 @@
+/* ==========================================================================
+   Discover (/discover, PLAN F6; #100).
+   Ported from docs/redesign/design-cinematic/css/screens/discover.css. The
+   React parts live in components/discover. Tokens only.
+   ========================================================================== */
+
+@layer components {
+  .disc-page { padding-bottom: var(--sp-10); }
+
+  /* ---- Head: the large title (phone) or display title and intro (desktop) ---- */
+  .disc-head { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: calc(var(--sp-2) + env(safe-area-inset-top, 0px)); }
+  .disc-head h1 { font-weight: var(--w-bold); }
+  .disc-intro { display: none; max-width: 60ch; }
+  @media (min-width: 1024px) {
+    .disc-head { padding-top: var(--sp-10); }
+    .disc-intro { display: block; }
+  }
+
+  /* ---- Moods and the phone's quick chips: rows that scroll sideways ---------- */
+  .disc-top { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-3); }
+  @media (min-width: 1024px) { .disc-top { padding-top: var(--sp-6); } }
+  .disc-moods { padding-block: 4px; }
+  .disc-moods .fchip { height: 40px; padding: 0 var(--sp-4); font-size: var(--t-body); }
+  .disc-pchips { padding-block: 4px; }
+  .disc-filters-btn svg { color: var(--text-2); }
+  .disc-filters-btn.is-on svg { color: var(--accent-text); }
+  @media (min-width: 1024px) { .disc-pchips { display: none; } }
+
+  /* ---- Layout: sidebar + results ------------------------------------------- */
+  .disc-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-8); padding-top: var(--sp-4); }
+  .disc-side { display: none; position: relative; }
+  @media (min-width: 1024px) {
+    .disc-layout { grid-template-columns: 288px minmax(0, 1fr); gap: var(--sp-10); padding-top: var(--sp-6); }
+    .disc-side { display: block; }
+  }
+  @media (min-width: 1440px) { .disc-layout { grid-template-columns: 312px minmax(0, 1fr); } }
+
+  /* The filter column: sticky, and scrolls on its own */
+  .disc-side-in {
+    position: sticky; top: calc(var(--topbar-h) + var(--sp-4));
+    max-height: calc(100vh - var(--topbar-h) - var(--sp-8)); overflow-y: auto; overscroll-behavior: contain;
+    padding: var(--sp-1) var(--sp-3) var(--sp-6) 2px; margin-left: -2px; scrollbar-width: thin;
+  }
+
+  /* ---- Filter panel (sidebar and sheet) --------------------------------------- */
+  .disc-panel { display: flex; flex-direction: column; gap: var(--sp-6); }
+  .disc-sec { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+  .disc-sec legend { padding: 0; margin-bottom: var(--sp-3); display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; }
+  .disc-sec[disabled] .seg { opacity: 0.45; }
+  .disc-hint { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: var(--w-regular); font-size: 12px; color: var(--text-3); }
+  .disc-sec .fchips { gap: 6px; }
+  .disc-sec .seg button { min-height: 40px; gap: 4px; }
+  .disc-sec .seg button svg { color: var(--accent-text); }
+  .disc-years { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--sp-2); }
+  .disc-anime {
+    display: flex; align-items: center; gap: var(--sp-3); min-height: 56px;
+    padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--line-1);
+  }
+  .disc-anime .grow { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+  /* ---- Results ---------------------------------------------------------------- */
+  .disc-main { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+  .disc-rhead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+  .disc-rhead .titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .disc-rhead .t-title-2 { font-variant-numeric: tabular-nums; }
+  .disc-rtools { display: flex; align-items: center; gap: var(--sp-2); }
+  .disc-copy { display: none; }
+  @media (min-width: 1024px) { .disc-copy { display: inline-flex; } }
+  .disc-sort { width: auto; min-width: 168px; font-size: var(--t-small); font-weight: var(--w-medium); background-color: var(--surface-1); }
+  @media (max-width: 639px) {
+    .disc-rhead .t-title-2 { font-size: var(--t-title-3); }
+    .disc-sort { min-width: 0; max-width: 160px; }
+  }
+  .disc-active { gap: 6px; }
+  .disc-grid { margin-top: var(--sp-2); }
+  @media (min-width: 1024px) { .disc-main .poster-grid { --poster-min: 164px; } }
+  @media (min-width: 1440px) { .disc-main .poster-grid { --poster-min: 176px; } }
+
+  /* Infinite-scroll footer: one row of skeletons (more rows collapse) and a label */
+  .disc-more { display: flex; flex-direction: column; gap: var(--sp-5); margin-top: var(--sp-2); }
+  .disc-skelrow { grid-template-rows: auto; grid-auto-rows: 0; row-gap: 0; overflow: hidden; opacity: 0.8; }
+  .disc-more-label { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); padding-block: var(--sp-2); font-size: var(--t-small); color: var(--text-2); }
+  .disc-more-label .cat-eyes--svg { flex-shrink: 0; }
+
+  /* ---- Empty: each filter is one tap to remove, with what you'd get back -------- */
+  .disc-empty.empty { max-width: 560px; padding-top: var(--sp-10); }
+  .disc-empty .art { color: var(--surface-3); }
+  .disc-empty .actions { flex-direction: column; align-items: center; gap: var(--sp-5); width: 100%; }
+  .disc-fixes { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); }
+  .disc-fix { height: 40px; border-style: dashed; }
+  .disc-fix svg { color: var(--text-3); }
+  .disc-fix .n { display: inline-flex; align-items: center; gap: 3px; color: var(--text-3); }
+  .disc-fix.has-results { border-style: solid; border-color: var(--accent-line); }
+  .disc-fix.has-results .n, .disc-fix.has-results .n svg { color: var(--accent-text); }
+
+  /* ---- Phone filter sheet ------------------------------------------------------- */
+  .disc-sheet .sheet-body { padding-bottom: var(--sp-8); }
+  .disc-sheet .sheet-foot .disc-apply { flex: 1 1 auto; }
+  @media (min-width: 1024px) { .disc-sheet { width: 440px; } }
+}
