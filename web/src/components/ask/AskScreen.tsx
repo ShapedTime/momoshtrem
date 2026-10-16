@@ -12,7 +12,7 @@ import { isApiError } from '@/lib/api/client';
 import { recommendationsHomeQuery, traktIntegrationQuery } from '@/lib/api/endpoints';
 import { askAnnouncement, askProblem, type ComposerBlock, composerPlaceholder, costNote, headerLine } from '@/lib/ask/copy';
 import { ASK_NEW_EVENT, askRouteThread } from '@/lib/ask/route';
-import type { AskTurnView } from '@/lib/ask/turns';
+import { isWorking, type AskTurnView } from '@/lib/ask/turns';
 import { ASK_ROUTE } from '@/lib/recommendations/ask-href';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { AskComposer } from './AskComposer';
@@ -40,8 +40,9 @@ export function AskScreen() {
   const routeThread = askRouteThread(pathname);
   const q = searchParams.get('q');
   const sheets = useSheet();
-  const library = useAskLibrary();
   const { session, turns, thread, working, send, stop, reset } = useAskConversation(routeThread);
+  // The answered turns' titles are looked up in the library; a streaming turn's cards keep what Noir saw
+  const library = useAskLibrary(turns.filter((turn) => !isWorking(turn)).flatMap((turn) => turn.items));
   const home = useQuery({ ...recommendationsHomeQuery(), refetchInterval: false });
   const usage = useQuery(askUsageQuery());
   const trakt = useQuery({ ...traktIntegrationQuery(), refetchInterval: false, retry: false });

@@ -91,7 +91,8 @@ test.describe('Ask momoshtrem', () => {
     await expect(page).toHaveURL(/\/ask\/13$/);
     const goodPlace = card(page, 'The Good Place');
     await goodPlace.getByRole('button', { name: 'Add to library' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Added to library' })).toContainText('The Good Place · 4 seasons');
+    // For You's add (useAddRecTitle): the same toast
+    await expect(page.getByRole('status').filter({ hasText: 'Added to library' })).toContainText('The Good Place · next, find a torrent');
     await expect(goodPlace.locator('.pill')).toHaveText('In library');
     await goodPlace.getByRole('button', { name: 'Find a torrent' }).click();
     await expect(page).toHaveURL(/\/ask\/13\?sheet=torrent&show=66573&season=1$/);
@@ -101,6 +102,36 @@ test.describe('Ask momoshtrem', () => {
     await page.keyboard.press('Escape');
     await expect(search).toBeHidden();
     await expect(goodPlace.getByRole('button', { name: 'Find a torrent' })).toBeVisible();
+  });
+
+  test('feedback on a pick: 👍 toggles, 👎 dims it with Undo, and the "…" sheet adds it to the library', async ({ page }) => {
+    await signIn(page, '/ask/12');
+    const goodPlace = cards(answers(page).first()).filter({ has: page.getByRole('heading', { name: 'The Good Place', exact: true }) });
+    const row = goodPlace.getByRole('group', { name: 'Feedback on The Good Place' });
+    await row.getByRole('button', { name: 'More like this' }).click();
+    await expect(row.getByRole('button', { name: 'More like this' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(goodPlace).not.toHaveClass(/is-dimmed/);
+
+    // Every card of the same title agrees (the Lighter answer has The Good Place too)
+    const again = cards(answers(page).nth(1)).filter({ has: page.getByRole('heading', { name: 'The Good Place', exact: true }) });
+    await expect(again.getByRole('button', { name: 'More like this' })).toHaveAttribute('aria-pressed', 'true');
+
+    const mythic = cards(answers(page).first()).filter({ has: page.getByRole('heading', { name: 'Mythic Quest', exact: true }) });
+    await mythic.getByRole('button', { name: 'Less like this' }).click();
+    await expect(mythic).toHaveClass(/is-dimmed/);
+    const toast = page.getByRole('status').filter({ hasText: 'Got it, fewer like this' });
+    await expect(toast).toContainText('Mythic Quest won’t be picked again.');
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect(mythic).not.toHaveClass(/is-dimmed/);
+
+    // The "…" sheet's Add to library turns the card into In library + Find a torrent
+    await goodPlace.getByRole('button', { name: 'More feedback' }).click();
+    const sheet = page.getByRole('dialog', { name: 'The Good Place' });
+    await sheet.getByRole('button', { name: 'Add to library' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Added to library' })).toBeVisible();
+    await expect(goodPlace.locator('.pill')).toHaveText('In library');
+    await expect(goodPlace.getByRole('button', { name: 'Find a torrent' })).toBeVisible();
+    await expectAccessibleAndContained(page);
   });
 
   test('Stop cancels the answer, and the next ask goes through', async ({ page }, testInfo) => {
@@ -202,6 +233,8 @@ test.describe('Ask momoshtrem', () => {
 
 test.describe('Ask entry points', () => {
   test('the top-bar pill, the palette, Search and Discover', async ({ page }, testInfo) => {
+    // Five pages, then an answer streams
+    test.slow();
     await signIn(page, '/search');
     if (isDesktop(testInfo)) {
       await expect(page.locator('header.topbar').getByRole('link', { name: 'Ask momoshtrem' })).toHaveAttribute('href', '/ask');

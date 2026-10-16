@@ -1,76 +1,67 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useToast } from '@/components/ui';
-import type { AskItem, MediaType } from '@/lib/api/contract';
-import { libraryKeys, recKeys, titleKeys, titlesApi, traktKeys } from '@/lib/api/endpoints';
+import { useAddRecTitle } from '@/components/recommendations';
+import { useLibraryLookup } from '@/hooks/useLibraryLookup';
+import type { AskItem, AvailabilityStage, LibraryRef, MediaType } from '@/lib/api/contract';
 import { showSourceParams } from '@/lib/source/context';
 import { useSheet } from '@/lib/sheets/useSheet';
-import { plural } from '@/lib/title/format';
 
 type TitleRef = Pick<AskItem, 'media_type' | 'tmdb_id'>;
 
-export const askTitleKey = (item: TitleRef): string => `${item.media_type}:${item.tmdb_id}`;
+const keyOf = (item: TitleRef): string => `${item.media_type}:${item.tmdb_id}`;
 
 /** Find a torrent for a title Ask found: a movie, or a show's season-1 packs (Season pack scope; flow 2 in js/manifest.js). */
 export function torrentSheetParams(item: { media_type: MediaType; tmdb_id: number }): Record<string, string> {
   return item.media_type === 'movie' ? { movie: String(item.tmdb_id) } : showSourceParams(item.tmdb_id, { season: 1 });
 }
 
+/** Where a card's title stands: not in the library, added since Noir picked it (Find a torrent next), or in it (its stage). */
+export type AskLibraryState = { kind: 'none' } | { kind: 'added' } | { kind: 'in'; stage: AvailabilityStage };
+
 export interface AskLibrary {
-  /** Titles added from this page: "In library" + Find a torrent, whatever the item says. */
-  added: ReadonlySet<string>;
-  adding: ReadonlySet<string>;
+  stateOf: (item: AskItem) => AskLibraryState;
+  adding: (item: AskItem) => boolean;
   add: (item: AskItem) => void;
   findTorrent: (item: TitleRef) => void;
 }
 
 /**
- * Ask's cards add to the library in place (POST /movies or /shows, as a
- * title page does) and then offer Find a torrent, which opens the torrent
- * sheet over the conversation.
+ * The library side of Ask's cards. Adding is For You's (`useAddRecTitle`:
+ * the same toast and refetches). An item's `library` is what it was when
+ * Noir picked it; `/library?ids=` for the answered turns says what it is
+ * now, so a title added from its "…" sheet, or removed elsewhere, shows that
+ * too. A title added here is "In library" with Find a torrent, which opens
+ * the torrent sheet over the conversation.
  */
-export function useAskLibrary(): AskLibrary {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
+export function useAskLibrary(answered: readonly AskItem[]): AskLibrary {
   const sheets = useSheet();
+  const addTitle = useAddRecTitle();
   const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
-  const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
+  const lookup = useLibraryLookup(answered.map((item): LibraryRef => ({ media_type: item.media_type, tmdb_id: item.tmdb_id })));
+  const settled = !lookup.isPending && !lookup.error;
+  const lookedUp = new Set(answered.map(keyOf));
+
+  const stateOf = (item: AskItem): AskLibraryState => {
+    if (added.has(keyOf(item))) return { kind: 'added' };
+    const now = lookup.get(item.media_type, item.tmdb_id);
+    if (now) return item.library ? { kind: 'in', stage: now.availability_stage } : { kind: 'added' };
+    // A card still streaming, or a lookup that hasn't answered (or can't): the item's own state stands
+    if (settled && lookedUp.has(keyOf(item))) return { kind: 'none' };
+    return item.library ? { kind: 'in', stage: item.library.availability_stage } : { kind: 'none' };
+  };
 
   const findTorrent = useCallback((item: TitleRef) => sheets.open('torrent', torrentSheetParams(item)), [sheets]);
+  const pending = addTitle.isPending && addTitle.variables ? keyOf(addTitle.variables) : null;
 
-  const add = useCallback(
-    async (item: AskItem) => {
-      const key = askTitleKey(item);
-      setAdding((keys) => new Set(keys).add(key));
-      try {
-        await (item.media_type === 'movie' ? titlesApi.addMovie(item.tmdb_id) : titlesApi.addShow(item.tmdb_id));
-        setAdded((keys) => new Set(keys).add(key));
-        toast({
-          tone: 'ready',
-          title: 'Added to library',
-          body: item.seasons ? `${item.title} · ${plural(item.seasons, 'season')}` : item.title,
-          action: { label: 'Find a torrent', onClick: () => findTorrent(item) },
-        });
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: titleKeys.all }),
-          queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
-          queryClient.invalidateQueries({ queryKey: traktKeys.me }),
-          queryClient.invalidateQueries({ queryKey: recKeys.home }),
-        ]);
-      } catch (error) {
-        toast({ tone: 'error', title: `Couldn’t add ${item.title}`, body: error instanceof Error ? error.message : undefined });
-      } finally {
-        setAdding((keys) => {
-          const next = new Set(keys);
-          next.delete(key);
-          return next;
-        });
-      }
-    },
-    [findTorrent, queryClient, toast]
-  );
-
-  return { added, adding, add: (item) => void add(item), findTorrent };
+  return {
+    stateOf,
+    adding: (item) => pending === keyOf(item),
+    add: (item) =>
+      addTitle.mutate(
+        { media_type: item.media_type, tmdb_id: item.tmdb_id, title: item.title },
+        { onSuccess: () => setAdded((keys) => new Set(keys).add(keyOf(item))) }
+      ),
+    findTorrent,
+  };
 }

@@ -1,6 +1,9 @@
+'use client';
+
 import Link from 'next/link';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { Plus, Search, Sparkle, Star } from 'lucide-react';
+import { FeedbackRow, useRecFeedback } from '@/components/recommendations';
 import { Button, ButtonLink, Media, Skeleton, StatusPill } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import type { AskItem, AvailabilityStage } from '@/lib/api/contract';
@@ -8,7 +11,7 @@ import { askItemFacts, askRating } from '@/lib/ask/copy';
 import type { StatusKey } from '@/lib/status';
 import { titleHref } from '@/lib/title/href';
 import { cx } from '@/lib/utils/cx';
-import { askTitleKey, type AskLibrary } from './useAskLibrary';
+import type { AskLibrary, AskLibraryState } from './useAskLibrary';
 
 /** The library pill on a card (as LibraryPill, off the artwork). */
 const STAGE_PILL: Record<AvailabilityStage, { status: StatusKey; label?: string }> = {
@@ -19,9 +22,8 @@ const STAGE_PILL: Record<AvailabilityStage, { status: StatusKey; label?: string 
 };
 
 /** The card's main action by library state (ask.js `cardActions`). */
-function PrimaryAction({ item, library }: { item: AskItem; library: AskLibrary }) {
-  const key = askTitleKey(item);
-  if (library.added.has(key)) {
+function PrimaryAction({ item, state, library }: { item: AskItem; state: AskLibraryState; library: AskLibrary }) {
+  if (state.kind === 'added') {
     return (
       <span className="ask-inlib">
         <StatusPill status="added" label="In library" />
@@ -32,8 +34,8 @@ function PrimaryAction({ item, library }: { item: AskItem; library: AskLibrary }
       </span>
     );
   }
-  if (item.library) {
-    const pill = STAGE_PILL[item.library.availability_stage];
+  if (state.kind === 'in') {
+    const pill = STAGE_PILL[state.stage];
     return (
       <span className="ask-inlib">
         <StatusPill status={pill.status} label={pill.label} />
@@ -44,7 +46,7 @@ function PrimaryAction({ item, library }: { item: AskItem; library: AskLibrary }
     );
   }
   return (
-    <Button variant="primary" size="sm" loading={library.adding.has(key)} onClick={() => library.add(item)}>
+    <Button variant="primary" size="sm" loading={library.adding(item)} onClick={() => library.add(item)}>
       <Plus size={16} aria-hidden="true" />
       Add to library
     </Button>
@@ -57,18 +59,20 @@ interface AskCardProps {
   library: AskLibrary;
   /** Arrived while you watched: it rises in. */
   isNew?: boolean;
-  /** Negative feedback dims it at once (it's gone the next time the thread is read). */
-  dimmed?: boolean;
-  /** The feedback row (thumbs and "…"). */
-  feedback?: ReactNode;
 }
 
-/** One pick (ask.js `card`): poster, match tag, title, facts, the reason, and what you can do with it. */
-export function AskCard({ item, index, library, isNew, dimmed, feedback }: AskCardProps) {
+/**
+ * One pick (ask.js `card`): poster, match tag, title, facts, the reason,
+ * what you can do with it, and feedback (thumbs and "…", #155's). Negative
+ * feedback dims it at once, with Undo; the next read of the thread leaves it out.
+ */
+export function AskCard({ item, index, library, isNew }: AskCardProps) {
+  const feedback = useRecFeedback(item, 'ask');
+  const state = library.stateOf(item);
   const href = titleHref(item.media_type, item.tmdb_id);
   const rating = askRating(item.vote_average);
   return (
-    <article className={cx('ask-card', isNew && 'is-new', dimmed && 'is-dimmed')} style={{ '--i': index } as CSSProperties}>
+    <article className={cx('ask-card', isNew && 'is-new', feedback.dismissed && 'is-dimmed')} style={{ '--i': index } as CSSProperties}>
       <Link className="ask-poster" href={href} tabIndex={-1} aria-hidden="true">
         <Media shape="poster" src={buildImageUrl(item.poster_path, 'poster', 'small')} sizes="(min-width: 1024px) 112px, 84px" />
       </Link>
@@ -94,11 +98,11 @@ export function AskCard({ item, index, library, isNew, dimmed, feedback }: AskCa
         </p>
         <p className="ask-reason">{item.reason}</p>
         <div className="ask-actions">
-          <PrimaryAction item={item} library={library} />
+          <PrimaryAction item={item} state={state} library={library} />
           <ButtonLink variant="ghost" size="sm" href={href}>
             Details
           </ButtonLink>
-          {feedback}
+          <FeedbackRow feedback={feedback} inLibrary={state.kind !== 'none'} className="ask-fb" />
         </div>
       </div>
     </article>

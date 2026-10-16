@@ -136,8 +136,8 @@
   .ask-reason { color: var(--text-2); max-width: 64ch; overflow-wrap: anywhere; }
   .ask-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin-top: var(--sp-2); }
   .ask-inlib { display: inline-flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-  .ask-fb { display: inline-flex; gap: 2px; margin-left: auto; }
-  .ask-fb [aria-pressed="true"] { color: var(--accent-text); background: var(--accent-soft); }
+  /* The feedback row (.rec-feedback, #155) at the end of the actions */
+  .ask-fb { margin-left: auto; }
   @media (max-width: 639px) {
     .ask-card { grid-template-columns: 72px minmax(0, 1fr); gap: var(--sp-3); }
     .ask-actions { margin-left: calc(-72px - var(--sp-3)); padding-top: var(--sp-2); border-top: 1px solid var(--line-1); }
