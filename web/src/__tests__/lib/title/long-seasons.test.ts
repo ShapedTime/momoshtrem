@@ -134,7 +134,7 @@ describe('range chips', () => {
 
 describe('earlierWatched', () => {
   it('collapses a leading watched run of 10 or more in a long season', () => {
-    expect(earlierWatched(season(209867, 1).episodes)).toEqual({ count: 25, from: 1, to: 25 });
+    expect(earlierWatched(season(209867, 1).episodes)).toEqual({ count: 26, from: 1, to: 26 });
     expect(earlierWatched(season(37854, 22).episodes)).toEqual({ count: 25, from: 1, to: 25 });
   });
 

@@ -12,7 +12,7 @@ import { systemHandlers } from './system';
 import { titleSearchHandlers } from './title-search';
 import { resetMockLibrary, titlesHandlers } from './titles';
 import { resetMockTorrents, torrentsHandlers } from './torrents';
-import { traktHandlers } from './trakt';
+import { resetMockTrakt, traktHandlers } from './trakt';
 
 /**
  * Mock handlers for every PLAN §6 endpoint, one file per domain (feature
@@ -36,7 +36,7 @@ export const handlers = [
   ...legacyHandlers,
 ];
 
-/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile, stored subtitles and torrent pauses live per page). */
+/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile, stored subtitles, torrent pauses and the Trakt account live per page). */
 export function resetMockState(): void {
   resetMockLibrary();
   resetMockSettings();
@@ -45,5 +45,6 @@ export function resetMockState(): void {
   resetMockHDRezka();
   resetMockSearch();
   resetMockTorrents();
+  resetMockTrakt();
   setMockScenario(null);
 }

@@ -34,7 +34,8 @@ test.describe('settings', () => {
       await expect(services.getByText(name, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole('status').filter({ hasText: 'All good' })).toBeVisible();
-    await expect(services.getByText('Not connected').first()).toBeVisible();
+    // The mock's Trakt account starts connected (fixtures/trakt.ts)
+    await expect(services.getByText('Connected', { exact: true })).toBeVisible();
     const recheck = page.getByRole('button', { name: 'Re-check' });
     const refreshed = page.waitForRequest((request) => request.url().endsWith('/api/status?refresh=1'));
     await recheck.click();

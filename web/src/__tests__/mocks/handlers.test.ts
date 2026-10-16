@@ -95,10 +95,15 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /settings/quality-profile', () => searchApi.qualityProfile()],
     ['PUT /settings/quality-profile', async () => searchApi.putQualityProfile({ ...(await searchApi.qualityProfile()), max_gb_per_hour: 6 })],
     ['GET /integrations/trakt', () => traktApi.integration()],
-    ['POST /integrations/trakt/connect', () => traktApi.connect()],
+    ['POST /integrations/trakt/connect', async () => {
+      await traktApi.disconnect(); // 409 while connected, as the mock starts
+      return traktApi.connect();
+    }],
     ['POST /integrations/trakt/sync', () => traktApi.sync()],
+    ['PUT /integrations/trakt/settings', () => traktApi.updateSettings({ include_paused: true })],
     ['DELETE /integrations/trakt', () => traktApi.disconnect()],
     ['GET /me/up-next', () => traktApi.upNext()],
+    ['GET /me/new-episodes', () => traktApi.newEpisodes(7)],
     ['GET /me/watchlist', () => traktApi.watchlist('movie')],
     ['GET /me/history', () => traktApi.history(2)],
     ['GET /recommendations/home', () => recApi.home()],

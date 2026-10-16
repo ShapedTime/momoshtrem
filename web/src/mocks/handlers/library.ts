@@ -10,6 +10,7 @@ import { apiError, latency } from './util';
 function items(): LibraryItem[] {
   switch (scenario()) {
     case 'library-empty':
+    case 'first-time':
       return [];
     case 'library-reviewed':
       return libraryItems(mockLibrary()).map((item) => ({ ...item, needs_review: 0, review_job_id: null }));

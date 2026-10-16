@@ -37,9 +37,9 @@ test.describe('show page', () => {
     await expect(page.getByText('2 files need a quick review')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Review mapping' })).toHaveAttribute('href', '/mapping/101');
 
-    // Episodes 1–25 are all watched: one row until you ask for them
+    // Episodes 1–26 are all watched: one row until you ask for them
     const list = page.getByRole('list', { name: 'Season 1 episodes' });
-    await expect(list.getByRole('listitem')).toHaveCount(13);
+    await expect(list.getByRole('listitem')).toHaveCount(12);
     await expect(page.getByRole('group', { name: 'Episode ranges' }).getByRole('button', { name: /29–38/ })).toHaveAttribute('aria-pressed', 'true');
     const next = list.locator('.eprow.is-next');
     await expect(next).toContainText('Up next');
@@ -273,7 +273,7 @@ test.describe('show page', () => {
     await expect(list.getByRole('listitem')).toHaveCount(38);
 
     await page.goto('/tv/209867');
-    await page.getByRole('button', { name: 'Show episodes 1–25 (all watched)' }).click();
+    await page.getByRole('button', { name: 'Show episodes 1–26 (all watched)' }).click();
     await expect(page.getByRole('button', { name: /Show episodes/ })).toHaveCount(0);
     // The button is gone: focus goes to the first row it brought back, not the page
     await expect(list.locator('#ep-1')).toBeFocused();

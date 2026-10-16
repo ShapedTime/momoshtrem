@@ -48,10 +48,12 @@ export interface LibraryItem {
   /** Shows only. */
   episodes_total: number | null;
   episodes_ready: number | null;
+  /** Regular episodes watched on Trakt (B5); 0 without Trakt. */
   episodes_watched: number | null;
   needs_review: number;
   size_bytes: number;
   added_at: Timestamp;
+  /** The movie's last play, or the show's last watched episode; null without Trakt. */
   last_watched_at: Timestamp | null;
   /** Movies: minutes. Null for shows and when unknown. */
   runtime: number | null;
@@ -75,7 +77,7 @@ export interface LibraryCounts {
   all: number;
   movie: number;
   tv: number;
-  /** 0 until B5 (#8). */
+  /** Shows with 0 < episodes_watched < episodes_total that aren't dropped or hidden on Trakt. */
   watching: number;
   ready: number;
   incomplete: number;
