@@ -97,7 +97,10 @@ export const STORAGE_FLOOR_BYTES = 5 * GiB;
 export const STORAGE_MIN_BYTES = 4 * GiB;
 const RESERVE_CAP_BYTES = 20 * GiB;
 
-/** `storage-config`: config.yaml's `global_cache_size: 53760` (MiB), the VM's before #200. */
+/**
+ * `storage-config`: config.yaml's `global_cache_size: 53760` (MiB: 56.4 GB), the VM's before #200. The cache's
+ * 62.4 GB fill is over it on purpose: Settings › Storage shows it being trimmed down to the limit.
+ */
 export const CONFIG_LIMIT_BYTES = 53_760 * 1024 ** 2;
 
 /** What app_settings key `storage` holds: what PUT writes. */

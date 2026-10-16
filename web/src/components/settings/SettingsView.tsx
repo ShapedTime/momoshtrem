@@ -7,12 +7,13 @@ import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useSignOut } from '@/components/shell/signOut';
 import { useHydrated } from '@/hooks/useHydrated';
 import { qualityProfileQuery } from '@/lib/api/endpoints/search';
-import { aiSettingsQuery, aiUsageQuery } from '@/lib/api/endpoints/settings';
+import { aiSettingsQuery, aiUsageQuery, storageSettingsQuery } from '@/lib/api/endpoints/settings';
 import { statusQuery } from '@/lib/api/endpoints/system';
 import { traktIntegrationQuery } from '@/lib/api/endpoints/trakt';
-import type { AiSettings, AiUsage, QualityProfile, SystemStatus, TraktIntegration } from '@/lib/api/contract';
+import type { AiSettings, AiUsage, QualityProfile, StorageSettings, SystemStatus, TraktIntegration } from '@/lib/api/contract';
 import { aiNavSummary } from '@/lib/settings/ai';
 import { qualitySummary } from '@/lib/settings/quality';
+import { storageNavSummary } from '@/lib/settings/storage';
 import { traktNavSummary } from '@/lib/settings/trakt';
 import { cx } from '@/lib/utils/cx';
 import { AiSection } from './AiSection';
@@ -20,6 +21,7 @@ import { PlaybackSection } from './PlaybackSection';
 import { QualitySection } from './QualitySection';
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections';
 import { StatusSection } from './StatusSection';
+import { StorageSection } from './StorageSection';
 import { serviceRows, summarize, versionLabel } from './status-model';
 import { TraktSection } from './TraktSection';
 
@@ -30,13 +32,16 @@ interface NavData {
   statusFailed: boolean;
   quality: QualityProfile | undefined;
   trakt: TraktIntegration | undefined;
-  ai: { settings: AiSettings | undefined; usage: AiUsage | undefined; hydrated: boolean };
+  ai: { settings: AiSettings | undefined; usage: AiUsage | undefined };
+  storage: StorageSettings | undefined;
+  hydrated: boolean;
 }
 
-function navSummary(id: SectionId, { status, statusFailed, quality, trakt, ai }: NavData): { text: string; attention?: boolean } {
+function navSummary(id: SectionId, { status, statusFailed, quality, trakt, ai, storage, hydrated }: NavData): { text: string; attention?: boolean } {
   if (id === 'quality') return { text: quality ? qualitySummary(quality) : '' };
   // Not before hydration: the server's HTML has no summary (#148)
-  if (id === 'ai') return ai.hydrated ? aiNavSummary(ai.settings, ai.usage) : { text: '' };
+  if (id === 'ai') return hydrated ? aiNavSummary(ai.settings, ai.usage) : { text: '' };
+  if (id === 'storage') return hydrated ? storageNavSummary(storage) : { text: '' };
   if (id === 'trakt') return traktNavSummary(trakt);
   if (id === 'status') {
     if (statusFailed) return { text: 'Can’t reach the server', attention: true };
@@ -66,6 +71,7 @@ export function SettingsView() {
   // AI & picks polls the usage while a run works; the nav reads along
   const { data: aiSettings } = useQuery(aiSettingsQuery());
   const { data: aiUsage } = useQuery({ ...aiUsageQuery(), refetchInterval: false });
+  const { data: storage } = useQuery(storageSettingsQuery());
   const hydrated = useHydrated();
 
   return (
@@ -80,7 +86,7 @@ export function SettingsView() {
               <ul className="overflow-hidden rounded-lg border border-line-1 bg-surface-1 max-lg:divide-y max-lg:divide-line-1 lg:border-0 lg:bg-transparent">
                 {SECTIONS.filter((s) => s.group === group).map((s) => {
                   const Icon = s.icon;
-                  const summary = navSummary(s.id, { status, statusFailed: isError, quality, trakt, ai: { settings: aiSettings, usage: aiUsage, hydrated } });
+                  const summary = navSummary(s.id, { status, statusFailed: isError, quality, trakt, ai: { settings: aiSettings, usage: aiUsage }, storage, hydrated });
                   const isActive = s.id === active;
                   return (
                     <li key={s.id}>
@@ -145,6 +151,8 @@ export function SettingsView() {
             <StatusSection trakt={trakt} />
           ) : active === 'quality' ? (
             <QualitySection />
+          ) : active === 'storage' ? (
+            <StorageSection />
           ) : (
             <AiSection />
           )}
