@@ -5,8 +5,8 @@
  *
  * - `backend-down`: /status says the backend can't be reached.
  * - `ai-off`: no ANTHROPIC_API_KEY. Mapping jobs have no AI (`ai_available: false`; re-check answers 503);
- *   /recommendations/home answers `enabled: false`, Refresh and Ask answer 503 `unavailable`, and the AI usage
- *   says `configured: false`. The AI settings still read and save.
+ *   /recommendations/home answers `configured: false` and `enabled: false` (no picks, no Ask entries), Refresh
+ *   and Ask answer 503 `unavailable`, and the AI usage says `configured: false`. The AI settings still read and save.
  * - `ai-error`: a re-check ends with `ai_error` set and every proposal unchanged.
  * - `job-failed`: every open mapping job fails when it's next read.
  * - `job-hold:<step>`: working mapping jobs walk up to `<step>` (`queued`,
@@ -55,15 +55,17 @@
  * - `trakt-pending`: off, and a device code from Connect is never approved, so the code and waiting
  *   screens hold (until Cancel or the code expires).
  * - `trakt-loading`: GET /integrations/trakt never answers (For You's loading state).
- * - `for-you-no-hero`: every /me read and /api/tmdb/trending fail, so For You has nothing to pick a hero from.
+ * - `for-you-no-hero`: every /me read and /api/tmdb/trending fail and Noir has no picks yet, so For You has
+ *   nothing to pick a hero from.
  * - `recs-none`: picks are on, but no run has finished yet: /recommendations/home has `run: null` and no
  *   shelves (For You keeps trending). Refresh starts the first run.
  * - `recs-first-run`: no picks yet, and the run after Trakt's first import (`first_sync`) holds at
- *   "Writing your shelves" (2 of 5).
+ *   "Writing your shelves" (2 of 5). Trakt's last sync is that initial import.
  * - `recs-refreshing`: last night's picks, and a manual run holds at "Writing your shelves" (2 of 5).
  * - `recs-failed`: the last refresh failed (the earlier picks stay), and the next one fails at TMDB.
- * - `recs-off`: picks are switched off (`rec_enabled: false`): /home answers `enabled: false` and Refresh
- *   409 `recs_disabled`. Ask still works; switching picks back on in Settings brings the shelves back.
+ * - `recs-off`: picks are switched off (`rec_enabled: false`): /home answers `configured: true` and
+ *   `enabled: false` (no picks, but the Ask entries stay), and Refresh 409 `recs_disabled`. Ask still works;
+ *   switching picks back on in Settings brings the shelves back.
  * - `ask-budget`: the month's $5 budget is spent: Ask and Refresh answer 429 `budget_exceeded` with `resets_at`
  *   (the 1st), and the usage says `budget_reached`.
  * - `ask-limit`: 30 asks today: Ask answers 429 `ask_limit` with `resets_at` (the next midnight).

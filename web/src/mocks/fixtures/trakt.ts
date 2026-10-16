@@ -324,6 +324,9 @@ function startingAccount(from: MockScenario | null, now: number): MockTraktAccou
         hold: 'details',
         lastSyncAt: null,
       };
+    case 'recs-first-run':
+      // The first import just finished; its end queued Noir's first run (fixtures/recommendations.ts)
+      return { ...account, sync: { ...account.sync, kind: 'initial' } };
     case 'trakt-sync-error':
       return {
         ...account,

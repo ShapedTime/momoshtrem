@@ -1,15 +1,21 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { Banner, Button, ButtonLink, EmptyState, LoadingRegion, PosterSkeletons, Skeleton, WideSkeletons } from '@/components/ui';
+import { useAskAvailable } from '@/hooks/useAskAvailable';
 import { useTraktIntegration } from '@/hooks/useTraktIntegration';
-import type { TraktIntegration } from '@/lib/api/contract';
+import { isApiError } from '@/lib/api/client';
+import type { RunProgress, Shelf, TraktIntegration } from '@/lib/api/contract';
 import {
   discoverPagesQuery,
   libraryQuery,
   newEpisodesQuery,
+  recKeys,
+  recommendationsHomeQuery,
+  recRunsQuery,
+  titleKeys,
   TRAKT_POLL_MS,
   trendingTitlesQuery,
   upNextQuery,
@@ -17,12 +23,15 @@ import {
 } from '@/lib/api/endpoints';
 import { DEFAULT_FILTERS, type DiscoverFilters } from '@/lib/discover/filters';
 import { newEpisodeCard, upNextCard } from '@/lib/for-you/episode-card';
-import { heroPicks, localDateKey } from '@/lib/for-you/hero';
-import { forYouState } from '@/lib/for-you/state';
+import { forYouHeroPicks, heroPicks, localDateKey } from '@/lib/for-you/hero';
+import { failedRefresh } from '@/lib/for-you/picks';
+import { askSuggestions, layoutShelves, refreshingShelfSlug } from '@/lib/for-you/shelves';
+import { firstPicksRun, forYouState } from '@/lib/for-you/state';
 import { REAUTH_TITLE, reauthBody } from '@/lib/settings/trakt';
 import { plural } from '@/lib/title/format';
 import { FirstSync } from './FirstSync';
 import { HomeHero, HomeHeroSkeleton } from './HomeHero';
+import { AskBand, AskEntryPhone, PicksError, PicksFoot, PicksLoading, PicksNote, RefreshBanner, ShelfRail, WritingShelf } from './Picks';
 import { EpisodeRail, railQuery, TitleRail } from './Rails';
 import { ConnectCard, TRAKT_SETTINGS_HREF, Welcome } from './Welcome';
 
@@ -126,8 +135,8 @@ function TraktOffHome({ username, traktFailed, onRetryTrakt }: { username: strin
   );
 }
 
-/** The first import is running (or stopped): its steps, and Up next as it fills. */
-function FirstSyncHome({ trakt }: { trakt: TraktIntegration }) {
+/** The first import is running (or stopped): its steps, and Up next as it fills. Then Noir writes the first shelves. */
+function FirstSyncHome({ trakt, firstRun }: { trakt: TraktIntegration; firstRun: RunProgress | null }) {
   const today = useToday();
   const syncing = trakt.sync.status === 'syncing';
   const upNext = useQuery({ ...upNextQuery(), refetchInterval: syncing ? TRAKT_POLL_MS : false, refetchIntervalInBackground: false });
@@ -135,7 +144,7 @@ function FirstSyncHome({ trakt }: { trakt: TraktIntegration }) {
   return (
     <div className="page-sections first-sync-page">
       <PageTitle />
-      <FirstSync trakt={trakt} />
+      <FirstSync trakt={trakt} firstRun={firstRun} />
       {(syncing || (cards.items?.length ?? 0) > 0) && (
         <div className="page">
           <EpisodeRail
@@ -145,6 +154,11 @@ function FirstSyncHome({ trakt }: { trakt: TraktIntegration }) {
             errorTitle="Couldn’t load Up next"
             filling={syncing}
           />
+        </div>
+      )}
+      {firstRun && (
+        <div className="page">
+          <WritingShelf title="Your picks" subtitle="Writing…" />
         </div>
       )}
     </div>
@@ -160,7 +174,33 @@ function CaughtUp() {
   );
 }
 
-/** Connected: the hero, Up next, New episodes and the watchlist, then trending until #9's shelves. */
+/** Picks aren't served yet (a 503 until #157 wires them): quietly no picks, as without a key. */
+const picksUnavailable = (error: unknown) => isApiError(error) && error.status === 503;
+
+/**
+ * When a run ends, the runs list (the failed-refresh note) and the title
+ * pages' "Why it's for you" are stale, and /home is read once more for the
+ * new picks.
+ */
+function useRunEnd(activeRunId: number | null) {
+  const queryClient = useQueryClient();
+  const previous = useRef(activeRunId);
+  useEffect(() => {
+    const was = previous.current;
+    previous.current = activeRunId;
+    if (was === null || was === activeRunId) return;
+    void queryClient.invalidateQueries({ queryKey: recKeys.home });
+    void queryClient.invalidateQueries({ queryKey: [...recKeys.all, 'runs'] });
+    void queryClient.invalidateQueries({ queryKey: titleKeys.all });
+  }, [activeRunId, queryClient]);
+}
+
+/**
+ * Connected (HANDOFF §4.3; home.js): the hero (Noir's Tonight's pick, else
+ * For You's own), Up next, New episodes, Noir's first shelf, the Ask band,
+ * the other shelves, the watchlist, Coming soon, and the picks footer.
+ * Without picks (none yet, switched off, no key) trending fills in.
+ */
 function PersonalHome({ username, trakt }: { username: string; trakt: TraktIntegration }) {
   const today = useToday();
   const showWatchlist = trakt.settings.show_watchlist;
@@ -168,23 +208,41 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
   const newEpisodes = useQuery(newEpisodesQuery());
   const watchlist = useQuery({ ...watchlistQuery(), enabled: showWatchlist });
   const { trending, rail: trendingRail } = useTrendingRail();
+  const recs = useQuery(recommendationsHomeQuery());
+  const askAvailable = useAskAvailable();
+
+  // Picks switched off (or no key) read as no picks: trending fills in
+  const home = recs.data?.enabled ? recs.data : undefined;
+  const run = home?.run ?? null;
+  const activeRun = home?.active_run ?? null;
+  const shelves = useMemo(() => layoutShelves(run && home ? home.shelves : []), [run, home]);
+  const hasShelves = shelves.lead !== null || shelves.comingSoon.length > 0;
+  const refreshing = activeRun && hasShelves ? refreshingShelfSlug(shelves) : null;
+  const latestRun = useQuery({ ...recRunsQuery(1), enabled: home !== undefined });
+  const failed = activeRun ? null : failedRefresh(latestRun.data?.items[0], run);
+  const picksFailed = recs.isError && !recs.data && !picksUnavailable(recs.error);
+  useRunEnd(activeRun?.id ?? null);
 
   const upNextRail = railQuery(upNext, (data) => data.items.map((item) => upNextCard(item, today)));
   const newRail = railQuery(newEpisodes, (data) => data.items.map((item) => newEpisodeCard(item, today)));
   const watchlistRail = railQuery(watchlist, (data) => data.items, showWatchlist);
 
-  // The hero waits for what it picks from, so it never swaps a trending pick for an Up next one mid-view
-  const settled = !upNext.isPending && (!showWatchlist || !watchlist.isPending) && !trending.isPending;
+  // The hero waits for what it picks from, so it never swaps a trending pick for an Up next one,
+  // or its own pick for Noir's, mid-view
+  const recommended = useMemo(() => home?.hero_picks ?? [], [home]);
+  const ownSettled = !upNext.isPending && (!showWatchlist || !watchlist.isPending) && !trending.isPending;
+  const settled = !recs.isPending && (recommended.length > 0 || ownSettled);
   const picks = useMemo(
     () =>
-      heroPicks({
+      forYouHeroPicks(recommended, {
         upNext: upNext.data?.items ?? [],
         watchlist: showWatchlist ? (watchlist.data?.items ?? []) : [],
         trending: trending.data ?? [],
         date: localDateKey(today),
       }),
-    [upNext.data, watchlist.data, trending.data, showWatchlist, today]
+    [recommended, upNext.data, watchlist.data, trending.data, showWatchlist, today]
   );
+  const suggestions = useMemo(() => askSuggestions(upNext.data?.items.find((item) => item.source === 'progress')?.show.title), [upNext.data]);
 
   const rails = [upNextRail, newRail, watchlistRail];
   const allFailed = rails.every((rail, i) => rail.failed || (i === 2 && !showWatchlist));
@@ -193,6 +251,8 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
 
   const relinking = trakt.state === 'reauth' || trakt.state === 'pending';
   const watchlistCount = trakt.counts.watchlist || watchlistRail.items?.length || 0;
+  const shelfRail = (shelf: Shelf) =>
+    shelf.slug === refreshing ? <WritingShelf key={shelf.slug} title={shelf.title} subtitle="Refreshing…" /> : <ShelfRail key={shelf.slug} shelf={shelf} today={today} />;
 
   return (
     <>
@@ -212,6 +272,9 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
             {reauthBody(trakt)}
           </Banner>
         )}
+        {activeRun && <RefreshBanner run={activeRun} first={run === null} />}
+        {failed && <PicksNote run={failed} first={run === null} />}
+        {askAvailable && <AskEntryPhone />}
         {allFailed ? (
           <Banner
             tone="error"
@@ -222,7 +285,7 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
               </Button>
             }
           >
-            Up next, new episodes and the watchlist didn’t load. Trending still works.
+            Up next, new episodes and the watchlist didn’t load. The rest of the page still works.
           </Banner>
         ) : nothing ? (
           <EmptyState
@@ -241,35 +304,76 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
           <>
             <EpisodeRail title="Up next" subtitle="From your Trakt progress" query={upNextRail} errorTitle="Couldn’t load Up next" empty={<CaughtUp />} />
             <EpisodeRail title="New episodes" subtitle="For shows you watch" query={newRail} errorTitle="Couldn’t load new episodes" />
-            {showWatchlist && (
-              <TitleRail
-                title="Your Trakt watchlist"
-                subtitle={watchlistCount > 0 ? `${plural(watchlistCount, 'title')} · ${trakt.counts.watchlist_in_library} in your library` : undefined}
-                query={watchlistRail}
-                errorTitle="Couldn’t load your watchlist"
-                errorDetail="momoshtrem didn’t answer. The rest of the page still works."
-              />
-            )}
           </>
         )}
-        <TitleRail title="Trending this week" query={trendingRail} errorTitle="Couldn’t load trending titles" />
+        {recs.isPending ? (
+          <PicksLoading />
+        ) : picksFailed ? (
+          <PicksError onRetry={() => void recs.refetch()} retrying={recs.isRefetching} />
+        ) : (
+          shelves.lead && shelfRail(shelves.lead)
+        )}
+        {activeRun && run === null && <WritingShelf title="Your picks" subtitle="Writing…" />}
+        {askAvailable && <AskBand suggestions={suggestions} />}
+        {shelves.rest.map(shelfRail)}
+        {showWatchlist && !allFailed && !nothing && (
+          <TitleRail
+            title="Your Trakt watchlist"
+            subtitle={watchlistCount > 0 ? `${plural(watchlistCount, 'title')} · ${trakt.counts.watchlist_in_library} in your library` : undefined}
+            query={watchlistRail}
+            errorTitle="Couldn’t load your watchlist"
+            errorDetail="momoshtrem didn’t answer. The rest of the page still works."
+          />
+        )}
+        {shelves.comingSoon.map(shelfRail)}
+        {!hasShelves && !recs.isPending && <TitleRail title="Trending this week" query={trendingRail} errorTitle="Couldn’t load trending titles" />}
+        {run && hasShelves && <PicksFoot run={run} now={today} />}
       </div>
     </>
   );
 }
 
 /**
- * For You (`/`, PLAN F5; #135): "What should I watch tonight, and is it
- * ready?" Which page it shows follows lib/for-you/state.ts: loading, first
- * time, Trakt off, the first sync, or the personal page. #9 adds its shelves
- * and Tonight's pick.
+ * When Trakt's first import ends, the backend queues Noir's first run: read
+ * /home again, and stay on the first sync until it answers, so the personal
+ * page doesn't flash up before "Writing your shelves".
+ */
+function useAfterFirstImport(importing: boolean, recs: { dataUpdatedAt: number; errorUpdatedAt: number }): boolean {
+  const queryClient = useQueryClient();
+  const readAt = Math.max(recs.dataUpdatedAt, recs.errorUpdatedAt);
+  const [wasImporting, setWasImporting] = useState(importing);
+  const [readAtEnd, setReadAtEnd] = useState<number | null>(null);
+  if (wasImporting !== importing) {
+    setWasImporting(importing);
+    setReadAtEnd(wasImporting && !importing ? readAt : null);
+  }
+  useEffect(() => {
+    if (readAtEnd !== null) void queryClient.invalidateQueries({ queryKey: recKeys.home });
+  }, [readAtEnd, queryClient]);
+  return readAtEnd !== null && readAt === readAtEnd;
+}
+
+/**
+ * For You (`/`, PLAN F5; #135, #155): "What should I watch tonight, and is
+ * it ready?" Which page it shows follows lib/for-you/state.ts: loading, first
+ * time, Trakt off, the first sync (then Noir's first shelves), or the
+ * personal page with Noir's picks.
  */
 export function ForYouView({ username }: { username: string }) {
   const integration = useTraktIntegration();
   const library = useQuery(libraryQuery({ page_size: 1 }));
+  const recs = useQuery(recommendationsHomeQuery());
   // A failed poll keeps what was known; only a first load that fails reads as "no Trakt"
   const trakt = integration.data ?? (integration.isError ? null : undefined);
-  const state = forYouState({ trakt, libraryTotal: library.data?.summary.total ?? (library.isError ? null : undefined) });
+  const importing = trakt?.sync.kind === 'initial' && trakt.sync.status === 'syncing';
+  const checkingPicks = useAfterFirstImport(importing, recs);
+  const firstRun = firstPicksRun(recs.data);
+  const state = forYouState({
+    trakt,
+    libraryTotal: library.data?.summary.total ?? (library.isError ? null : undefined),
+    writingFirstPicks: firstRun !== null || checkingPicks,
+    picksPending: recs.isPending,
+  });
 
   switch (state) {
     case 'loading':
@@ -279,7 +383,7 @@ export function ForYouView({ username }: { username: string }) {
     case 'trakt_off':
       return <TraktOffHome username={username} traktFailed={trakt === null} onRetryTrakt={() => void integration.refetch()} />;
     case 'first_sync':
-      return trakt ? <FirstSyncHome trakt={trakt} /> : null;
+      return trakt ? <FirstSyncHome trakt={trakt} firstRun={firstRun} /> : null;
     case 'default':
       return trakt ? <PersonalHome username={username} trakt={trakt} /> : null;
   }

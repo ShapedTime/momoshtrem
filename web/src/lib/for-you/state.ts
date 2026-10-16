@@ -1,4 +1,4 @@
-import type { TraktIntegration, TraktSync, TraktSyncStep } from '@/lib/api/contract';
+import type { RecommendationsHome, RunProgress, TraktIntegration, TraktSync, TraktSyncStep } from '@/lib/api/contract';
 import { IMPORT_STEPS } from '@/lib/settings/trakt';
 import { formatNumber, plural } from '@/lib/title/format';
 
@@ -7,7 +7,8 @@ import { formatNumber, plural } from '@/lib/title/format';
  * - `loading`: the integration (or, without Trakt, the library) isn't known yet;
  * - `first_time`: no Trakt and an empty library: "Evening. I'm Noir." and three steps;
  * - `trakt_off`: no Trakt: a trending hero, "Make this page yours" and trending rails;
- * - `first_sync`: the first import after connecting is running, or stopped with an error;
+ * - `first_sync`: the first import after connecting is running, or stopped with an error, or
+ *   Noir is writing the first shelves after it (#155);
  * - `default`: the hero, Up next, New episodes and the watchlist.
  */
 export type ForYouState = 'loading' | 'first_time' | 'trakt_off' | 'first_sync' | 'default';
@@ -24,16 +25,34 @@ export interface ForYouInput {
   trakt: TraktIntegration | null | undefined;
   /** The library's `summary.total`: undefined while loading, null when it failed. */
   libraryTotal: number | null | undefined;
+  /** Noir's first run is writing the first shelves (`firstPicksRun`), or For You is still asking /home whether it is. */
+  writingFirstPicks?: boolean;
+  /** /recommendations/home hasn't answered yet. */
+  picksPending?: boolean;
 }
 
-export function forYouState({ trakt, libraryTotal }: ForYouInput): ForYouState {
+export function forYouState({ trakt, libraryTotal, writingFirstPicks = false, picksPending = false }: ForYouInput): ForYouState {
   if (trakt === undefined) return 'loading';
   if (trakt === null || !traktLinked(trakt)) {
     if (libraryTotal === undefined) return 'loading';
     return libraryTotal === 0 ? 'first_time' : 'trakt_off';
   }
   if (trakt.sync.kind === 'initial' && trakt.sync.status !== 'idle') return 'first_sync';
+  if (writingFirstPicks) return 'first_sync';
+  // Right after the first import, Noir's first run may be writing: wait for /home rather than flash the personal page
+  if (trakt.sync.kind === 'initial' && picksPending) return 'loading';
   return 'default';
+}
+
+/**
+ * The run queued when Trakt's first import ends (`first_sync`), while there
+ * are no picks yet: For You stays on the first sync with "Writing your
+ * shelves" until it's done. Null otherwise (a refresh over old picks shows
+ * the refreshing banner instead).
+ */
+export function firstPicksRun(home: RecommendationsHome | undefined): RunProgress | null {
+  const run = home?.active_run;
+  return home?.enabled && home.run === null && run?.kind === 'first_sync' ? run : null;
 }
 
 // ---- The first sync's steps -------------------------------------------------------
@@ -116,8 +135,18 @@ export function importedSoFar(progress: Progress): string | null {
   return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
 }
 
-/** The loader's line under "First sync with Trakt". */
-export function firstSyncDetail(sync: TraktSync): string {
+/** The loader's line under "First sync with Trakt"; once Noir writes the shelves, "Building your picks…". */
+export function firstSyncDetail(sync: TraktSync, writing = false): string {
   const imported = importedSoFar(sync.progress);
+  if (writing) return imported ? `Imported ${imported}. Building your picks…` : 'Building your picks…';
   return imported ? `Imported ${imported} so far. Up next fills in as it goes.` : 'Reading your history from Trakt. Up next fills in as it goes.';
+}
+
+/** The step after the import while Noir's first run writes (home.js: "Writing your shelves · 2 of 5"). */
+export function writingShelvesStep(run: Pick<RunProgress, 'shelves_done' | 'shelves_target'>): { label: string; detail: string | null; state: 'active' } {
+  return {
+    label: 'Writing your shelves',
+    detail: run.shelves_target > 0 ? `${run.shelves_done} of ${run.shelves_target}` : null,
+    state: 'active',
+  };
 }

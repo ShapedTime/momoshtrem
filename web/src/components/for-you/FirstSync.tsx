@@ -3,24 +3,29 @@
 import { RefreshCw } from 'lucide-react';
 import { Banner, Button, Loader, Steps } from '@/components/ui';
 import { useTraktSync } from '@/hooks/useTraktActions';
-import type { TraktIntegration } from '@/lib/api/contract';
-import { firstSyncDetail, firstSyncSteps } from '@/lib/for-you/state';
+import type { RunProgress, TraktIntegration } from '@/lib/api/contract';
+import { firstSyncDetail, firstSyncSteps, writingShelvesStep } from '@/lib/for-you/state';
 import { syncErrorCopy } from '@/lib/settings/trakt';
 
 /**
  * The first import after connecting Trakt (HANDOFF §4.3: named steps, never
  * just a spinner): Noir's eyes while it runs, what's in so far, and the
  * steps. When it stops with an error, the eyes go and Retry picks it up at
- * the step that failed, with the same words as Settings › Trakt.
+ * the step that failed, with the same words as Settings › Trakt. Once the
+ * import is in, Noir's first run adds "Writing your shelves" (#155).
  */
-export function FirstSync({ trakt }: { trakt: TraktIntegration }) {
+export function FirstSync({ trakt, firstRun = null }: { trakt: TraktIntegration; firstRun?: RunProgress | null }) {
   const { sync } = trakt;
   const failed = sync.status === 'error';
   // The answer goes into the integration's cache, so polling resumes at once
   const retry = useTraktSync();
   const stopped = syncErrorCopy(sync);
 
-  const steps = firstSyncSteps(sync).map(({ label, detail, state }) => ({ label, detail: detail ?? undefined, state }));
+  const steps = [...firstSyncSteps(sync), ...(firstRun ? [writingShelvesStep(firstRun)] : [])].map(({ label, detail, state }) => ({
+    label,
+    detail: detail ?? undefined,
+    state,
+  }));
 
   return (
     <section className="page sync-hero" aria-label="First sync with Trakt">
@@ -41,7 +46,7 @@ export function FirstSync({ trakt }: { trakt: TraktIntegration }) {
           </Banner>
         </div>
       ) : (
-        <Loader title="First sync with Trakt" detail={firstSyncDetail(sync)} />
+        <Loader title="First sync with Trakt" detail={firstSyncDetail(sync, firstRun !== null)} />
       )}
       <Steps steps={steps} className="sync-steps" />
     </section>

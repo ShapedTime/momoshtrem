@@ -56,6 +56,8 @@ interface PosterCardProps {
   posterSrc?: string | null;
   /** Top-left status pill (use `onArt`). */
   badge?: ReactNode;
+  /** Top-right label on the artwork (use `onArt`), e.g. a Coming soon date. Not with `action`, which sits there. */
+  badgeEnd?: ReactNode;
   /** 0–100 watched progress bar on the artwork. */
   watchedPct?: number;
   /** Inline feedback buttons under the meta. */
@@ -74,12 +76,13 @@ interface PosterCardProps {
 }
 
 /** Title and year are always visible (never hover-only), clamped to 2 lines. */
-export function PosterCard({ href, title, titleContent, subtitle, reason, posterSrc, badge, watchedPct, footer, action, lines, dismissed, className }: PosterCardProps) {
+export function PosterCard({ href, title, titleContent, subtitle, reason, posterSrc, badge, badgeEnd, watchedPct, footer, action, lines, dismissed, className }: PosterCardProps) {
   return (
     <article className={cx('pcard', dismissed && 'is-dismissed', action !== undefined && 'has-action', className)}>
       <Link href={href} className="flex flex-col gap-2 rounded-md" aria-label={subtitle ? `${title}, ${subtitle}` : title}>
         <Media shape="poster" src={posterSrc} alt="">
           {badge && <span className="badge-tl">{badge}</span>}
+          {badgeEnd && <span className="badge-tr">{badgeEnd}</span>}
           {watchedPct !== undefined && (
             <div className="progress progress--watched" aria-hidden="true">
               <span style={{ width: `${watchedPct}%` }} />

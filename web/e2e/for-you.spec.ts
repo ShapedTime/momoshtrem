@@ -8,7 +8,9 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
  * The Good Place not in the library, Doctor Who needing a torrent, Bluey
  * ready (a watchlist start), Severance airing next week. Scenarios
  * (src/mocks/scenario.ts): trakt-off, first-time, trakt-syncing,
- * trakt-sync-error, trakt-reauth, up-next-empty, me-error, trakt-loading.
+ * trakt-sync-error, trakt-reauth, up-next-empty, me-error, trakt-loading,
+ * and recs-none where For You's own hero and trending matter (Noir's picks,
+ * #155: for-you-picks.spec.ts).
  */
 
 /** axe and no sideways scrolling at this width and at 320 px. */
@@ -32,7 +34,9 @@ const card = (page: Page, rail: string, show: string) => region(page, rail).loca
 const heroSettled = (page: Page) => expect(hero(page).locator('h2.t-display-xl')).toBeVisible();
 
 test.describe('For You', () => {
-  test('the personal page: hero, Up next with every availability, new episodes, the watchlist and trending', async ({ page }) => {
+  test('the personal page before Noir’s picks: its own hero, Up next with every availability, new episodes, the watchlist and trending', async ({ page }) => {
+    // No run has finished yet (#155): For You picks its own hero and keeps trending
+    await scenario(page, 'recs-none');
     await signIn(page, '/');
     await expect(page).toHaveTitle('For You · momoshtrem');
     await expect(page.getByRole('heading', { name: 'For You', level: 1 })).toBeAttached();
@@ -65,6 +69,7 @@ test.describe('For You', () => {
   });
 
   test('the hero’s pager changes the pick, and Play in Infuse opens the setup sheet with the episode', async ({ page }) => {
+    await scenario(page, 'recs-none');
     await signIn(page, '/');
     const title = hero(page).getByRole('heading', { level: 2 });
     await expect(title).not.toHaveText(/Loading/);
@@ -206,17 +211,18 @@ test.describe('For You', () => {
     await expectAccessibleAndContained(page);
   });
 
-  test('when the Trakt rows fail, one banner offers Try again and trending still works', async ({ page }) => {
+  test('when the Trakt rows fail, one banner offers Try again and Noir’s picks still work', async ({ page }) => {
     await scenario(page, 'me-error');
     await signIn(page, '/');
     await expect(page.getByText('Couldn’t load your Trakt rows')).toBeVisible();
+    await expect(page.getByText('Up next, new episodes and the watchlist didn’t load. The rest of the page still works.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
-    await expect(region(page, 'Trending this week').locator('article.pcard').first()).toBeVisible();
-    await expect(hero(page).getByText('Trending this week')).toBeVisible();
+    await expect(hero(page).getByText('Tonight’s pick')).toBeVisible();
+    await expect(region(page, 'Because you loved Severance').locator('article.pcard').first()).toBeVisible();
     await expectAccessibleAndContained(page);
   });
 
-  test('no hero to pick (trending down, the Trakt rows failing): the rows start below the top bar', async ({ page }) => {
+  test('no hero to pick (trending down, the Trakt rows failing, no picks yet): the rows start below the top bar', async ({ page }) => {
     await scenario(page, 'for-you-no-hero');
     await signIn(page, '/');
     const banner = page.getByText('Couldn’t load your Trakt rows');
@@ -224,7 +230,8 @@ test.describe('For You', () => {
     await expect(hero(page)).toHaveCount(0);
     const bar = page.locator('header.topbar, header.phone-bar').filter({ visible: true }).first();
     const barBottom = await bar.evaluate((el) => el.getBoundingClientRect().bottom);
-    const firstTop = await page.locator('.home-body > *').first().evaluate((el) => el.getBoundingClientRect().top);
+    // The phone's Ask entry is hidden on desktop
+    const firstTop = await page.locator('.home-body > *').filter({ visible: true }).first().evaluate((el) => el.getBoundingClientRect().top);
     expect(firstTop).toBeGreaterThanOrEqual(barBottom);
     await expectAccessibleAndContained(page);
   });
