@@ -27,11 +27,19 @@ var sourceScore = map[string]float64{
 	"on_air":   0.2,
 }
 
+// TMDB's "similar" lists match on genres and keywords alone, so they
+// count for less than its recommendations (what people who liked the
+// title also liked).
 const (
 	recScore       = 1.0
-	similarScore   = 0.6
-	maxSourceScore = 2.5
+	similarScore   = 0.35
+	maxSourceScore = 2.0
 	maxKeywordFit  = 1.0
+	// A title's TMDB rating moves it by up to qualityWeight: +all at
+	// qualityTop above qualityMid, −all as far below.
+	qualityWeight = 0.6
+	qualityMid    = 6.8
+	qualityTop    = 1.5
 )
 
 // scorer is the profile as lookups.
@@ -107,7 +115,7 @@ func (s *scorer) score(c *Candidate) float64 {
 		score += s.animeShare - 0.15 // a lift for anime fans, a dip for everyone else
 	}
 	if c.Vote > 0 {
-		score += 0.2 * max(-1, min(1, (c.Vote-6.5)/2.5))
+		score += qualityWeight * max(-1, min(1, (c.Vote-qualityMid)/qualityTop))
 	}
 	return math.Round(score*1000) / 1000
 }

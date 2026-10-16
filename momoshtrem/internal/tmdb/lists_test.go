@@ -214,3 +214,20 @@ func TestCached_Lists(t *testing.T) {
 		t.Errorf("requests = %d, want 1", got)
 	}
 }
+
+func TestShowDetails_EpisodeRuntime(t *testing.T) {
+	tests := []struct {
+		name string
+		show ShowDetails
+		want int
+	}{
+		{"episode_run_time", ShowDetails{EpisodeRunTime: []int{0, 52}, LastEpisodeToAir: &EpisodeRef{Runtime: 60}}, 52},
+		{"the last episode's when TMDB's list is empty", ShowDetails{LastEpisodeToAir: &EpisodeRef{Runtime: 58}}, 58},
+		{"unknown", ShowDetails{}, 0},
+	}
+	for _, tt := range tests {
+		if got := tt.show.EpisodeRuntime(); got != tt.want {
+			t.Errorf("%s: %d, want %d", tt.name, got, tt.want)
+		}
+	}
+}

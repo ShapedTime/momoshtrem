@@ -295,9 +295,7 @@ func showDetails(s *tmdb.ShowDetails) *details {
 	if s.OriginalName != s.Name {
 		d.OriginalTitle = s.OriginalName
 	}
-	if len(s.EpisodeRunTime) > 0 {
-		d.Runtime = s.EpisodeRunTime[0]
-	}
+	d.Runtime = s.EpisodeRuntime()
 	for _, season := range s.Seasons {
 		if season.SeasonNumber > 0 {
 			d.Seasons++

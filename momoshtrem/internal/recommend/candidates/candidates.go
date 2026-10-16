@@ -430,7 +430,7 @@ func (b *Builder) describeOne(ctx context.Context, c *Candidate) {
 	if err != nil {
 		return
 	}
-	c.Runtime = episodeRuntime(d)
+	c.Runtime = d.EpisodeRuntime()
 	for _, s := range d.Seasons {
 		if s.SeasonNumber > 0 {
 			c.Seasons++
@@ -441,15 +441,6 @@ func (b *Builder) describeOne(ctx context.Context, c *Candidate) {
 	if !c.Anime {
 		c.Anime = isAnime(d.Genres, d.OriginalLanguage, d.OriginCountry, d.Keywords.Keywords)
 	}
-}
-
-// episodeRuntime is a show's usual episode runtime: TMDB's list, else its
-// last episode's.
-func episodeRuntime(d *tmdb.ShowDetails) int {
-	if len(d.EpisodeRunTime) > 0 {
-		return d.EpisodeRunTime[0]
-	}
-	return 0
 }
 
 func keywordIDs(ks []tmdb.Keyword) []int {

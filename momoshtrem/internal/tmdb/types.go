@@ -276,6 +276,7 @@ type EpisodeRef struct {
 	SeasonNumber  int    `json:"season_number"`
 	EpisodeNumber int    `json:"episode_number"`
 	EpisodeType   string `json:"episode_type"`
+	Runtime       int    `json:"runtime"` // minutes; 0 when unknown
 }
 
 // ShowDetails is GET /tv/{id} with external_ids, keywords, credits,
@@ -319,6 +320,21 @@ type ShowDetails struct {
 
 // Year extracts the year from the first air date
 func (s *ShowDetails) Year() int { return yearOf(s.FirstAirDate) }
+
+// EpisodeRuntime is the show's usual episode runtime in minutes: TMDB's
+// episode_run_time (often empty for newer shows), else the last aired
+// episode's; 0 when neither says.
+func (s *ShowDetails) EpisodeRuntime() int {
+	for _, r := range s.EpisodeRunTime {
+		if r > 0 {
+			return r
+		}
+	}
+	if s.LastEpisodeToAir != nil {
+		return s.LastEpisodeToAir.Runtime
+	}
+	return 0
+}
 
 // SeasonNumbers returns the show's season numbers in TMDB's order, season 0
 // (specials) included when TMDB lists it.

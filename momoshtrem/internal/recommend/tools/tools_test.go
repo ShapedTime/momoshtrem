@@ -437,3 +437,11 @@ func TestCached(t *testing.T) {
 		t.Error("a failed profile build made a pool")
 	}
 }
+
+// Results don't spend tokens escaping &, < and >.
+func TestEncode(t *testing.T) {
+	out, err := Encode(map[string]string{"genre": "Sci-Fi & Fantasy", "why": "rec:<x>"})
+	if err != nil || string(out) != `{"genre":"Sci-Fi & Fantasy","why":"rec:<x>"}` {
+		t.Errorf("Encode = %s, %v", out, err)
+	}
+}

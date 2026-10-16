@@ -158,11 +158,24 @@ func (t *tool) Run(ctx context.Context, input json.RawMessage) (json.RawMessage,
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(out)
+	b, err := Encode(out)
 	if err != nil {
 		return nil, fmt.Errorf("%s: failed to encode the result: %w", t.name, err)
 	}
 	return b, nil
+}
+
+// Encode is v as compact JSON the way the tools answer, without escaping
+// &, < and > (tokens for nothing): for a run's first turn, which inlines
+// the profile and the pool, too.
+func Encode(v any) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // compact turns a schema written for people into the bytes sent, once.

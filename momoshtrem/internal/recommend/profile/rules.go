@@ -121,7 +121,7 @@ func MovieFacts(d *tmdb.MovieDetails) Facts {
 // ShowFacts reads a show's details.
 func ShowFacts(d *tmdb.ShowDetails) Facts {
 	f := Facts{Title: d.Name, Year: d.Year(), Genres: d.Genres, Keywords: d.Keywords.Keywords, Language: d.OriginalLanguage,
-		Countries: d.OriginCountry, Runtime: medianInt(d.EpisodeRunTime), AnimeKnown: true,
+		Countries: d.OriginCountry, Runtime: d.EpisodeRuntime(), AnimeKnown: true,
 		Anime: metadata.IsAnime(d.Genres, d.OriginalLanguage, d.OriginCountry, d.Keywords.Keywords)}
 	for _, c := range d.CreatedBy {
 		f.Creators = append(f.Creators, Person{c.ID, c.Name})
