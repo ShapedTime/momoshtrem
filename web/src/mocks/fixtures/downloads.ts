@@ -397,12 +397,15 @@ export const mockDownloads = (now = clock()): Download[] => mockHolds(now).map((
 
 export const liveDownload = (record: MockDownload, now = clock()): Download => live(record, mockStorageDocument(), now).download;
 
-/** Per torrent, the largest share any of `records` wants: a file two downloads want counts once. */
+/**
+ * Per torrent, the largest share any of `records` wants: a file two downloads want counts once.
+ * A download's bytes beyond its torrents' parts (files admitted later, or no torrent known) count on their own.
+ */
 function sharedBytes(records: readonly MockDownload[], pick: (t: MockDownloadTorrent) => number, alone: (d: Download) => number): number {
   const perHash = new Map<string, number>();
   let rest = 0;
   for (const record of records) {
-    if (record.torrents.length === 0) rest += alone(record.download);
+    rest += Math.max(0, alone(record.download) - record.torrents.reduce((sum, t) => sum + pick(t), 0));
     for (const t of record.torrents) perHash.set(t.info_hash, Math.max(perHash.get(t.info_hash) ?? 0, pick(t)));
   }
   return rest + [...perHash.values()].reduce((sum, bytes) => sum + bytes, 0);
@@ -592,13 +595,15 @@ function noFile(record: MockDownload): void {
 /** A torrent was removed (B6 DELETE): downloads keep their rows; with nothing else assigned they're `no_file`. */
 export function onTorrentRemoved(hash: string): void {
   for (const record of withTorrent(hash)) {
+    const removed = record.torrents.filter((t) => t.info_hash === hash);
     record.torrents = record.torrents.filter((t) => t.info_hash !== hash);
     if (record.torrents.length === 0) {
       noFile(record);
       continue;
     }
-    record.download.wanted_bytes = record.torrents.reduce((sum, t) => sum + t.bytes, 0);
-    record.download.done_bytes = record.torrents.reduce((sum, t) => sum + t.done_bytes, 0);
+    const { download } = record;
+    download.wanted_bytes = Math.max(0, download.wanted_bytes - removed.reduce((sum, t) => sum + t.bytes, 0));
+    download.done_bytes = Math.max(0, download.done_bytes - removed.reduce((sum, t) => sum + t.done_bytes, 0));
   }
 }
 
@@ -629,13 +634,17 @@ function episodeOf(id: number): { tmdbId: number; season: number; episode: numbe
 /** What's left of the kept cap now. */
 const keptRoom = () => storageCaps(mockStorageDocument()).kept - downloadsUsage().committed_kept_bytes;
 
+/** An episode's file, as the hooks are told it: a torrent file (its bytes), an HDRezka stream, or none. */
+export type EpisodeFileKind = { bytes: number } | 'stream' | null;
+
 /**
- * An episode's file changed: a torrent file assigned (`bytes`; an applied mapping
- * job), an HDRezka stream, or unassigned (null). An episode download follows it;
- * a kept show or season takes a new file while the kept cap has room, in episode
- * order, and otherwise holds it over the cap (`storage_full`).
+ * An episode's file changed from `previous` to `next`: a torrent file assigned
+ * (an applied mapping job), an HDRezka stream, or unassigned (null). An episode
+ * download follows it. A kept show or season counts the file once whatever its
+ * source, and takes a torrent file while the kept cap has room, in episode order;
+ * otherwise the file waits over the cap (`storage_full`).
  */
-export function onEpisodeFile(episodeId: number, file: { bytes: number } | 'stream' | null): void {
+export function onEpisodeFile(episodeId: number, next: EpisodeFileKind, previous: EpisodeFileKind = null): void {
   const found = episodeOf(episodeId);
   if (!found) return;
   const key = episodeKey(found.season, found.episode);
@@ -645,31 +654,32 @@ export function onEpisodeFile(episodeId: number, file: { bytes: number } | 'stre
     if (d.scope === 'episode') {
       if (d.item.season_number !== found.season || d.item.episode_number !== found.episode) continue;
       noFile(record);
-      if (file === 'stream') Object.assign(d, { state: 'unavailable', files: { total: 1, done: 0, unavailable: 1, over_cap: 0 } });
-      else if (file) Object.assign(d, { state: 'queued', wanted_bytes: file.bytes, files: { total: 1, done: 0, unavailable: 0, over_cap: 0 } });
+      if (next === 'stream') Object.assign(d, { state: 'unavailable', files: { total: 1, done: 0, unavailable: 1, over_cap: 0 } });
+      else if (next) Object.assign(d, { state: 'queued', wanted_bytes: next.bytes, files: { total: 1, done: 0, unavailable: 0, over_cap: 0 } });
       continue;
     }
     if (d.scope === 'season' && d.item.season_number !== found.season) continue;
+
+    // The file it replaces leaves: an HDRezka one was unavailable, a torrent one wanted (unless over the cap)
     const wasOver = record.over_cap.includes(key);
     record.over_cap = record.over_cap.filter((k) => k !== key);
-    if (file === null) {
+    if (previous) {
       d.files.total = Math.max(0, d.files.total - 1);
-      if (!wasOver) d.wanted_bytes = Math.max(0, d.wanted_bytes - found.bytes);
-      if (d.files.total === 0) noFile(record);
-      continue;
+      if (previous === 'stream') d.files.unavailable = Math.max(0, d.files.unavailable - 1);
+      else if (!wasOver) d.wanted_bytes = Math.max(0, d.wanted_bytes - previous.bytes);
     }
-    d.files.total += 1;
-    if (file === 'stream') {
-      d.files.unavailable += 1;
-      continue;
+    if (next) {
+      d.files.total += 1;
+      if (next === 'stream') d.files.unavailable += 1;
+      // Admitted in episode order while the kept cap has room; the rest wait over it
+      else if (d.reason === 'kept' && keptRoom() < next.bytes) record.over_cap.push(key);
+      else {
+        // Beyond its torrents' parts, so committed_kept_bytes counts it on its own
+        d.wanted_bytes += next.bytes;
+        if (d.state === 'done' || d.state === 'no_file') d.state = 'queued';
+      }
     }
-    // Admitted in episode order while the kept cap has room; the rest wait over it
-    if (d.reason === 'kept' && keptRoom() < file.bytes) {
-      record.over_cap.push(key);
-      continue;
-    }
-    d.wanted_bytes += file.bytes;
-    if (d.state === 'done' || d.state === 'no_file') d.state = 'queued';
+    if (d.files.total === 0) noFile(record);
   }
 }
 

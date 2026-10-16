@@ -20,11 +20,14 @@ export type DownloadScope = 'movie' | 'show' | 'season' | 'episode';
 
 /**
  * The first that matches: `unavailable` (nothing it covers can be downloaded: HDRezka only, or pure v2);
- * `no_file` (nothing assigned yet); `done` (every file it covers is on disk); `paused` (the user paused its
- * torrent, or background downloads are off); `disk_full`; `storage_full` (episodes assigned later didn't fit
- * the kept cap: `files.over_cap`); `waiting_for_window` (outside every download window); `waiting_for_stream`
- * (something else streams); `stalled` (no progress for 10 min, retried with backoff); `downloading` (in one
- * of the 2 slots); `queued`.
+ * `no_file` (nothing assigned yet); `done` (every downloadable file it covers is on disk); `paused` (the user
+ * paused its torrent, or background downloads are off); `disk_full`; `storage_full` (episodes assigned later
+ * didn't fit the kept cap: `files.over_cap`); `waiting_for_window` (outside every download window);
+ * `waiting_for_stream` (something else streams); `stalled` (no progress for 10 min, retried with backoff);
+ * `downloading` (in one of the 2 slots); `queued`.
+ *
+ * The `storage_full` state isn't the `storage_full` 409 code: the state is a kept show or season that
+ * can't take episodes assigned later; the 409 refuses a new Keep (`isStorageFullError`).
  */
 export type DownloadState =
   | 'queued'

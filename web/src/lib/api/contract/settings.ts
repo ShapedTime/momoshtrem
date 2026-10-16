@@ -74,7 +74,11 @@ export interface DownloadWindow {
 export interface StorageKeptSettings {
   /** Null: 50% of the limit. An explicit cap is at most the limit less the reserve (else 422). */
   max_bytes: number | null;
-  /** The cap applied: a default (null) cap shrinks, smart first, so kept + smart leave the streaming reserve free. */
+  /**
+   * The cap applied: kept + smart leave the streaming reserve free. A default (null) cap shrinks, smart
+   * first; a PUT never shrinks an explicit one (422), but when the limit falls on its own (auto following
+   * the disk, or config.yaml's) explicit caps are clamped too.
+   */
   effective_max_bytes: number;
   /** With `default_days: 30`, the defaults: "until watched, at most 30 days". */
   default_until_watched: boolean;

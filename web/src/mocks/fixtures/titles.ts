@@ -25,6 +25,8 @@ import type {
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
 import { type CatalogEntry, findTitle, iso } from './catalog';
 import {
+  EPISODE_BYTES_PER_MINUTE,
+  type EpisodeFileKind,
   episodeHold,
   episodeKeep,
   episodeWanted,
@@ -481,10 +483,20 @@ export function assignMovieStream(row: MockLibraryEntry, stream: Omit<TitleStrea
 
 /** Episodes play from HDRezka (#63): each replaces the episode's torrent file. */
 export function assignEpisodeStream(row: MockLibraryEntry, episodeId: number, stream: EpisodeStream): void {
+  const previous = episodeFileKind(row, episodeId);
   row.streamed.set(episodeId, stream);
   row.filed.delete(episodeId);
   row.unassigned.delete(episodeId);
-  onEpisodeFile(episodeId, 'stream');
+  onEpisodeFile(episodeId, 'stream', previous);
+}
+
+/** The file an episode has now, for the downloads hooks: HDRezka, a torrent's (estimated by runtime), or none. */
+export function episodeFileKind(row: MockLibraryEntry, episodeId: number): EpisodeFileKind {
+  if (row.streamed.has(episodeId)) return 'stream';
+  const episode = findEpisode(episodeId);
+  const seed = episode && seedEpisode(SHOWS[episode.tmdbId], [episode.season, episode.episode]);
+  if (!seed || fileState(seed, episodeId, row) !== 'ready') return null;
+  return { bytes: seed.runtime * EPISODE_BYTES_PER_MINUTE };
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {

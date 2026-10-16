@@ -37,6 +37,7 @@ afterAll(() => {
 
 const DUNE_TORRENT = '4f1a2b3c4d5e6f708192a3b4c5d6e7f8091abe90';
 const BATTLE = 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html';
+const SEVERANCE_HDREZKA = 'https://hdrezka.me/series/thriller/47283-razdelenie-2022.html';
 
 const failure = (promise: Promise<unknown>) => promise.then(() => undefined, (error: unknown) => error);
 const byTitle = (list: DownloadList, title: string) => list.items.filter((d) => d.item.title === title);
@@ -300,6 +301,30 @@ describe('what other mocks change', () => {
     await titlesApi.unassignEpisode(episodeId(247767, 1, 10));
     expect(only(await downloadsApi.list(), 'The Studio')).toMatchObject({ state: 'no_file', wanted_bytes: 0, files: { total: 0 } });
     expect(await episode(247767, 1, 10)).toMatchObject({ pct: null, keep: { state: 'no_file' } });
+  });
+
+  it('a kept season counts a file once whatever its source, and admitted files count in committed', async () => {
+    const severance = await downloadsApi.create({ scope: 'season', id: 4, season_number: 2 });
+    expect(severance).toMatchObject({ state: 'done', files: { total: 9, unavailable: 0 } });
+    const byId = async (id: number) => (await downloadsApi.list()).items.find((d) => d.id === id);
+    // S02E09 moves from the torrent to HDRezka: still one file, now unavailable
+    await hdrezkaApi.assignShow(4, { url: SEVERANCE_HDREZKA, translator_id: 238, quality: '720p', items: [{ episode_id: episodeId(95396, 2, 9), season: 2, episode: 9 }] });
+    expect(await byId(severance.id)).toMatchObject({ files: { total: 9, unavailable: 1 } });
+    await titlesApi.unassignEpisode(episodeId(95396, 2, 9));
+    expect(await byId(severance.id)).toMatchObject({ files: { total: 8, unavailable: 0 } });
+
+    // Frieren's show keep wants its S02 torrent; job 101's files join it beyond that torrent's part
+    const show = await downloadsApi.create({ scope: 'show', id: 1 });
+    expect(show.wanted_bytes).toBe(12_600_000_000);
+    const committed = (await downloadsApi.list()).usage.committed_kept_bytes;
+    const { proposals } = await assignmentApi.job(101);
+    const pending = proposals.filter((p) => p.decision === 'pending' && p.targets.length > 0);
+    await assignmentApi.patchProposals(101, { items: pending.map((p) => ({ id: p.id, decision: 'accepted' as const })) });
+    await assignmentApi.apply(101);
+    const grown = await byId(show.id);
+    expect(grown?.files.total).toBeGreaterThan(show.files.total);
+    expect(grown?.wanted_bytes).toBeGreaterThan(show.wanted_bytes);
+    expect((await downloadsApi.list()).usage.committed_kept_bytes - committed).toBe((grown?.wanted_bytes ?? 0) - show.wanted_bytes);
   });
 
   it('episodes a mapping job assigns to a kept season past the kept cap make it storage_full', async () => {

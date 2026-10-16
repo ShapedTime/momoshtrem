@@ -6,6 +6,7 @@ import {
   addToLibrary,
   buildSeason,
   buildTitle,
+  episodeFileKind,
   findByLibraryId,
   findEpisode,
   libraryKey,
@@ -121,10 +122,11 @@ export const titlesHandlers = [
     const episode = findEpisode(id);
     const row = episode && library.get(libraryKey('tv', episode.tmdbId));
     if (!row) return notFound('No such episode');
+    const previous = episodeFileKind(row, id);
     row.unassigned.add(id);
     row.filed.delete(id);
     row.streamed.delete(id);
-    onEpisodeFile(id, null); // its downloads lose the file (#77)
+    onEpisodeFile(id, null, previous); // its downloads lose the file (#77)
     return noContent();
   }),
   http.patch('*/api/shows/:id', async ({ params, request }) => {

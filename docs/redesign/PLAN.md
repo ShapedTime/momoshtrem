@@ -1168,8 +1168,9 @@ Every size is in bytes (int64) and every time is RFC 3339 in UTC.
   - smart downloads get `smart.effective_max_bytes`: `smart.max_bytes`, or 15% of the limit when null;
   - the rest is the streaming cache.
   - **The streaming reserve**, `reserve_bytes` = min(20 GiB, 25% of the limit), is never pinned: `kept.effective_max_bytes + smart.effective_max_bytes ≤ limit_effective_bytes − reserve_bytes`.
-    - When a lower limit (or an auto one) breaks that, a default (null) cap shrinks, smart first.
-    - An explicit cap never shrinks: one that doesn't fit is refused when it's sent (422, below).
+    - When a lower limit breaks that, a default (null) cap shrinks, smart first.
+    - A PUT never shrinks an explicit cap: one that doesn't fit the limit it leaves is refused (422, below).
+    - When the limit falls on its own (auto following the disk, or config.yaml's), `Resolve` clamps explicit caps too: kept to the limit less the reserve, then smart to what's left. The stored values don't change.
   - Smart never evicts kept: a smart pick that doesn't fit is skipped. A Keep that doesn't fit is `409 storage_full` ("Downloads (#77)").
 ```
 GET /settings/storage → 200 StorageSettings
@@ -1243,7 +1244,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
   - Releasing unpins the data. It stays as ordinary cache and plays until the LRU evicts it.
   - The pieces of watched episodes are the first to be evicted (`Demote`).
 - **Until-watched lifetimes.**
-  - Watched files are released one by one. A watched episode of a kept show or season has `keep: null`.
+  - With `until_watched`, watched files are released one by one. A watched episode of such a show or season keep has `keep: null`.
   - The download itself ends at `expires_at` or a DELETE, whatever `until_watched` says.
   - With `until_watched`, the download also ends:
     - a movie or episode download, once it's watched;
@@ -1258,7 +1259,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
   - **Re-picks:**
     - A watched episode is never a candidate.
     - An episode whose smart row was released `deleted` (dismissed) is never picked again.
-    - After `expired`, it's picked again only if the show's frontier moved after `released_at`, that is, there's new watch activity since then.
+    - After `expired`, it's picked again only if there's a play of the show after `released_at`.
   - A Keep on a smart pick turns it kept: the same row, with `created_at` reset to now and its duration from the request or the defaults.
 ```
 GET /downloads → 200 DownloadList
@@ -1290,20 +1291,22 @@ Download {
 - **`state`**, the first that matches:
   1. `unavailable`: it covers files, and none can be downloaded (HDRezka only, or pure v2).
   2. `no_file`: it covers no assigned file yet. A movie gets one with a torrent, and a show or season with its first episode.
-  3. `done`: every file it covers is on disk (none over the cap).
+  3. `done`: every downloadable file it covers is on disk (none over the cap). HDRezka and pure-v2 files don't hold it back.
   4. `paused`: the user paused its torrent (B6), or background downloads are off (`background.enabled: false`).
   5. `disk_full`: the floor leaves no room to fetch more.
-  6. `storage_full`: episodes assigned later didn't fit the kept cap (`files.over_cap > 0`); the admitted files still download.
+  6. `storage_full`: episodes assigned later didn't fit the kept cap (`files.over_cap > 0`); the admitted files still download. This state isn't POST's `409 storage_full` code: that one refuses a new Keep.
   7. `waiting_for_window`: outside every download window.
   8. `waiting_for_stream`: something else streams (`pause_while_streaming`), or the minute after the last stream ended.
   9. `stalled`: no progress for 10 minutes. Its slot goes to the next torrent, and it's retried with backoff (`resumes_at`).
   10. `downloading`: in one of the 2 slots.
   11. `queued`: waiting for a slot.
 
-  The manager keeps the states from `paused` on (but `storage_full`) per torrent (`TorrentWanted.state`). A download over several torrents is:
+  The manager keeps `done`, `paused`, `disk_full` and the states after `storage_full` per torrent (`TorrentWanted.state`). A download over several torrents is:
   - `done` when all of them are;
   - `downloading` when any is;
   - otherwise the first of `paused`…`queued` that one of them has. Finished torrents don't count.
+
+  That per-torrent rule gives the state of the download's admitted files. `storage_full` replaces it when files are over the cap, unless that state is `paused` or `disk_full`.
 - **`POST /downloads`**, a Keep:
   ```
   { "scope": "movie",   "id": <library movie id> }
