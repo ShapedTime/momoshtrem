@@ -222,67 +222,37 @@ func (s *Server) getMovie(c *gin.Context) {
 	c.JSON(http.StatusOK, toMovieResponse(movie, assignment))
 }
 
+// deleteMovie removes a movie, its subtitles and the torrents nothing else
+// uses (PLAN §6 "Titles and library").
+// DELETE /api/movies/:id?delete_data=true|false → 204
 func (s *Server) deleteMovie(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {
 		return
 	}
-
-	// Get movie info before deletion for tree update
-	movie, err := s.movieRepo.GetByID(id)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Failed to get movie for deletion")
+	deleteData, ok := parseDeleteData(c)
+	if !ok || !s.removalsReady(c) {
 		return
 	}
-
-	// Deactivate assignments first
-	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id); err != nil {
-		slog.Error("Failed to deactivate assignments for movie", "movie_id", id, "error", err)
-	}
-
-	if err := s.movieRepo.Delete(id); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+	if err := s.opts.Removals.DeleteMovie(c.Request.Context(), id, deleteData); err != nil {
+		removalErrorResponse(c, err)
 		return
 	}
-
-	// Update VFS tree immediately
-	if movie != nil && s.treeUpdater != nil {
-		s.treeUpdater.RemoveMovieFromTree(movie.Title, movie.Year)
-	}
-
 	c.Status(http.StatusNoContent)
 }
 
+// unassignMovieTorrent drops the movie's file and the subtitles that came
+// with it, and releases its torrent when nothing else uses it.
+// DELETE /api/movies/:id/assign → 204
 func (s *Server) unassignMovieTorrent(c *gin.Context) {
 	id, ok := parseID(c, "id")
-	if !ok {
+	if !ok || !s.removalsReady(c) {
 		return
 	}
-
-	// Get movie info and assignment before deactivating for tree/cache update
-	movie, err := s.movieRepo.GetByID(id)
-	if err != nil {
-		slog.Error("Failed to get movie for unassign", "movie_id", id, "error", err)
-	}
-
-	// Invalidate cached file handles before deactivating assignment
-	if s.treeUpdater != nil {
-		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeMovie, id); err == nil &&
-			assignment != nil && assignment.IsTorrent() {
-			s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
-		}
-	}
-
-	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeMovie, id); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+	if err := s.opts.Removals.UnassignMovie(c.Request.Context(), id); err != nil {
+		removalErrorResponse(c, err)
 		return
 	}
-
-	// Update VFS tree immediately
-	if movie != nil && s.treeUpdater != nil {
-		s.treeUpdater.RemoveMovieFromTree(movie.Title, movie.Year)
-	}
-
 	c.Status(http.StatusNoContent)
 }
 
@@ -391,89 +361,39 @@ func (s *Server) refreshShow(c *gin.Context) {
 	})
 }
 
+// deleteShow removes a show with its episodes, their subtitles and the
+// torrents nothing else uses (PLAN §6 "Titles and library").
+// DELETE /api/shows/:id?delete_data=true|false → 204
 func (s *Server) deleteShow(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {
 		return
 	}
-
-	// Get all episodes to deactivate their assignments
-	show, err := s.showRepo.GetWithSeasonsAndEpisodes(id)
-	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, "Failed to get show for deletion")
+	deleteData, ok := parseDeleteData(c)
+	if !ok || !s.removalsReady(c) {
 		return
 	}
-
-	// Store show info for tree update before deletion
-	var showTitle string
-	var showYear int
-	if show != nil {
-		showTitle = show.Title
-		showYear = show.Year
-
-		for _, season := range show.Seasons {
-			for _, ep := range season.Episodes {
-				if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, ep.ID); err != nil {
-					slog.Error("Failed to deactivate assignment for episode", "episode_id", ep.ID, "error", err)
-				}
-			}
-		}
-	}
-
-	if err := s.showRepo.Delete(id); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+	if err := s.opts.Removals.DeleteShow(c.Request.Context(), id, deleteData); err != nil {
+		removalErrorResponse(c, err)
 		return
 	}
-
-	// Update VFS tree immediately
-	if showTitle != "" && s.treeUpdater != nil {
-		s.treeUpdater.RemoveShowFromTree(showTitle, showYear)
-	}
-
 	c.Status(http.StatusNoContent)
 }
 
 // Episode handlers
 
+// unassignEpisodeTorrent drops the episode's file and the subtitles that
+// came with it, and releases its torrent when nothing else uses it.
+// DELETE /api/episodes/:id/assign → 204
 func (s *Server) unassignEpisodeTorrent(c *gin.Context) {
 	id, ok := parseID(c, "id")
-	if !ok {
+	if !ok || !s.removalsReady(c) {
 		return
 	}
-
-	// Get episode context before deactivating for tree update
-	ctx, err := s.showRepo.GetEpisodeContext(id)
-	if err != nil {
-		slog.Error("Failed to get episode context for unassign", "episode_id", id, "error", err)
-	}
-
-	// Invalidate cached file handles before deactivating assignment
-	grouped := false
-	if s.treeUpdater != nil {
-		if assignment, err := s.assignmentRepo.GetActiveForItem(library.ItemTypeEpisode, id); err == nil && assignment != nil {
-			if assignment.IsTorrent() {
-				s.treeUpdater.InvalidateFileHandles(assignment.InfoHash)
-			}
-			// A job's row may share a grouped entry ("S01E01-E02") with
-			// other episodes of the file: they get renamed.
-			grouped = assignment.Groupable()
-		}
-	}
-
-	if err := s.assignmentRepo.DeactivateForItem(library.ItemTypeEpisode, id); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+	if err := s.opts.Removals.UnassignEpisode(c.Request.Context(), id); err != nil {
+		removalErrorResponse(c, err)
 		return
 	}
-
-	// Update VFS tree immediately
-	switch {
-	case s.treeUpdater == nil:
-	case grouped:
-		s.treeUpdater.InvalidateTree()
-	case ctx != nil:
-		s.treeUpdater.RemoveEpisodeFromTree(ctx.ShowTitle, ctx.ShowYear, ctx.SeasonNumber, ctx.EpisodeNumber)
-	}
-
 	c.Status(http.StatusNoContent)
 }
 

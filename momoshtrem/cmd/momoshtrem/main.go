@@ -463,6 +463,18 @@ func main() {
 	apiOpts.Assignments = jobService
 	apiOpts.Review = jobService
 
+	// Removals: deleting torrents and titles and unassigning files, with
+	// their subtitles, jobs and the torrents nothing uses any more.
+	apiOpts.Removals = service.NewRemovalService(service.RemovalDeps{
+		Jobs:        library.NewAssignmentJobRepository(db),
+		Movies:      movieRepo,
+		Shows:       showRepo,
+		Assignments: assignmentRepo,
+		Torrents:    torrentService,
+		Subtitles:   subtitleService,
+		Tree:        libraryFS,
+	})
+
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
 	apiServer.SetReaderTracker(readerTracker)

@@ -220,6 +220,21 @@ func (r *Repo) DeleteByItem(_ context.Context, itemType subtitle.ItemType, itemI
 	return nil
 }
 
+func (r *Repo) DeleteByItems(_ context.Context, items []subtitle.Item, sources ...subtitle.Source) ([]*subtitle.Subtitle, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var deleted []*subtitle.Subtitle
+	r.rows = slices.DeleteFunc(r.rows, func(row *subtitle.Subtitle) bool {
+		if !slices.Contains(items, row.Item()) || (len(sources) > 0 && !slices.Contains(sources, row.Source)) {
+			return false
+		}
+		c := *row
+		deleted = append(deleted, &c)
+		return true
+	})
+	return deleted, nil
+}
+
 // Fetcher is a fake opensubtitles.SubtitleFetcher.
 type Fetcher struct {
 	mu sync.Mutex

@@ -9,9 +9,8 @@ import (
 
 // getTorrentDebug returns detailed piece-level debug info for a torrent.
 func (s *Server) getTorrentDebug(c *gin.Context) {
-	hash := c.Param("hash")
-	if hash == "" {
-		errorResponse(c, http.StatusBadRequest, "torrent hash required")
+	hash, ok := parseInfoHash(c)
+	if !ok {
 		return
 	}
 
