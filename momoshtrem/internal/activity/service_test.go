@@ -209,6 +209,8 @@ type env struct {
 	lib      *fakeLibrary
 	store    *fakePauseStore
 	statfs   error
+	// pauseChanges counts OnPauseChange calls (the download manager's wakes).
+	pauseChanges int
 }
 
 var (
@@ -250,7 +252,8 @@ func newEnv() *env {
 		Sessions: fakeSessions{session("1", severance, at(49)), session("2", "", at(48))},
 		Speeds:   fakeSpeeds{total: torrent.Rate{Down: 2_000_000, Up: 30_000}, history: []torrent.Rate{{Down: 1, Up: 2}, {Down: 3, Up: 4}}},
 		Cache:    fakeCache{}, DiskPath: "/data/torrents",
-		Now: func() time.Time { return at(50) },
+		OnPauseChange: func() { e.pauseChanges++ },
+		Now:           func() time.Time { return at(50) },
 		Statfs: func(path string) (int64, int64, error) {
 			if e.statfs != nil {
 				return 0, 0, e.statfs
@@ -447,6 +450,10 @@ func TestPauseAndResume(t *testing.T) {
 	}
 	if item, err = e.svc.Resume(ctx, frieren); err != nil || item.State != StateIdle {
 		t.Errorf("resume again = %+v, %v", item, err)
+	}
+	// Each pause and resume woke the download manager (#77).
+	if e.pauseChanges != 5 {
+		t.Errorf("pause changes = %d, want 5", e.pauseChanges)
 	}
 
 	// The store fails: the client isn't touched.
