@@ -14,6 +14,9 @@ const tidy = (list: string[]) =>
 /** This page's AI settings (mapping jobs read `classifier_enabled` and `auto_apply_high_confidence`). */
 export const mockAiSettings = () => ai;
 
+/** This page's quality profile as Settings › Quality saved it (torrent search ranks with it). */
+export const getMockQualityProfile = () => profile;
+
 /** Tests: back to the fixture's AI settings and quality profile. */
 export function resetMockSettings(): void {
   ai = { ...AI_SETTINGS };
