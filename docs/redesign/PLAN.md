@@ -207,12 +207,22 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by a hash of `(info_hash, show_id, metadata_updated_at, hint, scope)` plus the model and its prompt version, for 30 days.
 
 **`005_trakt.sql` (B5)**
-- `trakt_auth(id=1, username, access_token_enc, refresh_token_enc, expires_at, created_at, updated_at)`.
-- `trakt_history(trakt_history_id bigint pk, media_type, tmdb_id, show_tmdb_id, season, episode, watched_at)`.
-- `trakt_ratings(media_type, trakt_id, tmdb_id, show_tmdb_id, season, episode, rating, rated_at, pk(media_type, trakt_id))`.
-- `trakt_watchlist(media_type, tmdb_id, trakt_id, listed_at)`.
-- `trakt_show_progress(show_tmdb_id pk, aired, completed, last_watched_at, next_season, next_episode, reset_at, updated_at)`.
-- `trakt_sync_state(key pk, value jsonb)`. Stores the `last_activities` snapshot and cursors.
+Every table is Trakt's: a disconnect purges them all in one transaction, and the settings (`app_settings` key `trakt`) stay. Movies and shows without a TMDB id are skipped on import, so every row maps to TMDB.
+- `trakt_auth`, the one connection (`id smallint` CHECK `id = 1`):
+  - `username`, `user_slug`;
+  - `access_token_enc`, `refresh_token_enc` (`bytea`, AES-GCM with `SECRET_KEY`), `token_created_at` (Trakt's `created_at`), `expires_at` (`created_at + expires_in`);
+  - `needs_reauth`, `reauth_reason`;
+  - `connected_at`, the generation guard: every sync write checks it, so nothing lands after a disconnect or reconnect replaced it; `updated_at`.
+- `trakt_sync_state(key pk, value jsonb, updated_at)`: the `last_activities` snapshot, `last_sync_at`, `last_reconcile_at` and the calendar's fetch time.
+- `trakt_history`, every play: `id bigint` pk (Trakt's history event id, so an incremental sync's overlap upserts onto the same rows), `media_type` (`movie|episode`), `tmdb_id` and `trakt_id` (the movie's or the show's), `title`, `year`, `season`, `episode`, `episode_tmdb_id`, `episode_title`, `watched_at`. A CHECK: episode rows have a season and an episode, movie rows neither. Indexed on `(watched_at DESC, id DESC)` (`/me/history`) and `(media_type, tmdb_id)`.
+- Derived from `trakt_history` in the transaction that writes it: `trakt_watched_movies(tmdb_id pk, plays, last_watched_at)` and `trakt_watched_episodes(show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)`, pk `(show_tmdb_id, season, episode)`, with a partial index on `episode_tmdb_id`.
+- `trakt_ratings(media_type movie|show|season|episode, trakt_id, tmdb_id, show_tmdb_id, season, episode, rating 1–10, rated_at)`, pk `(media_type, trakt_id)`, indexed on `(media_type, tmdb_id)`. `tmdb_id` is the rated item's own (NULL when a season or an episode has none).
+- `trakt_watchlist(media_type movie|tv, trakt_id, tmdb_id, title, year, poster_path, backdrop_path, rank, listed_at)`, pk `(media_type, trakt_id)`, indexed on `(media_type, tmdb_id)` and `(listed_at DESC)`.
+- `trakt_show_progress`, one row per show from the bulk `/sync/progress/watched`: `show_trakt_id` pk, `show_tmdb_id` (indexed), `title`, `year`, `poster_path`, `backdrop_path`, `aired` and `completed` (regular episodes), `last_watched_at`, `reset_at`, `last_season`, `last_episode`, Trakt's next episode (`next_season`, `next_episode`, `next_episode_tmdb_id`, `next_title`, `next_still_path`; NULL when caught up), `updated_at`.
+- `trakt_hidden(section dropped|progress_watched, trakt_id, tmdb_id)`, pk `(section, trakt_id)`, indexed on `tmdb_id`.
+- `trakt_calendar(show_trakt_id, season, episode, show_tmdb_id, episode_tmdb_id, show_title, year, episode_title, first_aired, still_path, poster_path, backdrop_path)`, pk `(show_trakt_id, season, episode)`, indexed on `first_aired` and `show_tmdb_id`: `/calendars/my/shows` from 7 days ago, 33 days long.
+- `app_settings` key `trakt`: `{use_ratings, show_watchlist, include_paused}`, defaults `true`, `true`, `false`, read over the defaults (`library.SettingsRepository.TraktSettings`). `UpdateTraktSettings` is a partial update in one jsonb statement, so two toggles never lose each other's change.
+- Rollback: nothing else reads these tables, so an older binary ignores them.
 
 **`006_recommendations.sql` (R1/R2)**
 - `taste_profiles(id, created_at, profile jsonb)`.
@@ -253,7 +263,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - The web app exposes the same paths under its own session-checked `/api/*` routes. A catch-all `web/src/app/api/[...path]` forwards any path whose first segment is in `BACKEND_PREFIXES` (`web/src/lib/api/backend-proxy.ts`), adding the token and streaming the response (SSE included); explicit web routes take precedence. Typed browser calls and TanStack Query factories for every endpoint live in `web/src/lib/api/endpoints/`, and MSW fixtures in `web/src/mocks/` (F1).
 
 ### Titles and library (B1)
-- `GET /titles/{movie|tv}/{tmdb_id}`: cached TMDB details, plus library state, watch state (once B5 lands) and the recommendation reason if there is one. Types: `web/src/lib/api/contract/titles.ts`.
+- `GET /titles/{movie|tv}/{tmdb_id}`: cached TMDB details, plus library state, watch state (B5; "Watch state rules" below) and the recommendation reason if there is one. Types: `web/src/lib/api/contract/titles.ts`.
   ```
   Title = MovieTitle | ShowTitle
   TitleBase {
@@ -269,8 +279,12 @@ Migration numbers are reserved per task so parallel branches don't collide.
                 creators: [], networks: [], end_year, episode_run_time,
                 seasons: [SeasonSummary],    // Specials (season 0) last; left out while include_specials is off
                 default_season               // the season to open; null when there are none
+  WatchState { watched_at, plays, rating,    // from Trakt (B5); null when Trakt knows nothing about the title
+               progress: {completed, aired},                                       // shows
+               next_episode: {season, episode, absolute_number, name, air_date} | null }   // shows
   SeasonSummary { season_number, name, episodes_total, ready, missing, needs_review, upcoming,
-                  absolute_from, absolute_to }   // episodes_total includes upcoming;
+                  absolute_from, absolute_to }   // episodes_total includes upcoming; ready: episodes with a file;
+                                                 // missing, needs_review and upcoming leave watched ones out;
                                                  // not in library: only episodes_total, the rest 0/null
   TitleLibraryState {
     in_library, library_id, added_at,        // library_id and added_at are null when not in the library
@@ -295,7 +309,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
   { season_number, name, episodes: [EpisodeSummary], ranges: [EpisodeRange] }
   EpisodeSummary { id, season_number, episode_number, absolute_number, name, overview, air_date, still_path,
                    runtime, episode_type: standard|mid_season|finale|null,
-                   state: watched|ready|downloading|missing|upcoming|needs_review, pct,
+                   state: watched|ready|downloading|missing|upcoming|needs_review, pct,   // watched wins (B5)
                    webdav_path,              // only while the episode has a file
                    source, stream }          // the file's source; see "HDRezka (#63)"
   EpisodeRange { label, kind: arc|block, from, to, absolute_from, absolute_to, missing }   // from/to in-season
@@ -304,16 +318,22 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - **Availability rules.** The server computes `availability_stage`, so the client never infers it.
   - Movie: `none` not in the library; `needs_torrent` no active assignment; `downloading` the torrent is loaded and active and the file isn't fully cached; `ready` otherwise.
   - Show: `none` not in the library; `needs_torrent` nothing assigned, or the frontier is non-empty; `downloading` any assigned episode is downloading; `ready` otherwise.
-  - The **frontier** (until B5 knows what was watched): aired regular episodes after the last assigned one. Specials never count, nor do gaps before the last assigned episode. `missing` is its first run, within one season.
-  - Episode: `ready` or `downloading` when assigned; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown; `needs_review` as below. `watched` (B5) fills in later.
+  - The **frontier**: aired regular episodes after the last one with a file **or watched** (B5). Specials never count, nor do gaps before that episode. `missing` is its first run, within one season.
+  - Episode, first match: `watched` when Trakt has a play of it (B5); `ready` or `downloading` when assigned; `needs_review` as below; `missing` when aired and unassigned; `upcoming` when the air date is in the future or unknown.
   - An HDRezka file (#63) counts as assigned like a torrent's, and is never `downloading`: it streams from the CDN, so it's always `ready`. The stage keeps the name `needs_torrent`.
-  - `default_season`: the frontier's season, else the latest season with a file, else the first regular season.
+  - `default_season`: `watch_state.next_episode`'s season when the title lists it, else the frontier's season, else the latest season with a file, else the first regular season.
 - **Review rules** (B2, #5). They read the item's open, non-dry-run mapping jobs that are past classification (`resolving`, `needs_review` or `ready`; §6 "Assignment").
   - `needs_review` (title and `LibraryItem`) counts those jobs' files that are pending and map (have targets, or are movie candidates) or are in a conflict. `/library?status=needs_review` is `needs_review > 0`.
   - `review_job_id` is the newest of those jobs, or null. It stays set while a `ready` job waits for Apply, even at `needs_review = 0`.
-  - An episode is `needs_review` when one of those files targets it and it has no file, aired or not: a file (`ready`, `downloading`, `watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` or `upcoming` there, or in `EpisodeRange.missing`.
+  - An episode is `needs_review` when one of those files targets it and it has no file, aired or not: a file (`ready`, `downloading`) or a play (`watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` or `upcoming` there, or in `EpisodeRange.missing`.
   - The frontier is about files: an aired episode under review is still part of it.
   - Cost: one more query for a title page or a season; `/library` reads it in its one query.
+- **Watch state rules** (B5, #133). They read what the Trakt sync imported (§5 `005_trakt.sql`); without Trakt every `watch_state` is null and nothing is `watched`.
+  - **Matching** a Trakt episode to a library episode: `episodes.tmdb_episode_id` against Trakt's `episode_tmdb_id` first; season and number only when either id is missing, so an episode TMDB numbers differently never borrows another's watched state. One rule, everywhere.
+  - **`watch_state`** is null when Trakt knows nothing about the title (no play, rating or progress). A movie: `watched_at` (its last play), `plays`, `rating`. A show: `watched_at` (its last watched episode), `plays` (the sum of its episodes' plays), `rating` (the show's), `progress` (Trakt's, regular episodes) and `next_episode`.
+  - **`next_episode`** is the episode Up next names for the show (§6 "Trakt (B5)"), whether or not Up next lists the show (dropped, hidden and idle shows keep theirs); null when there's none. It drives `default_season` and the page's next-up highlight, with the frontier (`missing`) as the fallback.
+  - An episode with a play is `watched`, whatever else is true; `pct`, `webdav_path`, `source` and `stream` still describe its file. `SeasonSummary.ready` counts episodes with a file (watched ones too); `missing`, `needs_review`, `upcoming` and `EpisodeRange.missing` leave watched ones out.
+  - Cost: one more query for a title page; seasons and `/library` don't grow.
 - `POST /movies` and `POST /shows` with `{tmdb_id}` → `201 {id, tmdb_id, title, year}` (`200` if already there; `400 bad_request` for an unknown TMDB id, as today).
 - `DELETE /movies/{id}?delete_data=true|false` and `DELETE /shows/{id}?delete_data=` → `204` (B6, #96). `delete_data` defaults to `false`; any other value is `400 bad_request`. An unknown title is `404`.
   - One transaction deletes the title (its seasons, episodes and jobs cascade) and deactivates its assignments, in one query for a whole show. The rows stay, inactive.
@@ -342,7 +362,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
                 missing: MissingRun | null,          // shows: the first frontier run, as TitleLibraryState.missing
                 streaming }                          // a streaming session plays it (a show: any episode); an in-memory overlay (#99)
   ```
-  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above; `last_watched_at` is null until B5. `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`. `status=watching` matches nothing until B5 (`counts.watching` is 0); until B5, `episodes_watched` is 0 for shows and `sort=last_watched` orders like `added`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
+  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above. `episodes_watched` counts a show's regular episodes with a play, and `last_watched_at` is the movie's last play or the show's last watched episode (the watch state rules; 0 and null without Trakt). `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`; `watching` is shows with `0 < episodes_watched < episodes_total` that aren't dropped or hidden on Trakt (`trakt_hidden`), and `counts.watching` counts them. `sort=last_watched` is `last_watched_at DESC NULLS LAST, created_at DESC, media_type, id`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
   `ids=movie:603,tv:1399` looks titles up by TMDB id (Discover, Search and the palette mark library titles with it): comma-separated `media_type:tmdb_id`, at most 200, ANDed with the other filters; the answer is page 1 of all of them (`page_size` = the number of distinct ids; `page` and `page_size` are ignored). Malformed, or more than 200, is `400 bad_request`.
   Cost: one query, whatever the params, including an empty page (it still carries `counts` and `summary`).
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
@@ -711,15 +731,77 @@ QualityProfile {
 - There's no preview endpoint (in place of HANDOFF §6's `/settings/quality-profile/preview`): "Best match would prefer…" is a client-side function of the profile.
 
 ### Trakt (B5)
-- `GET /integrations/trakt` returns `{configured, connected, username, last_sync_at, sync_status, counts: {history, ratings, watchlist}}`.
-- `POST /integrations/trakt/connect` returns `{user_code, verification_url, expires_at, interval}`. The backend polls Trakt itself; the client polls `GET /integrations/trakt`.
-- `POST /integrations/trakt/sync` returns `202`.
-- `DELETE /integrations/trakt` disconnects and purges the imported data.
-- `GET /me/up-next` returns `{items: [{show, next_episode, availability, airs_at, progress: {completed, aired}, last_watched_at}]}`.
-  - `availability` is one of `ready`, `downloading`, `needs_torrent`, `not_in_library` or `airs_on`.
-- `GET /me/watchlist?type=`: `{items}` with library and availability state.
-- `GET /me/history?page=`: paginated.
-- Watch state (`watched`, `progress`, `rating`) is also embedded in the `/titles` and `/library` responses.
+Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written to Trakt. Served by `internal/trakt` (#131 connect, #132 sync) and `internal/me` (#133); the web mocks are a state machine (`web/src/mocks/fixtures/trakt.ts`).
+
+- **`GET /integrations/trakt`** → `200 TraktIntegration`:
+  ```
+  TraktIntegration {
+    configured,                        // TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET and a valid SECRET_KEY
+    state: off | pending | connected | reauth,
+    connected,                         // state = connected
+    username,                          // while an account is linked: connected, reauth, or a code pending from reauth
+    pending: {user_code, verification_url, expires_at, interval} | null,   // the live device code while pending
+    connect_error: expired | denied | failed | null,   // why the last code didn't connect; the next connect clears it
+    reauth_reason,                     // for the user, while reauth
+    last_sync_at,                      // the last sync that finished without an error
+    next_sync_at,                      // the next scheduled check; null unless connected
+    sync: {
+      status: idle | syncing | error,
+      kind: initial | incremental | reconcile | null,   // the running run, else the last; null before the first
+      step: history | ratings | watchlist | progress | details | null,   // the running step, or the one that failed; null while idle
+      progress: {plays, plays_total, ratings, watchlist, shows},   // what the run imported; plays_total is Trakt's count, 0 until known
+      error,                           // for the user, while error
+      started_at, finished_at          // finished_at null while syncing
+    },
+    counts: {history, ratings, watchlist, watchlist_in_library},   // what's imported (history: plays)
+    settings: {use_ratings, show_watchlist, include_paused}
+  }
+  ```
+  - **States.** `off` → `pending` (a device code) → `connected` ↔ `reauth`. `reauth` means Trakt stopped accepting the tokens (a refresh failed, a second 401, or a `SECRET_KEY` that can't decrypt them). The imported data stays and `/me` keeps answering from it; connecting again goes through `pending`. Without `configured` the state is `off`.
+  - **The initial import** after a connect is a reconcile with `kind: initial`; its steps run in order, `history`, `ratings`, `watchlist`, `progress` (shows and the calendar) and `details` (artwork), and each section of `/me` fills as its step finishes.
+- **`POST /integrations/trakt/connect`** → `200 TraktConnect` (`{user_code, verification_url, expires_at, interval}`), from `off` or `reauth`: the device-code flow. While a code is live the same one comes back. The backend polls Trakt every `interval` seconds; the client polls `GET /integrations/trakt`. `409 conflict` while connected; `503 unavailable` without `configured`; `502 trakt_unavailable` when Trakt's device-code endpoint fails.
+  - **Outcomes.** Approved: `connected`, and the initial import starts. Expired: `connect_error: expired`. Denied: `denied` (free Trakt accounts can connect only 2 apps; the UI says so). Anything else: `failed`. A code that doesn't connect goes back to `off` (`reauth` when it came from there).
+- **`DELETE /integrations/trakt`** → `204`, idempotent. While `pending` it cancels the code only (back to `off`, or to `reauth` while an account is linked). Otherwise it disconnects: it stops the sync (waiting at most 10 s), revokes the token (best effort, 5 s) and purges every trakt table in one transaction. The settings stay.
+- **`PUT /integrations/trakt/settings`** with any of `{use_ratings, show_watchlist, include_paused}` → `200 TraktSettings` (all three), in any state. Fields left out keep their value and unknown ones are ignored; a value that isn't a boolean is `400 bad_request`. Stored in `app_settings` key `trakt` (§5) and kept across a disconnect.
+  - `use_ratings` (default on): recommendations (#9) weigh Trakt ratings. `show_watchlist` (on): the watchlist row on For You, and Up next's watchlist starts. `include_paused` (off): Up next keeps shows idle for over 180 days.
+- **`POST /integrations/trakt/sync`** → `202 TraktIntegration`, its `sync` running: a sync now (incremental, or a reconcile when the last one is over 24 h old; a failed initial import picks up again), or the running one, joined. `409 conflict` unless connected.
+- **`GET /me/up-next`** → `{items: [UpNextItem]}`, at most 40:
+  ```
+  UpNextItem {
+    show: {tmdb_id, title, poster_path, backdrop_path, library_id},   // library_id null when not in the library
+    next_episode: {season, episode, absolute_number, name, still_path, tmdb_id, air_date},   // tmdb_id: TMDB's episode id
+    availability: ready | downloading | needs_review | needs_torrent | not_in_library | airs_on,
+    airs_at,                           // only while airs_on: the calendar's first_aired, else the air date at 00:00 UTC; null when unknown
+    progress: {completed, aired},      // Trakt's, regular episodes; {0, aired} for a watchlist start
+    last_watched_at,                   // null for a watchlist start
+    source: progress | watchlist,
+    webdav_path, webdav_url,           // the episode's file, while ready or downloading
+    download: {pct, info_hash} | null, // while downloading ("Details" opens /activity/{info_hash})
+    review_job_id                      // while needs_review: the newest job that wants the episode (review rules)
+  }
+  ```
+  - **The next episode** is Trakt progress's `next_episode`; else (caught up) the first regular calendar entry after `last_episode`, `airs_on` while it hasn't aired; else the show is left out. Specials are never next. Absolute numbers, names and stills come from the library's episode when it has one, else from Trakt (HANDOFF §6: the landscape card's still, name and `#1124`).
+  - **Shows**: every `trakt_show_progress` row except dropped or hidden ones (`trakt_hidden`, always left out) and those last watched over 180 days ago (left out unless `include_paused`).
+  - **Watchlist starts**, only with `show_watchlist`: S01E01 of a watchlisted library show with no plays, once it has aired; at most 3, newest listed first.
+  - **Availability**, first match: the episode has a file → `ready` or `downloading`; a mapping job wants it → `needs_review` (the review rules); it hasn't aired → `airs_on`; the show is in the library → `needs_torrent` (an episode the library doesn't list yet too); else `not_in_library`. It reads the file and review facts, never `watched`.
+  - **Order**: the shows that aren't `airs_on` by `last_watched_at`, newest first; then watchlist starts; then `airs_on` by `airs_at` (unknown last).
+  - Reading it starts an incremental sync in the background when the last check is over 5 minutes old (#132).
+  - No `backdrop_dominant_color` (HANDOFF §6 lists one for up-next): the hero loads the title, which has it.
+- **`GET /me/new-episodes?days=7`** → `{items: [NewEpisodeItem]}`, at most 30, newest first (HANDOFF §6's "New episodes" row):
+  ```
+  NewEpisodeItem {
+    show, episode,                     // as UpNextItem's show and next_episode
+    aired_at,                          // the calendar's first_aired, else the air date at 00:00 UTC
+    availability: ready | downloading | needs_review | needs_torrent | not_in_library,   // as Up next's; it has aired, so never airs_on
+    webdav_path, webdav_url, download, review_job_id   // as Up next's
+  }
+  ```
+  - Regular episodes that aired in the last `days` days (1–30, default 7; anything else is `400 bad_request`) and haven't been watched: the library shows' episodes plus the Trakt calendar's, once each. Dropped and hidden shows never show.
+- **`GET /me/watchlist?type=movie|tv`** → `{items: [WatchlistItem]}`, newest listed first: `{media_type, tmdb_id, title, year, poster_path, listed_at, library}`, where `library` is `SimilarTitle.library` (`{library_id, availability_stage, episodes_total, episodes_ready} | null`) from one batch lookup. Another `type` is `400 bad_request`.
+- **`GET /me/history?page=&page_size=`** → `Paginated<HistoryItem>`, 50 a page by default (at most 200; otherwise `400 bad_request`), newest first (`watched_at DESC, id DESC`): `{id, media_type, tmdb_id, title, year, season, episode, episode_name, watched_at}`. `id` is Trakt's history event id and `tmdb_id` the movie's or the show's; `season`, `episode` and `episode_name` are null for movies.
+- **Without Trakt** (nothing imported: `off`, or `pending` before the first import) every `/me/*` answers `200` with no items, except new episodes, where the library's shows still count. In `reauth` they answer what was imported.
+- **Watch state** in `/titles`, seasons and `/library`: "Watch state rules" under "Titles and library (B1)".
+- **The web app** polls `GET /integrations/trakt` every 3 s while `state` is `pending` or `sync.status` is `syncing` (never in a hidden tab), and when a sync stops it refetches `/me`, the title pages and the library (`web/src/hooks/useTraktIntegration.ts`).
 
 ### Recommendations (R1–R3)
 - `GET /recommendations/home` returns:
@@ -870,7 +952,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
     jackett: { configured, reachable, latency_ms?, error?,
                indexers?: [{name, status: ok|timeout|error|unknown, ms: number|null, since: Timestamp|null, error?}] },   // #6
     tmdb: { configured, reachable, latency_ms?, error? },
-    trakt: { configured, connected },             // connected is always false until B5
+    trakt: { configured, connected },             // configured: Trakt's client id and secret and a valid SECRET_KEY; connected: state is connected (B5)
     ai: { configured, mtd_cost_usd },             // mtd_cost_usd: every AI feature's spend this month (ai_usage); null when it can't be read
     opensubtitles: { configured },
     hdrezka: { configured, reachable, latency_ms?, error? }   // #63
@@ -1090,27 +1172,28 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - p95 is under 4 s with Jackett warm.
 
 **B5 · Trakt, read-only** (depends on B1)
-- Owns `internal/trakt`, migration 005 and `internal/api/trakt_routes.go`, `me_routes.go`.
-- **Verify first.** Check endpoint shapes, token lifetime and rate limits against the official Trakt API docs before coding. The details below come from secondary sources.
-- **Device-code OAuth.**
-  - Flow: `POST /oauth/device/code`, then poll `/oauth/device/token` every `interval` seconds.
-  - Tokens are encrypted with `SECRET_KEY`.
-  - Access tokens reportedly expire after about 24 hours (a Trakt change in March 2025). Refresh them proactively and retry once on a 401. If the refresh fails, mark the integration disconnected and show that in the UI.
-- **Requests.**
-  - Headers: `trakt-api-version: 2`, `trakt-api-key`, and the Bearer token.
-  - Honour `Retry-After` on 429.
-  - Paginate with `page`/`limit` and the `X-Pagination-*` headers.
-- **Sync:**
-  - Every 30 minutes, poll `/sync/last_activities`.
-  - When something changed, pull only the deltas: history (`/sync/history/{movies,episodes}?start_at=`), ratings, watchlist, and watched shows and progress.
-  - Run a full reconcile nightly, and show progress during the initial import.
-- **ID mapping.** Map via `ids.tmdb` and keep the Trakt IDs too. Fetch unknown TMDB IDs into `tmdb_cache` lazily.
-- **Up next.** For each in-progress show, find the next episode (skipping specials unless they've been watched). Its availability comes from the library, assignments and air dates.
-- **Optional inputs for R1:** Trakt `/recommendations/{movies,shows}` and `/calendars/my/shows`.
+- Owns `internal/trakt`, `internal/me`, migration 005 and `internal/api/trakt_routes.go`, `me_routes.go`. #8 splits it: #130 the contract (§5, §6, the web mocks), #131 connect, #132 sync, #133 `/me` and watch state.
+- **Trakt API facts**, checked against developer.trakt.tv on 2026-10-16:
+  - OAuth is on `https://auth.trakt.tv` (`POST /oauth/device/code`, then `POST /oauth/device/token` every `interval` seconds: 400 still pending, 404 invalid, 409 already used, 410 expired, 418 denied, 429 slow down), the API on `https://api.trakt.tv`.
+  - Access tokens last about 7 days. Schedule the refresh from `created_at + expires_in`, never from a hard-coded lifetime.
+  - Refresh tokens are **single-use and rotate**: store both new tokens before using either.
+  - After a 401, stop using that token: refresh once, and a second 401 means `reauth`.
+  - Every request needs a `User-Agent` (`momoshtrem/<version>`), plus `trakt-api-version: 2`, `trakt-api-key` and the Bearer token.
+  - GETs are limited to 500 per 5 minutes. Honour `Retry-After` on 429 (Cloudflare's 429s carry none: back off with jitter).
+  - `limit` is at most 250; always paginate (`page`, `limit`, the `X-Pagination-*` headers), even where a list looks short (the watchlist answers 10 items without them).
+  - Show progress comes from the bulk `GET /sync/progress/watched`, never one request per show. Trakt doesn't filter dropped or hidden shows out of it: read `/users/hidden/dropped` and `/users/hidden/progress_watched` and filter them ourselves.
+  - Free accounts can connect at most 2 apps, so a denied code may be that limit.
+- **Device-code OAuth** (#131): tokens encrypted with `SECRET_KEY` (AES-256-GCM); a key that can't decrypt them means `reauth`, never a crash. Disconnect revokes (`POST /oauth/revoke`, best effort) and purges.
+- **Sync** (#132):
+  - Every 30 minutes, `GET /sync/last_activities`. When something changed, only the deltas: history (`/sync/history/{movies,episodes}?start_at=`), ratings, watchlist, hidden lists, progress and the calendar (`/calendars/my/shows`).
+  - A nightly reconcile, and the initial import (the same code path, with progress), replace everything in transactions, which also catches deleted or backdated plays. History deltas miss backdated plays until then.
+- **ID mapping.** Map via `ids.tmdb` and keep the Trakt ids too; skip movies and shows without a TMDB id. Artwork for titles outside the library comes through `tmdb_cache` (the `details` step).
+- **Up next, new episodes and watch state** (#133): the rules in §6 "Trakt (B5)" and "Titles and library (B1)".
+- **Optional input for R1:** Trakt `/recommendations/{movies,shows}`.
 - Acceptance:
   - Tests use a fake Trakt server.
   - Connect and disconnect work end to end.
-  - Incremental sync fetches only deltas.
+  - Incremental sync fetches only deltas: an unchanged `last_activities` is one request.
   - Up next is correct for a show with specials and for a show whose next episode hasn't aired.
 
 **B6 · Torrent and activity hygiene** (independent)
@@ -1387,7 +1470,7 @@ F tasks start against the MSW mocks and switch to the real backend as each B or 
 **Risks**
 - **Classifier regressions on items already assigned.** Leave existing assignments alone; v2 applies only to new jobs. Add a "re-run mapping" action per torrent.
 - **VFS path changes** (specials, multi-episode naming) could make Infuse rescan or lose playback state. Keep existing paths stable, and verify naming on a device before H3.
-- **Trakt API details** come from secondary sources. Verify them in B5.
+- **Trakt API changes.** §7 B5's facts were checked on 2026-10-16. Trakt has changed token lifetimes before, so refreshes follow each token's `expires_in`, and a token that stops working means `reauth` (shown in Settings), never lost data.
 - **AI cost creep.** Mitigated by the budget cap, the usage page and the configurable schedule.
 - **Until G4 ships HTTPS,** password autofill may stay unreliable even after G3.
 
