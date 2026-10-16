@@ -169,6 +169,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 **`002_app_settings.sql` (G2)**
 - `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults.
   - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`; `claude-sonnet-5-5` and `claude-opus-5-5` are priced too) and `auto_apply_high_confidence` (true), and the AI resolver (B3) `monthly_budget_usd` (none: no cap; once every AI feature's spend this month reaches it, AI calls are skipped). `library.SettingsRepository.AISettings` reads it; #9 serves the endpoints.
+  - Key `quality_profile`: one document shaped like `GET/PUT /settings/quality-profile` (§6 "Search"; #6). A missing field takes its default.
 
 **`003_metadata.sql` (B1)**
 - `movies`: add `imdb_id`, `poster_path`, `backdrop_path`, `runtime`, `genres jsonb`, `metadata_updated_at`.
@@ -356,7 +357,9 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
   - it has no conflict;
   - something maps and isn't ignored (a torrent of openings and endings alone waits for the user);
   - nothing that maps is pending, and everything that maps is `high`;
-  - no video is unmatched.
+  - no video is unmatched;
+  - no proposal has `replaces` (it would replace a file the item already has, a torrent or an HDRezka stream).
+- **Dry runs** (Inspect, §6 "Search") are read-only: PATCH and reclassify answer `409 dry_run`, as Apply does; Discard works. For a title not in the library, `item.id` is null and `ProposalTarget.episode_id` is a TMDB episode id.
 - **Restart.** Jobs before `resolving` start again from `queued`. An interrupted `resolving` gets `ai_error` and its status recomputed (`needs_review`, or `ready` when nothing is pending), keeping the rules' proposals; it isn't auto-applied. Apply and re-check never need the torrent loaded: the file list is stored as proposals.
 - **Failure.** A failed job has `error` for the user; the database also keeps why for code (`error_code`: `metadata_timeout`, `no_videos`, `no_torrents`, `title_gone`, `invalid_magnet`, `torrent_error`, `internal`).
 
@@ -427,7 +430,7 @@ ProposalTarget { episode_id, season, episode, absolute_number, name }
 - **`confidence`** is null with no target and for a manual pick.
 - **`reason`** is at most 120 characters and never starts with "AI:": the UI labels AI reasons from `source`.
 - **Conflicts:** two or more non-ignored proposals whose targets share an episode. They block Apply. Subtitles never conflict: one that no video claims can be accepted onto an episode a video also maps to.
-- **`replaces`.** An episode that already has a file from elsewhere isn't a conflict. The proposal gets a `replaces` note for its first target instead, computed when read; it never blocks.
+- **`replaces`.** An episode that already has a file from elsewhere isn't a conflict. The proposal gets a `replaces` note for its first target instead, computed when read; it never blocks Apply, but auto-apply waits.
 - **`superseded_by`** points from a v1 file to its v2 in the same torrent; the v1 sits in `extras` as `superseded`.
 - **`updated`/`hinted`:** the latest re-check changed this proposal (and had a hint). Both reset when the next re-check starts.
 
@@ -513,49 +516,161 @@ POST /shows/{id}/assign-hdrezka  {url, translator_id, quality, items: [{episode_
 - **`GET /status`** adds `hdrezka: {configured, reachable, latency_ms?, error?}`: one GET of the mirror's home page, only while HDRezka is on. The anti-bot page reports `error: "HDRezka asks for a browser check"`.
 
 ### Search (B4)
-
-`GET /search/torrents` parameters:
-
-| Group | Parameters |
-|---|---|
-| Context | `media_type=movie|tv`, `tmdb_id`, `season`, `episode`, `q` |
-| Filters | `resolution`, `source`, `codec`, `hdr`, `pack`, `min_seeders`, `max_size_gb`, `indexer` |
-| Sort and paging | `sort=best|seeders|size|newest`, `page`, `page_size` |
-
-Response:
+Torrent search across Jackett's indexers, ranked by the quality profile. Delivered by #6's slices. Types: `web/src/lib/api/contract/search.ts`.
 ```
-{
-  items: [Release],
-  facets: { resolution: {"2160p": 12, …}, source, codec, hdr, pack, indexer },
-  total, page, page_size,
-  queries: [...],   // what was sent to Jackett
-  cached_at,
-  warnings: [...]   // e.g. "2 indexers timed out"
+GET  /search/torrents?media_type=movie|tv&tmdb_id=[&season=&episode=][&scope=][&q=][&<filter>=…][&sort=][&page=&page_size=][&refresh=1]
+     → SearchTorrentsResponse
+POST /search/torrents/resolve {release_id} → 200 {magnet_uri, info_hash}
+POST /search/torrents/inspect {media_type, tmdb_id, release_id | magnet_uri, hint?: {season?, episode?}} → 202 {job_id}
+GET  /settings/quality-profile → QualityProfile
+PUT  /settings/quality-profile QualityProfile → QualityProfile
+```
+
+**`GET /search/torrents`**
+- **Context:**
+  - `media_type=movie|tv` and `tmdb_id` are both required; `season` and `episode` are optional.
+  - `scope=episode|season|any` (TV only; ignored for movies):
+    - default `episode` when an episode is given, `season` when only a season is given, otherwise `any`;
+    - `scope=episode` without an episode, or `scope=season` without a season, is `400 bad_request`.
+  - `q`: the client sends it only when the user edited the field. It replaces the generated text queries, ID queries are skipped, and the scope still filters.
+- **Filters:**
+  - `resolution`, `source`, `codec`, `hdr`, `audio`, `pack`, `indexer`, `group`: each repeatable, OR within a filter and AND across filters. An unknown value matches nothing.
+  - `min_seeders`.
+  - `min_size_gb` and `max_size_gb`: per episode for TV (size ÷ the episodes it covers, so a pack compares with a single episode), the whole release for movies.
+- **Sort and paging:**
+  - `sort=best|seeders|size|newest`, default `best`: `seeders` most first, `size` smallest first, `newest` by `published_at` (unknown last);
+  - `page`, default 1;
+  - `page_size`, default 25, max 100;
+  - `refresh=1` (Retry) re-runs the search, at most once per 10 s per plan; a second one within 10 s reads the running or cached search.
+- **Query plan** (no `q`):
+  - an ID query: `imdbid`, `tvdbid` or `tmdbid`, only to indexers whose caps support it, with `season`/`ep`;
+  - normalised title queries: strip `: ' ! ,` and similar; "Title Year" for movies, "Title SxxEyy" for an episode, "Title S01" for a season;
+  - anime extras: the short title with the absolute number (`Frieren 29`), the romaji title from TMDB's alternative titles, and scene numbering (TMDB S01E29 is release S02E01, from cours or episode groups);
+  - when the exact queries find nothing, a show-level fallback query whose results are filtered by coverage.
+- **What each scope keeps:**
+  - `episode`: releases that contain the episode, packs included;
+  - `season`: any release that isn't a single episode and has at least one episode of the season;
+  - `any`: everything that names the title.
+- **Hygiene:**
+  - one Torznab request per indexer per query, with 8 s per request;
+  - adult categories (the 6000 range) are never requested, and results in them are dropped;
+  - HTML entities are decoded;
+  - text-query results whose title matches none of the known titles are dropped (unless `q` was given);
+  - duplicates are merged by info hash, otherwise by normalised title + size: the most seeders wins, and a magnet is preferred.
+- **Progress:**
+  - a GET starts the plan's search unless it's cached or already running;
+  - the search runs detached from the request, with a single flight per plan;
+  - the GET that starts it answers when the search completes or after 2 s, whichever comes first; a GET that finds it running answers at once;
+  - while `complete` is false, the client polls the same URL every second, without `refresh`;
+  - filters, sort and paging apply to what has arrived so far.
+- **Cache:**
+  - 10 minutes per plan, keyed by (media type, TMDB id, scope, season, episode, `q`). Filters, sort and paging aren't part of it, so they never search again;
+  - scores and the profile's hide rules are applied when results are read, so a profile change takes effect at once.
+- **Response:**
+  ```
+  SearchTorrentsResponse {
+    items: [Release], total, page, page_size,   // total: after filters
+    total_unfiltered,           // in scope, after the profile hides, before filters ("Your filters hide all 27 results")
+    hidden,                     // dropped by the profile (avoid terms, above max_resolution)
+    best_id,                    // string | null; sort=best puts it first on page 1
+    facets: { resolution, source, codec, hdr, audio, pack, indexer, group },   // each [{value, count}]
+    queries: [{q, label}],      // text queries sent, primary first (the field shows queries[0].q);
+                                // label null | "original title" | "absolute number" | "scene numbering" | "whole show"
+    indexers: [{name, status: pending|ok|timeout|error, count, ms, error?}],   // ms: time so far while pending
+    complete,
+    missing: {season_number, from, to, absolute_from, absolute_to, count, best_covers} | null,
+    cached_at,                  // when the search started
+    warnings: [string]          // problems that aren't about one indexer
+  }
+  ```
+  - `indexers`: one entry per indexer over all the plan's queries. `pending` while any of its requests runs; `ok` when every one answered; otherwise its first failure, with `error` saying why (never the key or a link). `count` is what it returned.
+  - `queries`: `"whole show"` labels the fallback query.
+  - `missing`: the title's `library.missing` run (the frontier, under "Availability rules"), only when the context's season is the run's and its episode, if any, is in the run. It's null for movies, for titles not in the library and for one-episode runs. `best_covers` means the best match covers the whole run. It drives "10 episodes are missing · A pack gets 29–38 in one go. The best match below already does."
+- **Release:**
+  ```
+  Release {
+    id,                         // stable per indexer result across searches; indexed 1 h for resolve and inspect
+    raw_title, display_title,
+    info_hash | null, magnet_uri | null,
+    size_bytes, seeders, leechers, published_at | null, indexer,
+    attrs: { resolution, source, codec, bit_depth: 10|12|null, hdr: [], audio: [], channels: "7.1"|"5.1"|"2.0"|null,
+             languages: [],         // "multi", "dual", or ISO 639-1 codes
+             subs: "multi"|"hardcoded"|null, group | null, edition | null, repack,
+             pack: {type, label, seasons: [n], episodes: {from, to} | null} | null },  // release numbering; null for movies
+    score,                      // 0–100
+    score_reasons: [string],    // positive only, most important first; the UI shows at most 4
+    notes: [string],            // e.g. 'Scene "Season 2" = TMDB S01E29–E38', "Covers all 4 seasons, 53 episodes"
+    warnings: [string],         // e.g. "CAM recording · filmed in a cinema", "Only 4 seeders · may be slow", "Over your 8 GB/hour limit"
+    flags: [cam|no_seeders|low_seeders|size_outlier|over_size_limit|needs_torrent_fetch]
+  }
+  ```
+  - `needs_torrent_fetch`: no magnet yet, so Add and Copy magnet call resolve first.
+  - `hdr` and `audio` list only what the name says; `repack` covers PROPER too.
+- **Allowed values** (they are both the facet values and the filter values):
+  - `resolution`: 2160p, 1080p, 720p, 576p, 480p, unknown;
+  - `source`: REMUX, BluRay, WEB-DL, WEBRip, WEB, HDTV, DVD, CAM (which also covers TS, HDTS, TELESYNC, TC and SCR), unknown;
+  - `codec`: x265 (HEVC, H.265), x264 (AVC, H.264), AV1, other, unknown;
+  - `hdr`: DV, HDR10+, HDR10, HDR, SDR (the facet's and filter's `SDR` also covers releases whose `hdr` is empty);
+  - `audio`: Atmos, TrueHD, DTS-HD, DTS, DD+, DD, AAC, FLAC, Opus;
+  - `pack.type`: episode, multi_episode, season, multi_season, complete, unknown;
+  - `indexer`: names; `group`: release groups.
+- **Facets:**
+  - disjunctive: each facet is counted with every other active filter applied and its own left out, so a count is what selecting that value would give (this replaces HANDOFF §6's `would_be`);
+  - the filter sheet's "Show N results" asks the same endpoint with the draft filters and `page_size=1`;
+  - buckets list every value present in the unfiltered scope, plus any selected value;
+  - order: allowed values in the order above; `indexer` and `group` by count (`group`: top 20);
+  - `hdr` and `audio` are multi-valued: a release counts once per value. `pack` is empty for movies.
+- **Profile effects:**
+  - hidden (counted in `hidden`): any avoid term as a whole word, case-insensitive; a resolution above `max_resolution`;
+  - warnings and score penalties: CAM, no seeders, under 5 seeders, over `max_gb_per_hour`, an implausible size;
+  - `best_id`: the top score among the filtered releases flagged neither `cam` nor `no_seeders`, with a score of at least 50;
+  - a pack that includes episodes that already have a file gets a note that's true: adding replaces their files, and the mapping review asks first (auto-apply waits on `replaces`, "Assignment").
+- **Errors:**
+
+  | Status | When |
+  |---|---|
+  | `400 bad_request` | A malformed request: no `media_type` or `tmdb_id`, a scope without its season or episode, an unknown `scope` or `sort`, a malformed number |
+  | `404 not_found` | Unknown TMDB title |
+  | `502 tmdb_unavailable` | The title isn't in the library, there's no `q`, and TMDB is down |
+  | `502 jackett_unavailable` | The indexer list can't be fetched, or Jackett rejects the key |
+  | `503 unavailable` | Jackett isn't configured |
+  | `200` | Every indexer failed: the answer carries the per-indexer statuses |
+
+**`POST /search/torrents/resolve`** with `{release_id}` → `200 {magnet_uri, info_hash}`
+- The client calls it before Add or Copy magnet when a release has no magnet.
+- The Torznab `link` carries the Jackett API key, so it never leaves the server.
+- The server fetches only the link's path and query on the configured `JACKETT_URL`, never the link's own host (the SSRF guard).
+- A redirect to `magnet:` is the answer; any other redirect is refused.
+- The `.torrent` file is capped at 5 MB, read with `metainfo.Load`, and turned into a magnet with `dn` and trackers.
+- Errors: `400`; `404 not_found` (expired: search again); `502 torrent_unavailable`; `504 timeout` (15 s).
+
+**`POST /search/torrents/inspect`** with `{media_type, tmdb_id, release_id | magnet_uri, hint?: {season?, episode?}}` → `202 {job_id}`, or `200 {job_id}` when the same title and torrent were inspected in the last hour.
+- The job is a dry run (`dry_run: true`) with the AssignmentJob shape; `hint` becomes the job's hint.
+- For a title not in the library:
+  - `item.id` is null, and `item.title`, `year` and `poster_path` come from TMDB;
+  - for a show, `targets[].episode_id` is the TMDB episode id;
+  - there's no metadata refresh, and the classifier runs rules only.
+- A library show runs the normal pipeline, AI included.
+- Dry runs are read-only: PATCH and reclassify answer `409 dry_run`, as Apply already does. Discard works.
+- Dry runs are deleted after 24 h, and their torrent is dropped then unless something else uses it.
+- Inspect is a nested sheet inside the search sheet, not a URL sheet.
+- Errors: `400 bad_request` (neither `release_id` nor `magnet_uri`, a magnet without an info hash), `404 not_found` (an expired release or an unknown TMDB title), and resolve's `502` and `504` for a release without a magnet.
+
+**`GET` and `PUT /settings/quality-profile`**
+- `PUT` takes the whole profile and answers the saved one. Invalid values are `422 validation_error`, naming the field.
+- Stored in `app_settings` under the key `quality_profile` (§5). A missing field takes its default.
+```
+QualityProfile {
+  preferred_resolution: "720p"|"1080p"|"2160p",  // default "1080p"
+  max_resolution: "1080p"|"2160p"|null,          // null = no limit (default); must be ≥ preferred
+  max_gb_per_hour,                               // 1–20, step 0.5; default 8; soft (a warning and penalty, not hidden)
+  prefer_x265, prefer_hdr, prefer_dolby_vision,  // default false
+  avoid_terms: [string],                         // ≤ 30 terms of 1–30 chars; default ["CAM","HDCAM","TS","HDTS","TELESYNC"]; matching releases are hidden
+  preferred_groups: [string]                     // ≤ 30; a small boost that never overrides seeders or the size limit; default []
 }
 ```
-
-Each `Release`:
-```
-{
-  id, raw_title, display_title,
-  info_hash?, magnet_uri?,
-  size_bytes, seeders, leechers, published_at, indexer,
-  attrs: {
-    resolution, source, codec,
-    hdr: [], audio: [], group, languages: [], edition, repack,
-    pack: {
-      type: "episode"|"multi_episode"|"season"|"multi_season"|"complete",
-      seasons: [], episodes: []
-    }
-  },
-  score, score_reasons: [],
-  flags: ["cam", "no_seeders", "size_outlier", "needs_torrent_fetch"]
-}
-```
-
-Related endpoints:
-- `POST /search/torrents/inspect` with `{release_id | magnet_uri, media_type, tmdb_id}` returns `202 {job_id}`. The job is a dry run (`dry_run=true`) with the same shape as an assignment job, and it is never applied.
-- `GET /settings/quality-profile` and `PUT /settings/quality-profile` with `{preferred_resolution, min_resolution, max_resolution, prefer_codecs[], prefer_hdr, max_gb_per_hour, avoid_terms[], preferred_groups[]}`.
+- `max_gb_per_hour` compares the size per episode (or the movie's) with the runtime; without a runtime there's no check.
+- There's no preview endpoint (in place of HANDOFF §6's `/settings/quality-profile/preview`): "Best match would prefer…" is a client-side function of the profile.
 
 ### Trakt (B5)
 - `GET /integrations/trakt` returns `{configured, connected, username, last_sync_at, sync_status, counts: {history, ratings, watchlist}}`.
@@ -606,7 +721,8 @@ Related endpoints:
     version, uptime_seconds, checked_at,          // checked_at: RFC 3339, when the probes ran
     db: { ok, size_bytes, error? },
     webdav: { url, port, auth_enabled, username?, active_readers? },  // username only when auth is on
-    jackett: { configured, reachable, latency_ms?, error? },
+    jackett: { configured, reachable, latency_ms?, error?,
+               indexers?: [{name, status: ok|timeout|error|unknown, ms: number|null, since: Timestamp|null, error?}] },   // #6
     tmdb: { configured, reachable, latency_ms?, error? },
     trakt: { configured, connected },             // connected is always false until B5
     ai: { configured, mtd_cost_usd },             // mtd_cost_usd: every AI feature's spend this month (ai_usage); null when it can't be read
@@ -616,7 +732,12 @@ Related endpoints:
   ```
   - Probes run concurrently with a 3 s timeout each. Results are cached for 30 s, and concurrent callers share one check. `?refresh=1` bypasses the cache at most once every 5 s.
   - It returns 200 even when a probe fails (the body says what's wrong) and 503 only when the database ping fails. The response never contains secrets.
-  - Per-indexer health (`jackett.indexers`, HANDOFF §6) is added by B4.
+  - **`jackett.indexers`** (#6) is the per-indexer health:
+    - the probe asks `t=indexers&configured=true` instead of `t=caps`, which checks the key and lists the indexers in one request;
+    - each indexer is merged with its latest search outcome (in memory since startup) and is `unknown` before any search;
+    - `since` is when the current timeout or error streak began ("Timing out for 2 h");
+    - `indexers` is omitted when Jackett isn't configured or isn't reachable;
+    - there's no Jackett version and no "Open Jackett" link (Jackett is loopback-only).
   - The web app's own `GET /api/status` (F1) adds `web: {version}`. A backend 503 (database down) is passed through as 200 with the same body, so Settings can show which service is down. Only a backend that can't be reached becomes `503 {error: {code: "backend_unreachable"}, web, webdav: {reachable}}`, probing WebDAV directly (`WEBDAV_INTERNAL_URL`, default: the API host on port 36911) so the offline page can say whether Infuse still plays.
 - `GET /torrents` (B6) returns `{items}`. It merges torrents known from the DB but not loaded (`idle`) with live stats. It returns real `download_speed`/`upload_speed`, and each torrent links to its titles.
 
@@ -780,6 +901,7 @@ Related endpoints:
 - Acceptance: at least 95% file-level accuracy on the golden set, with average cost per torrent reported in the PR.
 
 **B4 · Torrent search service** (independent; `inspect` uses B2 jobs, so stub it until B2 merges)
+- Delivered by #6's slices (#86–#91). §6 "Search" is the contract; where the bullets below differ, §6 wins.
 - Owns `internal/search`, `internal/release`, `internal/api/search_routes.go` and the quality-profile settings.
 - **Torznab client:**
   - Query `t=caps` at startup and cache it.
@@ -990,6 +1112,7 @@ Then, in parallel (they live in separate route folders):
   - **Primary action** reflects the real state. Once a title is ready, the torrent card moves above the fold and "Search torrents" becomes secondary.
   - **Subtitles** panel, ranked by release match (B7).
 - **F3 · Torrent search sheet** (depends on B4; B2 for Inspect)
+  - Delivered by #6's slices (#92–#95; Settings › Quality: #94). §6 "Search" is the contract; where the bullets below differ, §6 wins.
   - **Context-aware defaults.** Movie, season or episode, with a scope switch: Episode · Season pack · Any.
   - **Filters.** Chips with facet counts; on mobile they open in a bottom sheet. Sort and paginate ("Showing 25 of 143 · Load more").
   - **Best match.** A highlighted card with its score reasons.
