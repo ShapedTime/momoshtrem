@@ -153,6 +153,15 @@ test.describe('library', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Copied' })).toContainText('Paste it into Infuse › Add files › WebDAV');
   });
 
+  test('Find missing episodes opens torrent search on the first missing one', async ({ page }, testInfo) => {
+    await signIn(page, '/library');
+    await moreActions(page, 'Frieren: Beyond Journey’s End').click();
+    await page.getByRole(isDesktop(testInfo) ? 'menuitem' : 'button', { name: /Find missing episodes/ }).click();
+    await expect(page).toHaveURL(/\/library\?sheet=torrent&show=209867&season=1&se=S01E29$/);
+    const search = page.getByRole('dialog', { name: /^Find a source · Frieren: Beyond Journey’s End S01E29/ });
+    await expect(search.getByRole('article', { name: '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]' })).toContainText('Best match');
+  });
+
   test('remove, then Undo: the title comes back and nothing is sent', async ({ page }) => {
     const sent = deletes(page);
     await signIn(page, '/library');

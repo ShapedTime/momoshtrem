@@ -120,7 +120,8 @@ test.describe('show page', () => {
   test('the episode sheet closes with Escape and with Back, and opens the search over it from Replace', async ({ page }, testInfo) => {
     await signIn(page, '/tv/209867');
     const options = page.getByRole('button', { name: /^S01E28 options/ });
-    const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again' });
+    // Exact: the search sheet's name ends with the episode's
+    const sheet = page.getByRole('dialog', { name: 'It Would Be Embarrassing When We Met Again', exact: true });
     // Right after a sheet closes the router may still be settling its Back and drop a push: retry the open
     const openSheet = () =>
       expect(async () => {
