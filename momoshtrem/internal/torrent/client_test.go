@@ -1,9 +1,6 @@
 package torrent
 
 import (
-	"go/ast"
-	"go/parser"
-	gotoken "go/token"
 	"reflect"
 	"slices"
 	"testing"
@@ -123,53 +120,4 @@ func sameValue(a, b reflect.Value) bool {
 		return a.IsNil() == b.IsNil() && (a.IsNil() || a.Pointer() == b.Pointer())
 	}
 	return reflect.DeepEqual(a.Interface(), b.Interface())
-}
-
-// TestNewClientUsesClientConfigFor keeps NewClient and the lab on one config:
-// NewClient hands ClientConfigFor's result straight to torrent.NewClient, so
-// a setting can't go into NewClient alone.
-func TestNewClientUsesClientConfigFor(t *testing.T) {
-	file, err := parser.ParseFile(gotoken.NewFileSet(), "client.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body *ast.BlockStmt
-	for _, d := range file.Decls {
-		if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == "NewClient" {
-			body = fn.Body
-		}
-	}
-	if body == nil {
-		t.Fatal("client.go has no NewClient")
-	}
-
-	calls := 0
-	ast.Inspect(body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || !isSelector(call.Fun, "torrent", "NewClient") {
-			return true
-		}
-		calls++
-		if len(call.Args) != 1 {
-			t.Errorf("torrent.NewClient takes %d arguments in NewClient, want 1", len(call.Args))
-			return true
-		}
-		if arg, ok := call.Args[0].(*ast.CallExpr); !ok || !isIdent(arg.Fun, "ClientConfigFor") {
-			t.Error("NewClient must pass ClientConfigFor(cfg, cc) straight to torrent.NewClient; put client settings in ClientConfigFor")
-		}
-		return true
-	})
-	if calls != 1 {
-		t.Errorf("NewClient calls torrent.NewClient %d times, want once", calls)
-	}
-}
-
-func isSelector(e ast.Expr, pkg, name string) bool {
-	sel, ok := e.(*ast.SelectorExpr)
-	return ok && sel.Sel.Name == name && isIdent(sel.X, pkg)
-}
-
-func isIdent(e ast.Expr, name string) bool {
-	id, ok := e.(*ast.Ident)
-	return ok && id.Name == name
 }

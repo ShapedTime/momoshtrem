@@ -7,25 +7,29 @@ import (
 )
 
 // StaticMovie and StaticEpisode are videos for NewStaticFS.
-type StaticMovie struct {
-	Title      string
-	Year       int
-	Assignment *library.TorrentAssignment
-}
+type (
+	StaticMovie struct {
+		Title      string
+		Year       int
+		Assignment *library.TorrentAssignment
+	}
 
-type StaticEpisode struct {
-	Show       string
-	Year       int
-	Season     int
-	Episode    int
-	Name       string
-	Assignment *library.TorrentAssignment
-}
+	StaticEpisode struct {
+		Show       string
+		Year       int
+		Season     int
+		Episode    int
+		Name       string
+		Assignment *library.TorrentAssignment
+	}
+)
 
 // NewStaticFS is a LibraryFS whose tree is fixed: it holds the given videos,
 // named as the tree builder names them, for the streamlab lab and for tests
 // outside the package (WebDAV end to end). It has no repositories, so
-// InvalidateTree and rebuilds aren't supported yet; H4 (#183) adds that.
+// InvalidateTree, or anything else that rebuilds the tree, panics: the
+// rebuild reads the nil repositories (buildTreeFromDB). H4 (#183) gives it
+// a static builder.
 func NewStaticFS(movies []StaticMovie, episodes []StaticEpisode) *LibraryFS {
 	tree, moviesDir, tvDir := newEmptyTree()
 	dir := func(parent *VirtualDir, dirPath string) *VirtualDir {
