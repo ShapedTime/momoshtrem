@@ -152,6 +152,7 @@ GET /api/v2.0/indexers/all/results/torznab/?apikey={key}&t=search&q={query}
 - `internal/artwork/` - Backdrop dominant colour for the hero glow
 - `internal/identify/` - Pure rules classifier: `Classify` maps a torrent's files to episodes with a confidence and a reason, `RankMovieFiles`, `MergeAI`; `token/` tokenizer; `corpus/` loads the corpus in `testdata/` (gates: ≥95% exact, zero wrong `high`)
 - `internal/identify/ai/` - The Haiku resolver: asks Claude about the files the rules can't place (prompt, scope, cost)
+- `internal/release/` - Release-name parser on `identify/token`: `Parse` gives PLAN §6 `Release.attrs` (its JSON), the title, year, display title and pack coverage (absolute spans flagged). Search and subtitle ranking use it
 - `internal/service/assignment_*.go` - Mapping jobs: create and worker (`_jobs`, `_worker`), the contract's rules (`_rules`), PATCH (`_review`), re-check (`_recheck`), Apply and its VFS writer (`_apply`), overrides and torrent files (`_override`), legacy `?wait=true` (`_legacy`), library show → classifier catalog (`_catalog`)
 - `internal/library/assignment_job*.go`, `ai_store.go`, `settings_ai.go` - Jobs and proposals (claimed with `FOR UPDATE SKIP LOCKED`), `ai_usage` and `ai_cache`, AI settings in `app_settings`
 - `cmd/classifier-eval/` - The classifier on the golden corpus, rules and AI modes (Commands above)

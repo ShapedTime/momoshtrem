@@ -317,6 +317,7 @@ var sources = map[string]bool{
 	"web": true, "webdl": true, "webrip": true, "webhd": true, "hdtv": true, "pdtv": true, "sdtv": true,
 	"dsr": true, "tvrip": true, "hdtvrip": true, "dvd": true, "dvdrip": true, "dvd5": true, "dvd9": true,
 	"dvdscr": true, "hdrip": true, "vhsrip": true, "laserdisc": true, "tc": true,
+	"hdcam": true, "camrip": true, "hdts": true, "telesync": true, "telecine": true, "hdtc": true,
 	"amzn": true, "nf": true, "dsnp": true, "hmax": true, "hulu": true, "atvp": true, "pcok": true,
 	"pmtp": true, "cr": true, "funi": true, "hidive": true, "adn": true, "bglobal": true, "abema": true,
 	"stan": true, "itunes": true,

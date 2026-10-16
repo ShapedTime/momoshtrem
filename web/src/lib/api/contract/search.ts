@@ -57,7 +57,7 @@ export interface SearchTorrentsParams {
 /** A release's numbering as its name gives it, not TMDB's. */
 export interface ReleasePack {
   type: PackType;
-  /** e.g. "S01E29", "Season 1", "S01–S04". */
+  /** e.g. "S01E29", "Episodes 29–38", "Season 1", "Seasons 1–4", "Complete". */
   label: string;
   seasons: number[];
   /** Null for whole seasons. */
