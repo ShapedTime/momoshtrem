@@ -23,6 +23,7 @@ Self-hosted media streaming stack for Apple TV with library management:
 - **momoshtrem** (Go): Library-first torrent streaming service with WebDAV
 - **web** (Next.js, package `momoshtrem-web`): the momoshtrem UI for browsing TMDB, managing the library and searching torrents. Lives in `web/`.
 - **Jackett**: Torrent indexer aggregator, queried by momoshtrem for torrent search
+- **FlareSolverr**: passes Cloudflare challenges for Jackett's indexers behind one (1337x, EZTV, RuTracker); internal only, set once in Jackett (README)
 - **Postgres**: Library database
 
 ## Redesign (v2)
@@ -81,8 +82,8 @@ ops/deploy/deploy.sh momoshtrem-v2 [<commit>]    # deploy; a rollback is an olde
                                        │
                         ┌──────────────┴──────────────┐
                         ▼                             ▼
-                    TMDB API                 momoshtrem (:4444) ───► Jackett (:9117)
-                                                      │              (torrent search)
+                    TMDB API                 momoshtrem (:4444) ───► Jackett (:9117) ───► FlareSolverr (:8191)
+                                                      │              (torrent search)     (Cloudflare challenges)
                                                       ▼
                                              Postgres (library)
                                                       │

@@ -13,7 +13,7 @@ import (
 )
 
 // Download fetches a result's Link and returns either a magnet link or the
-// .torrent file's bytes (at most 5 MB, within 15 s). A magnet Link comes
+// .torrent file's bytes (at most 5 MB, within 25 s). A magnet Link comes
 // back as it is.
 //
 // The SSRF guard: only the link's path and query are fetched, from the

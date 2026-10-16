@@ -579,14 +579,14 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   - `season`: any release that isn't a single episode and has at least one episode of the season;
   - `any`: everything that names the title.
 - **Hygiene:**
-  - one Torznab request per indexer per query, with 8 s per request;
+  - one Torznab request per indexer per query, with 90 s per request: an indexer behind Cloudflare answers only after FlareSolverr's challenge, which Jackett solves one at a time (#106). The indexer list has 8 s;
   - requests ask for the title's categories only: TV and anime for a show, movies (plus anime for an anime film) for a movie. Adult categories (the 6000 range) are never requested, and results in them are dropped;
   - HTML entities are decoded;
   - text-query results whose title matches none of the known titles are dropped (unless `q` was given). Known titles are the title, original title, romaji and aliases, plus their short forms for anime ("Frieren"); a trailing country tag ("The Office US") and any part of a slash-separated name count. A movie's text-query results from a year more than 1 off are dropped too. ID-query results are trusted;
   - duplicates are merged by info hash, otherwise by normalised title + size: the most seeders wins, and a magnet is preferred. Sizes match within 5%, because indexers round them ("1.4 GiB"), and two different info hashes are never merged. The copy that stays takes the other's magnet when it has none.
 - **Progress:**
   - a GET starts the plan's search unless it's cached or already running;
-  - the search runs detached from the request, with a single flight per plan, and stops after 60 s (a `warnings` entry says so);
+  - the search runs detached from the request, with a single flight per plan, and stops after 180 s, two passes of 90 s (a `warnings` entry says so);
   - the GET that starts it answers when the search completes or after 2 s, whichever comes first; a GET that finds it running answers at once;
   - while `complete` is false, the client polls the same URL every second, without `refresh`;
   - filters, sort and paging apply to what has arrived so far.
@@ -676,7 +676,7 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
 - The server fetches only the link's path and query on the configured `JACKETT_URL`, never the link's own host (the SSRF guard).
 - A redirect to `magnet:` is the answer; any other redirect is refused.
 - The `.torrent` file is capped at 5 MB, read with `metainfo.Load`, and turned into a magnet with `dn` and trackers.
-- Errors: `400`; `404 not_found` (expired: search again); `502 torrent_unavailable`; `504 timeout` (15 s).
+- Errors: `400`; `404 not_found` (expired: search again); `502 torrent_unavailable`; `504 timeout` (25 s: the `.torrent` can come through FlareSolverr too, #106).
 
 **`POST /search/torrents/inspect`** with `{media_type, tmdb_id, release_id | magnet_uri, hint?: {season?, episode?}}` → `202 {job_id}`, or `200 {job_id}` when the same title and torrent (info hash) were inspected in the last hour.
 - **Reuse:** the earlier dry run is answered only when it wasn't cancelled and didn't fail, and the title's library state is the same: a title added to the library since gets a new dry run, with library ids. The new hint is then ignored.

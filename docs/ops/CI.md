@@ -44,7 +44,7 @@ The commands are the ones in `CLAUDE.md` "Commands". A new push to a PR cancels 
 `.github/dependabot.yml` opens one grouped PR a week for each ecosystem:
 - **GitHub Actions.** It moves the SHA pins and their version comments.
 - **The Dockerfile base images** in `momoshtrem/` and `web/`. A Node bump in `web/Dockerfile` also moves the `web` job's Node.
-- **The third-party images in `compose.yml`**: Jackett, Postgres, pgAdmin and Caddy, pinned to exact tags (#37). Our own two images are ignored: deploys move their tag.
+- **The third-party images in `compose.yml`**: Jackett, FlareSolverr, Postgres, pgAdmin and Caddy, pinned to exact tags (#37, #106). Our own two images are ignored: deploys move their tag.
 
 ## 5. One-time setup
 

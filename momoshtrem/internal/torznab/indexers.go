@@ -94,7 +94,7 @@ func (c *Client) FetchIndexers(ctx context.Context) ([]Indexer, error) {
 	ch := c.group.DoChan("indexers", func() (any, error) {
 		// Detached: other callers may be waiting on this request.
 		body, err := c.get(context.WithoutCancel(ctx), apiPath("all"),
-			url.Values{"t": {"indexers"}, "configured": {"true"}}, c.requestTimeout)
+			url.Values{"t": {"indexers"}, "configured": {"true"}}, IndexersTimeout)
 		var list []Indexer
 		if err == nil {
 			list, err = parseIndexers(body)

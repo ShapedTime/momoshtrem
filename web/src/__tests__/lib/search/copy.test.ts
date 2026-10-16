@@ -6,6 +6,7 @@ import {
   filteredEmptyTitle,
   filtersMatchNothing,
   hiddenByProfile,
+  indexerErrorText,
   indexerList,
   indexerProgress,
   missingCopy,
@@ -26,6 +27,11 @@ import {
 const ok = (name: string, count = 3): IndexerReport => ({ name, status: 'ok', count, ms: 300 });
 /** What Jackett answers for an indexer behind Cloudflare when FlareSolverr isn't set up (#106). */
 const CHALLENGE = 'jackett error: Challenge detected but FlareSolverr is not configured';
+/** Jackett's answers once it is (#106): FlareSolverr down, a challenge it couldn't solve in time, and a captcha. */
+const FS_DOWN = 'jackett error: Error connecting to FlareSolverr server: System.Net.Http.HttpRequestException: Name does not resolve (flaresolverr:8191)';
+const fsFailed = (seconds: string) =>
+  `jackett error: FlareSolverr was unable to process the request, please check FlareSolverr logs. Message: Error: Error solving the challenge. Timeout after ${seconds} seconds.`;
+const FS_CAPTCHA = 'jackett error: FlareSolverr was able to process the request, but a captcha was detected. Message: Captcha detected but no automatic solver is configured.';
 const failed = (name: string, error?: string): IndexerReport => ({ name, status: 'error', count: 0, ms: 40, error });
 const FRIEREN_QUERIES = [
   { q: 'Frieren 29', label: null },
@@ -75,6 +81,16 @@ describe('searching', () => {
     expect(indexerProgress({ name: 'TPB', status: 'error', count: 0, ms: 50 })).toBe('failed');
     expect(indexerProgress({ name: 'TPB', status: 'error', count: 0, ms: 50, error: 'jackett error: Invalid API Key' })).toBe('Invalid API Key');
     expect(indexerProgress({ name: 'EZTV', status: 'error', count: 0, ms: 50, error: CHALLENGE })).toBe('Jackett needs FlareSolverr for it');
+    expect(indexerProgress(failed('1337x', FS_DOWN))).toBe('Jackett can’t reach FlareSolverr');
+    expect(indexerProgress(failed('1337x', fsFailed('5.0')))).toBe('FlareSolverr couldn’t get past Cloudflare');
+    expect(indexerProgress(failed('1337x', FS_CAPTCHA))).toBe('Cloudflare asks for a captcha');
+  });
+
+  it('puts an indexer’s error in a few words, for Status too', () => {
+    expect(indexerErrorText(FS_DOWN)).toBe('Jackett can’t reach FlareSolverr');
+    expect(indexerErrorText(CHALLENGE)).toBe('Jackett needs FlareSolverr for it');
+    expect(indexerErrorText('jackett error: Login failed.')).toBe('Login failed');
+    expect(indexerErrorText(undefined)).toBe('');
   });
 });
 
@@ -105,6 +121,19 @@ describe('partialProblem', () => {
     expect(partialProblem([ok('Nyaa'), failed('EZTV', CHALLENGE)])?.body).toBe('EZTV: Jackett needs FlareSolverr for it.');
     expect(partialProblem([ok('Nyaa'), failed('TPB', 'jackett error: Invalid API Key'), failed('EZTV', 'jackett error: Invalid API Key.'), failed('X')])?.body).toBe(
       'TPB and EZTV failed: Invalid API Key. X failed.'
+    );
+  });
+
+  it('says what FlareSolverr’s own errors mean, in one sentence for indexers that failed alike', () => {
+    expect(partialProblem([ok('Nyaa'), failed('1337x', fsFailed('20.0')), failed('EZTV', fsFailed('19.8'))])?.body).toBe(
+      '1337x and EZTV: FlareSolverr couldn’t get past Cloudflare.'
+    );
+    expect(partialProblem([ok('Nyaa'), ...['RuTracker.org', '1337x', 'EZTV'].map((name) => failed(name, FS_DOWN))])?.body).toBe(
+      'RuTracker.org, 1337x and EZTV: Jackett can’t reach FlareSolverr.'
+    );
+    expect(partialProblem([ok('Nyaa'), failed('1337x', FS_CAPTCHA)])?.body).toBe('1337x: Cloudflare asks for a captcha FlareSolverr can’t solve.');
+    expect(partialProblem([ok('Nyaa'), failed('RuTracker.org', CHALLENGE), failed('1337x', fsFailed('20.0')), failed('EZTV', fsFailed('20.0'))])?.body).toBe(
+      '1337x and EZTV: FlareSolverr couldn’t get past Cloudflare. RuTracker.org: Jackett needs FlareSolverr for it.'
     );
   });
 

@@ -52,7 +52,7 @@ type FanoutOptions struct {
 	OnProgress func(Progress)
 }
 
-// Fanout runs reqs concurrently, each with the request timeout, and returns
+// Fanout runs reqs concurrently, each with the search timeout, and returns
 // their responses in order once all have finished. Cancelling ctx stops
 // requests that are waiting for a slot and aborts running ones.
 func (c *Client) Fanout(ctx context.Context, reqs []Request, opts FanoutOptions) []Response {

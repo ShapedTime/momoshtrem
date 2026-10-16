@@ -38,7 +38,7 @@
 | D5 | **Build a fresh VM and cut over** | Reversed on 2026-10-15 (#42): the as-is inventory found too much to fix in place. The new VM is created by hand from [`VM.md`](VM.md), configured by Ansible and deployed from scratch, and the data is copied across. It keeps its own IP, 192.168.0.99: at cutover the router forwards (36911, and 443 since #19) move to it, and the old VM keeps the .81 reservation. The old VM stays, stopped, as the way back until the new one is proven. The user takes Proxmox snapshots by hand before risky steps. |
 | D6 | **Secrets live only on the VM** and in the encrypted backup | `.env` is managed by hand on the VM. Secrets never go in the repo or in GitHub, and there is no Ansible Vault. The break-glass values the VM can't hold live in the user's password manager (§7). |
 | D7 | **Images live on GHCR, tagged by the full commit SHA** | The images are public, since the code is public anyway. Tags are immutable, and the VM never builds. |
-| D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | compose publishes them on the VM's loopback only (`127.0.0.1:9117` and `127.0.0.1:9090`, and the web app's `127.0.0.1:3000` since #19), so an SSH tunnel reaches them: `ssh -L 9117:localhost:9117 momoshtrem-v2`. |
+| D8 | Keep **pgAdmin** (LAN only). **Don't publish Jackett or metrics to the LAN** | compose publishes them on the VM's loopback only (`127.0.0.1:9117` and `127.0.0.1:9090`, and the web app's `127.0.0.1:3000` since #19), so an SSH tunnel reaches them: `ssh -L 9117:localhost:9117 momoshtrem-v2`. FlareSolverr (#106) isn't published at all: only Jackett calls it, at `http://flaresolverr:8191` on the compose network. |
 | D9 | **Go-live happens at cutover** | The first deploy is current `main` (v2). The old VM went down before #35 and #38 existed (§9), so it's deployed by hand and protected by the #33 copy and a Proxmox snapshot. Later deploys use `ops/deploy/deploy.sh`, behind its pre-deploy dump and the B2 backup (#35). |
 
 ## 3. Current state: findings that drive this plan
@@ -105,7 +105,7 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 |---|---|---|---|
 | Postgres library | `pgdata` | **Critical** | Back it up as a logical dump (`pg_dump`), never as the raw data directory. |
 | `.env` | checkout root | **Critical** | Holds all the secrets (D6), and exists only here and in the backup. |
-| Jackett `/config` | `/mnt/data/3/jackett` | **Critical** | The indexer setup. Its API key must match `JACKETT_API_KEY`, so restore the two together. |
+| Jackett `/config` | `/mnt/data/3/jackett` | **Critical** | The indexer setup, and the FlareSolverr URL and max timeout (`ServerConfig.json`, #106). Its API key must match `JACKETT_API_KEY`, so restore the two together. |
 | momoshtrem `config.yaml` | `.../momoshtrem/config` | Back up | Tuning: cache size, ports, metrics. |
 | Downloaded subtitles | `.../data/data/subtitles` | Back up | DB rows point at these files, and downloading them again uses up OpenSubtitles quota. |
 | `caddy_data` volume | `momoshtrem_caddy_data`, a Docker named volume | Back up | The Let's Encrypt account and certificate (#19), and the old internal CA, now unused. If it's lost, Caddy gets a new certificate when it starts; nothing has to be trusted again. The pinned project name fixes the volume's name (#37). |

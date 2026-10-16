@@ -119,7 +119,7 @@ In `/opt/momoshtrem`:
    docker compose exec -T postgres psql -U momoshtrem -d momoshtrem -At -F' ' < ~/restore/row-counts.sql | diff ~/restore/row-counts.txt - && echo identical
    ```
    `--no-owner` gives every object to the `momoshtrem` role, whatever owned it before.
-4. **Jackett.** Unpack its `/config` into `/mnt/data/jackett`, so that `/mnt/data/jackett/Jackett/ServerConfig.json` exists. Check the layout first with `tar -tf`. The folder stays owned by `agha` (`PUID=1000`).
+4. **Jackett.** Unpack its `/config` into `/mnt/data/jackett`, so that `/mnt/data/jackett/Jackett/ServerConfig.json` exists. Check the layout first with `tar -tf`. The folder stays owned by `agha` (`PUID=1000`). That file also carries the FlareSolverr URL (#106); a backup older than that needs it set once (README › Configure Jackett).
 5. **Subtitles.** Unpack them into `/mnt/data/momoshtrem/data/data/subtitles`, as root: the container runs as root. The DB rows point at `movie/<id>/…` and `episode/<id>/…` under it.
 6. **`caddy_data`.** The pinned project name makes the volume `momoshtrem_caddy_data`. A throwaway container creates it and unpacks the old volume into it:
    ```bash

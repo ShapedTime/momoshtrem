@@ -224,26 +224,39 @@ func TestSearch_Hygiene(t *testing.T) {
 	}
 }
 
+// Jackett's errors for an indexer behind Cloudflare, as recorded (#106). The
+// web reads FlareSolverr's state from these descriptions.
 func TestSearch_TorznabErrorDocument(t *testing.T) {
-	j := newFakeJackett(t)
-	body := fixture(t, "error_indexer.xml")
-	j.handle("1337x", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest) // as recorded
-		_, _ = w.Write(body)
-	})
-	c := New(j.URL, testKey)
+	tests := []struct {
+		fixture, want string
+	}{
+		{"error_indexer.xml", "Challenge detected but FlareSolverr is not configured"},
+		{"error_flaresolverr_down.xml", "Error connecting to FlareSolverr server: System.Net.Http.HttpRequestException: Name does not resolve (flaresolverr:8191)"},
+		{"error_flaresolverr_timeout.xml", "FlareSolverr was unable to process the request, please check FlareSolverr logs. Message: Error: Error solving the challenge. Timeout after 5.0 seconds."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			j := newFakeJackett(t)
+			body := fixture(t, tt.fixture)
+			j.handle("1337x", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadRequest) // as recorded
+				_, _ = w.Write(body)
+			})
+			c := New(j.URL, testKey)
 
-	_, err := c.Search(context.Background(), "1337x", Query{Q: "Frieren"})
-	var e *Error
-	if !errors.As(err, &e) || e.Code != 900 {
-		t.Fatalf("err = %v (%T), want a Torznab error 900", err, err)
-	}
-	if e.Description != "Challenge detected but FlareSolverr is not configured" {
-		t.Errorf("description = %q", e.Description)
-	}
-	h := snapshotOf(t, c, "1337x")
-	if h.Status != StatusError || h.Error != "jackett error: Challenge detected but FlareSolverr is not configured" {
-		t.Errorf("health = %+v", h)
+			_, err := c.Search(context.Background(), "1337x", Query{Q: "Frieren"})
+			var e *Error
+			if !errors.As(err, &e) || e.Code != 900 {
+				t.Fatalf("err = %v (%T), want a Torznab error 900", err, err)
+			}
+			if e.Description != tt.want {
+				t.Errorf("description = %q, want %q", e.Description, tt.want)
+			}
+			h := snapshotOf(t, c, "1337x")
+			if h.Status != StatusError || h.Error != "jackett error: "+tt.want {
+				t.Errorf("health = %+v", h)
+			}
+		})
 	}
 }
 
