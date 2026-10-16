@@ -65,6 +65,9 @@
 
   /* Actions: one row on phone, Add at its natural width and the magnet pushed right;
      a 132 px column on desktop, the magnet with its word */
+  /* A seedless release looks weaker without fading its red "0 seeders" below AA (as .is-weak):
+     sorting by size or date brings these to the top */
+  .ts-release.is-dim { opacity: 1; background: transparent; border-style: dashed; }
   .ts-release .actions { flex-wrap: wrap; }
   .ts-release .actions .btn { flex: 0 0 auto; }
   .ts-magnet { color: var(--text-2); }

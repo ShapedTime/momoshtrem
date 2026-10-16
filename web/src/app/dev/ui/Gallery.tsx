@@ -48,6 +48,7 @@ import {
   Progress,
   Rail,
   RailItem,
+  Range,
   RingMeter,
   SearchInput,
   SegmentedControl,
@@ -170,6 +171,7 @@ export function Gallery() {
   const [nested, setNested] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [switchOn, setSwitchOn] = useState(true);
+  const [size, setSize] = useState<[number, number]>([20, 80]);
   const [chips, setChips] = useState({ uhd: true, fhd: false, dv: false });
   const [scope, setScope] = useState<'episode' | 'season' | 'any'>('episode');
   const [season, setSeason] = useState<'1' | '2' | '0'>('1');
@@ -315,6 +317,14 @@ export function Gallery() {
             <Switch checked={switchOn} onCheckedChange={setSwitchOn} label="Auto-apply high-confidence mappings" />
             <span className="text-fg-2">Auto-apply high-confidence mappings</span>
           </div>
+          <Range
+            min={0}
+            max={100}
+            value={size}
+            onValueChange={setSize}
+            labels={['Minimum size', 'Maximum size']}
+            valueText={(value, thumb) => (thumb === 'min' && value === 0 ? 'No minimum' : thumb === 'max' && value === 100 ? 'No maximum' : `${value}%`)}
+          />
           <p className="text-fg-2">
             Open the palette with <Kbd>⌘K</Kbd> or <Kbd>/</Kbd>
           </p>

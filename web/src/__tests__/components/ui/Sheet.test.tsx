@@ -94,4 +94,16 @@ describe('Sheet', () => {
     fireEvent.pointerDown(screen.getByText('Elsewhere'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
+
+  it('puts a title action before the close, and makes a labelled body a focusable region', async () => {
+    render(
+      <Sheet open onOpenChange={() => {}} title="Filters" titleAction={<button>Reset</button>} bodyLabel="Files in this torrent">
+        <p>Read-only rows</p>
+      </Sheet>
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Filters' });
+    const buttons = Array.from(dialog.querySelectorAll('.sheet-title button')).map((button) => button.textContent || button.getAttribute('aria-label'));
+    expect(buttons).toEqual(['Reset', 'Close']);
+    expect(screen.getByRole('region', { name: 'Files in this torrent' })).toHaveAttribute('tabindex', '0');
+  });
 });

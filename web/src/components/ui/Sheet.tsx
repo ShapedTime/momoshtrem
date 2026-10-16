@@ -22,6 +22,11 @@ export interface SheetProps {
   /** A quiet action in the title row, before the close button: the Filters sheet's Reset. */
   titleAction?: ReactNode;
   /**
+   * For read-only content with nothing to focus (Inspect's file list): the body
+   * becomes a labelled region in the tab order, so a keyboard can scroll it.
+   */
+  bodyLabel?: string;
+  /**
    * default: sizes to content. narrow: 480 px panel on desktop.
    * full: opens at full height immediately so loading never changes the height
    * (search sheets), and only the grabber drags on touch.
@@ -94,7 +99,15 @@ function SheetHead({ title, kicker, closeLabel = 'Close', description, titleActi
   );
 }
 
-function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, size, nested, head, footer, className, children }: SheetProps) {
+function SheetBody({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <div className="sheet-body" {...(label ? { role: 'region', 'aria-label': label, tabIndex: 0 } : {})}>
+      {children}
+    </div>
+  );
+}
+
+function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, head, footer, className, children }: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true });
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -119,7 +132,7 @@ function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description
             Description={Dialog.Description}
             Close={Dialog.Close}
           />
-          <div className="sheet-body">{children}</div>
+          <SheetBody label={bodyLabel}>{children}</SheetBody>
           {footer && <div className="sheet-foot">{footer}</div>}
         </Dialog.Content>
       </Dialog.Portal>
@@ -127,7 +140,7 @@ function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description
   );
 }
 
-function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, size, nested, head, footer, className, children }: SheetProps) {
+function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, head, footer, className, children }: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true });
   const Root = nested ? Drawer.NestedRoot : Drawer.Root;
   return (
@@ -156,7 +169,7 @@ function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, descriptio
             Description={Drawer.Description}
             Close={Drawer.Close}
           />
-          <div className="sheet-body">{children}</div>
+          <SheetBody label={bodyLabel}>{children}</SheetBody>
           {footer && <div className="sheet-foot">{footer}</div>}
         </Drawer.Content>
       </Drawer.Portal>

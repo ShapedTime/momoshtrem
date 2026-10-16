@@ -146,6 +146,7 @@ export function InspectSheet({ open, onOpenChange, release, starting, startError
       kicker="Inspect · nothing downloads yet"
       title={inspectTitle(job)}
       closeLabel="Back to results"
+      bodyLabel="Files in this torrent"
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Back</Button>
