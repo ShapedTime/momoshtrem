@@ -40,7 +40,7 @@ The service refuses to start without a database URL, with a port outside 1–655
 | `TMDB_API_KEY` | `tmdb.api_key` | Library metadata and air-date sync. Without it, adding or refreshing titles returns `503`. |
 | `TMDB_LANGUAGE` | `tmdb.language` | Language of names and overviews, e.g. `de-DE`. Default `en-US`. |
 | `TMDB_RPS` | `tmdb.rps` | TMDB requests per second, a whole number of at least 1. Default `20` (TMDB allows about 50). |
-| `JACKETT_URL`, `JACKETT_API_KEY` | `jackett.*` | Torrent search (moving from web to the backend in B4). |
+| `JACKETT_URL`, `JACKETT_API_KEY` | `jackett.*` | Torrent search (`/search/torrents`, Inspect and `/status` indexer health). Only momoshtrem talks to Jackett. |
 | `HDREZKA_ENABLED` | `hdrezka.enabled` | HDRezka as a second source of files ([epic #63](https://github.com/ShapedTime/momoshtrem/issues/63)). Default `false`. Run [`hdrezka-probe`](#checking-hdrezka) before turning it on. |
 | `HDREZKA_URL` | `hdrezka.url` | The HDRezka mirror, `http(s)://host[:port]` with no path. Default `https://rezka.ag`. |
 | `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | `opensubtitles.*` | Subtitle download. |

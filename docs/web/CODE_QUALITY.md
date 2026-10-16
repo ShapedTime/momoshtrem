@@ -26,7 +26,6 @@ src/
 │   │   ├── backend-proxy.ts  # Server: /api/* → momoshtrem /api/* with the token
 │   │   ├── momoshtrem.ts # Server: legacy momoshtrem client
 │   │   ├── tmdb.ts       # Server: TMDB
-│   │   └── jackett.ts    # Server: Jackett (moves to the backend in v2)
 │   ├── query/            # QueryClient defaults and <Providers>
 │   ├── sheets/           # URL-driven sheets: registry + useSheet (?sheet=…)
 │   ├── auth/             # Authentication logic

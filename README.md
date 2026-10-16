@@ -55,20 +55,20 @@ The backend uses a **library-first** virtual filesystem: the folder structure is
                         │   Browse, search, manage library  │
                         └───────────────┬──────────────────┘
                                         │
-                ┌───────────────────────┼───────────────────────┐
-                ▼                       ▼                       ▼
-           TMDB API              Jackett (:9117)        momoshtrem (:4444)
-                                                               │
-                                                     ┌─────────┼─────────┐
-                                                     ▼         ▼         ▼
-                                                PostgreSQL  WebDAV    Prometheus
-                                                 (:5432)   (:36911)   (:9090)
-                                                               │
-Player (Infuse/VLC/nPlayer) ──────► Caddy ─────────────────────┘
+                        ┌───────────────┴───────────────┐
+                        ▼                               ▼
+                    TMDB API                   momoshtrem (:4444) ───► Jackett (:9117)
+                                                        │
+                                              ┌─────────┼─────────┐
+                                              ▼         ▼         ▼
+                                         PostgreSQL  WebDAV    Prometheus
+                                          (:5432)   (:36911)   (:9090)
+                                                        │
+Player (Infuse/VLC/nPlayer) ──────► Caddy ──────────────┘
                                    (HTTPS + Basic Auth)
 ```
 
-The frontend talks to TMDB for metadata, Jackett for torrent search, and momoshtrem for library management. momoshtrem stores the library in PostgreSQL and exposes a virtual filesystem over WebDAV. Caddy sits in front of WebDAV providing HTTPS and basic auth. Grafana (optional) connects to Prometheus metrics for streaming diagnostics.
+The frontend talks to TMDB for metadata and to momoshtrem for everything else. momoshtrem searches torrents across Jackett's indexers and ranks the releases by your quality profile. momoshtrem stores the library in PostgreSQL and exposes a virtual filesystem over WebDAV. Caddy sits in front of WebDAV providing HTTPS and basic auth. Grafana (optional) connects to Prometheus metrics for streaming diagnostics.
 
 ## Quick Start
 
@@ -108,7 +108,7 @@ The frontend talks to TMDB for metadata, Jackett for torrent search, and momosht
    - Open Jackett at `http://localhost:9117` (it listens on the server's loopback only; from another machine, use `ssh -L 9117:localhost:9117 <server>`)
    - Add your preferred torrent indexers
    - Copy the API key from the top of the Jackett UI
-   - Add it to `.env` as `JACKETT_API_KEY` and restart:
+   - Add it to `.env` as `JACKETT_API_KEY` and restart. momoshtrem uses it for torrent search; the web app never sees it:
      ```bash
      docker compose up -d
      ```
@@ -129,7 +129,7 @@ See [`.env.example`](.env.example) for all available variables.
 | `TMDB_API_KEY` | Yes | TMDB API key for metadata |
 | `SESSION_SECRET` | Yes | JWT signing secret |
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL database password |
-| `JACKETT_API_KEY` | No | Jackett API key (configure after first run) |
+| `JACKETT_API_KEY` | No | Jackett API key for momoshtrem's torrent search (configure after first run) |
 | `OPENSUBTITLES_API_KEY` | No | OpenSubtitles API key for subtitle search |
 | `OPENSUBTITLES_USERNAME` | No | OpenSubtitles account username |
 | `OPENSUBTITLES_PASSWORD` | No | OpenSubtitles account password |
@@ -156,7 +156,7 @@ apple-tv-tor-stream/
 │   └── config.yaml.example
 ├── web/                     # Next.js frontend (momoshtrem-web): browse, search, manage
 │   ├── src/app/             # Pages and API routes
-│   ├── src/lib/api/         # API clients (momoshtrem, jackett, tmdb)
+│   ├── src/lib/api/         # API clients (momoshtrem, tmdb)
 │   └── src/types/           # TypeScript interfaces
 ├── grafana/                 # Grafana dashboard provisioning
 ├── docs/                    # Documentation and code quality guides
@@ -183,7 +183,7 @@ The virtual filesystem is built from your library database. When you add a movie
 | **web** (momoshtrem-web) | 3000 (loopback) | Next.js web UI for browsing, searching, and managing your library |
 | **momoshtrem** | 4444 (internal) | Go backend — REST API, torrent client, library management |
 | **momoshtrem WebDAV** | 36911 | Virtual filesystem endpoint for media players |
-| **Jackett** | 9117 (loopback) | Torrent indexer aggregator — search across multiple trackers |
+| **Jackett** | 9117 (loopback) | Torrent indexer aggregator — momoshtrem searches across its trackers |
 | **PostgreSQL** | 5432 (internal) | Library and metadata storage |
 | **Caddy** | 443, 36911, 5050 | Reverse proxy — HTTPS (Let's Encrypt) for the web UI and WebDAV, basic auth for WebDAV, LAN-only pgAdmin |
 

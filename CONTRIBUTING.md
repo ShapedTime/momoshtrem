@@ -27,7 +27,7 @@ npm install
 npm run dev
 ```
 
-The dev server runs at `http://localhost:3000`. It expects momoshtrem and Jackett to be running (via Docker or locally).
+The dev server runs at `http://localhost:3000`. It expects momoshtrem to be running (via Docker or locally); torrent search goes through momoshtrem, which needs Jackett. Without a backend, `NEXT_PUBLIC_API_MOCKING=enabled npm run dev` answers every API call from fixtures.
 
 ### Backend Development
 

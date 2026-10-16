@@ -153,7 +153,7 @@ New and moved environment variables:
 |---|---|---|
 | `APP_USERNAME` | web | Login username. Optional, defaults to `admin` with a startup warning. |
 | `BACKEND_API_TOKEN` | web + momoshtrem | Shared-secret header between web and backend |
-| `JACKETT_URL`, `JACKETT_API_KEY` | **moves** from web to momoshtrem | Search moves to the backend (the web route is removed in H2) |
+| `JACKETT_URL`, `JACKETT_API_KEY` | **moved** from web to momoshtrem | Search runs in the backend (B4). The web's Jackett route and env were removed in #95. |
 | `ANTHROPIC_API_KEY` | momoshtrem | Classifier and recommendations. The features are disabled when unset. |
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | momoshtrem | Trakt app, created at trakt.tv/oauth/applications |
 | `SECRET_KEY` | momoshtrem | AES-GCM key for encrypting Trakt tokens at rest |
@@ -1326,7 +1326,7 @@ Acceptance for every F task:
   - axe accessibility checks.
   - An overflow assertion (`scrollWidth <= innerWidth`) on every route.
 - **H2 · Cleanup**
-  - Remove the legacy pieces: `?wait=true`, the web Jackett route and env, the old hooks and components.
+  - Remove the legacy pieces: `?wait=true` (#60), the web Jackett route and env (done in #6 / #95), the old hooks and components.
   - Update docs (README, CLAUDE.md, CODE_QUALITY, STYLE_GUIDE, API reference) and refresh the screenshots.
 - **H3 · Release**
   - Prepare: a `pg_dump` backup, then the migrations and the backfill command, then deploy.
