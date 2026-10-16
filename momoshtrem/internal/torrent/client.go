@@ -86,8 +86,11 @@ func InitStorage(metadataFolder string, cacheSizeMB int64) (storage.ClientImpl, 
 	return st, fc, pc, nil
 }
 
-// NewClient creates a new torrent client with the given configuration.
-func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, error) {
+// ClientConfigFor is the anacrolix config NewClient creates its client from:
+// the defaults plus momoshtrem's settings. The streamlab lab builds its
+// client from it too, so every client setting goes here, not in NewClient.
+// It has no side effects: nothing listens until torrent.NewClient.
+func ClientConfigFor(cfg *config.TorrentConfig, cc *ClientConfig) *torrent.ClientConfig {
 	log := slog.With("component", "torrent-client")
 
 	torrentCfg := torrent.NewDefaultClientConfig()
@@ -121,7 +124,14 @@ func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, er
 		dhtCfg.NoSecurity = false
 	}
 
-	client, err := torrent.NewClient(torrentCfg)
+	return torrentCfg
+}
+
+// NewClient creates a new torrent client with the given configuration.
+func NewClient(cfg *config.TorrentConfig, cc *ClientConfig) (*torrent.Client, error) {
+	log := slog.With("component", "torrent-client")
+
+	client, err := torrent.NewClient(ClientConfigFor(cfg, cc))
 	if err != nil {
 		return nil, err
 	}
