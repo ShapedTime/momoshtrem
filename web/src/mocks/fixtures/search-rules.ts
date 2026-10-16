@@ -153,9 +153,19 @@ const RESOLUTION_RANK: Record<ReleaseResolution, number> = { '2160p': 5, '1080p'
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Hidden by the profile: an avoid term as a whole word (case-insensitive), or above `max_resolution`. */
+/**
+ * An avoid term as whole words of the name, case-insensitive: anything but
+ * letters and digits separates words, so "TS" hides "Movie.2023.TS.x264" but
+ * not "Ghosts", and "WEB-DL" matches "WEB.DL" (PLAN §6 quality profile).
+ */
+function avoidPattern(term: string): RegExp | null {
+  const words = term.split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(escape);
+  return words.length > 0 ? new RegExp(`(^|[^\\p{L}\\p{N}])${words.join('[^\\p{L}\\p{N}]+')}([^\\p{L}\\p{N}]|$)`, 'iu') : null;
+}
+
+/** Hidden by the profile: an avoid term, or a resolution above `max_resolution`. */
 export function profileHides(release: Pick<Release, 'raw_title' | 'attrs'>, profile: Pick<QualityProfile, 'avoid_terms' | 'max_resolution'>): boolean {
-  const avoided = profile.avoid_terms.some((term) => new RegExp(`(^|[^a-z0-9])${escape(term)}([^a-z0-9]|$)`, 'i').test(release.raw_title));
+  const avoided = profile.avoid_terms.some((term) => avoidPattern(term)?.test(release.raw_title) ?? false);
   const tooBig = profile.max_resolution !== null && RESOLUTION_RANK[release.attrs.resolution] > RESOLUTION_RANK[profile.max_resolution];
   return avoided || tooBig;
 }

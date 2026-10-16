@@ -138,6 +138,8 @@ describe('the rules', () => {
     expect(profileHides({ raw_title: 'Movie 2025 CAMRip', attrs: ATTRS }, profile)).toBe(false);
     expect(profileHides({ raw_title: 'Movie.2025.DTS-HD.MA', attrs: ATTRS }, profile)).toBe(false);
     expect(profileHides({ raw_title: 'Movie.2025.cam.x264', attrs: ATTRS }, profile)).toBe(true);
+    expect(profileHides({ raw_title: 'Ghosts.S01E01.1080p', attrs: ATTRS }, profile)).toBe(false);
+    expect(profileHides({ raw_title: 'Movie.2025.1080p.WEB.DL', attrs: ATTRS }, { ...profile, avoid_terms: ['WEB-DL'] })).toBe(true);
     expect(profileHides({ raw_title: 'Movie.2025.2160p', attrs: { ...ATTRS, resolution: '2160p' } }, profile)).toBe(true);
     expect(profileHides({ raw_title: 'Movie.2025.2160p', attrs: { ...ATTRS, resolution: '2160p' } }, { ...profile, max_resolution: null })).toBe(false);
   });
