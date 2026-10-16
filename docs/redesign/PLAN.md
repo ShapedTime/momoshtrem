@@ -540,7 +540,7 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   - `media_type=movie|tv` and `tmdb_id` are both required; `season` and `episode` are optional.
   - `scope=episode|season|any` (TV only; ignored for movies):
     - default `episode` when an episode is given, `season` when only a season is given, otherwise `any`;
-    - `scope=episode` without an episode, or `scope=season` without a season, is `400 bad_request`.
+    - `scope=episode` without an episode, `scope=season` without a season, or an episode without a season, is `400 bad_request`.
   - `q`: the client sends it only when the user edited the field. It replaces the generated text queries, ID queries are skipped, and the scope still filters.
 - **Filters:**
   - `resolution`, `source`, `codec`, `hdr`, `audio`, `pack`, `indexer`, `group`: each repeatable, OR within a filter and AND across filters. An unknown value matches nothing.
@@ -553,9 +553,14 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
   - `refresh=1` (Retry) re-runs the search, at most once per 10 s per plan; a second one within 10 s reads the running or cached search.
 - **Query plan** (no `q`):
   - an ID query: `imdbid`, `tvdbid` or `tmdbid`, only to indexers whose caps support it, with `season`/`ep`;
-  - normalised title queries: strip `: ' ! ,` and similar; "Title Year" for movies, "Title SxxEyy" for an episode, "Title S01" for a season;
-  - anime extras: the short title with the absolute number (`Frieren 29`), the romaji title from TMDB's alternative titles, and scene numbering (TMDB S01E29 is release S02E01, from cours or episode groups);
-  - when the exact queries find nothing, a show-level fallback query whose results are filtered by coverage.
+  - normalised title queries: strip `: ' ! ,` and similar, with `&` as "and"; "Title Year" for movies, "Title SxxEyy" for an episode, "Title S01" for a season, "Title" for `any`; each again with the original title when it's in Latin letters (`"original title"`);
+  - anime:
+    - the primary is the short title (before ":") with the absolute number (`Frieren 29`);
+    - the romaji title from TMDB's alternative titles takes the original title's place (`Sousou no Frieren 29`);
+    - scene numbering (TMDB S01E29 is release S02E01, from cours or episode groups) is added, and a season adds the scene seasons it holds (`"scene numbering"`);
+    - without scene numbering, TMDB's own SxxEyy is added, with a null label;
+  - a show the library numbers absolutely that isn't anime adds "Title 17" (`"absolute number"`);
+  - when the exact queries find nothing, a show-level fallback (the title, and the original title) whose results are filtered by coverage (`"whole show"`).
 - **What each scope keeps:**
   - `episode`: releases that contain the episode, packs included;
   - `season`: any release that isn't a single episode and has at least one episode of the season;
@@ -642,7 +647,7 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
 
   | Status | When |
   |---|---|
-  | `400 bad_request` | A malformed request: no `media_type` or `tmdb_id`, a scope without its season or episode, an unknown `scope` or `sort`, a malformed number |
+  | `400 bad_request` | A malformed request: no `media_type` or `tmdb_id`, a scope without its season or episode, an episode without a season, an unknown `scope` or `sort`, a malformed number |
   | `404 not_found` | Unknown TMDB title |
   | `502 tmdb_unavailable` | The title isn't in the library, there's no `q`, and TMDB is down |
   | `502 jackett_unavailable` | The indexer list can't be fetched, or Jackett rejects the key |

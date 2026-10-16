@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -506,29 +507,38 @@ func (s *JobService) reloadShow(ctx context.Context, id int64) (*library.Show, e
 // catalogExtras reads the show's alternative titles and its season-like
 // episode groups from TMDB (cached). Whatever fails is left out.
 func (s *JobService) catalogExtras(ctx context.Context, show *library.Show) CatalogExtras {
+	extras, _ := loadCatalogExtras(ctx, s.tmdb, show.TMDBID, show.EpisodeGroupID, s.log.With("show_id", show.ID))
+	return extras
+}
+
+// loadCatalogExtras reads a show's alternative titles, its chosen episode
+// group and its season-like episode groups from TMDB (cached), within
+// extrasBudget. Whatever fails is left out. It also returns the show's list
+// of episode groups.
+func loadCatalogExtras(ctx context.Context, src CatalogSource, tmdbID int, chosenGroup string, log *slog.Logger) (CatalogExtras, []tmdb.EpisodeGroupSummary) {
 	var extras CatalogExtras
-	if s.tmdb == nil || show.TMDBID == 0 {
-		return extras
+	if src == nil || tmdbID == 0 {
+		return extras, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, extrasBudget)
 	defer cancel()
 
-	titles, err := s.tmdb.ShowAlternativeTitles(ctx, show.TMDBID)
+	titles, err := src.ShowAlternativeTitles(ctx, tmdbID)
 	if err != nil {
-		s.log.Debug("No alternative titles", "show_id", show.ID, "error", err)
+		log.Debug("No alternative titles", "error", err)
 	}
 	extras.AlternativeTitles = titles
 
 	var ids []string
-	if show.EpisodeGroupID != "" {
-		ids = append(ids, show.EpisodeGroupID)
+	if chosenGroup != "" {
+		ids = append(ids, chosenGroup)
 	}
-	summaries, err := s.tmdb.EpisodeGroups(ctx, show.TMDBID)
+	summaries, err := src.EpisodeGroups(ctx, tmdbID)
 	if err != nil {
-		s.log.Debug("No episode groups", "show_id", show.ID, "error", err)
+		log.Debug("No episode groups", "error", err)
 	}
 	for _, g := range summaries {
-		if seasonLikeGroup(g.Type) && g.ID != show.EpisodeGroupID {
+		if seasonLikeGroup(g.Type) && g.ID != chosenGroup {
 			ids = append(ids, g.ID)
 		}
 	}
@@ -536,14 +546,14 @@ func (s *JobService) catalogExtras(ctx context.Context, show *library.Show) Cata
 		if len(extras.EpisodeGroups) == maxEpisodeGroups {
 			break
 		}
-		g, err := s.tmdb.EpisodeGroup(ctx, id)
+		g, err := src.EpisodeGroup(ctx, id)
 		if err != nil {
-			s.log.Debug("Episode group unavailable", "show_id", show.ID, "group", id, "error", err)
+			log.Debug("Episode group unavailable", "group", id, "error", err)
 			continue
 		}
 		extras.EpisodeGroups = append(extras.EpisodeGroups, g)
 	}
-	return extras
+	return extras, summaries
 }
 
 // seasonLikeGroup reports episode group types that split a show into
