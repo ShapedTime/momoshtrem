@@ -61,15 +61,22 @@ type DatabaseConfig struct {
 }
 
 type TorrentConfig struct {
-	MetadataFolder       string `yaml:"metadata_folder"`
-	GlobalCacheSize      int64  `yaml:"global_cache_size"` // MB
-	AddTimeout           int    `yaml:"add_timeout"`       // seconds
-	ReadTimeout          int    `yaml:"read_timeout"`      // seconds
-	IdleEnabled          bool   `yaml:"idle_enabled"`
-	IdleTimeout          int    `yaml:"idle_timeout"` // seconds
-	StartPaused          bool   `yaml:"start_paused"`
-	DropDuplicatePeerIds bool   `yaml:"drop_duplicate_peer_ids"` // Prevent duplicate peer connections
-	MaxUnverifiedMB      int64  `yaml:"max_unverified_mb"`       // Cap in-flight unverified data (MB, 0=unlimited)
+	MetadataFolder string `yaml:"metadata_folder"`
+	// GlobalCacheSize caps the piece cache, in MiB. The server takes it
+	// only when config.yaml sets it (GlobalCacheSizeSet), below a limit
+	// saved in Settings › Storage and above auto (internal/storagecap).
+	// The default is what the streamlab lab passes to InitStorage.
+	GlobalCacheSize int64 `yaml:"global_cache_size"`
+	// GlobalCacheSizeSet is true when config.yaml sets
+	// torrent.global_cache_size.
+	GlobalCacheSizeSet   bool  `yaml:"-"`
+	AddTimeout           int   `yaml:"add_timeout"`  // seconds
+	ReadTimeout          int   `yaml:"read_timeout"` // seconds
+	IdleEnabled          bool  `yaml:"idle_enabled"`
+	IdleTimeout          int   `yaml:"idle_timeout"` // seconds
+	StartPaused          bool  `yaml:"start_paused"`
+	DropDuplicatePeerIds bool  `yaml:"drop_duplicate_peer_ids"` // Prevent duplicate peer connections
+	MaxUnverifiedMB      int64 `yaml:"max_unverified_mb"`       // Cap in-flight unverified data (MB, 0=unlimited)
 	// ListenPort is the BitTorrent port (TCP and uTP). 0 picks a free one,
 	// so two instances can run side by side.
 	ListenPort int `yaml:"listen_port"`
@@ -243,6 +250,7 @@ func load(path string, needDatabase bool) (*Config, error) {
 			if err := yaml.Unmarshal(data, cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse config file %s: %w", path, err)
 			}
+			cfg.Torrent.GlobalCacheSizeSet = setsGlobalCacheSize(data)
 		case errors.Is(err, fs.ErrNotExist):
 			slog.Info("Config file not found, using defaults and environment", "path", path)
 		default:
@@ -261,6 +269,27 @@ func load(path string, needDatabase bool) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// setsGlobalCacheSize reports whether the YAML document sets
+// torrent.global_cache_size to a value: a key left empty (null) doesn't
+// count. data has already parsed.
+func setsGlobalCacheSize(data []byte) bool {
+	var probe struct {
+		Torrent struct {
+			GlobalCacheSize *int64 `yaml:"global_cache_size"`
+		} `yaml:"torrent"`
+	}
+	return yaml.Unmarshal(data, &probe) == nil && probe.Torrent.GlobalCacheSize != nil
+}
+
+// GlobalCacheBytes is config.yaml's torrent.global_cache_size in bytes;
+// ok is false when the file doesn't set it.
+func (t TorrentConfig) GlobalCacheBytes() (bytes int64, ok bool) {
+	if !t.GlobalCacheSizeSet {
+		return 0, false
+	}
+	return t.GlobalCacheSize << 20, true
 }
 
 // applyEnv overrides cfg with any non-empty environment variables.
