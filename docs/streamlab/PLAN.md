@@ -37,7 +37,7 @@ Each of these was verified by hand on the Apple TV.
 |---|---|
 | D1 | **Safety net first.** Phase 1 changes no production behaviour. S1 touches no production file, and S2 adds only additive hooks (§4). The streamtrace hooks (Phase 3) come after the lab, and the lab must show they change nothing (§7 R5). |
 | D2 | **Real code, synthetic world.** The lab runs the real stack in-process against a synthetic seeder. Content is a pure function f(seed, offset), so every byte served is checked. |
-| D3 | **The lab mirrors production's client config.** It uses `torrent.ClientConfigFor` (H2), with overrides only for loopback, port, DHT, trackers, uTP and logger. Never `atorrent.TestingConfig`: it sets `MaxAllocPeerRequestDataPerConn=5` and `KeepAliveTimeout=1ms`. Production is `CGO_ENABLED=0`, so the lab uses TCP only (`DisableUTP`, `-tags disable_libutp`). |
+| D3 | **The lab mirrors production's client config.** It uses `torrent.ClientConfigFor` (H2), with overrides only for loopback, port, DHT, trackers, uTP and logger. Never `atorrent.TestingConfig`: it sets `MaxAllocPeerRequestDataPerConn=5` and `KeepAliveTimeout=1ms`. Production is `CGO_ENABLED=0`, so it runs anacrolix's pure-Go uTP and never links libutp. `-tags disable_libutp` keeps the lab's cgo and `-race` builds on that same code. Over loopback the lab still sets `DisableUTP` and runs TCP only. That is a known difference from production, which the realism tier covers. |
 | D4 | **One subprocess per scenario repetition.** slog's default logger, the MIME table, the `sync.Pool`s and `DefaultServeMux` are process-wide. A subprocess gives a clean goroutine baseline and contains deadlocks: on a hard timeout the runner sends SIGQUIT and keeps the goroutine dump. |
 | D5 | **Counts are the regression signal, timings are judged only by A/B.** Exact and count metrics are deterministic and can be gated. Timing metrics depend on the machine: they get a verdict only from an interleaved A/B on one machine, with repetitions and a significance test. No timing baseline is committed. |
 | D6 | **Known issues are expected failures.** A check that fails because of a known bug (§3) reports `xfail` and doesn't block. When a fix lands, it flips to `xpass` and the report says so. |
@@ -53,7 +53,7 @@ Most of these come from reading the code during planning; F2 and F3 were already
 | ID | Suspect | Where |
 |---|---|---|
 | F1 | The `alpine:3` image has no `/etc/mime.types`, and Go's built-in table has no `.mkv`. So `http.ServeContent` sniffs 512 B at offset 0 and seeks back on every GET and HEAD, which sets Now priority on the header pieces. PROPFIND's `getcontenttype` does the same per file. Tests on macOS/Ubuntu can't see it, because those hosts have a MIME table. | `webdav/server.go`, x/net `prop.go:403` |
-| F2 | ETag and ModTime are `time.Now()`, so `If-Range` never matches and the server answers 200 with the whole file (#73). `webdavFile.ETag` and `webdavFile.ContentType` are dead code: x/net checks `common.FileInfo`. | `vfs/library_fs.go:Stat`, `webdav/server.go:254,286` |
+| F2 | ModTime is `time.Now()` in every `Stat`. x/net's default ETag (ModTime + size, `prop.go:450`) therefore changes with each request, so `If-Range` never matches and the server answers 200 with the whole file (#73). For GET and HEAD the ETag comes from the opened file's `Stat`, so fixing `LibraryFS.Stat` alone isn't enough. `webdavFile.ETag` and `webdavFile.ContentType` are dead code: x/net checks the `os.FileInfo`. | `vfs/library_fs.go:Stat`, `vfs/torrent_file.go:229`, `vfs/remote_file.go:74`, `webdav/server.go:254,286` |
 | F3 | PROPFIND opens every listed file, and for a torrent that runs `GetOrAddTorrent` (#83). | x/net `prop.go:170`, `vfs/library_fs.go:openTorrentFile` |
 | F4 | `OpenContext` holds `fs.mu.RLock` across `GetOrAddTorrent`, which can wait up to `add_timeout`. A pending writer (`InvalidateTree`) then blocks every new reader. | `vfs/library_fs.go:267` |
 | F5 | `InvalidateTree` sets `tree=nil` before rebuilding. `OpenContext`, `Stat` and `ReadDir` then dereference `fs.tree.pathMap` with no nil check. | `vfs/library_fs.go:672` |
@@ -61,7 +61,7 @@ Most of these come from reading the code during planning; F2 and F3 were already
 | F7 | The prioritizer runs on every 32 KiB read. Each non-debounced update loops `SetPriority` over ~(urgent+readahead)/piece pieces, and every call takes the anacrolix client lock. | `vfs/torrent_file.go:ReadAt`, `streaming/prioritizer.go` |
 | F10 | `detectFormat` opens a second reader with no timeout. | `streaming/reader.go:263` |
 | F11 | The filecache LRU can evict pieces anacrolix still believes are complete. The Bolt piece-completion store is created but unused. | `torrent/client.go:InitStorage` |
-| F12 | `seekAndReadAtLeast` and `readAtLeast` read under `context.Background()` + `read_timeout`, not the request context. If a client aborts while a read is blocked (an Infuse seek), the handler, its `PriorityReader` and its Now window live on for up to 120 s, competing with the new position. | `vfs/torrent_file.go:333,364` |
+| F12 | `seekAndReadAtLeast` (the WebDAV `ReadAt` path) and `readWithTimeout` (`Read`) read under `context.Background()` + `read_timeout`, not the request context. If a client aborts while a read is blocked (an Infuse seek), the handler, its `PriorityReader` and its Now window live on for up to 120 s, competing with the new position. | `vfs/torrent_file.go:364,288` |
 
 (F8 and F9 from planning were folded into F12 and the HDRezka scenarios.)
 
@@ -78,7 +78,7 @@ All are additive or pure refactors.
 
 The leecher finds the seeder through the real `service.add()` path: the magnet carries `x.pe=<seeder addr>`, which anacrolix maps to `PeerAddrs` (`spec.go:42`).
 
-Cold start is faithful. After `add()` sets every piece to None, anacrolix dials no peers until the first read raises priorities. The activation wait therefore measures real dial and handshake time.
+Cold start is faithful. After `add()` sets every piece to None, anacrolix dials no peers until the first read raises priorities. The activation wait therefore measures real dial and handshake time when the info dict comes from the `MetainfoStore`. With metadata from peers, the connection that fetched it stays open.
 
 ## 5. The lab
 
@@ -116,7 +116,7 @@ momoshtrem/internal/streamlab/
 1. `InitStorage`, then the leecher.
 2. `NewActivityManager` → `NewMetainfoStore` → `NewService(WithMetainfoStore, WithPieceStorage, WithSpeedSampler)`.
 3. `NewStaticFS` → `SetTorrentService`, `SetReaderTracker`, `SetSessions(NewRegistry(WithClock))`, `SetMetrics(metrics.New(perRunRegistry))`, `SetRemoteSource`.
-4. `webdav.NewServer(...).Handler()`.
+4. `webdav.NewServer(...)`, `SetMetrics` (the same metrics; without it, `requests_inflight` stays 0 and the quiescence check passes trivially), then `.Handler()`.
 
 The config is `config.DefaultConfig()` with an optional `--config prod.yaml` overlaid. A fingerprint of the effective config goes into every report.
 
