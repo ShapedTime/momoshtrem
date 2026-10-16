@@ -24,6 +24,9 @@ import {
 } from '@/lib/search/copy';
 
 const ok = (name: string, count = 3): IndexerReport => ({ name, status: 'ok', count, ms: 300 });
+/** What Jackett answers for an indexer behind Cloudflare when FlareSolverr isn't set up (#106). */
+const CHALLENGE = 'jackett error: Challenge detected but FlareSolverr is not configured';
+const failed = (name: string, error?: string): IndexerReport => ({ name, status: 'error', count: 0, ms: 40, error });
 const FRIEREN_QUERIES = [
   { q: 'Frieren 29', label: null },
   { q: 'Sousou no Frieren 29', label: 'original title' as const },
@@ -70,25 +73,46 @@ describe('searching', () => {
     expect(indexerProgress({ name: 'TPB', status: 'timeout', count: 0, ms: 8000 })).toBe('timed out after 8 s');
     expect(indexerProgress({ name: 'TPB', status: 'error', count: 0, ms: 50, error: 'Rejected the API key' })).toBe('Rejected the API key');
     expect(indexerProgress({ name: 'TPB', status: 'error', count: 0, ms: 50 })).toBe('failed');
+    expect(indexerProgress({ name: 'TPB', status: 'error', count: 0, ms: 50, error: 'jackett error: Invalid API Key' })).toBe('Invalid API Key');
+    expect(indexerProgress({ name: 'EZTV', status: 'error', count: 0, ms: 50, error: CHALLENGE })).toBe('Jackett needs FlareSolverr for it');
   });
 });
 
 describe('partialProblem', () => {
   const timeout = (name: string, ms = 8000): IndexerReport => ({ name, status: 'timeout', count: 0, ms });
 
-  it('names who timed out or failed, and says the results may be incomplete', () => {
+  it('names who timed out or failed, and why', () => {
     expect(partialProblem([ok('Nyaa'), ok('TorrentLeech'), timeout('The Pirate Bay')])).toEqual({
       title: '2 of 3 indexers answered',
-      body: 'The Pirate Bay timed out after 8 s. Results may be incomplete.',
+      body: 'The Pirate Bay timed out after 8 s.',
       none: false,
     });
-    expect(
-      partialProblem([ok('Nyaa'), timeout('EZTV', 7600), timeout('The Pirate Bay'), { name: '1337x', status: 'error', count: 0, ms: 20, error: 'Cloudflare blocked it' }])
-    ).toEqual({
+    expect(partialProblem([ok('Nyaa'), timeout('EZTV', 7600), timeout('The Pirate Bay'), failed('1337x', 'Cloudflare blocked it')])).toEqual({
       title: '1 of 4 indexers answered',
-      body: 'EZTV and The Pirate Bay timed out after 8 s. 1337x failed: Cloudflare blocked it. Results may be incomplete.',
+      body: 'EZTV and The Pirate Bay timed out after 8 s. 1337x failed: Cloudflare blocked it.',
       none: false,
     });
+  });
+
+  it('groups indexers that failed the same way, and says what FlareSolverr’s error means', () => {
+    // The VM's Jackett while RuTracker, 1337x and EZTV sit behind Cloudflare (#122)
+    const live = [ok('TorrentGalaxyClone'), ok('The Pirate Bay'), ok('LimeTorrents'), ok('TheRARBG'), failed('RuTracker.org', CHALLENGE), failed('1337x', CHALLENGE), failed('EZTV', CHALLENGE)];
+    expect(partialProblem(live)).toEqual({
+      title: '4 of 7 indexers answered',
+      body: 'RuTracker.org, 1337x and EZTV: Jackett needs FlareSolverr for them.',
+      none: false,
+    });
+    expect(partialProblem([ok('Nyaa'), failed('EZTV', CHALLENGE)])?.body).toBe('EZTV: Jackett needs FlareSolverr for it.');
+    expect(partialProblem([ok('Nyaa'), failed('TPB', 'jackett error: Invalid API Key'), failed('EZTV', 'jackett error: Invalid API Key.'), failed('X')])?.body).toBe(
+      'TPB and EZTV failed: Invalid API Key. X failed.'
+    );
+  });
+
+  it('stays two lines: past two reasons the rest are counted, and a big group is counted too', () => {
+    const many = [ok('Nyaa'), timeout('The Pirate Bay'), failed('RuTracker.org', CHALLENGE), failed('1337x', CHALLENGE), failed('EZTV', 'Bad gateway'), failed('Kinozal')];
+    expect(partialProblem(many)?.body).toBe('RuTracker.org and 1337x: Jackett needs FlareSolverr for them. 3 other indexers didn’t answer.');
+    const four = [ok('Nyaa'), ...['RuTracker.org', '1337x', 'EZTV', 'Kinozal'].map((name) => failed(name, CHALLENGE))];
+    expect(partialProblem(four)?.body).toBe('4 indexers: Jackett needs FlareSolverr for them.');
   });
 
   it('when nobody answered it says so; nothing while anyone is pending or when all answered', () => {

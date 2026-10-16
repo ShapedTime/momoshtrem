@@ -14,7 +14,7 @@ import { accepted, apiError, isRecord, jsonBody, latency, notFound } from './uti
  * read like the backend reads its cache (fixtures/search-rules.ts). Per plan,
  * the page remembers when its search started (search-slow's clock) and
  * whether a Retry (`refresh=1`) asked again, which brings timed-out indexers
- * back. Scenarios: search-partial, search-none, search-slow, search-down.
+ * back. Scenarios: search-partial, search-challenge, search-none, search-slow, search-down.
  */
 interface PlanState {
   started: number;
@@ -31,6 +31,10 @@ export function resetMockSearch(): void {
 /** search-slow: one more indexer answers every second. */
 const SLOW_STEP_MS = 1000;
 const TIMEOUT_MS = 8000;
+
+/** search-challenge: indexers behind Cloudflare, which Jackett can't pass without FlareSolverr (#106). */
+const CHALLENGED = ['RuTracker.org', '1337x', 'EZTV'];
+const CHALLENGE_ERROR = 'jackett error: Challenge detected but FlareSolverr is not configured';
 
 type IndexerState = Omit<IndexerReport, 'count'>;
 
@@ -53,8 +57,11 @@ export const searchHandlers = [
 
     const flaky = plan.retried ? undefined : mode === 'search-partial' ? fixture.indexers.at(-1) : fixture.flaky;
     const answering = mode === 'search-slow' ? Math.floor((now - plan.started) / SLOW_STEP_MS) : Infinity;
-    const indexers = fixture.indexers.map((name, i): IndexerState => {
+    const challenged = mode === 'search-challenge' ? CHALLENGED : [];
+    const names = [...fixture.indexers, ...challenged.filter((name) => !fixture.indexers.includes(name))];
+    const indexers = names.map((name, i): IndexerState => {
       if (i >= answering) return { name, status: 'pending', ms: now - plan.started };
+      if (challenged.includes(name)) return { name, status: 'error', ms: 40 + i * 10, error: CHALLENGE_ERROR };
       if (name === flaky) return { name, status: 'timeout', ms: TIMEOUT_MS, error: 'No answer in 8 s' };
       return { name, status: 'ok', ms: 180 + i * 140 };
     });

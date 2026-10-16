@@ -9,7 +9,7 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
  * pages). Frieren misses S01E29–E38 (the
  * 29–38 batch is the best match), Severance's The Pirate Bay times out until
  * a Retry, One Battle After Another is a movie with a CAM. Scenarios in
- * src/mocks/scenario.ts (search-partial, -none, -slow, -down).
+ * src/mocks/scenario.ts (search-partial, -challenge, -none, -slow, -down).
  */
 
 /** axe and no sideways scrolling at this width and at 320 px. */
@@ -122,7 +122,7 @@ test.describe('Torrent search', () => {
     await signIn(page, SEVERANCE_E08);
     const dialog = sheet(page);
     const warning = dialog.getByRole('status').filter({ hasText: '2 of 3 indexers answered' });
-    await expect(warning).toContainText('The Pirate Bay timed out after 8 s. Results may be incomplete.');
+    await expect(warning).toContainText('The Pirate Bay timed out after 8 s.');
     await expect(dialog.getByText('9 results · TorrentLeech, EZTV')).toBeVisible();
     await expect(dialog.getByRole('article', { name: /SuccessfulCrab/ }).first()).toBeVisible();
     await expectAccessibleAndContained(page);
@@ -131,6 +131,24 @@ test.describe('Torrent search', () => {
     await expect(warning).toBeHidden();
     await expect(dialog.getByText('13 results · TorrentLeech, EZTV, The Pirate Bay')).toBeVisible();
     await expect(dialog.getByRole('article', { name: /x265-ELiTE/ })).toBeVisible();
+  });
+
+  test('indexers failing the same way share a sentence, and the banner stays two lines', async ({ page }) => {
+    await scenario(page, 'search-challenge');
+    await signIn(page, FRIEREN_E29);
+    const dialog = sheet(page);
+    const warning = dialog.getByRole('status').filter({ hasText: '3 of 6 indexers answered' });
+    await expect(warning).toContainText('RuTracker.org, 1337x and EZTV: Jackett needs FlareSolverr for them.');
+    await expect(warning).not.toContainText('jackett error');
+    await expect(dialog.getByRole('article', { name: BATCH })).toBeVisible();
+    // The body's lines: one rect per line of its text
+    const lines = await warning.locator('.grow > span').evaluate((body) => {
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    });
+    expect(lines).toBeLessThanOrEqual(2);
+    await expectAccessibleAndContained(page);
   });
 
   test('nothing found: ways to broaden, and Try HDRezka', async ({ page }) => {
@@ -438,6 +456,13 @@ test.describe('Torrent search screenshots', () => {
     await signIn(page, SEVERANCE_E08);
     await expect(sheet(page).getByText('2 of 3 indexers answered')).toBeVisible();
     await shoot(page, testInfo, 'partial');
+  });
+
+  test('partial-grouped', async ({ page }, testInfo) => {
+    await scenario(page, 'search-challenge');
+    await signIn(page, FRIEREN_E29);
+    await expect(sheet(page).getByText('3 of 6 indexers answered')).toBeVisible();
+    await shoot(page, testInfo, 'partial-grouped');
   });
 
   test('none', async ({ page }, testInfo) => {
