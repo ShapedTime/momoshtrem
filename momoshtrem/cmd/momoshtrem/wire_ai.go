@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"log/slog"
+
+	"github.com/shapedtime/momoshtrem/internal/aicore"
+	"github.com/shapedtime/momoshtrem/internal/aisettings"
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/config"
@@ -29,18 +34,42 @@ type aiDeps struct {
 	traktSync *trakt.Syncer
 }
 
-// aiCore is the AI core (#154): the Claude client, our streaming tool loop,
-// the pricing table (web searches and fallback hops included) and the
-// monthly budget every AI feature shares. Picks and Ask run on it.
-type aiCore struct{}
-
-// wireAI sets up the AI core and serves GET/PUT /settings/ai and
-// /settings/ai/usage (Options.AISettings), with or without a key. #154
-// fills it in; until then those routes answer 503.
-func wireAI(d aiDeps, opts *api.Options) *aiCore {
-	_, _ = d, opts
-	return &aiCore{}
+// aiCore is the AI core (#154) the picks and Ask run on.
+type aiCore struct {
+	// client runs tool loops (Client.Run), recording each API call's usage
+	// in the ledger; nil without ANTHROPIC_API_KEY.
+	client *aicore.Client
+	// ledger records usage and checks the monthly budget every AI feature
+	// shares (Check before a run or an Ask turn; a *aicore.BudgetError
+	// carries resets_at).
+	ledger *aicore.Ledger
+	// settings serves /settings/ai and its usage; the picks and Ask install
+	// their parts of the usage page with SetRecs (#157) and SetAsk (#158).
+	settings *aisettings.Service
 }
 
-// Close stops what wireAI started.
+// wireAI sets up the AI core and serves GET/PUT /settings/ai and
+// /settings/ai/usage (Options.AISettings), with or without a key.
+func wireAI(d aiDeps, opts *api.Options) *aiCore {
+	key := d.cfg.AI.AnthropicAPIKey
+	ledger := aicore.NewLedger(d.aiStore, d.settings)
+	core := &aiCore{
+		client:   aicore.New(aicore.Config{APIKey: key, Recorder: ledger}),
+		ledger:   ledger,
+		settings: aisettings.New(d.settings, d.aiStore, key != ""),
+	}
+	opts.AISettings = core.settings
+	if core.client == nil {
+		slog.Info("ANTHROPIC_API_KEY not set: picks and Ask are off; the AI settings still work", "component", "aicore")
+	}
+	return core
+}
+
+// Close stops what wireAI started: nothing runs in the background.
 func (c *aiCore) Close() {}
+
+// aiMonthToDate is /status's ai.mtd_cost_usd: every AI feature's spend
+// this server-local month, as the budget counts it.
+func aiMonthToDate(store *library.AIStore, settings *library.SettingsRepository) func(context.Context) (float64, error) {
+	return aicore.NewLedger(store, settings).MonthToDate
+}

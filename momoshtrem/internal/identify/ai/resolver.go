@@ -36,8 +36,8 @@
 // Answers are cached by torrent, show, metadata version, hint and scope (a
 // cached answer is free, budget or not). Before calling, Resolve checks the
 // monthly budget and returns ErrBudgetExceeded when it's spent. Every API
-// call's usage is recorded with its cost from the price table (cost.go),
-// whether or not its answer could be used.
+// call's usage is recorded with its cost from the AI core's price table
+// (aicore), whether or not its answer could be used.
 //
 // More than 60 files are split into requests that run side by side, four
 // at a time: Waves says how many rounds a scope takes, so the caller can
@@ -57,6 +57,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
+	"github.com/shapedtime/momoshtrem/internal/aicore"
 	"github.com/shapedtime/momoshtrem/internal/identify"
 )
 
@@ -132,7 +133,7 @@ func newResolver(client messagesAPI, cfg Config) (*Resolver, error) {
 	if r.model == "" {
 		r.model = DefaultModel
 	}
-	if _, ok := prices[r.model]; !ok {
+	if !aicore.Priced(r.model) {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownModel, r.model)
 	}
 	if r.timeout <= 0 {
@@ -166,7 +167,7 @@ func (r *Resolver) Resolve(ctx context.Context, in identify.ResolveInput) (ident
 	if in.Model != "" {
 		model = in.Model
 	}
-	if _, ok := prices[model]; !ok {
+	if !aicore.Priced(model) {
 		return identify.ResolveOutput{}, fmt.Errorf("%w: %q", ErrUnknownModel, model)
 	}
 

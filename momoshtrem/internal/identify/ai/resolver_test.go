@@ -49,8 +49,8 @@ func TestResolveModelPerCall(t *testing.T) {
 	if err != nil || client.calls[0].Model != "claude-sonnet-5-5" || out.Usage.Model != "claude-sonnet-5-5" || rec.usages[0].Model != "claude-sonnet-5-5" {
 		t.Fatalf("Resolve = %+v, %v; request model %q", out.Usage, err, client.calls[0].Model)
 	}
-	// Priced on Sonnet's card: $2 in, $10 out, $0.20 cache reads.
-	if want := (1000*2.0 + 200*10.0 + 2000*0.20) / 1e6; math.Abs(out.Usage.CostUSD-want) > 1e-12 {
+	// Priced on Sonnet's card: $2 in, $10 out, $0.10 cache reads (0.05x).
+	if want := (1000*2.0 + 200*10.0 + 2000*0.10) / 1e6; math.Abs(out.Usage.CostUSD-want) > 1e-12 {
 		t.Errorf("cost = %v, want %v", out.Usage.CostUSD, want)
 	}
 

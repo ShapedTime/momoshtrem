@@ -42,16 +42,3 @@ func TestUsageOf(t *testing.T) {
 		t.Errorf("usageOf = %+v, want %+v", u, want)
 	}
 }
-
-func TestEveryPricedModelHasAFullCard(t *testing.T) {
-	for model, cards := range prices {
-		if len(cards) == 0 || cards[len(cards)-1].upTo != 0 {
-			t.Errorf("%s: the last card must apply to any length", model)
-		}
-		for _, c := range cards {
-			if c.input <= 0 || c.output <= 0 || c.cacheRead <= 0 || c.cacheWrite <= 0 {
-				t.Errorf("%s: a rate is missing: %+v", model, c)
-			}
-		}
-	}
-}

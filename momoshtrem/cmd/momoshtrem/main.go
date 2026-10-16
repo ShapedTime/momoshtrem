@@ -373,7 +373,7 @@ func main() {
 		},
 		ActiveReaders:           sessionRegistry.Count,
 		AIConfigured:            cfg.AI.AnthropicAPIKey != "",
-		AICost:                  aiStore.MonthToDateCost,
+		AICost:                  aiMonthToDate(aiStore, settingsRepo),
 		OpenSubtitlesConfigured: cfg.OpenSubtitles.APIKey != "",
 	}
 	if cfg.TMDB.APIKey != "" {

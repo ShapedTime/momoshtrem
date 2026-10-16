@@ -51,26 +51,43 @@ func TestAIStoreUsage(t *testing.T) {
 	s := NewAIStore(db)
 	ctx := context.Background()
 
-	if cost, err := s.MonthToDateCost(ctx); cost != 0 || err != nil {
-		t.Fatalf("empty month = %v, %v", cost, err)
+	// The period's start comes from Go (the server-local month), never
+	// from the database's clock or zone.
+	since := time.Now().Add(-time.Hour)
+	if cost, err := s.CostSince(ctx, since); cost != 0 || err != nil {
+		t.Fatalf("empty period = %v, %v", cost, err)
+	}
+	if totals, err := s.FeatureTotalsSince(ctx, since); len(totals) != 0 || err != nil {
+		t.Fatalf("empty period by feature = %v, %v", totals, err)
 	}
 	ref := int64(42)
 	for _, u := range []AIUsage{
 		{Feature: AIFeatureClassifier, Model: "claude-haiku-5-5", InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 2000, CostUSD: 0.00022, RefID: &ref},
-		{Feature: AIFeatureRecs, Model: "claude-opus-5-5", InputTokens: 10, CostUSD: 0.5},
+		{Feature: AIFeatureRecs, Model: "claude-opus-5-5", InputTokens: 10, WebSearches: 3, CostUSD: 0.5},
+		{Feature: AIFeatureRecs, Model: "claude-opus-5-5", InputTokens: 10, CostUSD: 0.25},
 	} {
 		if err := s.RecordUsage(ctx, u); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Last month's usage doesn't count.
+	// Usage before the period doesn't count.
 	if _, err := db.Exec(`INSERT INTO ai_usage (feature, model, cost_usd, created_at)
-		VALUES ('classifier', 'claude-haiku-5-5', 9, date_trunc('month', NOW()) - INTERVAL '1 day')`); err != nil {
+		VALUES ('classifier', 'claude-haiku-5-5', 9, $1::timestamptz - INTERVAL '1 second')`, since); err != nil {
 		t.Fatal(err)
 	}
-	cost, err := s.MonthToDateCost(ctx)
-	if err != nil || math.Abs(cost-0.50022) > 1e-9 {
-		t.Errorf("month to date = %v, %v; want 0.50022", cost, err)
+	cost, err := s.CostSince(ctx, since)
+	if err != nil || math.Abs(cost-0.75022) > 1e-9 {
+		t.Errorf("cost since = %v, %v; want 0.75022", cost, err)
+	}
+	totals, err := s.FeatureTotalsSince(ctx, since)
+	if err != nil || len(totals) != 2 ||
+		totals[0].Feature != AIFeatureClassifier || math.Abs(totals[0].CostUSD-0.00022) > 1e-9 || totals[0].Requests != 1 ||
+		totals[1].Feature != AIFeatureRecs || math.Abs(totals[1].CostUSD-0.75) > 1e-9 || totals[1].Requests != 2 {
+		t.Errorf("by feature = %+v, %v", totals, err)
+	}
+	var searches int
+	if err := db.QueryRow(`SELECT SUM(web_searches) FROM ai_usage WHERE feature = 'recs'`).Scan(&searches); err != nil || searches != 3 {
+		t.Errorf("web searches = %d, %v", searches, err)
 	}
 
 	var got AIUsage

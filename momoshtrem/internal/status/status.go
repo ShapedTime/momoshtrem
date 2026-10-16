@@ -68,8 +68,9 @@ type Options struct {
 	TraktConnected          func() bool
 	AIConfigured            bool
 	OpenSubtitlesConfigured bool
-	// AICost is what the AI features have cost this month (ai_usage).
-	// Optional: without it, or when it fails, mtd_cost_usd is null.
+	// AICost is what the AI features have cost this server-local month
+	// (ai_usage; the budget's month, TZ). Optional: without it, or when it
+	// fails, mtd_cost_usd is null.
 	AICost func(ctx context.Context) (float64, error)
 
 	// ProbeTimeout bounds each check; zero means DefaultProbeTimeout.
