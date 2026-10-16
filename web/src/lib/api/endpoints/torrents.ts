@@ -1,26 +1,23 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiJson } from '../client';
+import { apiJson, toQuery } from '../client';
 import type { TorrentDetail, TorrentListItem, TorrentsPauseCount, TorrentsSummary } from '../contract';
-import type { TorrentListResponse } from '@/types/torrent';
 
 /**
- * Activity (PLAN §6 "Torrents and activity (B6)").
- *
- * Until #102 retires app/api/torrents/**, the legacy web routes answer these
- * paths on the real stack: GET /api/torrents keeps the legacy `{torrents}`
- * shape, and the [hash] routes catch summary, the detail, pause, resume and
- * the *-all routes. Mock mode (MSW) answers the new shapes, except GET
- * /api/torrents.
+ * Activity (PLAN §6 "Torrents and activity (B6)"). Every /api/torrents* path
+ * goes through the session-checked proxy to the backend.
  */
 export const torrentKeys = {
   all: ['torrents'] as const,
   list: ['torrents', 'list'] as const,
   summary: ['torrents', 'summary'] as const,
   detail: (infoHash: string) => ['torrents', 'detail', infoHash.toLowerCase()] as const,
-  legacy: ['torrents', 'legacy'] as const,
 };
 
 const torrentPath = (infoHash: string) => `/api/torrents/${encodeURIComponent(infoHash)}`;
+
+/** DELETE /torrents/{hash}?delete_data=true|false, also for a keepalive request while the page unloads. */
+export const removeTorrentUrl = (infoHash: string, { deleteData = false }: { deleteData?: boolean } = {}) =>
+  `${torrentPath(infoHash)}${toQuery({ delete_data: deleteData })}`;
 
 export const torrentsApi = {
   list: () => apiJson<{ items: TorrentListItem[] }>('/api/torrents'),
@@ -36,10 +33,8 @@ export const torrentsApi = {
   /** Resumes every paused torrent. */
   resumeAll: () => apiJson<TorrentsPauseCount>('/api/torrents/resume-all', { method: 'POST' }),
   /** Forgets the torrent (its jobs, assignments and torrent subtitles) and drops it; deleteData also deletes its pieces. */
-  remove: (infoHash: string, { deleteData = false }: { deleteData?: boolean } = {}) =>
-    apiJson<void>(`${torrentPath(infoHash)}${deleteData ? '?delete_data=true' : ''}`, { method: 'DELETE' }),
-  /** The current web route's shape ({torrents}); replaced by `list` in #102. */
-  legacyList: () => apiJson<TorrentListResponse>('/api/torrents'),
+  remove: (infoHash: string, options: { deleteData?: boolean } = {}) =>
+    apiJson<void>(removeTorrentUrl(infoHash, options), { method: 'DELETE' }),
 };
 
 /** Every torrent the library knows, loaded or not; polls every 5 s while the tab is visible. */
@@ -49,10 +44,6 @@ export const torrentsListQuery = () =>
 /** One torrent's detail (Activity's detail page); polls every 5 s while the tab is visible. */
 export const torrentDetailQuery = (infoHash: string) =>
   queryOptions({ queryKey: torrentKeys.detail(infoHash), queryFn: () => torrentsApi.detail(infoHash), refetchInterval: 5000 });
-
-/** Live torrent stats; polls every 5 s while the tab is visible. */
-export const legacyTorrentsQuery = (refetchInterval: number | false = 5000) =>
-  queryOptions({ queryKey: torrentKeys.legacy, queryFn: torrentsApi.legacyList, refetchInterval });
 
 /** Speeds sample every 2 s on the server; 5 s keeps the strip and the sparkline moving. */
 export const torrentsSummaryQuery = () =>

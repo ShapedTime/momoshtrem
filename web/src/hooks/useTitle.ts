@@ -1,10 +1,10 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Play, Trash2 } from 'lucide-react';
 import { useConfirm, useToast } from '@/components/ui';
 import type { MediaType, Title } from '@/lib/api/contract';
-import { libraryKeys, subtitleKeys, titleKeys, titleQuery, titlesApi } from '@/lib/api/endpoints';
+import { libraryKeys, subtitleKeys, titleKeys, titleQuery, titlesApi, torrentKeys, torrentsApi } from '@/lib/api/endpoints';
 import { removeConsequence } from '@/lib/title/facts';
 
 /** How often a downloading title refreshes its progress (paused in hidden tabs). */
@@ -68,9 +68,21 @@ export function useTitleActions(title: Title) {
     onError: failed('remove'),
   });
 
+  // A paused torrent (B6) stays paused until Resume: reads from Infuse don't wake it
+  const resumeTorrent = useMutation({
+    mutationFn: (infoHash: string) => torrentsApi.resume(infoHash),
+    onSuccess: async () => {
+      await Promise.all([refetch(), queryClient.invalidateQueries({ queryKey: torrentKeys.all })]);
+      toast({ tone: 'ready', icon: Play, title: `Resumed ${name}` });
+    },
+    onError: failed('resume'),
+  });
+
   return {
     add: () => add.mutate(),
     adding: add.isPending,
+    resumeTorrent: (infoHash: string) => resumeTorrent.mutate(infoHash),
+    resumingTorrent: resumeTorrent.isPending,
     refresh: () => {
       if (libraryId !== null) refresh.mutate(libraryId);
     },

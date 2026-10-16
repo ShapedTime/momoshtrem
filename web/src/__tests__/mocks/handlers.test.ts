@@ -110,6 +110,7 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /settings/ai', () => settingsApi.ai()],
     ['GET /settings/ai/usage', () => settingsApi.aiUsage()],
     ['GET /status', () => systemApi.status()],
+    ['GET /torrents', () => torrentsApi.list()],
     ['GET /torrents/summary', () => torrentsApi.summary()],
     ['GET /torrents/{hash}', () => torrentsApi.detail(DOWNLOADING)],
     ['POST /shows/{id}/assign-torrent {info_hash}', () => assignmentApi.assignShow(1, { info_hash: FRIEREN_BATCH })],
@@ -211,16 +212,18 @@ describe('Activity in mock mode (B6, #98)', () => {
     expect(TORRENTS.some((t) => t.open_job !== null)).toBe(true);
   });
 
-  it('keeps the legacy shape at GET /torrents for the legacy page and badge', async () => {
-    const { torrents } = await torrentsApi.legacyList();
-    expect(torrents).toHaveLength(TORRENTS.length);
-    expect(torrents.filter((t) => !t.is_paused && t.progress < 1)).toHaveLength(1);
+  it('answers GET /torrents with the B6 items, and the offline scenario as the proxy does', async () => {
+    const { items } = await torrentsApi.list();
+    expect(items.map((t) => t.info_hash)).toEqual(TORRENTS.map((t) => t.info_hash));
+    setMockScenario('torrents-offline');
+    await expect(torrentsApi.list()).rejects.toMatchObject({ status: 502, code: 'backend_unreachable' });
+    await expect(torrentsApi.summary()).rejects.toMatchObject({ status: 502 });
   });
 
   it('pauses and resumes a torrent, and the summary counts follow', async () => {
-    expect((await torrentsApi.summary()).counts).toEqual({ streaming: 1, downloading: 1, paused: 1, idle: 4 });
+    expect((await torrentsApi.summary()).counts).toEqual({ streaming: 1, downloading: 2, paused: 1, idle: 4 });
     expect(await torrentsApi.pause(DOWNLOADING.toUpperCase())).toMatchObject({ info_hash: DOWNLOADING, state: 'paused', download_bps: 0 });
-    expect((await torrentsApi.summary()).counts).toMatchObject({ downloading: 0, paused: 2 });
+    expect((await torrentsApi.summary()).counts).toMatchObject({ downloading: 1, paused: 2 });
     expect(TORRENTS.find((t) => t.info_hash === DOWNLOADING)?.state).toBe('downloading'); // the page's copy changed, not the fixture
     expect((await torrentsApi.pause(DOWNLOADING)).state).toBe('paused'); // idempotent
     expect((await torrentsApi.resume(DOWNLOADING)).state).toBe('downloading');
@@ -228,15 +231,15 @@ describe('Activity in mock mode (B6, #98)', () => {
   });
 
   it('pauses the streaming and downloading torrents, and resumes every paused one', async () => {
-    expect(await torrentsApi.pauseAll()).toEqual({ count: 2 });
+    expect(await torrentsApi.pauseAll()).toEqual({ count: 3 });
     expect(await torrentsApi.pauseAll()).toEqual({ count: 0 });
-    expect(await torrentsApi.resumeAll()).toEqual({ count: 3 });
-    expect((await torrentsApi.summary()).counts).toEqual({ streaming: 1, downloading: 2, paused: 0, idle: 4 });
+    expect(await torrentsApi.resumeAll()).toEqual({ count: 4 });
+    expect((await torrentsApi.summary()).counts).toEqual({ streaming: 1, downloading: 3, paused: 0, idle: 4 });
   });
 
   it('deletes a torrent, and rejects unknown and malformed hashes', async () => {
     await torrentsApi.remove(DOWNLOADING);
-    expect((await torrentsApi.legacyList()).torrents.map((t) => t.info_hash)).not.toContain(DOWNLOADING);
+    expect((await torrentsApi.list()).items.map((t) => t.info_hash)).not.toContain(DOWNLOADING);
     await expect(torrentsApi.pause(DOWNLOADING)).rejects.toMatchObject({ status: 404 });
     await expect(torrentsApi.resume('summary')).rejects.toMatchObject({ status: 400 });
   });

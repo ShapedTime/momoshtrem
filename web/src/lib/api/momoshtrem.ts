@@ -6,9 +6,6 @@ import type {
   RecentlyAiredResponse,
 } from '@/types/momoshtrem';
 import { parseMomoshtremError } from '@/types/momoshtrem';
-import type { TorrentListItem } from '@/lib/api/contract/torrents';
-import { legacyTorrentStatus, type TorrentStatus } from '@/types/torrent';
-import type { TorrentDebugInfo } from '@/types/torrent-debug';
 
 /** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
 export const TOKEN_HEADER = 'X-Momoshtrem-Token';
@@ -228,80 +225,6 @@ class MomoshtremClient {
       `/api/shows/${id}`,
       undefined,
       'delete show'
-    );
-  }
-
-  // ============================================================================
-  // Torrent Management API
-  // ============================================================================
-
-  /**
-   * Every torrent the library knows, loaded or not, in the legacy shape:
-   * the backend answers {items: TorrentListItem[]} (B6), which the legacy
-   * /torrents page and the Activity badge read through this until #102.
-   */
-  async getTorrents(): Promise<TorrentStatus[]> {
-    const result = await this.request<{ items: TorrentListItem[] }>(
-      'GET',
-      '/api/torrents',
-      undefined,
-      'get torrents'
-    );
-    return (result?.items ?? []).map(legacyTorrentStatus);
-  }
-
-  /**
-   * Remove a torrent.
-   * @param infoHash - The torrent info hash
-   * @param deleteData - If true, also deletes downloaded data
-   */
-  async removeTorrent(infoHash: string, deleteData = false): Promise<void> {
-    const query = deleteData ? '?delete_data=true' : '';
-    await this.request<void>(
-      'DELETE',
-      `/api/torrents/${infoHash}${query}`,
-      undefined,
-      'remove torrent'
-    );
-  }
-
-  /**
-   * Pause a torrent.
-   */
-  async pauseTorrent(infoHash: string): Promise<void> {
-    await this.request<void>(
-      'POST',
-      `/api/torrents/${infoHash}/pause`,
-      undefined,
-      'pause torrent'
-    );
-  }
-
-  /**
-   * Resume a paused torrent.
-   */
-  async resumeTorrent(infoHash: string): Promise<void> {
-    await this.request<void>(
-      'POST',
-      `/api/torrents/${infoHash}/resume`,
-      undefined,
-      'resume torrent'
-    );
-  }
-
-  // ============================================================================
-  // Torrent Debug API
-  // ============================================================================
-
-  /**
-   * Get detailed piece-level debug info for a torrent.
-   */
-  async getTorrentDebugInfo(infoHash: string): Promise<TorrentDebugInfo> {
-    return this.request<TorrentDebugInfo>(
-      'GET',
-      `/api/torrents/${infoHash}/debug`,
-      undefined,
-      'get torrent debug info'
     );
   }
 

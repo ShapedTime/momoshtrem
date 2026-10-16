@@ -61,7 +61,7 @@ describe('PrimaryPanel', () => {
     expect(screen.getByRole('heading', { name: 'Downloading' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Interstellar download' })).toHaveAttribute('aria-valuenow', '42');
     expect(screen.getByText('You can start watching in Infuse now;')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'View download' })).toHaveAttribute('href', '/torrents');
+    expect(screen.getByRole('link', { name: 'View download' })).toHaveAttribute('href', '/activity');
     fireEvent.click(screen.getByRole('button', { name: 'How to play in Infuse' }));
     expect(onAction).toHaveBeenCalledWith('how_to_play');
   });

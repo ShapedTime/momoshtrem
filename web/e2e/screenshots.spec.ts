@@ -47,7 +47,7 @@ test.describe('sign in', () => {
 
 test.describe('app shell', () => {
   test('frame', async ({ page }, testInfo) => {
-    await signIn(page, '/torrents');
+    await signIn(page, '/activity');
     await expect(page.getByText('Frieren.S02.1080p.WEB-DL.x264-SubsPlease')).toBeVisible();
     await shoot(page, testInfo, 'shell/frame');
   });
@@ -557,5 +557,53 @@ test.describe('discover', () => {
     await page.locator('.skel').first().waitFor();
     await page.waitForTimeout(600);
     await shoot(page, testInfo, 'discover/loading');
+  });
+});
+
+test.describe('activity', () => {
+  const SEVERANCE = 'b2c3d4e5f60718293a4b5c6d7e8f9012345678a1';
+  const ready = async (page: Page) => {
+    await page.getByRole('region', { name: 'Summary' }).waitFor();
+    await page.waitForTimeout(600);
+  };
+
+  test('default', async ({ page }, testInfo) => {
+    await signIn(page, '/activity');
+    await page.getByText('Frieren.S02.1080p.WEB-DL.x264-SubsPlease').waitFor();
+    await ready(page);
+    await shoot(page, testInfo, 'activity/default', { fullPage: true });
+  });
+
+  test('detail', async ({ page }, testInfo) => {
+    await signIn(page, `/activity/${SEVERANCE}?advanced=1`);
+    await page.getByRole('img', { name: /Piece map/ }).waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'activity/detail', { fullPage: true });
+  });
+
+  test('empty', async ({ page }, testInfo) => {
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'torrents-quiet'));
+    await signIn(page, '/activity');
+    await page.getByRole('heading', { name: 'Nothing downloading.' }).waitFor();
+    await ready(page);
+    await shoot(page, testInfo, 'activity/empty', { fullPage: true });
+  });
+
+  test('offline', async ({ page }, testInfo) => {
+    await signIn(page, '/activity');
+    await ready(page);
+    await page.evaluate(() => window.localStorage.setItem('msw:scenario', 'torrents-offline'));
+    await page.getByRole('alert').filter({ hasText: 'Can’t reach momoshtrem' }).waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'activity/offline', { fullPage: true });
+  });
+
+  test('remove dialog', async ({ page }, testInfo) => {
+    await signIn(page, '/activity');
+    await ready(page);
+    await page.getByRole('button', { name: 'Remove Interstellar torrent' }).click();
+    await page.getByRole('alertdialog', { name: 'Remove this torrent?' }).waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'activity/remove');
   });
 });

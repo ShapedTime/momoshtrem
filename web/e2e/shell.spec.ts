@@ -20,13 +20,13 @@ test.describe('app shell', () => {
       await expect(tabBar.getByRole('link', { name: 'Library' })).toHaveAttribute('aria-current', 'page');
       await tabBar.getByRole('link', { name: /Activity/ }).click();
     }
-    await expect(page).toHaveURL(/\/torrents$/);
+    await expect(page).toHaveURL(/\/activity$/);
   });
 
-  test('the Activity badge counts downloading torrents', async ({ page }, testInfo) => {
+  test('the Activity badge counts streaming and downloading torrents', async ({ page }, testInfo) => {
     await signIn(page, '/library');
     const nav = isDesktop(testInfo.project.name) ? page.locator('header.topbar') : page.locator('nav.tabbar');
-    await expect(nav.getByLabel('1 downloading')).toBeVisible();
+    await expect(nav.getByLabel('3 active')).toBeVisible();
   });
 
   test('a skip link jumps to the content', async ({ page }) => {
@@ -66,7 +66,7 @@ test.describe('command palette', () => {
   test.beforeEach(({}, testInfo) => test.skip(!isDesktop(testInfo.project.name), 'Keyboard shortcuts are a desktop affordance'));
 
   test('⌘K opens it, typing filters, Enter goes there', async ({ page }) => {
-    await signIn(page, '/torrents');
+    await signIn(page, '/activity');
     await page.keyboard.press('ControlOrMeta+k');
     const palette = page.getByRole('dialog', { name: 'Search or jump to' });
     await expect(palette).toBeVisible();
@@ -131,7 +131,7 @@ test.describe('URL-driven sheets', () => {
     await page.goto('/library?sheet=toString');
     // The badge comes from a client query: the shell hydrated and is still standing
     const nav = isDesktop(testInfo.project.name) ? page.locator('header.topbar') : page.locator('nav.tabbar');
-    await expect(nav.getByLabel('1 downloading')).toBeVisible();
+    await expect(nav.getByLabel('3 active')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Library', level: 1 })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'This page didn’t load' })).toHaveCount(0);

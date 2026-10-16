@@ -36,6 +36,9 @@
  * - `discover-loading`: /api/discover never answers (the loading state).
  * - `title-search-error`: /api/title-search answers 502 `tmdb_unavailable`.
  * - `title-search-loading`: /api/title-search never answers (the loading state).
+ * - `torrents-offline`: /torrents and /torrents/summary answer 502 `backend_unreachable`, as the proxy does
+ *   when momoshtrem is gone (Activity keeps what it had and says so).
+ * - `torrents-quiet`: /torrents lists only the idle torrents and the summary has nothing streaming (Activity's empty state).
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -65,7 +68,9 @@ export type MockScenario =
   | 'discover-error'
   | 'discover-loading'
   | 'title-search-error'
-  | 'title-search-loading';
+  | 'title-search-loading'
+  | 'torrents-offline'
+  | 'torrents-quiet';
 
 let override: MockScenario | null = null;
 

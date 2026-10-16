@@ -16,6 +16,11 @@ import {
 
 /** How long Undo is offered (HANDOFF §4.4). */
 export const UNDO_MS = 10_000;
+/**
+ * How long an uncertain removal stays hidden while the server may still be at
+ * it (a torrent delete waits up to `add_timeout`, 60 s, for an add in flight).
+ */
+export const UNCERTAIN_HOLD_MS = 60_000;
 
 const NONE: ReadonlyMap<string, PendingRemoval> = new Map();
 
@@ -66,6 +71,15 @@ export function useUndoableRemoval() {
           if (outcome.result === 'committed') {
             await refresh().catch(() => undefined);
             releasePendingRemoval(removal.key);
+          } else if (outcome.result === 'uncertain') {
+            // The proxy stopped waiting, not the server: say so, refetch, and keep it hidden a while
+            toast({ tone: 'info', title: `Still removing ${removal.label}…`, body: 'momoshtrem is taking its time. It drops off the list once it’s done.' });
+            await refresh().catch(() => undefined);
+            window.setTimeout(() => {
+              void refresh()
+                .catch(() => undefined)
+                .finally(() => releasePendingRemoval(removal.key));
+            }, UNCERTAIN_HOLD_MS);
           } else if (outcome.result === 'failed') {
             const cause = outcome.error instanceof Error ? outcome.error.message : '';
             toast({ tone: 'error', title: `Couldn’t remove ${removal.label}`, body: [cause, 'It’s back where it was.'].filter(Boolean).join(' · ') });

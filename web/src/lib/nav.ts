@@ -12,16 +12,15 @@ export interface NavItem {
 }
 
 /**
- * The five destinations (HANDOFF §2/§3). Until its v2 screen lands, Activity
- * points at the existing /torrents page (#7). Feature issues update their
- * entry here.
+ * The five destinations (HANDOFF §2/§3). Feature issues update their entry
+ * here.
  */
 export const NAV: NavItem[] = [
   { id: 'home', label: 'For You', href: '/', icon: Sparkles, match: ['/'], inTopBar: true },
   { id: 'discover', label: 'Discover', href: '/discover', icon: Compass, match: ['/discover'], inTopBar: true },
   { id: 'search', label: 'Search', href: '/search', icon: Search, match: ['/search'], inTopBar: false },
   { id: 'library', label: 'Library', href: '/library', icon: LibraryBig, match: ['/library'], inTopBar: true },
-  { id: 'activity', label: 'Activity', href: '/torrents', icon: Activity, match: ['/torrents', '/activity'], inTopBar: true },
+  { id: 'activity', label: 'Activity', href: '/activity', icon: Activity, match: ['/activity'], inTopBar: true },
 ];
 
 /** Whether `pathname` belongs to a nav item ("/" only matches exactly). */
