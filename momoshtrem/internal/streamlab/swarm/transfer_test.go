@@ -24,7 +24,7 @@ import (
 // media.Layout. They time nothing tightly: the machine may be loaded.
 //
 // A read that stalls with the seeder connected and its piece wanted now is
-// a known issue (knownStallIssue): the run is skipped with both clients'
+// a known issue (swarm.StallIssue): the run is skipped with both clients'
 // status rather than failed. Any other failed read fails the test.
 
 // transfer is one run: start a seeder, load its magnet in a leecher, read
@@ -151,7 +151,7 @@ func (c *checker) read(off int64, n int) {
 	if err != nil || m != n {
 		msg := fmt.Sprintf("ReadAt(%d bytes at %d of %s) = %d, %v\n%s", n, off, c.f.Path, m, err, c.status())
 		if c.knownStall(err, off+int64(m)) {
-			c.t.Skipf("known issue %s, a stall with one seeder: %s", knownStallIssue, msg)
+			c.t.Skipf("known issue %s, a stall with one seeder: %s", swarm.StallIssue, msg)
 		}
 		c.t.Fatal(msg)
 	}
@@ -168,26 +168,13 @@ func (c *checker) read(off int64, n int) {
 	c.checked += int64(n)
 }
 
-// knownStallIssue tracks reads that stall with one connected seeder:
-// anacrolix v1.60.0's connection writer loses a wakeup
-// (anacrolix/torrent#1070).
-const knownStallIssue = "#195"
-
 // knownStall reports whether a read that failed with err, stuck at the
-// file offset off, is the known stall (knownStallIssue). That means it timed
-// out while the leecher was connected to the seeder, and the piece at off
-// was wanted: anacrolix's effective priority Now, which counts its own
-// reader and is None while downloads are disallowed. A torrent left idle or
-// paused, or with no seeder connected, fails the test.
-//
-// It's an expected failure (PLAN D6) until the issue is fixed; S4's
-// known-issue registry (#175) replaces this.
+// file offset off, is the known stall (swarm.Stalled): it timed out while
+// the leecher was connected to the seeder and the piece at off was wanted.
+// Any other failed read fails the test.
 func (c *checker) knownStall(err error, off int64) bool {
-	if !errors.Is(err, context.DeadlineExceeded) || c.torrent.Stats().ConnectedSeeders < 1 {
-		return false
-	}
-	ps := c.torrent.PieceState(int((c.f.Offset + off) / c.layout.PieceLength()))
-	return ps.Priority == atorrent.PiecePriorityNow && !ps.Complete
+	return errors.Is(err, context.DeadlineExceeded) &&
+		swarm.Stalled(c.torrent, int((c.f.Offset+off)/c.layout.PieceLength()))
 }
 
 // sequential reads [from, to) in chunk-sized reads.
