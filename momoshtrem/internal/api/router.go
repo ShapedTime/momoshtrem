@@ -90,6 +90,19 @@ type Options struct {
 	// TraktNudge is nudged by GET /me/up-next (#132). Nil: reading Up next
 	// never starts a sync.
 	TraktNudge TraktNudger
+	// Recommendations serves the picks: /recommendations/home, refresh and
+	// runs (R2, #157; cmd/momoshtrem/wire_recs.go). Nil makes those routes
+	// return 503.
+	Recommendations Recommendations
+	// RecFeedback serves /recommendations/feedback (R1, #153;
+	// wire_recs.go). Nil makes those routes return 503.
+	RecFeedback RecFeedback
+	// Ask serves Ask momoshtrem over SSE and its threads (R3, #158;
+	// wire_ask.go). Nil makes those routes return 503.
+	Ask Ask
+	// AISettings serves GET/PUT /settings/ai and /settings/ai/usage (the
+	// AI core, #154; wire_ai.go). Nil makes those routes return 503.
+	AISettings AISettings
 }
 
 // NewServer creates a new API server
@@ -208,6 +221,11 @@ func (s *Server) setupRoutes() {
 	s.registerSearchRoutes(api)     // Torrent search and resolve
 	s.registerTraktRoutes(api)      // Trakt connect, disconnect, settings and sync
 	s.registerMeRoutes(api)         // Up next, new episodes, watchlist and history (B5)
+
+	// AI recommendations and Ask momoshtrem (#9)
+	s.registerRecommendationRoutes(api) // Picks: home, refresh, runs and feedback
+	s.registerAskRoutes(api)            // Ask over SSE, and its threads
+	s.registerAISettingsRoutes(api)     // GET/PUT /settings/ai and its usage
 }
 
 // Handler returns the HTTP handler

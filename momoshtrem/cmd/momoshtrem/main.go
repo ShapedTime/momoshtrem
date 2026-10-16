@@ -505,7 +505,7 @@ func main() {
 	// torrent state and hero colours (computed in the background, cached in
 	// tmdb_cache).
 	heroColors := artwork.New(tmdbCache)
-	apiOpts.Catalog = catalog.New(catalog.Deps{
+	catalogService := catalog.New(catalog.Deps{
 		Store:           library.NewCatalogRepository(db),
 		TMDB:            cachedTMDB,
 		Torrents:        torrentService,
@@ -515,6 +515,7 @@ func main() {
 		WebDAVPublicURL: webdavPublicURL,
 		HDRezkaURL:      cfg.HDRezka.URL,
 	})
+	apiOpts.Catalog = catalogService
 
 	// The AI resolver (Claude Haiku) looks at the files the rules aren't
 	// sure about; without ANTHROPIC_API_KEY the jobs run on rules only.
@@ -595,6 +596,24 @@ func main() {
 		WebDAVPublicURL: webdavPublicURL,
 	})
 
+	// AI recommendations and Ask momoshtrem (#9): the AI core and its
+	// settings (#154), the picks (#153, #157) and Ask (#158), each set up in
+	// its own wire_*.go. Their times (the 03:00 schedule, the hero's day,
+	// Ask's daily limit, the budget month) are server-local: TZ.
+	aiFeatures := aiDeps{
+		cfg:       cfg,
+		db:        db,
+		settings:  settingsRepo,
+		aiStore:   aiStore,
+		tmdb:      cachedTMDB,
+		catalog:   catalogService,
+		traktAuth: traktAuth,
+		traktSync: traktSync,
+	}
+	aiCoreService := wireAI(aiFeatures, &apiOpts)
+	recs := wireRecs(aiFeatures, aiCoreService, &apiOpts)
+	ask := wireAsk(aiFeatures, aiCoreService, recs, &apiOpts)
+
 	// Initialize servers with torrent service and tree updater
 	apiServer := api.NewServer(movieRepo, showRepo, assignmentRepo, torrentService, libraryFS, apiOpts)
 	apiServer.SetSubtitleService(subtitleService)
@@ -625,6 +644,9 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", cfg.Server.HTTPPort),
 		Handler: apiServer.Handler(),
 	}
+	// Shutdown doesn't cancel request contexts, so an Ask stream would hold
+	// it for its whole timeout: cancel the turns in flight as it starts.
+	httpServer.RegisterOnShutdown(ask.Close)
 
 	webdavHTTPServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.WebDAVPort),
@@ -652,6 +674,7 @@ func main() {
 		"api_token_required", cfg.Server.APIToken != "",
 		"webdav_url", webdavPublicURL,
 		"webdav_auth_enabled", cfg.Server.WebDAVAuth.Enabled,
+		"time_zone", time.Now().Format("MST -07:00"), // TZ (UTC by default): the AI schedule and limits
 	)
 
 	// Wait for shutdown signal
@@ -697,6 +720,11 @@ func main() {
 	// Stop the assignment workers before the torrent service they use; a
 	// job in flight resumes on the next start.
 	jobService.Close()
+
+	// Stop the picks' scheduler, then the AI core it runs on (Ask's turns
+	// were cancelled when the REST server began shutting down)
+	recs.Close()
+	aiCoreService.Close()
 
 	// Stop the Trakt sync (at most 10 s), then polling a pending device code
 	traktSync.Stop()

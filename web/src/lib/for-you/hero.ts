@@ -83,14 +83,14 @@ export function heroPicks({ upNext, watchlist, trending, date }: HeroPickInput):
 
   const readyShows = upNext.filter((item) => item.availability === 'ready').map((item) => ({ ...item, media_type: 'tv' as const, tmdb_id: item.show.tmdb_id }));
   const [show] = byDay(readyShows, day);
-  if (show) add({ media_type: 'tv', tmdb_id: show.tmdb_id, kicker: PICK_KICKER.up_next, reason: upNextReason(show), source: 'up_next' });
+  if (show) add({ media_type: 'tv', tmdb_id: show.tmdb_id, kicker: PICK_KICKER.up_next, reason: upNextReason(show), feedback: null, source: 'up_next' });
 
   for (const item of byDay(watchlist.filter((w) => w.library?.availability_stage === 'ready'), day)) {
-    add({ media_type: item.media_type, tmdb_id: item.tmdb_id, kicker: PICK_KICKER.watchlist, reason: 'On your Trakt watchlist, and it’s ready in Infuse.', source: 'watchlist' });
+    add({ media_type: item.media_type, tmdb_id: item.tmdb_id, kicker: PICK_KICKER.watchlist, reason: 'On your Trakt watchlist, and it’s ready in Infuse.', feedback: null, source: 'watchlist' });
   }
 
   for (const item of byDay(trending.slice(0, TRENDING_POOL), day)) {
-    add({ media_type: item.media_type, tmdb_id: item.tmdb_id, kicker: PICK_KICKER.trending, reason: '', source: 'trending' });
+    add({ media_type: item.media_type, tmdb_id: item.tmdb_id, kicker: PICK_KICKER.trending, reason: '', feedback: null, source: 'trending' });
   }
   return picks;
 }

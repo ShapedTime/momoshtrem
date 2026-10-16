@@ -4,7 +4,9 @@
  * (Playwright: page.addInitScript). Handlers check it per request.
  *
  * - `backend-down`: /status says the backend can't be reached.
- * - `ai-off`: mapping jobs have no AI (`ai_available: false`; re-check answers 503).
+ * - `ai-off`: no ANTHROPIC_API_KEY. Mapping jobs have no AI (`ai_available: false`; re-check answers 503);
+ *   /recommendations/home answers `enabled: false`, Refresh and Ask answer 503 `unavailable`, and the AI usage
+ *   says `configured: false`. The AI settings still read and save.
  * - `ai-error`: a re-check ends with `ai_error` set and every proposal unchanged.
  * - `job-failed`: every open mapping job fails when it's next read.
  * - `job-hold:<step>`: working mapping jobs walk up to `<step>` (`queued`,
@@ -54,6 +56,25 @@
  *   screens hold (until Cancel or the code expires).
  * - `trakt-loading`: GET /integrations/trakt never answers (For You's loading state).
  * - `for-you-no-hero`: every /me read and /api/tmdb/trending fail, so For You has nothing to pick a hero from.
+ * - `recs-none`: picks are on, but no run has finished yet: /recommendations/home has `run: null` and no
+ *   shelves (For You keeps trending). Refresh starts the first run.
+ * - `recs-first-run`: no picks yet, and the run after Trakt's first import (`first_sync`) holds at
+ *   "Writing your shelves" (2 of 5).
+ * - `recs-refreshing`: last night's picks, and a manual run holds at "Writing your shelves" (2 of 5).
+ * - `recs-failed`: the last refresh failed (the earlier picks stay), and the next one fails at TMDB.
+ * - `recs-off`: picks are switched off (`rec_enabled: false`): /home answers `enabled: false` and Refresh
+ *   409 `recs_disabled`. Ask still works; switching picks back on in Settings brings the shelves back.
+ * - `ask-budget`: the month's $5 budget is spent: Ask and Refresh answer 429 `budget_exceeded` with `resets_at`
+ *   (the 1st), and the usage says `budget_reached`.
+ * - `ask-limit`: 30 asks today: Ask answers 429 `ask_limit` with `resets_at` (the next midnight).
+ * - `ask-error`: an ask fails mid-stream after reading the history (`error`, code `upstream`); the thread keeps
+ *   the failed turn.
+ * - `ask-hold`: an ask stops at "Searching the web…" and never finishes, so Stop can be tested; stopping
+ *   cancels the turn.
+ *
+ * Without a scenario the recommendations mock is a state machine (fixtures/recommendations.ts): Refresh walks
+ * a run through its steps, one per read of /home or the run, then /home serves the new picks; feedback hides
+ * or marks titles at once; asks stream and grow the threads.
  */
 export const HOLD_STEPS = ['queued', 'fetching_metadata', 'classifying', 'resolving'] as const;
 export type HoldStep = (typeof HOLD_STEPS)[number];
@@ -97,7 +118,16 @@ export type MockScenario =
   | 'me-error'
   | 'trakt-pending'
   | 'trakt-loading'
-  | 'for-you-no-hero';
+  | 'for-you-no-hero'
+  | 'recs-none'
+  | 'recs-first-run'
+  | 'recs-refreshing'
+  | 'recs-failed'
+  | 'recs-off'
+  | 'ask-budget'
+  | 'ask-limit'
+  | 'ask-error'
+  | 'ask-hold';
 
 let override: MockScenario | null = null;
 

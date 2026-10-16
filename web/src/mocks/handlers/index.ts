@@ -4,7 +4,7 @@ import { discoverHandlers } from './discover';
 import { hdrezkaHandlers, resetMockHDRezka } from './hdrezka';
 import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
-import { recommendationsHandlers } from './recommendations';
+import { recommendationsHandlers, resetMockRecs } from './recommendations';
 import { resetMockSearch, searchHandlers } from './search';
 import { resetMockSettings, settingsHandlers } from './settings';
 import { resetMockSubtitles, subtitlesHandlers } from './subtitles';
@@ -36,7 +36,7 @@ export const handlers = [
   ...legacyHandlers,
 ];
 
-/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile, stored subtitles, torrent pauses and the Trakt account live per page). */
+/** Tests: forget what earlier requests changed (the library, mapping jobs, AI settings, the quality profile, stored subtitles, torrent pauses, the Trakt account and the picks, feedback and Ask threads live per page). */
 export function resetMockState(): void {
   resetMockLibrary();
   resetMockSettings();
@@ -46,5 +46,6 @@ export function resetMockState(): void {
   resetMockSearch();
   resetMockTorrents();
   resetMockTrakt();
+  resetMockRecs();
   setMockScenario(null);
 }

@@ -13,6 +13,8 @@ export interface ApiErrorBody {
     message: string;
     /** A 422 that's about one field names its JSON key, where the endpoint says so (the quality profile). */
     field?: string;
+    /** When a limit lifts, on the 429s that have one (the AI budget, Ask's daily limit). */
+    resets_at?: Timestamp;
   };
 }
 

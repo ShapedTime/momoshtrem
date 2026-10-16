@@ -159,6 +159,7 @@ New and moved environment variables:
 | `SECRET_KEY` | momoshtrem | AES-GCM key for encrypting Trakt tokens at rest |
 | `CORS_ALLOWED_ORIGINS` | momoshtrem | Optional comma-separated browser origins. Empty (the default) sends no CORS headers, since web calls the backend server-to-server. |
 | `WEBDAV_PUBLIC_URL` | momoshtrem | The WebDAV address Infuse uses (e.g. `https://momoshtrem.duckdns.org:36911/`), reported by `/status`. Defaults to `http://localhost:<webdav_port>/`. |
+| `TZ` | momoshtrem | Server-local time for the AI features (#9): the 03:00 picks run, the hero's day, Ask's daily limit and the budget month. An IANA name; compose passes `${TZ:-UTC}` (Go falls back to UTC for a name it doesn't know; the image has `tzdata`). The startup log prints the zone. |
 
 momoshtrem reads these settings and the other secrets and service URLs (`DATABASE_URL`, `TMDB_API_KEY`, OpenSubtitles, WebDAV auth, metrics) from env, with or without `config.yaml` (defaults → file → env). `config.yaml` covers the rest (ports, torrent, streaming…). `DATABASE_URL` is required.
 
@@ -168,7 +169,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 
 **`002_app_settings.sql` (G2)**
 - `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults.
-  - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`; `claude-sonnet-5-5` and `claude-opus-5-5` are priced too) and `auto_apply_high_confidence` (true), and the AI resolver (B3) `monthly_budget_usd` (none: no cap; once every AI feature's spend this month reaches it, AI calls are skipped). `library.SettingsRepository.AISettings` reads it; #9 serves the endpoints.
+  - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`; §6 "Recommendations (R1–R3)"). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`; `claude-sonnet-5-5` and `claude-opus-5-5` are priced too) and `auto_apply_high_confidence` (true), and every AI feature `monthly_budget_usd` (15 when the document doesn't have it; an explicit `null` is no cap; once every AI feature's spend this month reaches it, AI calls are skipped). `library.SettingsRepository.AISettings` reads the classifier's share; #9 serves the endpoints (#154), and `PUT` writes with one jsonb `||` statement.
   - Key `quality_profile`: one document shaped like `GET/PUT /settings/quality-profile` (§6 "Search"; #6). A missing field takes its default.
 
 **`003_metadata.sql` (B1)**
@@ -224,14 +225,38 @@ Every table is Trakt's: a disconnect purges them all in one transaction, and the
 - `app_settings` key `trakt`: `{use_ratings, show_watchlist, include_paused}`, defaults `true`, `true`, `false`, read over the defaults (`library.SettingsRepository.TraktSettings`). `UpdateTraktSettings` is a partial update in one jsonb statement, so two toggles never lose each other's change.
 - Rollback: nothing else reads these tables, so an older binary ignores them.
 
-**`006_recommendations.sql` (R1/R2)**
-- `taste_profiles(id, created_at, profile jsonb)`.
-- `rec_runs(id, kind nightly|manual, status, model, profile_id, progress jsonb, error, started_at, finished_at)`. Usage goes into `ai_usage` with `ref_id`.
-- `rec_shelves(id, run_id, position, slug, title, subtitle)`.
-- `rec_items(id, shelf_id, position, media_type, tmdb_id, reason, signals jsonb)`.
-- `rec_feedback(media_type, tmdb_id, signal like|dislike|not_interested|seen, created_at, pk(media_type, tmdb_id))`.
-- `ask_threads(id, title, created_at, updated_at)` and `ask_messages(id, thread_id, role, content jsonb, created_at)`.
-  - `content` holds the raw API content blocks, append-only. Tool loops and thinking replay need them unchanged.
+**`006_recommendations.sql` (R1, #153)**
+New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendations (R1–R3)".
+- `taste_profiles(id, created_at, counts jsonb, profile jsonb)`: R1's profile, one row per build.
+  - `counts` (`{loved, completed, dropped, rated, plays}`) drives `no_history` (fewer than 5 loved or completed titles).
+  - `profile` stays within about 16 KB (≤ 4k tokens). Rows no run references are pruned.
+- `rec_runs`:
+  - `id`, `kind` (CHECK `scheduled|manual|first_sync`), `status` (CHECK `queued|running|succeeded|failed|skipped`), `model`, `profile_id` (FK `taste_profiles`, `ON DELETE SET NULL`);
+  - `progress jsonb`: `{steps: [{step, state, detail}], shelves_done, shelves_target}`, written as the run moves;
+  - `skip_reason` (CHECK `budget_exceeded|no_history`), `error` (for the user);
+  - usage, summed from its `ai_usage` rows as they land: `api_calls`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `web_searches`, `cost_usd numeric`;
+  - `created_at`, `started_at`, `finished_at`;
+  - a partial unique index on `((true)) WHERE status IN ('queued', 'running')`, so at most one run is active, and an index on `(status, finished_at DESC)` (the newest succeeded run).
+  - At startup a run a crash left `queued` or `running` is `failed` ("momoshtrem restarted").
+- `rec_shelves(id, run_id FK cascade, position, slug, kind, title, subtitle)`: `kind` CHECK `because|new|anime|gems|coming_soon|other`; UNIQUE `(run_id, position)` and UNIQUE `(run_id, slug)`.
+- `rec_items(id, shelf_id FK cascade, position, media_type, tmdb_id, reason, meta jsonb, signals jsonb)`:
+  - `meta` is a snapshot taken at write time: `title, year, year_end, poster_path, seasons, runtime_minutes, vote_average, release_date, badge`, so reads never call TMDB;
+  - `signals`: why the agent picked it (profile keys, candidate source), for debugging; never served;
+  - UNIQUE `(shelf_id, media_type, tmdb_id)`, and an index on `(media_type, tmdb_id)` (the title page's reason).
+- `rec_hero_picks(id, run_id FK cascade, position, media_type, tmdb_id, kicker, reason, meta jsonb)`, UNIQUE `(run_id, position)` and UNIQUE `(run_id, media_type, tmdb_id)`. A run writes 3–9.
+- `rec_feedback(media_type, tmdb_id, signal, source, created_at, updated_at, PK (media_type, tmdb_id))`: `signal` CHECK `like|dislike|not_interested|seen`, `source` CHECK `shelf|hero|ask|title`. It isn't Trakt data: a Trakt disconnect keeps it.
+- `ask_threads(id, title, model, prompt_version, created_at, updated_at)`. `model` is the first turn's and stays for the thread's life (thinking blocks are bound to the model); `prompt_version` names the system prompt it started with.
+- `ask_turns(id, thread_id FK cascade, position, message, status, view jsonb, error_code, cost_usd, created_at, finished_at)`:
+  - `status` CHECK `streaming|done|error|cancelled`; UNIQUE `(thread_id, position)`;
+  - an index on `created_at` (the daily limit), and a partial unique index on `((true)) WHERE status = 'streaming'` (one turn at a time: `ask_busy`);
+  - `view` is what the thread page shows, written when the turn ends: `{steps, intro, items: [{media_type, tmdb_id, match_tag, reason, meta}], refinements, error, elapsed_ms}`;
+  - at startup a turn a crash left `streaming` is `error` (`internal`).
+- `ask_messages(id, thread_id FK cascade, turn_id FK cascade, position, role user|assistant, content jsonb, created_at)`, UNIQUE `(thread_id, position)`:
+  - `content` holds the raw API content blocks, append-only: tool loops, server tools and thinking replay need them unchanged;
+  - a turn's messages are written in one transaction, and only when it ends `done`. A cancelled or failed turn never replays, so no orphaned `tool_use` is ever sent.
+- `ai_usage` (004): `ref_id` is the run id for `recs` and the turn id for `ask`.
+- `app_settings` key `ai` gains `rec_enabled`, `rec_model` and `rec_schedule` (002 above), replacing the never-used `rec_schedule_cron`.
+- Rollback: nothing else reads these tables, so an older binary ignores them; it reads `ai` with its own fields.
 
 **`007_subtitles.sql` (B7)**
 - `subtitles`: add `release_name`. Drop `UNIQUE(item_type, item_id, language_code)` (looked up through `pg_get_constraintdef`).
@@ -810,35 +835,127 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
 - **The web app** polls `GET /integrations/trakt` every 3 s while `state` is `pending` or `sync.status` is `syncing` (never in a hidden tab), and when a sync stops it refetches `/me`, the title pages and the library (`web/src/hooks/useTraktIntegration.ts`).
 
 ### Recommendations (R1–R3)
-- `GET /recommendations/home` returns:
+Types: `web/src/lib/api/contract/recommendations.ts` and `settings.ts`; Go wire structs in `internal/recommend/types.go`. Served by `internal/recommend` (R1 #153, R2 #157, R3 #158) on the AI core (#154: the Claude client, our tool loop, pricing, the budget and `/settings/ai`). Routes: `internal/api/{recommendations,ask,ai_settings}_routes.go`, behind four interfaces (`Options.Recommendations`, `RecFeedback`, `Ask`, `AISettings`), each answering 503 until its service is wired (`cmd/momoshtrem/wire_{ai,recs,ask}.go`). The handlers answer every list as `[]`, never `null`. The web mocks are a state machine (`web/src/mocks/fixtures/recommendations.ts`; scenarios `recs-*`, `ask-*`, `ai-off`).
+
+- **What needs what.** Every AI call needs `ANTHROPIC_API_KEY` (*configured*). Picks (shelves, hero picks, runs and the title page's reason) also need `rec_enabled`, the master switch (on by default): off, `/home` is empty and no run is queued. Ask depends on the key only. Feedback, threads and the AI settings read and write in any state.
+- **The budget.** `monthly_budget_usd` ($15 on a fresh install; `null`: no cap) is shared by every AI feature. Once this month's spend (`ai_usage`) reaches it, runs are skipped, Ask and refresh answer `429 budget_exceeded`, and the classifier runs on rules. It's checked before each run, turn and classifier AI run, so one in flight can overshoot it by its own cost.
+- **Time.** "Today", "this month", the schedule and the hero's day are server-local: the service's `TZ` (§4; UTC by default). `/status`'s `ai.mtd_cost_usd` follows the same month. Every time boundary (the budget month, the hero's day, Ask's daily limit, the schedule's slots) is computed in Go with `time.Local` and passed to SQL as a parameter, never `date_trunc(…, NOW())`: Postgres's session zone isn't `TZ`.
+
+**Shapes**
+```
+RecItem {
+  media_type, tmdb_id, title, year, poster_path,
+  year_end,                    // shows: the last year; null while running, and for movies
+  seasons,                     // shows: the season count, Specials left out; null for movies
+  runtime_minutes,             // a movie's runtime, a show's episode runtime; null when unknown
+  vote_average,                // TMDB's; null without votes
+  release_date,                // YYYY-MM-DD: a movie's release, a show's first air date; null when unknown
+  badge,                       // a short poster label ("Jan 16", "2026"), mostly on coming_soon shelves; else null
+  reason,                      // ≤ 140 characters, grounded in the taste profile
+  // the facts above are the run's snapshot (rec_items.meta); these are read live:
+  library: {library_id, availability_stage, episodes_total, episodes_ready} | null,   // SimilarTitle.library
+  on_watchlist,                // on the Trakt watchlist (what's imported)
+  feedback: like | null        // a title with negative feedback is left out instead
+}
+AskItem = RecItem + { match_tag }   // ≤ 32 characters: "Mystery + workplace · lighter"
+Shelf { slug, kind: because|new|anime|gems|coming_soon|other, title, subtitle | null,
+        items: [RecItem] }     // 6–15 when written; read-time feedback can thin it, and an empty shelf is dropped
+HeroPick { media_type, tmdb_id, kicker, reason, feedback: like | null }   // the hero loads the title (artwork, colour)
+RunSummary { id, kind: scheduled|manual|first_sync, status: queued|running|succeeded|failed|skipped, model,
+             started_at, finished_at,      // started_at null while queued and for a skipped run
+             cost_usd,                     // so far, while it runs
+             skip_reason: budget_exceeded|no_history | null,
+             error | null }                // for the user, while failed
+RunProgress = RunSummary + { steps: [RunStep], shelves_done, shelves_target }   // shelves_target 0 until it starts
+RunStep { step: history|web|tmdb|write, state: active|done, detail | null }
+RunDetail = RunProgress + { usage: {api_calls, input_tokens, output_tokens, cache_read_tokens, web_searches, cost_usd} }   // its ai_usage rows, summed
+RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides the Ask entries too
+                      enabled,          // configured and rec_enabled: false with configured true is "picks off" (Ask still works)
+                      run: RunSummary | null, active_run: RunProgress | null, hero_picks: [HeroPick], shelves: [Shelf] }
+```
+- **A run's steps** are the ones reached so far, in the order reached, each once, with at most one `active` (the newest); when the run ends, all are `done`. The web lists the rest as pending in the order history, web, tmdb, write (`web/src/lib/recommendations/steps.ts` has the labels). A step starts with its first tool: `history` (the profile, `check_seen`), `web` (web search and fetch), `tmdb` (`get_candidates`, `tmdb_search`, `tmdb_details`), `write` (submitting shelves). `detail` is the step's running tally: "2,184 plays · 312 ratings", "14 new since Oct 1", "148 candidates · 23 already seen", "2 of 5 shelves". `shelves_done` counts the shelves written (one `submit_shelf` call each), `shelves_target` the ones asked for (5).
+
+**Picks**
+- **`GET /recommendations/home`** → `200 RecommendationsHome`, always: without a key it's `{configured: false, enabled: false, run: null, active_run: null, hero_picks: [], shelves: []}`, and with `rec_enabled` off the same with `configured: true`.
+  - `run` is the newest succeeded run; `shelves` and `hero_picks` are its. Before the first one (`run: null`) both are empty and the web keeps its own trending fallback (#135): the server has no trending shelves.
+  - `active_run` is the queued or running run. Poll `/home` every 3 s while it's set (the refreshing banner); the old picks stay until the new run succeeds.
+  - **Feedback** is applied at read time: a title with `dislike`, `not_interested` or `seen` is left out of every shelf and the hero picks; `like` shows as `feedback: 'like'`.
+  - **Hero picks:** three a server-local day, the same all day. A run writes 3–9 in order; on the n-th day since it finished (0 on its own day) `/home` takes them from position `3n mod count`, wrapping, skipping negative feedback, so a weekly run shows new picks each day. Fewer than three only when fewer are left; none means For You's own deterministic picks (#135).
+  - Cost: the newest run, its shelves and items, the hero picks, then one batch each for feedback, library state and the watchlist.
+- **`POST /recommendations/refresh`** → `202 {run_id}`: a `manual` run, or the active one (queued or running), joined. Checked in this order: `503 unavailable` without a key; `409 recs_disabled` while `rec_enabled` is off; the active run (`202`); `429 budget_exceeded` with `resets_at` (the 1st of next month) once the budget is spent; `409 no_history` without Trakt connected or with fewer than 5 loved or completed titles (R1's `counts`).
+- **Runs are queued** by the schedule (`scheduled`: `rec_schedule`, 03:00 server-local, weekly on Sunday), by refresh (`manual`), and by the end of Trakt's initial import when there's no succeeded run yet (`first_sync`; For You's "Writing your shelves" step). One at a time. A scheduled or first-sync run that meets the budget or the history check is stored `skipped` with its `skip_reason`, never `failed`; none is queued with `rec_enabled` off or without a key. A missed slot is caught up: when the server was down at the last scheduled time and no run has started since, one `scheduled` run starts shortly after startup (about a minute, so startup isn't slowed).
+- **What's never picked:** watched titles (a movie with a play, a show completed and not returning), titles with negative feedback, and shows hidden or dropped on Trakt (`trakt_hidden`). R1 leaves them out of the candidate pool and R2 drops them when it validates a run's items. Library titles can be picked: a card shows their state ("Ready").
+- **`GET /recommendations/runs?limit=`** → `{items: [RunSummary]}`, newest first (`id DESC`); `limit` 1–50, default 10, anything else `400 bad_request`.
+- **`GET /recommendations/runs/{id}`** → `RunDetail`; `404 not_found` for an unknown run. Poll every 2 s while it's queued or running.
+
+**Feedback**
+- **`POST /recommendations/feedback`** with `{media_type, tmdb_id, signal: like|dislike|not_interested|seen, source: shelf|hero|ask|title}` → `204`, an upsert: the newest signal wins (`created_at` kept, `updated_at` set). Any other body is `400 bad_request`.
+- **`DELETE /recommendations/feedback/{media_type}/{tmdb_id}`** → `204`, idempotent; a bad media type or id is `400`.
+- **Effects.** `dislike`, `not_interested` and `seen` drop the title from every AI surface (shelves, hero picks, Ask's thread reads, the title page's `recommendation_reason`) and from R1's candidate pools, so R2 and R3 never pick it again. `seen` also counts in the profile as a completed, neutral title. `like` is a positive signal (the profile's loved).
+- **Saved at once; Undo restores the previous signal.** The card dims and a 10-second Undo toast shows (HANDOFF §4.4); Undo POSTs the previous signal, or DELETEs when there was none (the web keeps it from its cache). Thumbs up toggles (a second tap DELETEs) and never dims.
+
+**Ask momoshtrem**
+- **`GET /recommendations/threads`** → `{items: [AskThreadSummary]}`, the newest `updated_at` first, at most 50: `{id, title, created_at, updated_at, turn_count}`.
+- **`GET /recommendations/threads/{id}`** → `AskThread`; `404 not_found` for an unknown one:
   ```
-  {
-    run: { id, finished_at } | null,
-    hero_picks: [{ tmdb_id, media_type, kicker, reason }],   // "Tonight's pick", stable per day
-    shelves: [{
-      slug, title, subtitle,
-      items: [{ media_type, tmdb_id, title, year, poster_path, reason, in_library, on_watchlist }]
-    }]
+  AskThread = AskThreadSummary + { model, turns: [AskTurn] }   // model: the thread's, kept for its life
+  AskTurn { id, message, status: streaming|done|error|cancelled,
+            steps: [AskStep], intro, items: [AskItem], refinements: [string],   // the turn's view (ask_turns.view)
+            error: {code, message} | null,       // while error
+            elapsed_ms | null,                   // null while streaming
+            created_at }
+  AskStep { step: history|rerank|web|tmdb|write, state: active|done, detail | null }
+  ```
+  A turn's view is written when it ends: a streaming turn has only its message; a cancelled or failed one keeps what it got to. An ended turn has no `active` step: the step still active when it failed or was cancelled is dropped from its view (it never finished, and an old failed turn must never show a spinner), as a finished run has none either. Library, watchlist and feedback are joined at read time, and items with negative feedback are left out, as on `/home`.
+- **`POST /recommendations/ask`** with `{thread_id?, message}`: `message` is 1–500 characters once trimmed, counted in code points (Go's runes; the web counts with `Array.from`, so an emoji is one). Without `thread_id` a thread starts, titled by this rule, in code points: the trimmed message with its first character upper-cased (Go's `unicode.ToUpper` on the first rune); if it's over 60 characters, take its first 60, cut them back to their last space when that space's index (0-based) is over 30 (otherwise keep all 60: a hard cut), trim trailing whitespace, and append `…`.
+  - **JSON errors before the stream**, checked in this order: `400 bad_request` (the body); `503 unavailable` (no key); `404 not_found` (unknown thread); `409 thread_full` (20 turns); `409 ask_busy` (a turn is streaming, in any thread: one at a time); `429 ask_limit` (30 turns started this server-local day, cancelled and failed ones included) and `429 budget_exceeded`, both with `resets_at` (the next local midnight; the 1st of next month).
+  - **Then `200 text/event-stream`** (`Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`), headers flushed at once:
+
+    | Event | Data |
+    |---|---|
+    | `start` | `{thread_id, turn_id, title}`, first |
+    | `status` | `AskStep`: a step starts (`active`, detail null) or ends (`done`, with its detail: "2,184 plays · you loved Severance, The Bear, Ted Lasso", "14 new since Oct 1", "23 candidates · 6 already seen", "5 picks"). Each step at most once a turn; a refinement uses `rerank` ("23 checked") instead of `history`, `web` and `tmdb` |
+    | `text` | `{delta}`: the turn's intro, streamed |
+    | `item` | `AskItem`, as each title resolves to a TMDB id (≤ 10 a turn) |
+    | `error` | `{code: refused|limit_reached|upstream|internal, message}`; it ends the stream. `refused`: Claude declined, fallbacks included; `limit_reached`: the turn hit its token or tool-call cap; `upstream`: the Anthropic API failed after retries |
+    | `done` | `{thread_id, turn_id, elapsed_ms, refinements, usage: {input_tokens, output_tokens, web_searches, cost_usd}}`, last. `refinements`: at most 5 chips ("Lighter", "Only anime") the web sends back as follow-up messages |
+
+    The usual order is `start`, `status…`, `text…`, `item…`, `done`. A `: ping` comment every 15 s keeps proxies from timing an idle stream out.
+  - **A disconnect** (Stop, a closed tab) cancels generation: the turn is `cancelled` and the usage already spent is recorded. The turn frees its slot as soon as its context is cancelled, before the usage is written, so a refinement sent right after Stop doesn't meet `ask_busy`; the web still retries once (after a short pause) on an `ask_busy` that follows its own Stop.
+  - **Shutdown** cancels every turn in flight the same way: the REST server's `RegisterOnShutdown` hook calls Ask's `Close`, since `http.Server.Shutdown` doesn't cancel request contexts and an open stream would hold shutdown for its whole timeout.
+  - **Threads are append-only.** A turn's API messages (`ask_messages`) are written in one transaction when it ends `done`; a cancelled or failed turn's never are, so it's never replayed and no orphaned `tool_use` is sent. The next turn replays the stored messages unchanged, on the thread's model.
+  - The web proxy passes the stream through unbuffered (`backend-proxy.ts`); `askStream` (`web/src/lib/api/endpoints/recommendations.ts`) reads it, and a pre-stream error throws an `ApiError` with `resetsAt`.
+
+**AI settings and usage**
+- **`GET /settings/ai`** → `AiSettings`. **`PUT /settings/ai`** with any of its fields → `200 AiSettings` (all of them). One jsonb `||` statement on `app_settings` key `ai` (§5): fields left out keep their value and unknown ones are ignored; a bad value is `422 validation_error` with `error.field` naming it (the first, in the order below); a body that isn't a JSON object is `400`. Both work without a key.
+  ```
+  AiSettings {
+    rec_enabled,                   // true: the master switch for picks
+    rec_model,                     // claude-opus-5-5 (default) | claude-sonnet-5-5: picks and new Ask threads
+    rec_schedule,                  // nightly (default) | weekly | manual: 03:00 server-local, weekly on Sunday
+    monthly_budget_usd,            // ≥ 0, or null for no cap; 15 on a fresh install
+    classifier_enabled,            // true
+    classifier_model,              // claude-haiku-5-5 (default) | claude-sonnet-5-5 | claude-opus-5-5
+    auto_apply_high_confidence     // true
   }
   ```
-  It falls back to trending shelves when there's no run yet or Trakt isn't connected.
-- `POST /recommendations/refresh` returns `202 {run_id}`.
-- `GET /recommendations/runs/{id}`: status, progress steps, usage and cost.
-- `POST /recommendations/ask` with `{thread_id?, message}` returns `text/event-stream` with these events:
-
-  | Event | Payload |
-  |---|---|
-  | `status` | `{step, detail}` |
-  | `item` | rec card |
-  | `text` | delta |
-  | `error` | |
-  | `done` | `{thread_id, usage}` |
-
-  The web route passes the stream through unbuffered.
-- `GET /recommendations/threads` (`{items: [{id, title, created_at, updated_at}]}`) and `GET /recommendations/threads/{id}` (the thread plus its `messages`).
-- `POST /recommendations/feedback` with `{media_type, tmdb_id, signal}`.
-- `GET /settings/ai` and `PUT /settings/ai` with `{rec_enabled, rec_model, rec_schedule_cron, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`.
-- `GET /settings/ai/usage`: month-to-date cost by feature.
+- **`GET /settings/ai/usage`** → `AiUsage`:
+  ```
+  AiUsage {
+    configured,                                   // ANTHROPIC_API_KEY is set
+    month, resets_at,                             // "2026-10", and the 1st of next month 00:00, server-local
+    total_usd, budget_usd | null, budget_reached, // this month, every feature; budget_reached: total ≥ budget
+    by_feature: [{feature: recs|ask|classifier, cost_usd, requests}],   // always all three, in this order; requests: API calls
+    recs: { last_run: RunSummary | null,          // the newest finished run: succeeded, failed or skipped
+            active_run: RunProgress | null,
+            next_run_at | null },                 // the schedule's next run; null when manual, off or not configured
+    estimates: { run_usd: {claude-opus-5-5: n | null, claude-sonnet-5-5: n | null},   // the mean of each model's last 5 succeeded runs
+                 ask_usd: n | null },                                                // the mean of the last 20 done turns
+    asks_today, ask_daily_limit                   // 30
+  }
+  ```
+- **Title pages:** `recommendation_reason` (§6 "Titles and library") is the newest succeeded run's reason for the title (a shelf item's, else a hero pick's); null without one, while picks are off, and after negative feedback.
+- **Dropped from earlier drafts:** `in_library` on rec items (replaced by `library`, as on similar titles); `backdrop_dominant_color` on rec items (HANDOFF §6 lists one: the hero loads the title, which has it, as Up next does); the thread's `messages` (replaced by `turns`, the saved views).
 
 ### Torrents and activity (B6)
 Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#98, #99), `internal/sessions` (#99) and `service.RemovalService` (#96).
@@ -1251,68 +1368,66 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
 
 ### Phase 2: Recommendations (after B1 and B5)
 
-**R1 · Taste profile and candidate pool** (deterministic, no LLM)
-- Owns `internal/recommend/profile`, `internal/recommend/candidates` and migration 006.
-- **Taste profile.** Weighted by recency, rating and completion. It covers:
+Epic #9, in slices: the contract, stateful mocks and skeletons (#152); then R1 (#153), the AI core (#154), For You's picks (#155) and the Ask page (#156) in parallel; then R2 (#157), R3 (#158) and Settings › AI & picks (#159); then a live run, docs and close-out (#160). §6 "Recommendations (R1–R3)" is the contract. Each backend slice fills in its own `cmd/momoshtrem/wire_*.go` and route file; `router.go` and `main.go` already call them.
+
+**AI core** (#154; the shared base of R2 and R3)
+- Owns the Claude client, the tool loop, pricing, the budget, `/settings/ai` and its usage (`internal/api/ai_settings_routes.go`'s `AISettings`), and `cmd/momoshtrem/wire_ai.go`.
+- **Our own streaming tool loop**, not the SDK's tool runner: in anthropic-sdk-go v1.81 the runner rewrites `params.Tools`, which drops `strict`, `cache_control` and server tools, and it runs tools in parallel. The loop keeps the tool definitions byte-stable, runs custom tools (`internal/recommend/agent.Tool`) one at a time in order, returns all of a turn's `tool_result`s in one user message, continues on `pause_turn` (server tools), and stops on `end_turn`, `refusal` or a cap.
+- **Requests.** Adaptive thinking with effort set explicitly (`medium`; Opus 5.5's default is `medium`, Sonnet 5.5's `high`, and neither can turn thinking off). Server-side refusal fallbacks: `fallbacks: "default"` with beta `server-side-fallback-2026-07-01`. Forced `tool_choice` (`any` or `tool`) is a 400 on Opus 5.5 and Sonnet 5.5, so tools are `auto`, `strict` and steered by the prompt. Prompt caching follows the render order tools → system → messages: the tools and system prompt never change between calls; the date and profile go in the user turn.
+- **Pricing.** One table per model (input, output, cache reads and writes) plus web searches, billed per search. A fallback hop bills at the fallback model's rates: cost comes from `usage.iterations`, per attempt. Every API call is one `ai_usage` row.
+- **Budget.** `monthly_budget_usd` ($15 by default, `null` no cap), checked before each run, turn and classifier run; the month is server-local (`TZ`), and the classifier's budget check and `/status` move to it too.
+
+**R1 · Taste profile, candidate pool and feedback** (#153; deterministic, no LLM)
+- Owns `internal/recommend/profile`, `internal/recommend/candidates`, migration 006, the agent's custom tools (each an `agent.Tool`), and feedback: `api.RecFeedback` (`SetFeedback`, `ClearFeedback`), set as `Options.RecFeedback` in `wire_recs.go` with or without a key, so it lands before the picks.
+- **Taste profile.** Weighted by recency, rating (only with Trakt's `use_ratings` on, `app_settings` key `trakt`) and completion. It covers:
   - Top genres, keywords, creators and cast.
   - Decades, languages and origin countries.
   - Anime share, the movie/show ratio and runtime tolerance.
-  - **Loved:** rated 8 or higher, or completed.
-  - **Dropped:** started, under 30% watched, and idle for 60 days.
+  - **Loved:** rated 8 or higher, completed, or `like`d.
+  - **Dropped:** started, under 30% watched, and idle for 60 days (or dropped on Trakt).
   - **Recent:** the last 30 days.
-  - **Aversions:** low ratings and `rec_feedback`.
+  - **Aversions:** low ratings, `dislike` and `not_interested`. `seen` counts as a completed, neutral title.
 
-  Stored in `taste_profiles` as compact JSON, targeting 4k tokens or fewer.
+  Stored in `taste_profiles` as compact JSON, targeting 4k tokens or fewer, with `counts` for the `no_history` check (at least 5 loved or completed titles, and Trakt connected).
 - **Candidate pool.** Sources:
   - TMDB recommendations and similar titles for the top loved titles.
-  - Trakt recommendations.
   - TMDB discover by top keywords and genres, within recency windows.
-  - Trending, upcoming and on-the-air.
+  - Trending, upcoming and on the air.
 
-  Exclude anything watched, in the library, disliked or marked not-interested. Pre-rank by overlap and keep a pool of about 150 with compact metadata.
+  Trakt's `/recommendations` is dropped as a source: its picks come from the same history the profile reads, it adds a Trakt call to every run, and it overlaps TMDB's recommendations for the loved titles while explaining nothing. Exclude anything watched (a movie with a play, a show completed and not returning), anything with negative feedback, and shows hidden or dropped on Trakt (`trakt_hidden`); library titles stay ("already in your library", or "Ready"). Pre-rank by overlap and keep a pool of about 150 with compact metadata.
+- **Tools:** `get_taste_profile`, `get_candidates(filters)`, `tmdb_search(query, type, year)`, `tmdb_details(type, id)`, `check_seen(tmdb_ids)`, all `strict`.
 - Acceptance: unit tests on fixtures, plus a dev-only `GET /recommendations/debug/profile`.
 
-**R2 · Nightly recommendation agent and shelves** (depends on R1)
-- Owns `internal/recommend/agent`, the scheduler wiring and the `/settings/ai` routes.
-- **Agent setup:**
-  - The Go SDK tool runner, with the model taken from settings (default `claude-opus-5-5`).
-  - Adaptive thinking, effort `medium`.
-  - Server-side refusal fallbacks (`fallbacks: "default"` with beta `server-side-fallback-2026-07-01`).
-  - Prompt caching on the system prompt and tools. Keep those bytes stable and put the date and profile in the user turn.
-- **Tools:**
-  - Server-side `web_search_20260209` (`max_uses` ≈ 8) and `web_fetch_20260209` (`max_uses` ≈ 4), for freshness: new releases, upcoming premieres, festival and awards buzz.
-  - Custom tools: `get_taste_profile`, `get_candidates(filters)`, `tmdb_search(query, type, year)`, `tmdb_details(type, id)`, `check_seen(tmdb_ids)`.
-  - `submit_shelves` with `strict: true`; calling it ends the run.
-- **Output.** 4–6 shelves (e.g. "Because you loved Severance", "New this month for you", "Anime you'll like", "Hidden gems", "Coming soon") with 8–15 items each. Every item carries a one-line reason grounded in the profile. Every item must resolve to a TMDB ID; the server validates them and drops invalid ones.
-- **Guardrails.**
-  - Cap tokens and tool calls per run.
-  - Enforce the monthly budget from settings: when it's exceeded, skip the run and say so in the UI.
-  - Record usage and cost in `ai_usage` and keep a run history.
-- **Scheduler.** Configurable cron (default 04:00 local), a manual refresh endpoint, and single-flight so two runs never overlap.
+**R2 · Recommendation runs and shelves** (#157; depends on R1 and the AI core)
+- Owns `internal/recommend/agent`'s run (prompt, `submit_shelf`, `submit_hero_picks`), the scheduler, `api.Recommendations` (`/home`, refresh, runs; set as `Options.Recommendations` in `wire_recs.go`, also without a key so `/home` answers `configured: false`), `recommendation_reason` on title pages, the `recommend-run` CLI, and the rest of `cmd/momoshtrem/wire_recs.go`.
+- **Hooks are setters**, called from `wire_recs.go`: the Trakt sync's `SyncDeps` and the catalog are built in `main.go` before `wireRecs` runs, so R2 adds `traktSync.SetOnImported(fn)` (queue the `first_sync` run when the initial import finishes) and `catalogService.SetReasons(r)` (the title pages' `recommendation_reason`). The reasons interface lives in `internal/catalog`, since catalog can't import `recommend`.
+- **The run.** The model from settings (`rec_model`, default `claude-opus-5-5`) on the AI core's loop, with R1's tools and the server-side `web_search_20260209` (`max_uses` ≈ 8) and `web_fetch_20260209` (≈ 4) for freshness: new releases, upcoming premieres, festival and awards buzz. `submit_shelf` (strict) writes one shelf per call, so `shelves_done` counts up; `submit_hero_picks` (strict) writes 3–9 hero picks. The run ends when the agent stops, or at a cap.
+- **Output.** 4–6 shelves (`kind`: because, new, anime, gems, coming_soon, other; e.g. "Because you loved Severance", "New this month for you", "Anime you'll like", "Hidden gems", "Coming soon") of 6–15 items. Every item carries a one-line reason (≤ 140) grounded in the profile and must resolve to a TMDB id: the server validates each (it exists, isn't watched or `seen`, has no negative feedback, isn't a show hidden or dropped on Trakt), drops the rest, and fills `meta` from the TMDB cache; a shelf left under 6 items is dropped, and a run with no shelf left fails.
+- **Progress** (`rec_runs.progress`) is written as the agent moves, with the steps and details in §6.
+- **Guardrails.** Caps on tokens, tool calls and time per run; the budget and history checks before it (a scheduled or first-sync run is then `skipped`); usage per API call in `ai_usage` (`feature: recs`, `ref_id` the run), summed onto the run.
+- **Scheduler.** `rec_schedule`: nightly at 03:00 server-local (the design's), weekly on Sunday at 03:00, or manual; `rec_enabled` off queues nothing. Single-flight through the partial unique index. Catch-up: if the server was down at the last slot and no run has started since, one run starts about a minute after startup. `first_sync` runs are queued from the `SetOnImported` hook when Trakt's initial import finishes and nothing has succeeded yet. Slot times come from `time.Local` (§6 "Time").
+- **`recommend-run [--dry-run]`**: one run in the foreground, printing the shelves and the cost (#160's live check).
 - Acceptance:
   - CI tests use a mocked API, with no network.
-  - One real run is documented in the PR, with its cost.
-  - The shelves endpoint serves from the DB.
+  - One real run is documented in the PR (#160), with its cost.
+  - `/home` serves from the DB.
 
-**R3 · Ask momoshtrem** (depends on R2)
-- Owns `internal/recommend/ask` and the SSE handler.
-- **Agent.** The same tools as R2, with conversation history loaded from `ask_messages`. Append the raw content blocks unchanged; never edit earlier turns.
-- **Streaming events:**
-  - `status` events from tool calls ("Checking your history…", "Searching the web: …").
-  - An `item` event whenever a title is resolved.
-  - `text` deltas, and `done` with usage.
-- **Refinement.** Chips like "lighter", "shorter" or "only anime" are simply follow-up messages.
-- **Feedback.** It's written to `rec_feedback` and shapes the next run.
-- **Limits.** A daily rate limit (e.g. 30 asks) and the budget guard.
+**R3 · Ask momoshtrem** (#158; depends on R2's agent and the AI core)
+- Owns `internal/recommend/ask`, `api.Ask` (the SSE route's service and the threads), and `cmd/momoshtrem/wire_ask.go`, whose `Close` cancels the turns in flight (`main.go` registers it with `httpServer.RegisterOnShutdown`). At startup a turn a crash left `streaming` is marked `error`.
+- **Agent.** The AI core's loop and R1's tools, on the thread's model; strict tools emit each `item` (match tag and reason) as a title resolves, and the final refinement chips. History comes from `ask_messages`, replayed unchanged: never edit earlier turns (an edited history also invalidates thinking blocks).
+- **Streaming events** as §6, the step details from what the tools did ("2,184 plays · you loved Severance, The Bear, Ted Lasso").
+- **Refinement.** Chips like "Lighter", "Shorter" or "Only anime" are follow-up messages; the turn re-ranks (`rerank`) instead of reading everything again.
+- **Feedback** given on Ask cards shapes the next run and the next answers (R1).
+- **Limits.** 30 turns a server-local day, 20 a thread, one at a time, and the budget; caps per turn (tokens, tool calls) end it with `limit_reached`. A disconnect cancels the turn and records its usage (`feature: ask`, `ref_id` the turn).
 - Acceptance:
-  - An SSE contract test.
+  - An SSE contract test (`httptest`): the events in order, `: ping`, and a disconnect mid-stream that marks the turn `cancelled` with its usage recorded.
   - The web route streams without buffering (`Cache-Control: no-transform`, `X-Accel-Buffering: no`; check that Caddy doesn't buffer either).
 
-**Cost ballpark** (verify with real usage):
-- The classifier costs a fraction of a cent per torrent on Haiku 5.5.
-- A nightly run on Opus 5.5 is probably around $0.5–1, so roughly $15–30 a month; about half that on Sonnet 5.5.
+**Cost ballpark** (verify with real usage; #160 documents a live run):
+- The classifier costs a fraction of a cent per torrent on Haiku 5.5 (about $0.0007 in `ai_always` mode, #5).
+- Opus 5.5 is $4 / $20 per million input / output tokens, Sonnet 5.5 $2 / $10. The design guesses $0.36 a run on Opus and $0.07 on Sonnet, and about $0.02 an ask; nightly Opus runs at that rate are about $11 a month, within the $15 default budget with room for Ask.
 - Web searches are billed per search on top of tokens.
-- The settings page shows month-to-date spend.
+- Settings › AI & picks shows the month's spend by feature, the budget and the estimates (`/settings/ai/usage`).
 
 ### Phase D: Design (involves the user; runs in parallel with Phase 1)
 
@@ -1391,6 +1506,9 @@ Then, in parallel (they live in separate route folders):
   - **More rows.** Watchlist, and trending when Trakt isn't connected.
   - **Ask** (page or drawer). Streaming status steps, result cards, refine chips and threads.
   - **Landed in #135 (F5a, #8):** For You without AI: the hero's deterministic picks (a ready Up next show, ready watchlist titles, then trending; stable per day), Up next, New episodes and the watchlist with one action per availability (`EpisodeCard`), the trending fallback, and the first-time, Trakt-off and first-sync states. The AI shelves, Tonight's pick, feedback, the Ask band and the refreshing state are #9's; #9 hands `hero_picks` to `HomeHero`.
+  - **#9's For You (#155):** the AI shelves between the rails, Tonight's pick (`hero_picks` into `HomeHero` as `source: 'recommendation'`; the deterministic picks when there are none), feedback with Undo (§6 "Feedback"), the refreshing banner while `active_run` is set, "Writing your shelves" in the first-sync steps (a `first_sync` run), the Ask band and the picks footer ("Picks written by Noir at 03:00"). Without a run (`run: null`) or with `enabled: false`, trending stays.
+  - **#9's Ask (#156):** `/ask` and `/ask/{thread_id}`: the named steps (`web/src/lib/recommendations/steps.ts`), the streamed intro and cards, refine chips, Stop, threads, and the budget and limit states (`ApiError.resetsAt`). Its entry points use `askHref(q)` (`web/src/lib/recommendations/ask-href.ts`): the top-bar pill, the palette's "Ask momoshtrem: “q”" (always present), Search's "Not quite it?" card and idle chip (#101), and Discover's empty state with a query from the active filters (#100). The entries hide while `/recommendations/home`'s `configured` is false (no key); picks being off doesn't hide them. Discover's moods stay fixed TMDB presets.
+  - Both build against the stateful mocks first: `recs-*` and `ask-*` scenarios (`web/src/mocks/scenario.ts`).
 - **F6 · Discover and search** (no new backend dependencies; TMDB via web)
   - **Filters.** Several genres at once, year range, rating, runtime, language/origin with an anime toggle, type and sort.
   - **URL state and loading.** Filters stay in the URL (e.g. `nuqs`); results load with infinite scroll.
@@ -1406,6 +1524,7 @@ Then, in parallel (they live in separate route folders):
   - **Quality profile** and **Playback** (the WebDAV URL and an Infuse setup guide).
   - **System status.**
   - **Landed in #134 (F8a, #8):** Settings › Trakt (off, device code, waiting, connected with sync status, counts and the three switches, disconnect) and the palette's Connect / Sync Trakt now. Settings › AI is #9's.
+  - **#9's Settings › AI & picks (#159):** "Write picks automatically" (`rec_enabled`), the schedule (nightly, weekly, manual; the next run and the last run's time and cost from `recs`), the model cards with `estimates.run_usd`, Run now (refresh, then the run's steps), the monthly budget (the bar from `by_feature`, `resets_at`, the budget input; `null` is no cap) and the episode-mapping switches. Saves are partial PUTs; a 422 names its field. Without a key it says how to add one and still saves.
 
 Acceptance for every F task:
 - It matches the design at 390 px and 1440 px.
@@ -1494,7 +1613,7 @@ F tasks start against the MSW mocks and switch to the real backend as each B or 
 **Open questions** (decide during D2 or Phase 1)
 - The mascot's name: "Momo" is only a working name.
 - Default auto-apply policy for high-confidence mappings (proposed: on).
-- Default recommendation model: Opus 5.5 or Sonnet 5.5 (a cost-vs-quality call for the user).
+- ~~Default recommendation model~~: decided 2026-10-16 (#9), Opus 5.5, with a $15 monthly budget shared by every AI feature.
 
 **Backlog (not in this plan)**
 - Auto-grab new episodes of followed shows using the quality profile; a natural next step after B4 and B5.

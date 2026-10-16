@@ -108,11 +108,14 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
     ['GET /me/history', () => traktApi.history(2)],
     ['GET /recommendations/home', () => recApi.home()],
     ['POST /recommendations/refresh', () => recApi.refresh()],
+    ['GET /recommendations/runs', () => recApi.runs(5)],
     ['GET /recommendations/runs/{id}', () => recApi.run(42)],
     ['GET /recommendations/threads', () => recApi.threads()],
-    ['GET /recommendations/threads/{id}', () => recApi.thread(7)],
-    ['POST /recommendations/feedback', () => recApi.feedback({ media_type: 'tv', tmdb_id: 95396, signal: 'like' })],
+    ['GET /recommendations/threads/{id}', () => recApi.thread(12)],
+    ['POST /recommendations/feedback', () => recApi.feedback({ media_type: 'tv', tmdb_id: 95396, signal: 'like', source: 'title' })],
+    ['DELETE /recommendations/feedback/{media_type}/{tmdb_id}', () => recApi.clearFeedback('tv', 95396)],
     ['GET /settings/ai', () => settingsApi.ai()],
+    ['PUT /settings/ai', () => settingsApi.putAi({ rec_schedule: 'weekly' })],
     ['GET /settings/ai/usage', () => settingsApi.aiUsage()],
     ['GET /status', () => systemApi.status()],
     ['GET /torrents', () => torrentsApi.list()],
@@ -137,9 +140,13 @@ describe('mock mode answers every PLAN §6 endpoint', () => {
   it('streams Ask as typed events, ending with done', async () => {
     const events: AskEvent[] = [];
     for await (const event of askStream({ message: 'something like Severance but lighter' })) events.push(event);
-    expect(events.map((e) => e.event)).toEqual(['status', 'status', 'item', 'text', 'text', 'done']);
+    const names = events.map((e) => e.event);
+    expect(names[0]).toBe('start');
+    expect(names.at(-1)).toBe('done');
+    // start → status… → text… → item… → done
+    expect(names.join(' ').replace(/(\w+)( \1)+/g, '$1')).toBe('start status text item done');
     const done = events.at(-1);
-    expect(done?.event === 'done' && done.data.refinements).toContain('lighter');
+    expect(done?.event === 'done' && done.data.refinements).toContain('Lighter');
   });
 });
 

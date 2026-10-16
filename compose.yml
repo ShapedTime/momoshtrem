@@ -132,6 +132,9 @@ services:
       - TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET:-}
       - SECRET_KEY=${SECRET_KEY:-}
       - TORRENT_LISTEN_PORT=${TORRENT_LISTEN_PORT:-}
+      # Server-local time for the AI features: the 03:00 picks run, the
+      # hero's day, Ask's daily limit and the budget month (#9)
+      - TZ=${TZ:-UTC}
     depends_on:
       postgres:
         condition: service_healthy

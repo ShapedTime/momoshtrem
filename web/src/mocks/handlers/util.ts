@@ -4,8 +4,9 @@ import type { ApiErrorBody, JobAccepted, RunAccepted } from '@/lib/api/contract'
 /** A little latency in the browser so loading states are visible; none in tests. */
 export const latency = () => delay(typeof window === 'undefined' ? 0 : 250);
 
-export const apiError = (status: number, code: string, message: string) =>
-  HttpResponse.json<ApiErrorBody>({ error: { code, message } }, { status });
+/** `extra`: a 422's `field`, a 429's `resets_at`. */
+export const apiError = (status: number, code: string, message: string, extra?: Omit<ApiErrorBody['error'], 'code' | 'message'>) =>
+  HttpResponse.json<ApiErrorBody>({ error: { code, message, ...extra } }, { status });
 
 export const notFound = (message = 'Not found') => apiError(404, 'not_found', message);
 
