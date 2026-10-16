@@ -1,6 +1,68 @@
-import type { TorrentListItem, TorrentsSummary, TorrentState } from '@/lib/api/contract';
+import type {
+  PieceRun,
+  StreamingSession,
+  TorrentDetail,
+  TorrentDetailFile,
+  TorrentListItem,
+  TorrentsSummary,
+  TorrentState,
+} from '@/lib/api/contract';
 import { legacyTorrentStatus, type TorrentStatus } from '@/types/torrent';
 import { iso } from './catalog';
+import { episodeIdFor, SHOWS } from './title-seeds';
+
+const SEVERANCE_HASH = 'b2c3d4e5f60718293a4b5c6d7e8f9012345678a1';
+const SEVERANCE_RELEASE = 'Severance.S02.2160p.ATVP.WEB-DL.DV.H.265';
+const SEVERANCE_EPISODES = ['Hello, Ms. Cobel', 'Goodbye, Mrs. Selvig', 'Who Is Alive?', 'Woe’s Hollow', 'Trojan’s Horse', 'Attila',
+  'Chikhai Bardo', 'Sweet Vitriol', 'The After Hours', 'Cold Harbor'];
+const SEVERANCE_EPISODE_BYTES = 4_830_000_000;
+const FRIEREN_BATCH_HASH = 'b7a3f1e9c2d4058a6e1f3c5b7d9a2e4f6081c3d5';
+const FRIEREN_BATCH = '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]';
+
+/**
+ * Infuse on the Apple TV playing Severance S02E05, 18:42 of 52:00. The torrent is
+ * complete, so the rest of the file is buffered ahead.
+ */
+export const STREAMING_SESSION: StreamingSession = {
+  id: '7',
+  source: 'torrent',
+  info_hash: SEVERANCE_HASH,
+  item: { media_type: 'tv', tmdb_id: 95396, library_id: 4, title: 'Severance', season_number: 2, episode_number: 5, episode_name: 'Trojan’s Horse' },
+  file_name: 'Severance - S02E05 - Trojan’s Horse.mkv',
+  file_path: `${SEVERANCE_RELEASE}/Severance.S02E05.Trojans.Horse.2160p.ATVP.WEB-DL.DV.H.265.mkv`,
+  client: 'Infuse',
+  device: 'Apple TV',
+  offset_bytes: 1_736_942_308,
+  size_bytes: SEVERANCE_EPISODE_BYTES,
+  position_seconds: 1122,
+  duration_seconds: 3120,
+  rate_bps: 9_100_000,
+  buffered_ahead_bytes: SEVERANCE_EPISODE_BYTES - 1_736_942_308,
+  buffered_ahead_seconds: 3120 - 1122,
+  started_at: '2026-10-14T20:41:30Z',
+  last_read_at: '2026-10-14T21:00:12Z',
+};
+
+/** Infuse on an iPhone playing Doctor Who S01E01 from HDRezka: no torrent, so no buffer; it read a minute earlier. */
+export const HDREZKA_SESSION: StreamingSession = {
+  id: '6',
+  source: 'hdrezka',
+  info_hash: null,
+  item: { media_type: 'tv', tmdb_id: 57243, library_id: 3, title: 'Doctor Who', season_number: 1, episode_number: 1, episode_name: 'Rose' },
+  file_name: 'Doctor Who - S01E01 - Rose.mp4',
+  file_path: null,
+  client: 'Infuse',
+  device: 'iPhone',
+  offset_bytes: 412_000_000,
+  size_bytes: 1_236_000_000,
+  position_seconds: 900,
+  duration_seconds: 2700,
+  rate_bps: 2_400_000,
+  buffered_ahead_bytes: null,
+  buffered_ahead_seconds: null,
+  started_at: '2026-10-14T20:44:02Z',
+  last_read_at: '2026-10-14T20:59:10Z',
+};
 
 /** Fields a torrent the client hasn't loaded reports as null or 0. */
 const NOT_LOADED = {
@@ -23,8 +85,8 @@ const NOT_LOADED = {
  */
 export const TORRENTS: TorrentListItem[] = [
   {
-    info_hash: 'b2c3d4e5f60718293a4b5c6d7e8f9012345678a1',
-    name: 'Severance.S02.2160p.ATVP.WEB-DL.DV.H.265',
+    info_hash: SEVERANCE_HASH,
+    name: SEVERANCE_RELEASE,
     state: 'streaming',
     loaded: true,
     complete: true,
@@ -39,7 +101,7 @@ export const TORRENTS: TorrentListItem[] = [
     last_active_at: iso(0),
     titles: [{ media_type: 'tv', tmdb_id: 95396, library_id: 4, title: 'Severance', year: 2022, poster_path: null, scope: 'Season 2' }],
     open_job: null,
-    streaming: [],
+    streaming: [STREAMING_SESSION],
   },
   {
     info_hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
@@ -121,8 +183,8 @@ export const TORRENTS: TorrentListItem[] = [
   },
   {
     ...NOT_LOADED,
-    info_hash: 'b7a3f1e9c2d4058a6e1f3c5b7d9a2e4f6081c3d5',
-    name: '[SubsPlease] Sousou no Frieren (29-38) (1080p) [Batch]',
+    info_hash: FRIEREN_BATCH_HASH,
+    name: FRIEREN_BATCH,
     state: 'idle',
     size_bytes: 14_200_000_000,
     added_at: iso(2),
@@ -147,10 +209,15 @@ export const TORRENTS: TorrentListItem[] = [
 const HISTORY_DOWN = Array.from({ length: 30 }, (_, i) => Math.round(6_400_000 * Math.min(1, (i + 1) / 20)));
 const HISTORY_UP = Array.from({ length: 30 }, (_, i) => Math.round(1_620_000 * Math.min(1, (i + 4) / 24)));
 
-/** GET /torrents/summary over `items` (the mock's current torrents). */
+/**
+ * GET /torrents/summary over `items` (the mock's current torrents). Its streaming is every
+ * torrent's sessions plus the HDRezka one, the most recently read first: "Streaming now"
+ * reads streaming[0].
+ */
 export function torrentsSummary(items: TorrentListItem[]): TorrentsSummary {
   const counts: Record<TorrentState, number> = { streaming: 0, downloading: 0, paused: 0, idle: 0 };
   for (const t of items) counts[t.state]++;
+  const streaming = [...items.flatMap((t) => t.streaming), HDREZKA_SESSION].sort((a, b) => b.last_read_at.localeCompare(a.last_read_at));
   return {
     download_bps: items.reduce((sum, t) => sum + t.download_bps, 0),
     upload_bps: items.reduce((sum, t) => sum + t.upload_bps, 0),
@@ -158,7 +225,92 @@ export function torrentsSummary(items: TorrentListItem[]): TorrentsSummary {
     history: { interval_seconds: 2, download_bps: HISTORY_DOWN, upload_bps: HISTORY_UP },
     counts,
     disk: { total_bytes: 2_000_000_000_000, free_bytes: 812_000_000_000, torrents_bytes: 3_100_000_000, cache_limit_bytes: 4_294_967_296 },
-    streaming: [],
+    streaming,
+  };
+}
+
+const MiB = 1 << 20;
+const dotted = (name: string) => name.replace(/[’'?,.]/g, '').replace(/\s+/g, '.');
+const trackers = (...urls: string[]) =>
+  urls.map((url) => ({ url, status: 'unknown' as const, error: null, seeders: null, peers: null, last_announce_at: null }));
+const ignored = (reason: string, label: string) => ({ reason, label });
+
+/** The files of the torrents that hold more than one; the others hold one video, named after the torrent. */
+function filesOf(t: TorrentListItem): TorrentDetailFile[] {
+  const progress = t.loaded ? (t.progress ?? 0) : null;
+  if (t.info_hash === SEVERANCE_HASH) {
+    return SEVERANCE_EPISODES.map((name, i) => ({
+      path: `${SEVERANCE_RELEASE}/Severance.S02E${String(i + 1).padStart(2, '0')}.${dotted(name)}.2160p.ATVP.WEB-DL.DV.H.265.mkv`,
+      size_bytes: SEVERANCE_EPISODE_BYTES,
+      progress,
+      plays_as: [{ media_type: 'tv', item_id: episodeIdFor(SHOWS[95396].key, 2, i + 1), season_number: 2, episode_number: i + 1, episode_name: name,
+        label: `S02E${String(i + 1).padStart(2, '0')}` }],
+      ignored: null,
+    }));
+  }
+  if (t.info_hash === FRIEREN_BATCH_HASH) {
+    // Not loaded and not applied yet (job 101 is in review): the job's list, nothing plays yet.
+    const file = (label: string | number) => `${FRIEREN_BATCH}/[SubsPlease] Sousou no Frieren - ${label} (1080p).mkv`;
+    return [
+      ...[29, 30, 31, 32, 33, 34, 35, 36, 37, 38].map((n) => ({ path: file(n), size_bytes: 1_320_000_000, progress, plays_as: [], ignored: null })),
+      { path: file('NCOP2'), size_bytes: 142 * MiB, progress, plays_as: [], ignored: ignored('opening', 'Ignored (NCOP)') },
+      { path: file('NCED2'), size_bytes: 139 * MiB, progress, plays_as: [], ignored: ignored('ending', 'Ignored (NCED)') },
+      { path: `${FRIEREN_BATCH}/Fonts/OpenSans-Semibold.ttf`, size_bytes: 220_000, progress, plays_as: [], ignored: ignored('font', 'Ignored (font)') },
+    ];
+  }
+  const title = t.titles[0];
+  return [{
+    path: `${t.name}/${t.name}.mkv`,
+    size_bytes: t.size_bytes ?? 0,
+    progress,
+    plays_as: title?.media_type === 'movie'
+      ? [{ media_type: 'movie', item_id: title.library_id, season_number: null, episode_number: null, episode_name: null, label: 'Movie' }]
+      : [],
+    ignored: null,
+  }];
+}
+
+/** A loaded torrent's piece map: what's on disk, then (fetching) the streaming window, then nothing wanted. */
+function piecesOf(t: TorrentListItem, total: number): PieceRun[] {
+  const have = Math.round(total * (t.progress ?? 0));
+  const runs: PieceRun[] = [{ state: 'have', count: have }];
+  if (t.state === 'downloading' && have < total) {
+    const partial = Math.min(2, total - have);
+    const priority = Math.min(24, total - have - partial);
+    runs.push({ state: 'partial', count: partial }, { state: 'priority', count: priority });
+  }
+  const rest = total - runs.reduce((sum, r) => sum + r.count, 0);
+  if (rest > 0) runs.push({ state: 'missing', count: rest });
+  return runs.filter((r) => r.count > 0);
+}
+
+/**
+ * GET /torrents/{hash} for a mock torrent, from its current state. A loaded torrent
+ * has its piece map, progress and totals; one that isn't has `pieces: null` and null
+ * progress, with piece facts from its stored metainfo (the Frieren batch has none
+ * stored: just the job's file list and the magnet's tracker).
+ */
+export function torrentDetail(t: TorrentListItem): TorrentDetail {
+  const pieceLength = t.info_hash === FRIEREN_BATCH_HASH ? null : 16 * MiB;
+  const total = pieceLength && t.size_bytes ? Math.ceil(t.size_bytes / pieceLength) : null;
+  const pieces = t.loaded && total ? piecesOf(t, total) : null;
+  const downloaded = t.loaded ? (t.bytes_completed ?? 0) : null;
+  const uploaded = t.loaded ? Math.round((t.bytes_completed ?? 0) * 0.12) : null;
+  return {
+    ...t,
+    magnet_uri: `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(t.name)}`,
+    piece_length: pieceLength,
+    pieces_total: total,
+    pieces_have: pieces ? pieces.filter((r) => r.state === 'have').reduce((sum, r) => sum + r.count, 0) : null,
+    pieces,
+    files: filesOf(t),
+    trackers: t.info_hash === FRIEREN_BATCH_HASH
+      ? trackers('http://nyaa.tracker.wf:7777/announce')
+      : trackers('udp://tracker.opentrackr.org:1337/announce', 'udp://open.stealth.si:80/announce'),
+    downloaded_bytes: downloaded,
+    uploaded_bytes: uploaded,
+    ratio: downloaded ? (uploaded ?? 0) / downloaded : null,
+    swarm: t.loaded ? { connected_peers: t.peers ?? 0, connected_seeders: t.seeders ?? 0, total_seeders: null } : null,
   };
 }
 

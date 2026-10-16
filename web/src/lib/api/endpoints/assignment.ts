@@ -41,7 +41,10 @@ function filterParam(filter: JobListFilter): string {
 }
 
 export const assignmentApi = {
-  /** 202 for a new job; 200 with the open job for the same show and torrent. */
+  /**
+   * 202 for a new job; 200 with the open job for the same show and torrent. `{info_hash}`
+   * instead of a magnet re-runs the mapping of a torrent the library knows (404 when it doesn't).
+   */
   assignShow: (showId: number, body: AssignShowTorrentRequest) =>
     apiJson<JobAccepted>(`/api/shows/${showId}/assign-torrent`, { method: 'POST', json: body }),
   assignMovie: (movieId: number, body: AssignMovieTorrentRequest) =>

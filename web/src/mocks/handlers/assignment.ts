@@ -27,6 +27,7 @@ import {
   WORKING,
 } from '../fixtures/assignment';
 import { findTitle } from '../fixtures/catalog';
+import { TORRENTS } from '../fixtures/torrents';
 import { assignMovieRelease, episodeFile, findByLibraryId, libraryKey, showEpisodes } from '../fixtures/titles';
 import { HOLD_STEPS, heldStep, scenario } from '../scenario';
 import { mockAiSettings } from './settings';
@@ -240,16 +241,31 @@ const isHint = (value: unknown): value is AssignHint =>
   (value.episode === undefined || typeof value.episode === 'number') &&
   (value.text === undefined || typeof value.text === 'string');
 
+/** A magnet, or (Re-run mapping) the hash of a torrent the library knows; the magnet wins when both come. */
 interface AssignBody {
-  magnet_uri: string;
+  magnet_uri?: string;
+  info_hash?: string;
   hint?: AssignHint;
   indexer?: string;
   file_path?: string;
 }
 
+/**
+ * The magnet the library has for a torrent, as TorrentMagnet finds it: a job's (the mock's
+ * stand-in for the assignments too), else one of the Activity fixture's torrents'.
+ */
+function knownMagnet(hash: string): string | undefined {
+  const job = [...jobs.values()].filter((j) => j.info_hash === hash).sort((a, b) => b.id - a.id)[0];
+  if (job) return job.magnet_uri;
+  const t = TORRENTS.find((torrent) => torrent.info_hash === hash);
+  return t && `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(t.name)}`;
+}
+
 const isAssignBody = (body: unknown): body is AssignBody =>
   isRecord(body) &&
-  typeof body.magnet_uri === 'string' &&
+  ((typeof body.magnet_uri === 'string' && body.magnet_uri !== '') || (typeof body.info_hash === 'string' && body.info_hash !== '')) &&
+  (body.magnet_uri === undefined || typeof body.magnet_uri === 'string') &&
+  (body.info_hash === undefined || typeof body.info_hash === 'string') &&
   (body.hint === undefined || isHint(body.hint)) &&
   (body.indexer === undefined || typeof body.indexer === 'string') &&
   (body.file_path === undefined || typeof body.file_path === 'string');
@@ -287,8 +303,17 @@ export const assignmentHandlers = [
       const found = findByLibraryId(mockLibrary(), mediaType, Number(params.id));
       if (!found) return notFound(mediaType === 'tv' ? 'No such show' : 'No such movie');
       const body = await jsonBody(request);
-      if (!isAssignBody(body)) return apiError(400, 'bad_request', 'Send {magnet_uri, hint?, indexer?}.');
-      const hash = infoHash(body.magnet_uri);
+      if (!isAssignBody(body)) return apiError(400, 'bad_request', 'Send {magnet_uri | info_hash, hint?, indexer?}.');
+      let magnet = body.magnet_uri;
+      if (!magnet) {
+        const asked = String(body.info_hash);
+        if (!/^[0-9a-f]{40}$/i.test(asked)) {
+          return apiError(400, 'bad_request', 'Not a BitTorrent info hash: send 40 hex characters or 32 base32 ones');
+        }
+        magnet = knownMagnet(asked.toLowerCase());
+        if (!magnet) return notFound('Torrent not found');
+      }
+      const hash = infoHash(magnet);
       if (!hash) return apiError(400, 'bad_request', 'The magnet link has no BitTorrent info hash.');
       // The same torrent for the same title: the job that's already open
       const open = [...jobs.values()].find(
@@ -299,7 +324,7 @@ export const assignmentHandlers = [
         media_type: mediaType,
         tmdb_id: found.entry.tmdb_id,
         library_id: found.row.library_id,
-        magnet_uri: body.magnet_uri,
+        magnet_uri: magnet,
         info_hash: hash,
         hint: body.hint,
         indexer: body.indexer,

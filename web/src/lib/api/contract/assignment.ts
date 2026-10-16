@@ -206,20 +206,24 @@ export interface AssignmentJobDetail {
 /** GET /assignment-jobs?status=: `open` (the default) or a list of statuses. Answers `{items: AssignmentJob[]}`, newest first, no dry runs. */
 export type JobListFilter = 'open' | JobStatus[];
 
+/**
+ * The torrent to assign: a magnet, or (Re-run mapping, #99) the info hash of a torrent
+ * the library knows, whose stored magnet is used: 404 when it knows none, 400 without either.
+ */
+export type AssignTorrentSource = { magnet_uri: string; info_hash?: never } | { info_hash: string; magnet_uri?: never };
+
 /** POST /shows/{id}/assign-torrent: 202 → JobAccepted, or 200 with the open job for the same show and torrent. */
-export interface AssignShowTorrentRequest {
-  magnet_uri: string;
+export type AssignShowTorrentRequest = AssignTorrentSource & {
   hint?: AssignHint;
   /** The search result's indexer, shown on the review page. */
   indexer?: string;
-}
+};
 
 /** POST /movies/{id}/assign-torrent: as for shows. `file_path` picks the movie file up front. */
-export interface AssignMovieTorrentRequest {
-  magnet_uri: string;
+export type AssignMovieTorrentRequest = AssignTorrentSource & {
   file_path?: string;
   indexer?: string;
-}
+};
 
 /**
  * One proposal's change: at least one of `decision` and `episode_ids` (else 400).
