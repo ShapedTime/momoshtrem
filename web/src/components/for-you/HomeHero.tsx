@@ -143,8 +143,9 @@ interface HomeHeroProps {
 
 /**
  * For You's hero (HANDOFF §4.3): the pick's backdrop over a glow in its
- * colour, what it is and why, its next step and Details, and a pager. The
- * top bar is transparent over it; the backdrop drifts as you scroll.
+ * colour, what it is and why, its next step and Details (and "…" feedback
+ * on Noir's picks, #155), and a pager. The top bar is transparent over it;
+ * the backdrop drifts as you scroll.
  */
 export function HomeHero({ username, picks, upNext = [] }: HomeHeroProps) {
   const headingId = useId();
