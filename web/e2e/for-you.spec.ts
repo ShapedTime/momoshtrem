@@ -28,6 +28,8 @@ const scenario = (page: Page, name: string) => page.addInitScript((value) => win
 const region = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
 const hero = (page: Page) => page.locator('section.home-hero');
 const card = (page: Page, rail: string, show: string) => region(page, rail).locator('article.lcard').filter({ hasText: show });
+/** The hero has its title, so nothing above the rails moves any more. */
+const heroSettled = (page: Page) => expect(hero(page).locator('h2.t-display-xl')).toBeVisible();
 
 test.describe('For You', () => {
   test('the personal page: hero, Up next with every availability, new episodes, the watchlist and trending', async ({ page }) => {
@@ -85,6 +87,7 @@ test.describe('For You', () => {
 
   test('phone flow: Up next → Find → the torrent sheet on that episode', async ({ page }) => {
     await signIn(page, '/');
+    await heroSettled(page);
     await card(page, 'Up next', 'Doctor Who').getByRole('button', { name: 'Find a torrent for Doctor Who S03E04' }).click();
     await expect(page).toHaveURL(/\/\?sheet=torrent&show=57243&se=S03E04$/);
     const sheet = page.getByRole('dialog', { name: /^Find a source · Doctor Who/ });
@@ -97,9 +100,11 @@ test.describe('For You', () => {
 
   test('Play in Infuse and Add on episode cards', async ({ page }) => {
     await signIn(page, '/');
+    await heroSettled(page);
     await card(page, 'Up next', 'Frieren').getByRole('button', { name: /^Play Frieren.* S01E27 in Infuse$/ }).click();
     const sheet = page.getByRole('dialog', { name: 'Play it in Infuse' });
-    await expect(sheet.getByText(/S01E27 - An Ordinary Mage/).first()).toBeVisible();
+    await expect(page).toHaveURL(/sheet=infuse-setup&path=[^&]*S01E27/);
+    await expect(sheet.getByLabel('WebDAV path of this title')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
 
