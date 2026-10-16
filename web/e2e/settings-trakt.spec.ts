@@ -253,7 +253,7 @@ test.describe('screenshots', () => {
     await connectButton(page).click();
     await expect(codeScreen(page)).toBeVisible();
     await page.waitForTimeout(400);
-    await shoot(page, testInfo, 'trakt-code');
+    await shoot(page, testInfo, 'trakt-code', { fullPage: true });
   });
 
   test('trakt waiting', async ({ page }, testInfo) => {
