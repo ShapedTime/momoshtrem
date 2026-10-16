@@ -30,6 +30,12 @@ export function failedRefresh(newest: RunSummary | undefined, picks: RunSummary 
   return picks === null || newest.id > picks.id ? newest : null;
 }
 
+/** The note's words: a failed refresh leaves the earlier picks; a failed first run leaves none yet. */
+export function failedRefreshCopy(run: Pick<RunSummary, 'error'>, first: boolean): { title: string; body: string } {
+  if (first) return { title: 'Couldn’t write your first picks.', body: run.error ?? 'Trending fills in until the next run.' };
+  return { title: 'Couldn’t refresh your picks.', body: run.error ?? 'These are from the last run that finished.' };
+}
+
 const pad = (n: number) => String(n).padStart(2, '0');
 const MONTH_DAY = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 const dayStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();

@@ -4,7 +4,7 @@ import { libraryPill } from '@/components/library/LibraryPill';
 import { PosterCard, StatusPill } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import type { RecFeedbackSource, RecItem } from '@/lib/api/contract';
-import { recCardSubtitle } from '@/lib/for-you/shelves';
+import { recCardSubtitle } from '@/lib/recommendations/cards';
 import { titleHref } from '@/lib/title/href';
 import { FeedbackRow } from './FeedbackRow';
 import { useRecFeedback } from './useRecFeedback';
@@ -12,7 +12,7 @@ import { useRecFeedback } from './useRecFeedback';
 interface RecPosterCardProps {
   item: RecItem;
   source: RecFeedbackSource;
-  /** A Coming soon label ("Jan 16"): it takes the library pill's place on the poster. */
+  /** A Coming soon label ("Jan 16", `comingSoonBadge`): top right on the poster, in place of the library pill. */
   comingSoon?: string | null;
 }
 
@@ -30,7 +30,9 @@ export function RecPosterCard({ item, source, comingSoon = null }: RecPosterCard
       subtitle={recCardSubtitle(item, comingSoon)}
       reason={item.reason}
       posterSrc={buildImageUrl(item.poster_path, 'poster', 'medium')}
-      badge={comingSoon ? <StatusPill status="upcoming" label={comingSoon} onArt /> : libraryPill(item.library)}
+      // The design's Coming soon cards carry their date top right instead of the library pill (core.js posterCard)
+      badge={comingSoon ? undefined : libraryPill(item.library)}
+      badgeEnd={comingSoon ? <StatusPill status="upcoming" label={comingSoon} onArt /> : undefined}
       footer={<FeedbackRow feedback={feedback} inLibrary={item.library !== null} />}
       dismissed={feedback.dismissed}
     />

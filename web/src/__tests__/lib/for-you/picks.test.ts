@@ -1,5 +1,5 @@
 import type { RunProgress, RunSummary } from '@/lib/api/contract';
-import { failedRefresh, picksFootLine, refreshSummary } from '@/lib/for-you/picks';
+import { failedRefresh, failedRefreshCopy, picksFootLine, refreshSummary } from '@/lib/for-you/picks';
 
 /** The runs behind For You's picks (#155): the refreshing banner, the failed-refresh note and the footer. */
 
@@ -75,6 +75,15 @@ describe('failedRefresh', () => {
     expect(failedRefresh(run({ id: 40, status: 'failed' }), picks)).toBeNull();
     expect(failedRefresh(run({ id: 43, status: 'skipped' }), picks)).toBeNull();
     expect(failedRefresh(undefined, picks)).toBeNull();
+  });
+});
+
+describe('failedRefreshCopy', () => {
+  it('a failed refresh keeps the earlier picks; a failed first run has none to keep', () => {
+    expect(failedRefreshCopy({ error: 'The Anthropic API didn’t answer.' }, false)).toEqual({ title: 'Couldn’t refresh your picks.', body: 'The Anthropic API didn’t answer.' });
+    expect(failedRefreshCopy({ error: null }, false).body).toBe('These are from the last run that finished.');
+    expect(failedRefreshCopy({ error: 'The Anthropic API didn’t answer.' }, true)).toEqual({ title: 'Couldn’t write your first picks.', body: 'The Anthropic API didn’t answer.' });
+    expect(failedRefreshCopy({ error: null }, true).body).toBe('Trending fills in until the next run.');
   });
 });
 

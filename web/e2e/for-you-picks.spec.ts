@@ -93,10 +93,16 @@ test.describe('For You: Noir’s picks', () => {
     await expect(andor.getByRole('button', { name: 'Less like this' })).toHaveAttribute('aria-pressed', 'true');
     const toast = page.getByRole('status').filter({ hasText: 'Got it, fewer like this' });
     await expect(toast).toContainText('Andor won’t be picked again.');
+    // Undo DELETEs the dislike (there was no signal before), then reads /home again
+    const reread = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith('/api/recommendations/home'));
     await toast.getByRole('button', { name: 'Undo' }).click();
     await expect(andor).not.toHaveClass(/is-dismissed/);
     await expect(andor.getByRole('button', { name: 'Less like this' })).toHaveAttribute('aria-pressed', 'false');
     await expect(toast).toBeHidden();
+    await reread;
+    // The fresh /home still has Andor on the shelf, undimmed
+    await expect(andor).toBeVisible();
+    await expect(andor).not.toHaveClass(/is-dismissed/);
   });
 
   test('like: thumbs up toggles with aria-pressed and never dims; the title agrees on every shelf', async ({ page }) => {
@@ -181,6 +187,14 @@ test.describe('For You: Noir’s picks', () => {
 
   test('the first run after Trakt’s import (recs-first-run): the first sync adds “Writing your shelves”', async ({ page }) => {
     await scenario(page, 'recs-first-run');
+    // The personal page's rows never flash up before the first sync shows, however the answers race
+    await page.addInitScript(() => {
+      const seen = window as unknown as { personalRowsSeen?: boolean };
+      seen.personalRowsSeen = false;
+      new MutationObserver(() => {
+        if (document.querySelector('.home-body h2')) seen.personalRowsSeen = true;
+      }).observe(document, { childList: true, subtree: true });
+    });
     await signIn(page, '/');
     const sync = page.getByRole('region', { name: 'First sync with Trakt' });
     await expect(sync.getByText(/Building your picks…$/)).toBeVisible();
@@ -192,6 +206,7 @@ test.describe('For You: Noir’s picks', () => {
     await expect(region(page, 'Your picks').getByText('Writing…')).toBeVisible();
     await expect(region(page, 'Up next').locator('article.lcard').first()).toBeVisible();
     await expect(hero(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { personalRowsSeen?: boolean }).personalRowsSeen)).toBe(false);
     await expectAccessibleAndContained(page);
   });
 

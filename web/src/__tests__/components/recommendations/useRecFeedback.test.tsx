@@ -9,16 +9,16 @@ import { resetLocalSignals } from '@/lib/recommendations/feedback-store';
 
 const originalFetch = global.fetch;
 let calls: Array<{ method: string; url: string; body: unknown }>;
-let failNext = false;
+let failures = 0;
 
 beforeEach(() => {
   resetLocalSignals();
   calls = [];
-  failNext = false;
+  failures = 0;
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ method: init?.method ?? 'GET', url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (failNext) {
-      failNext = false;
+    if (failures > 0) {
+      failures -= 1;
       const body = { error: { code: 'internal', message: 'momoshtrem didn’t answer.' } };
       return { ok: false, status: 500, json: async () => body, clone: () => ({ json: async () => body }) } as unknown as Response;
     }
@@ -109,12 +109,52 @@ describe('useRecFeedback', () => {
   });
 
   it('a failed save puts the signal back and says so', async () => {
-    failNext = true;
+    failures = 1;
     const { container } = render(<Row target={ANDOR} />, { wrapper });
     fireEvent.click(screen.getByRole('button', { name: 'Less like this' }));
     expect(container.querySelector('article')).toHaveAttribute('data-dismissed', 'true');
     await waitFor(() => expect(container.querySelector('article')).toHaveAttribute('data-dismissed', 'false'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t save your feedback on Andor');
+  });
+
+  it('a newer change closes the stale Undo: 👎 then 👍 keeps the like, and nothing DELETEs it', async () => {
+    const { container } = render(<Row target={ANDOR} />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Less like this' }));
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More like this' }));
+    // A like has no toast of its own, and the dislike's Undo is gone with it
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    expect(screen.queryByText('Got it, fewer like this')).toBeNull();
+    expect(container.querySelector('article')).toHaveAttribute('data-dismissed', 'false');
+    expect(screen.getByRole('button', { name: 'More like this' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent().map(([method, , body]) => [method, (body as { signal?: string } | undefined)?.signal])).toEqual([
+      ['POST', 'dislike'],
+      ['POST', 'like'],
+    ]);
+  });
+
+  it('a failed save and a failed Undo go back to what the server has, never to a dismissal it didn’t get', async () => {
+    failures = 2;
+    const { container } = render(<Row target={ANDOR} />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Less like this' }));
+    // Undo before the POST has failed: the DELETE queues behind it, and fails too
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent().map(([method]) => method)).toEqual(['POST', 'DELETE']);
+    expect(await screen.findByText('Couldn’t undo your feedback on Andor')).toBeInTheDocument();
+    expect(container.querySelector('article')).toHaveAttribute('data-dismissed', 'false');
+    expect(screen.getByRole('button', { name: 'Less like this' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('a failed Undo after a saved dislike keeps the dislike the server has', async () => {
+    const { container } = render(<Row target={ANDOR} />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Less like this' }));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    failures = 1;
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(await screen.findByText('Couldn’t undo your feedback on Andor')).toBeInTheDocument();
+    expect(container.querySelector('article')).toHaveAttribute('data-dismissed', 'true');
   });
 
   it('Not interested and Already seen dismiss too; the newest signal wins', () => {

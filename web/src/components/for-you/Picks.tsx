@@ -7,8 +7,8 @@ import { CatAvatar, CatEyes } from '@/components/brand';
 import { RecPosterCard } from '@/components/recommendations';
 import { LoadingRegion, PosterSkeletons, Rail, RailItem, Skeleton } from '@/components/ui';
 import type { RunProgress, RunSummary, Shelf } from '@/lib/api/contract';
-import { picksFootLine, refreshSummary } from '@/lib/for-you/picks';
-import { comingSoonBadge } from '@/lib/for-you/shelves';
+import { failedRefreshCopy, picksFootLine, refreshSummary } from '@/lib/for-you/picks';
+import { comingSoonBadge } from '@/lib/recommendations/cards';
 import { askHref } from '@/lib/recommendations/ask-href';
 import { RailError, RailFrame } from './Rails';
 
@@ -88,13 +88,14 @@ export function RefreshBanner({ run, first }: { run: RunProgress; first: boolean
   );
 }
 
-/** The last refresh failed: the shelves below are the earlier ones. Quiet, since nothing's lost. */
-export function PicksNote({ run }: { run: RunSummary }) {
+/** The newest run failed: the shelves below are the earlier ones, or there are none yet (the first run). Quiet, since nothing's lost. */
+export function PicksNote({ run, first }: { run: RunSummary; first: boolean }) {
+  const copy = failedRefreshCopy(run, first);
   return (
     <p className="picks-note t-small">
       <TriangleAlert size={16} aria-hidden="true" />
       <span>
-        <strong className="font-medium text-fg-1">Couldn’t refresh your picks.</strong> {run.error ?? 'These are from the last run that finished.'}
+        <strong className="font-medium text-fg-1">{copy.title}</strong> {copy.body}
       </span>
     </p>
   );

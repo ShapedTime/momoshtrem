@@ -9,6 +9,10 @@ import type { RecSignal } from '@/lib/api/contract';
  */
 
 const signals = new Map<string, RecSignal | null>();
+/** What the server last accepted from this page, per title: a failed request goes back to it. */
+const confirmed = new Map<string, RecSignal | null>();
+/** The Undo toast on screen for a title, if any: a newer change to the title closes it. */
+const undoToasts = new Map<string, number>();
 const listeners = new Set<() => void>();
 /** Each title's requests, in the order they were made, so an Undo never overtakes the signal it undoes. */
 const queues = new Map<string, Promise<unknown>>();
@@ -21,6 +25,27 @@ export function localSignal(key: string): RecSignal | null | undefined {
 export function setLocalSignal(key: string, signal: RecSignal | null): void {
   signals.set(key, signal);
   listeners.forEach((listener) => listener());
+}
+
+/** The signal the server last accepted from this page, or undefined when it hasn't accepted one (its own stands). */
+export function confirmedSignal(key: string): RecSignal | null | undefined {
+  return confirmed.has(key) ? confirmed.get(key) : undefined;
+}
+
+export function setConfirmedSignal(key: string, signal: RecSignal | null): void {
+  confirmed.set(key, signal);
+}
+
+/** The id of the title's Undo toast, while it's on screen. */
+export const undoToast = (key: string): number | undefined => undoToasts.get(key);
+
+export function setUndoToast(key: string, id: number): void {
+  undoToasts.set(key, id);
+}
+
+/** The toast went: forget it, unless a newer one for the title replaced it. */
+export function clearUndoToast(key: string, id: number): void {
+  if (undoToasts.get(key) === id) undoToasts.delete(key);
 }
 
 export function subscribeLocalSignals(listener: () => void): () => void {
@@ -43,6 +68,8 @@ export function inOrder<T>(key: string, send: () => Promise<T>): Promise<T> {
 /** Tests: forget everything. */
 export function resetLocalSignals(): void {
   signals.clear();
+  confirmed.clear();
+  undoToasts.clear();
   queues.clear();
   listeners.forEach((listener) => listener());
 }

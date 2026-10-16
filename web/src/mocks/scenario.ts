@@ -60,7 +60,7 @@
  * - `recs-none`: picks are on, but no run has finished yet: /recommendations/home has `run: null` and no
  *   shelves (For You keeps trending). Refresh starts the first run.
  * - `recs-first-run`: no picks yet, and the run after Trakt's first import (`first_sync`) holds at
- *   "Writing your shelves" (2 of 5).
+ *   "Writing your shelves" (2 of 5). Trakt's last sync is that initial import.
  * - `recs-refreshing`: last night's picks, and a manual run holds at "Writing your shelves" (2 of 5).
  * - `recs-failed`: the last refresh failed (the earlier picks stay), and the next one fails at TMDB.
  * - `recs-off`: picks are switched off (`rec_enabled: false`): /home answers `configured: true` and

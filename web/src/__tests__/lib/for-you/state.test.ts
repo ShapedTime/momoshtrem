@@ -134,6 +134,16 @@ describe('Noir’s first shelves (#155)', () => {
     expect(forYouState({ trakt: off, libraryTotal: 3, writingFirstPicks: true })).toBe('trakt_off');
   });
 
+  it('right after the first import, waits for /home instead of flashing the personal page', () => {
+    const justImported = trakt({ sync: sync({ status: 'idle', kind: 'initial' }) });
+    expect(forYouState({ trakt: justImported, libraryTotal: 3, picksPending: true })).toBe('loading');
+    expect(forYouState({ trakt: justImported, libraryTotal: 3, picksPending: false })).toBe('default');
+    // Later syncs are incremental: the personal page doesn't wait for the picks
+    expect(forYouState({ trakt: trakt(), libraryTotal: 3, picksPending: true })).toBe('default');
+    // The import itself still shows its steps
+    expect(forYouState({ trakt: trakt({ sync: sync({ status: 'syncing', kind: 'initial', step: 'history' }) }), libraryTotal: 3, picksPending: true })).toBe('first_sync');
+  });
+
   it('adds "Writing your shelves" with the count, and says it’s building your picks', () => {
     expect(writingShelvesStep(firstRun)).toEqual({ label: 'Writing your shelves', detail: '2 of 5', state: 'active' });
     expect(writingShelvesStep({ shelves_done: 0, shelves_target: 0 }).detail).toBeNull();

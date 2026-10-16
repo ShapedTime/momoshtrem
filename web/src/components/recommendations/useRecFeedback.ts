@@ -8,7 +8,17 @@ import { UNDO_MS } from '@/hooks/useUndoableRemoval';
 import type { MediaType, RecFeedbackSource, RecSignal } from '@/lib/api/contract';
 import { recApi, recKeys, titleKeys } from '@/lib/api/endpoints';
 import { dismissToast, feedbackChange, type FeedbackRequest, isDismissing, recFeedbackKey, shownSignal, toggledSignal } from '@/lib/recommendations/feedback';
-import { inOrder, localSignal, setLocalSignal, subscribeLocalSignals } from '@/lib/recommendations/feedback-store';
+import {
+  clearUndoToast,
+  confirmedSignal,
+  inOrder,
+  localSignal,
+  setConfirmedSignal,
+  setLocalSignal,
+  setUndoToast,
+  subscribeLocalSignals,
+  undoToast,
+} from '@/lib/recommendations/feedback-store';
 
 /** A title that takes feedback: a shelf's `RecItem`, an Ask card's `AskItem`, or a hero pick with its title's name. */
 export interface RecFeedbackTarget {
@@ -43,7 +53,9 @@ const TOAST_ICON: Partial<Record<RecSignal, LucideIcon>> = { dislike: ThumbsDown
  * card and shows "Got it, fewer like this" with Undo for 10 s, and Undo
  * restores the previous signal: a POST of it, or a DELETE when there was
  * none. Every card showing the title agrees (the store is per title, not
- * per card). A request that fails puts the signal back and says so.
+ * per card). A newer change to the title closes its Undo toast, so an Undo
+ * never wipes it. A request that fails goes back to what the server last
+ * accepted, and says so.
  *
  *   const feedback = useRecFeedback(item, 'shelf');
  *   <PosterCard dismissed={feedback.dismissed} footer={<FeedbackRow feedback={feedback} inLibrary={item.library !== null} />} />
@@ -57,17 +69,38 @@ export function useRecFeedback(target: RecFeedbackTarget, source: RecFeedbackSou
     () => undefined
   );
   const signal = shownSignal(local, server);
-  const { toast } = useToast();
+  const { toast, dismiss } = useToast();
   const queryClient = useQueryClient();
 
-  const send = useCallback(
-    (request: FeedbackRequest) =>
-      inOrder(key, () =>
+  /**
+   * Show `to` at once and send `request` after the title's earlier requests.
+   * Once the server accepts it, it's the confirmed signal; if it fails, the
+   * last confirmed one comes back (unless something newer replaced it).
+   * Resolves to whether it was saved.
+   */
+  const apply = useCallback(
+    (to: RecSignal | null, request: FeedbackRequest, failure: string): Promise<boolean> => {
+      setLocalSignal(key, to);
+      return inOrder(key, () =>
         request.method === 'DELETE'
           ? recApi.clearFeedback(mediaType, tmdbId)
           : recApi.feedback({ media_type: mediaType, tmdb_id: tmdbId, signal: request.signal, source })
-      ),
-    [key, mediaType, tmdbId, source]
+      ).then(
+        () => {
+          setConfirmedSignal(key, to);
+          return true;
+        },
+        (error: Error) => {
+          if (localSignal(key) === to) {
+            const saved = confirmedSignal(key);
+            setLocalSignal(key, saved === undefined ? server : saved);
+          }
+          toast({ tone: 'error', title: `${failure} ${title}`, body: error.message });
+          return false;
+        }
+      );
+    },
+    [key, mediaType, tmdbId, source, server, title, toast]
   );
 
   const toggle = useCallback(
@@ -77,46 +110,42 @@ export function useRecFeedback(target: RecFeedbackTarget, source: RecFeedbackSou
       const change = feedbackChange(from, toggledSignal(from, chosen));
       if (!change) return;
 
-      setLocalSignal(key, change.to);
-      send(change.request).then(
-        // The title page's "Why it's for you" goes with negative feedback, and comes back with Undo
-        () => void queryClient.invalidateQueries({ queryKey: titleKeys.detail(mediaType, tmdbId) }),
-        (error: Error) => {
-          // Put it back, unless something newer has replaced it meanwhile
-          if (localSignal(key) === change.to) setLocalSignal(key, change.from);
-          toast({ tone: 'error', title: `Couldn’t save your feedback on ${title}`, body: error.message });
-        }
-      );
+      // A newer change makes the title's last Undo stale: close it, so it can't wipe this one
+      const stale = undoToast(key);
+      if (stale !== undefined) dismiss(stale);
+
+      // The title page's "Why it's for you" goes with negative feedback, and comes back with Undo
+      void apply(change.to, change.request, 'Couldn’t save your feedback on').then((saved) => {
+        if (saved) void queryClient.invalidateQueries({ queryKey: titleKeys.detail(mediaType, tmdbId) });
+      });
 
       const copy = change.dismisses ? dismissToast(change.to, title) : null;
       if (!copy) return;
-      toast({
+      let id = 0;
+      id = toast({
         tone: 'info',
         icon: change.to ? TOAST_ICON[change.to] : undefined,
         title: copy.title,
         body: copy.body,
         durationMs: UNDO_MS,
+        onClose: () => clearUndoToast(key, id),
         action: {
           label: 'Undo',
           onClick: () => {
-            setLocalSignal(key, change.from);
-            send(change.undo).then(
+            // Only while this change still stands (a failed save has already put the old signal back)
+            if (localSignal(key) !== change.to) return;
+            void apply(change.from, change.undo, 'Couldn’t undo your feedback on').then((saved) => {
+              if (!saved) return;
               // A poll may have dropped the card meanwhile: read /home again to bring it back
-              () =>
-                Promise.all([
-                  queryClient.invalidateQueries({ queryKey: recKeys.home }),
-                  queryClient.invalidateQueries({ queryKey: titleKeys.detail(mediaType, tmdbId) }),
-                ]),
-              (error: Error) => {
-                if (localSignal(key) === change.from) setLocalSignal(key, change.to);
-                toast({ tone: 'error', title: `Couldn’t undo your feedback on ${title}`, body: error.message });
-              }
-            );
+              void queryClient.invalidateQueries({ queryKey: recKeys.home });
+              void queryClient.invalidateQueries({ queryKey: titleKeys.detail(mediaType, tmdbId) });
+            });
           },
         },
       });
+      setUndoToast(key, id);
     },
-    [key, server, send, queryClient, mediaType, tmdbId, title, toast]
+    [key, server, apply, dismiss, queryClient, mediaType, tmdbId, title, toast]
   );
 
   return useMemo(

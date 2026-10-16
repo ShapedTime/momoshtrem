@@ -273,7 +273,7 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
           </Banner>
         )}
         {activeRun && <RefreshBanner run={activeRun} first={run === null} />}
-        {failed && <PicksNote run={failed} />}
+        {failed && <PicksNote run={failed} first={run === null} />}
         {askAvailable && <AskEntryPhone />}
         {allFailed ? (
           <Banner
@@ -372,6 +372,7 @@ export function ForYouView({ username }: { username: string }) {
     trakt,
     libraryTotal: library.data?.summary.total ?? (library.isError ? null : undefined),
     writingFirstPicks: firstRun !== null || checkingPicks,
+    picksPending: recs.isPending,
   });
 
   switch (state) {

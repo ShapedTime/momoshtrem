@@ -27,9 +27,11 @@ export interface ForYouInput {
   libraryTotal: number | null | undefined;
   /** Noir's first run is writing the first shelves (`firstPicksRun`), or For You is still asking /home whether it is. */
   writingFirstPicks?: boolean;
+  /** /recommendations/home hasn't answered yet. */
+  picksPending?: boolean;
 }
 
-export function forYouState({ trakt, libraryTotal, writingFirstPicks = false }: ForYouInput): ForYouState {
+export function forYouState({ trakt, libraryTotal, writingFirstPicks = false, picksPending = false }: ForYouInput): ForYouState {
   if (trakt === undefined) return 'loading';
   if (trakt === null || !traktLinked(trakt)) {
     if (libraryTotal === undefined) return 'loading';
@@ -37,6 +39,8 @@ export function forYouState({ trakt, libraryTotal, writingFirstPicks = false }: 
   }
   if (trakt.sync.kind === 'initial' && trakt.sync.status !== 'idle') return 'first_sync';
   if (writingFirstPicks) return 'first_sync';
+  // Right after the first import, Noir's first run may be writing: wait for /home rather than flash the personal page
+  if (trakt.sync.kind === 'initial' && picksPending) return 'loading';
   return 'default';
 }
 
