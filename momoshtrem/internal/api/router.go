@@ -107,6 +107,10 @@ type Options struct {
 	// AISettings serves GET/PUT /settings/ai and /settings/ai/usage (the
 	// AI core, #154; wire_ai.go). Nil makes those routes return 503.
 	AISettings AISettings
+	// Storage serves GET/PUT /settings/storage: the piece cache's limit
+	// and the download caps (#77; wire_storage.go). Nil makes those routes
+	// return 503.
+	Storage Storage
 }
 
 // NewServer creates a new API server
@@ -221,6 +225,7 @@ func (s *Server) setupRoutes() {
 	s.registerReviewRoutes(api)     // Proposal edits, episode picker, manual overrides, torrent files
 	s.registerHDRezkaRoutes(api)    // HDRezka search, titles, streams and assigns
 	s.registerQualityRoutes(api)    // GET and PUT /settings/quality-profile
+	s.registerStorageRoutes(api)    // GET and PUT /settings/storage (#77)
 	s.registerInspectRoutes(api)    // Inspect: dry runs of a search result or magnet
 	s.registerSearchRoutes(api)     // Torrent search and resolve
 	s.registerTraktRoutes(api)      // Trakt connect, disconnect, settings and sync

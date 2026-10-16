@@ -211,19 +211,26 @@ func main() {
 	}
 
 	// Initialize torrent storage. The piece cache's fill and capacity go to
-	// the Activity summary.
+	// the Activity summary. Its limit follows the disk (#200): the storage
+	// governor sizes it before it opens, then applies the free-space floor
+	// at once, every minute and after each PUT /settings/storage.
+	storageGovernor := newStorageGovernor(cfg, settingsRepo)
+	cacheLimit := storageGovernor.StartupLimit(context.Background())
 	pieceStorage, pieceCache, pieceCompletion, err := torrent.InitStorage(
 		cfg.Torrent.MetadataFolder,
-		cfg.Torrent.GlobalCacheSize,
+		cacheLimit.LimitBytes>>20,
 	)
 	if err != nil {
 		slog.Error("Failed to initialize torrent storage", "error", err)
 		os.Exit(1)
 	}
 	defer pieceCompletion.Close()
+	storageGovernor.Start(context.Background(), storageCache(pieceCache))
+	apiOpts.Storage = storageGovernor
 	slog.Info("Torrent storage initialized",
 		"metadata_folder", cfg.Torrent.MetadataFolder,
-		"cache_size_mb", cfg.Torrent.GlobalCacheSize,
+		"cache_size_mb", cacheLimit.LimitBytes>>20,
+		"cache_limit_source", cacheLimit.Source,
 	)
 
 	// Initialize DHT item store
@@ -742,6 +749,9 @@ func main() {
 	// Stop the Trakt sync (at most 10 s), then polling a pending device code
 	traktSync.Stop()
 	traktAuth.Close()
+
+	// Stop the storage governor; a trim stops between two steps
+	storageGovernor.Close()
 
 	// Close torrent service
 	if err := torrentService.Close(); err != nil {

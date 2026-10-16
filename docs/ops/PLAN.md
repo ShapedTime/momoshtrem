@@ -49,7 +49,7 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 - **The root filesystem (a 15 GB LV) is 94% full.** Containerd images take 6.3 GB, including two `golang` images left from building on the box. Build cache takes 1.6 GB and journald 1.3 GB. The volume group has about 14 GB unallocated.
 - **The data disk** is 120 GB at `/mnt/data`, 81% used.
   - `/mnt/data/3/momoshtrem/` holds `pgdata` (67 MB), `config/config.yaml` and `data/data/`.
-  - `data/data/` holds the torrent cache (90 GB), `subtitles/`, `cache/vfs_tree.gob` and a legacy SQLite file.
+  - `data/data/` holds the torrent cache (90 GB, capped by `global_cache_size: 92160`), `subtitles/`, `cache/vfs_tree.gob` and a legacy SQLite file. Since #200 the cap follows the disk instead (VM.md §1).
   - Jackett's config is in `/mnt/data/3/jackett`.
 - **There are no backups of any kind**: no cron, no timers, nothing off the box. qemu-guest-agent isn't running.
 - **ufw allows** 3000, 4444, 9117, 5050, 9090, 80, 443 and 36911 from anywhere. Docker-published ports bypass ufw, though, so compose is what actually decides what's exposed.
@@ -106,13 +106,13 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 | Postgres library | `pgdata` | **Critical** | Back it up as a logical dump (`pg_dump`), never as the raw data directory. |
 | `.env` | checkout root | **Critical** | Holds all the secrets (D6), and exists only here and in the backup. |
 | Jackett `/config` | `/mnt/data/3/jackett` | **Critical** | The indexer setup, and the FlareSolverr URL and max timeout (`ServerConfig.json`, #106). Its API key must match `JACKETT_API_KEY`, so restore the two together. |
-| momoshtrem `config.yaml` | `.../momoshtrem/config` | Back up | Tuning: cache size, ports, metrics. |
+| momoshtrem `config.yaml` | `.../momoshtrem/config` | Back up | Tuning: ports, metrics. The cache's limit isn't here since #200: Settings › Storage keeps it in Postgres (`app_settings`). |
 | Downloaded subtitles | `.../data/data/subtitles` | Back up | DB rows point at these files, and downloading them again uses up OpenSubtitles quota. |
 | `caddy_data` volume | `momoshtrem_caddy_data`, a Docker named volume | Back up | The Let's Encrypt account and certificate (#19), and the old internal CA, now unused. If it's lost, Caddy gets a new certificate when it starts; nothing has to be trusted again. The pinned project name fixes the volume's name (#37). |
 | Deploy state | `/opt/momoshtrem/deploy-state` and `deploy.log` (#38) | Back up | The current, previous and last-failed commit, and one line per deploy. |
 | Pre-deploy dumps | `/opt/momoshtrem/dumps` (#38) | Excluded | The newest 10 `pg_dump`s, one per deploy, for a rollback across a migration. The nightly backup covers the same data. |
 | Caddyfile | the repo (#37) | Tracked | Its host values and the WebDAV hash come from `.env`. |
-| Torrent cache | `.../data/data/torrents` (90 GB) | Excluded | Rebuilds itself. Never move it; delete it if the space is needed. |
+| Torrent cache | `.../data/data/torrents` (up to its limit: 75% of the data disk on auto, VM.md §1) | Excluded | Rebuilds itself. Never move it; to free space, lower its limit in Settings › Storage, or delete it. |
 | `vfs_tree.gob` | `.../data/data/cache` | Excluded | Rebuilt from the DB. |
 | Legacy SQLite file | `.../data/data/momoshtrem.db` | Excluded | Archived once (#33). It isn't copied to the new VM (#42). |
 
@@ -227,8 +227,8 @@ Epic #32 is done when all of these hold:
   - Mitigation: a rehearsal of the restore and migrations on the Mac first, a snapshot, and the H3 smoke test. The old VM is the way back (§6).
 - **Losing `caddy_data`.** Since #19 it holds a Let's Encrypt certificate, so a new volume only means a new certificate. Let's Encrypt allows 5 a week for the same name.
   - Mitigation: #37 pins the project name, so the volume is always `momoshtrem_caddy_data`, and #35 backs it up.
-- **Disk pressure.** The old VM's root disk filled up, and the new data disk is 70 GiB until cutover.
-  - Mitigation: the new root LV fills its disk and the VM never builds (VM.md §1). Image retention (§8) keeps it that way. The torrent cache cap is 52 GiB until the data disk grows to 120 GiB.
+- **Disk pressure.** The old VM's root disk filled up, and the torrent cache grows to fill the data disk.
+  - Mitigation: the new root LV fills its disk and the VM never builds (VM.md §1). Image retention (§8) keeps it that way. The torrent cache's limit follows the data disk (#200): 75% of it on auto, and it always leaves 5 GiB free.
 - **One person, one VM.** Accepted. The runbook is the mitigation.
 
 **Deferred.** Each of these gets its own issue when it's needed.

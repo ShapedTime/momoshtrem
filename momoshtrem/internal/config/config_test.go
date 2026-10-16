@@ -306,6 +306,47 @@ func TestLoad_TorrentListenPort(t *testing.T) {
 	}
 }
 
+// torrent.global_cache_size counts only when the file sets it (#200): auto
+// applies otherwise. The value stays 4096 MiB by default, for the lab.
+func TestLoad_GlobalCacheSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		wantMiB int64
+		wantSet bool
+	}{
+		{"no file", "", 4096, false},
+		{"file without the key", "torrent:\n  add_timeout: 30\n", 4096, false},
+		{"file without a torrent section", "metrics:\n  enabled: true\n", 4096, false},
+		{"key set", "torrent:\n  global_cache_size: 53760 # MiB\n", 53760, true},
+		{"key set to the default", "torrent:\n  global_cache_size: 4096\n", 4096, true},
+		{"key left empty", "torrent:\n  global_cache_size:\n", 4096, false},
+		{"key commented out", "torrent:\n  # global_cache_size: 53760\n  add_timeout: 30\n", 4096, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, tt.file)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Torrent.GlobalCacheSize != tt.wantMiB || cfg.Torrent.GlobalCacheSizeSet != tt.wantSet {
+				t.Errorf("GlobalCacheSize = %d (set %v), want %d (set %v)",
+					cfg.Torrent.GlobalCacheSize, cfg.Torrent.GlobalCacheSizeSet, tt.wantMiB, tt.wantSet)
+			}
+			bytes, ok := cfg.Torrent.GlobalCacheBytes()
+			if ok != tt.wantSet || (ok && bytes != tt.wantMiB<<20) {
+				t.Errorf("GlobalCacheBytes = %d, %v", bytes, ok)
+			}
+		})
+	}
+}
+
 func TestLoad_TMDBSettings(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -1,12 +1,12 @@
 //go:build unix
 
-package activity
+package storagecap
 
 import "syscall"
 
-// statfs returns the size and the space available to us of the file
+// Statfs returns the size and the space available to us of the file
 // system holding path.
-func statfs(path string) (total, free int64, err error) {
+func Statfs(path string) (total, free int64, err error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, 0, err

@@ -134,10 +134,8 @@ In `/opt/momoshtrem`:
    docker compose run --rm --no-deps -T caddy tar -xf - -C /data < ~/restore/caddy_data.tar
    docker compose run --rm --no-deps caddy ls /data/caddy/pki/authorities/local   # root.crt and intermediate.crt: the old internal CA (unused since #19)
    ```
-7. **`config.yaml`** in `/mnt/data/momoshtrem/config`. Keep only what env doesn't cover and what differs from the defaults. Secrets go in `.env`. Set the cache cap from VM.md §1:
+7. **`config.yaml`** in `/mnt/data/momoshtrem/config`. Keep only what env doesn't cover and what differs from the defaults. Secrets go in `.env`. Leave `torrent.global_cache_size` out: the cache's limit is then auto, 75% of the data disk, and it changes in Settings › Storage (VM.md §1).
    ```yaml
-   torrent:
-     global_cache_size: 53760   # MiB: at most 75% of the data disk (VM.md §1)
    metrics:
      enabled: true              # on 127.0.0.1:9090 (PLAN D8)
    ```
