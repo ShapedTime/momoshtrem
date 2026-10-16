@@ -142,6 +142,9 @@ type HDRezkaConfig struct {
 // key is empty.
 type AIConfig struct {
 	AnthropicAPIKey string `yaml:"anthropic_api_key"`
+	// RecsDebug serves the dev-only GET /api/recommendations/debug/profile
+	// (the taste profile and candidate pool, #153). Off by default.
+	RecsDebug bool `yaml:"recs_debug"`
 }
 
 // TraktConfig configures the read-only Trakt integration.
@@ -305,6 +308,9 @@ func applyEnv(cfg *Config) error {
 	}
 	envString("HDREZKA_URL", &cfg.HDRezka.URL)
 	envString("ANTHROPIC_API_KEY", &cfg.AI.AnthropicAPIKey)
+	if err := envBool("RECS_DEBUG", &cfg.AI.RecsDebug); err != nil {
+		return err
+	}
 	envString("TRAKT_CLIENT_ID", &cfg.Trakt.ClientID)
 	envString("TRAKT_CLIENT_SECRET", &cfg.Trakt.ClientSecret)
 	envString("SECRET_KEY", &cfg.Security.SecretKey)

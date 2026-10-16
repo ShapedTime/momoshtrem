@@ -1,0 +1,82 @@
+package library
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// StoredTasteProfile is a taste_profiles row: R1's profile as one build
+// stored it. Counts and Profile are its JSON documents.
+type StoredTasteProfile struct {
+	ID        int64
+	CreatedAt time.Time
+	Counts    json.RawMessage
+	Profile   json.RawMessage
+}
+
+// TasteProfileRepository stores taste profiles.
+type TasteProfileRepository struct {
+	db *DB
+}
+
+// NewTasteProfileRepository creates a TasteProfileRepository.
+func NewTasteProfileRepository(db *DB) *TasteProfileRepository {
+	return &TasteProfileRepository{db: db}
+}
+
+// Insert stores a profile and, in the same transaction, prunes the ones no
+// run references that were created before pruneBefore (the caller's
+// clock, so a profile a run is about to reference survives).
+func (r *TasteProfileRepository) Insert(ctx context.Context, counts, profile json.RawMessage, pruneBefore time.Time) (*StoredTasteProfile, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	p := &StoredTasteProfile{Counts: counts, Profile: profile}
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO taste_profiles (counts, profile) VALUES ($1::jsonb, $2::jsonb) RETURNING id, created_at
+	`, string(counts), string(profile)).Scan(&p.ID, &p.CreatedAt); err != nil {
+		return nil, fmt.Errorf("failed to store the taste profile: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM taste_profiles t
+		WHERE t.id <> $1 AND t.created_at < $2
+		  AND NOT EXISTS (SELECT 1 FROM rec_runs r WHERE r.profile_id = t.id)
+	`, p.ID, pruneBefore); err != nil {
+		return nil, fmt.Errorf("failed to prune taste profiles: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit the taste profile: %w", err)
+	}
+	return p, nil
+}
+
+// Latest returns the newest profile, nil when there's none.
+func (r *TasteProfileRepository) Latest(ctx context.Context) (*StoredTasteProfile, error) {
+	return r.one(ctx, `SELECT id, created_at, counts, profile FROM taste_profiles ORDER BY id DESC LIMIT 1`)
+}
+
+// Get returns one profile, nil when it doesn't exist.
+func (r *TasteProfileRepository) Get(ctx context.Context, id int64) (*StoredTasteProfile, error) {
+	return r.one(ctx, `SELECT id, created_at, counts, profile FROM taste_profiles WHERE id = $1`, id)
+}
+
+func (r *TasteProfileRepository) one(ctx context.Context, query string, args ...any) (*StoredTasteProfile, error) {
+	p := &StoredTasteProfile{}
+	var counts, profile []byte
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.CreatedAt, &counts, &profile)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the taste profile: %w", err)
+	}
+	p.Counts, p.Profile = counts, profile
+	return p, nil
+}

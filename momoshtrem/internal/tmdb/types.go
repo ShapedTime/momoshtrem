@@ -168,20 +168,21 @@ func (v Videos) TrailerKey() string {
 
 // ListItem is a movie or show in a list (recommendations, similar).
 type ListItem struct {
-	ID               int     `json:"id"`
-	MediaType        string  `json:"media_type,omitempty"`
-	Title            string  `json:"title,omitempty"` // Movies
-	Name             string  `json:"name,omitempty"`  // TV
-	OriginalLanguage string  `json:"original_language"`
-	Overview         string  `json:"overview"`
-	PosterPath       string  `json:"poster_path"`
-	BackdropPath     string  `json:"backdrop_path"`
-	ReleaseDate      string  `json:"release_date,omitempty"`   // Movies
-	FirstAirDate     string  `json:"first_air_date,omitempty"` // TV
-	GenreIDs         []int   `json:"genre_ids"`
-	VoteAverage      float64 `json:"vote_average"`
-	VoteCount        int     `json:"vote_count"`
-	Popularity       float64 `json:"popularity"`
+	ID               int      `json:"id"`
+	MediaType        string   `json:"media_type,omitempty"`
+	Title            string   `json:"title,omitempty"` // Movies
+	Name             string   `json:"name,omitempty"`  // TV
+	OriginalLanguage string   `json:"original_language"`
+	OriginCountry    []string `json:"origin_country,omitempty"` // TV
+	Overview         string   `json:"overview"`
+	PosterPath       string   `json:"poster_path"`
+	BackdropPath     string   `json:"backdrop_path"`
+	ReleaseDate      string   `json:"release_date,omitempty"`   // Movies
+	FirstAirDate     string   `json:"first_air_date,omitempty"` // TV
+	GenreIDs         []int    `json:"genre_ids"`
+	VoteAverage      float64  `json:"vote_average"`
+	VoteCount        int      `json:"vote_count"`
+	Popularity       float64  `json:"popularity"`
 }
 
 // DisplayTitle returns the movie title or show name.
@@ -275,6 +276,7 @@ type EpisodeRef struct {
 	SeasonNumber  int    `json:"season_number"`
 	EpisodeNumber int    `json:"episode_number"`
 	EpisodeType   string `json:"episode_type"`
+	Runtime       int    `json:"runtime"` // minutes; 0 when unknown
 }
 
 // ShowDetails is GET /tv/{id} with external_ids, keywords, credits,
@@ -318,6 +320,21 @@ type ShowDetails struct {
 
 // Year extracts the year from the first air date
 func (s *ShowDetails) Year() int { return yearOf(s.FirstAirDate) }
+
+// EpisodeRuntime is the show's usual episode runtime in minutes: TMDB's
+// episode_run_time (often empty for newer shows), else the last aired
+// episode's; 0 when neither says.
+func (s *ShowDetails) EpisodeRuntime() int {
+	for _, r := range s.EpisodeRunTime {
+		if r > 0 {
+			return r
+		}
+	}
+	if s.LastEpisodeToAir != nil {
+		return s.LastEpisodeToAir.Runtime
+	}
+	return 0
+}
 
 // SeasonNumbers returns the show's season numbers in TMDB's order, season 0
 // (specials) included when TMDB lists it.

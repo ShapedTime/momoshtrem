@@ -128,6 +128,8 @@ services:
       - OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
       - OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Dev only: GET /api/recommendations/debug/profile (#153); unset is off
+      - RECS_DEBUG=${RECS_DEBUG:-}
       - TRAKT_CLIENT_ID=${TRAKT_CLIENT_ID:-}
       - TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET:-}
       - SECRET_KEY=${SECRET_KEY:-}

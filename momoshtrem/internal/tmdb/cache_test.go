@@ -123,7 +123,7 @@ func TestCached_FreshHitSkipsUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first ShowDetails: %v", err)
 	}
-	e, ok := cache.entry("tmdb:v1:en-US:tv/1")
+	e, ok := cache.entry("tmdb:v2:en-US:tv/1")
 	if !ok {
 		t.Fatalf("nothing cached; entries: %v", cache.entries)
 	}
@@ -281,8 +281,8 @@ func TestCached_SeasonTTLFollowsStatus(t *testing.T) {
 	if _, err := c.Season(ctx, 7, 1, "Returning Series"); err != nil {
 		t.Fatal(err)
 	}
-	ended, _ := cache.entry("tmdb:v1:en-US:tv/7/season/0")
-	airing, _ := cache.entry("tmdb:v1:en-US:tv/7/season/1")
+	ended, _ := cache.entry("tmdb:v2:en-US:tv/7/season/0")
+	airing, _ := cache.entry("tmdb:v2:en-US:tv/7/season/1")
 	if !ended.expiresAt.Equal(now.Add(SeasonTTLEnded)) || !airing.expiresAt.Equal(now.Add(SeasonTTLAiring)) {
 		t.Errorf("expiry: ended %v, airing %v", ended.expiresAt, airing.expiresAt)
 	}
@@ -303,7 +303,7 @@ func TestCached_EpisodeGroups(t *testing.T) {
 	if u.calls.Load() != 1 {
 		t.Errorf("requests = %d, want 1", u.calls.Load())
 	}
-	if _, ok := cache.entry("tmdb:v1:en-US:tv/5/episode_groups"); !ok {
+	if _, ok := cache.entry("tmdb:v2:en-US:tv/5/episode_groups"); !ok {
 		t.Error("episode groups not cached")
 	}
 }
@@ -323,7 +323,7 @@ func TestCached_ShowAlternativeTitles(t *testing.T) {
 	if u.calls.Load() != 1 {
 		t.Errorf("requests = %d, want 1", u.calls.Load())
 	}
-	e, ok := cache.entry("tmdb:v1:en-US:tv/5/alternative_titles")
+	e, ok := cache.entry("tmdb:v2:en-US:tv/5/alternative_titles")
 	if !ok || !e.expiresAt.Equal(now.Add(DetailsTTL)) {
 		t.Errorf("cache entry = %+v, %v", e, ok)
 	}
@@ -343,7 +343,7 @@ func TestCached_CacheReadErrorFallsThrough(t *testing.T) {
 func TestCached_UndecodableEntryRefetches(t *testing.T) {
 	u := newUpstream(t)
 	cache := newMemCache()
-	_ = cache.Set(context.Background(), "tmdb:v1:en-US:movie/1", []byte(`{"id": "not a number"}`), time.Time{})
+	_ = cache.Set(context.Background(), "tmdb:v2:en-US:movie/1", []byte(`{"id": "not a number"}`), time.Time{})
 	c, _ := newTestCached(u, cache)
 
 	if got, err := c.MovieDetails(context.Background(), 1); err != nil || got.ID != 1 {

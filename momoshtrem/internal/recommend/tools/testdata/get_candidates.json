@@ -1,0 +1,70 @@
+{
+  "name": "get_candidates",
+  "description": "The candidate pool: up to 150 titles TMDB suggests for this taste profile, best first (pre-ranked by overlap with the profile). Anything watched, started, rated, dropped, hidden or turned down is already left out; library titles stay (in_library). Every filter has a value for no filter: any, [], 0, empty or either. Each item: media_type, tmdb_id, title, date, genres, lang, anime, runtime (minutes; a show's per episode), seasons, ended, vote (TMDB), why (its sources: rec:<loved title> and similar:<loved title> are TMDB's picks for a title they loved; kw their keywords; new, gems and lang discover; trending, upcoming, on_air), in_library, watchlist.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "media_type": {
+        "description": "movie, tv, or any for both.",
+        "type": "string",
+        "enum": [
+          "movie",
+          "tv",
+          "any"
+        ]
+      },
+      "genres": {
+        "description": "Any of these genres, by name as the profile and candidates name them (Drama, Science Fiction, Animation); [] for any genre.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "min_runtime": {
+        "description": "At least this many minutes (a movie's runtime, a show's episode runtime); 0 for no bound. A bound leaves out titles with no known runtime.",
+        "type": "integer"
+      },
+      "max_runtime": {
+        "description": "At most this many minutes, as min_runtime; 0 for no bound.",
+        "type": "integer"
+      },
+      "year_from": {
+        "description": "Released (or first aired) in this year or later; 0 for no bound.",
+        "type": "integer"
+      },
+      "year_to": {
+        "description": "Released (or first aired) in this year or earlier; 0 for no bound.",
+        "type": "integer"
+      },
+      "language": {
+        "description": "Original language, ISO 639-1 (en, ja, ko); empty for any.",
+        "type": "string"
+      },
+      "anime": {
+        "description": "only: anime only; exclude: no anime; either: both.",
+        "type": "string",
+        "enum": [
+          "only",
+          "exclude",
+          "either"
+        ]
+      },
+      "limit": {
+        "description": "At most this many, 1–60; 0 for 30.",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "media_type",
+      "genres",
+      "min_runtime",
+      "max_runtime",
+      "year_from",
+      "year_to",
+      "language",
+      "anime",
+      "limit"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -14,7 +14,7 @@ var envVars = []string{
 	"BACKEND_API_TOKEN", "CORS_ALLOWED_ORIGINS", "WEBDAV_PUBLIC_URL",
 	"WEBDAV_AUTH_ENABLED", "WEBDAV_USERNAME", "WEBDAV_PASSWORD",
 	"DATABASE_URL", "METRICS_ENABLED", "METRICS_PORT", "TORRENT_LISTEN_PORT",
-	"TMDB_API_KEY", "TMDB_LANGUAGE", "TMDB_RPS", "JACKETT_URL", "JACKETT_API_KEY", "ANTHROPIC_API_KEY",
+	"TMDB_API_KEY", "TMDB_LANGUAGE", "TMDB_RPS", "JACKETT_URL", "JACKETT_API_KEY", "ANTHROPIC_API_KEY", "RECS_DEBUG",
 	"HDREZKA_ENABLED", "HDREZKA_URL",
 	"TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "SECRET_KEY",
 	"OPENSUBTITLES_API_KEY", "OPENSUBTITLES_USERNAME", "OPENSUBTITLES_PASSWORD",
@@ -393,6 +393,50 @@ func TestLoad_HDRezka(t *testing.T) {
 			}
 			if cfg.HDRezka.Enabled != tt.wantEnabled || cfg.HDRezka.URL != tt.wantURL {
 				t.Errorf("HDRezka = %+v, want enabled %v, url %q", cfg.HDRezka, tt.wantEnabled, tt.wantURL)
+			}
+		})
+	}
+}
+
+// The recommendations debug route is off unless the file or env turns it
+// on (#153).
+func TestLoad_RecsDebug(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		env     map[string]string
+		want    bool
+		wantErr string // "" means valid
+	}{
+		{"off by default", "", nil, false, ""},
+		{"file", "ai:\n  recs_debug: true\n", nil, true, ""},
+		{"env", "", map[string]string{"RECS_DEBUG": "true"}, true, ""},
+		{"env wins over file", "ai:\n  recs_debug: true\n", map[string]string{"RECS_DEBUG": "false"}, false, ""},
+		{"not a bool", "", map[string]string{"RECS_DEBUG": "yes please"}, false, "RECS_DEBUG"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://env/momo")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			path := ""
+			if tt.file != "" {
+				path = writeConfig(t, tt.file)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: want an error naming %s, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.AI.RecsDebug != tt.want {
+				t.Errorf("AI.RecsDebug = %v, want %v", cfg.AI.RecsDebug, tt.want)
 			}
 		})
 	}

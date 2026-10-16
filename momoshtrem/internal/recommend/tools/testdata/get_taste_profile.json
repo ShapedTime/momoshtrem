@@ -1,0 +1,10 @@
+{
+  "name": "get_taste_profile",
+  "description": "The user's taste profile, built from their Trakt history, ratings and feedback. Shares (w, 0–1) are the part of their weighted history a genre, keyword, person, decade, language or country covers. loved: rated 8+, liked or finished; dropped: shows abandoned; recent: the last 30 days; aversions: rated 4 or less, disliked or not interested. Ground every reason in it, and never recommend what it lists.",
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  }
+}

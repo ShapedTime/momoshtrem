@@ -10,9 +10,15 @@ import (
 //
 // Its definition is sent with `strict: true`, so the schema must be a JSON
 // Schema object with "additionalProperties": false and every property in
-// "required" (optional values are nullable instead). Name, Description and
-// Schema must be byte-stable across calls: they sit in the cached prompt
-// prefix, ahead of the system prompt.
+// "required". An optional value takes a sentinel, not a nullable union:
+// "any" or "either" in an enum, [] for any, 0 for no bound, "" for none.
+// Structured outputs allow at most 16 parameters with a union type (anyOf
+// or a type array) per request, counted across every strict tool, and
+// past that the request is a 400 ("Schema is too complex for
+// compilation"); there are also at most 24 optional parameters and 20
+// strict tools. Name, Description and Schema must be byte-stable across
+// calls: they sit in the cached prompt prefix, ahead of the system
+// prompt.
 type Tool interface {
 	// Name is the tool's name, e.g. "get_candidates".
 	Name() string

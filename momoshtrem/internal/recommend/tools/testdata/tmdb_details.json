@@ -1,0 +1,26 @@
+{
+  "name": "tmdb_details",
+  "description": "One movie or show from TMDB, compactly: dates, status, runtime, seasons, genres, keywords, language, creators, cast, rating and overview, and whether it can be picked (excluded) and what the user did with it. Use it to check a title before recommending it, or to ground its reason.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "media_type": {
+        "description": "movie or tv.",
+        "type": "string",
+        "enum": [
+          "movie",
+          "tv"
+        ]
+      },
+      "tmdb_id": {
+        "description": "The title's TMDB id.",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "media_type",
+      "tmdb_id"
+    ],
+    "additionalProperties": false
+  }
+}

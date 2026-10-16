@@ -239,3 +239,49 @@ func TestRecommendationRoutes_Errors(t *testing.T) {
 		t.Errorf("not found = %d", rec.Code)
 	}
 }
+
+// fakeDebug answers a report or an error.
+type fakeDebug struct{ err error }
+
+func (f fakeDebug) DebugProfile(context.Context) (*recommend.DebugReport, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &recommend.DebugReport{TraktConnected: true, EnoughHistory: true, ProfileBytes: 2}, nil
+}
+
+// The dev-only debug route exists only when it's configured.
+func TestRecommendationDebugRoute(t *testing.T) {
+	if rec := doBody(t, newTestServer(Options{}), "GET", "/api/recommendations/debug/profile", ""); rec.Code != 404 {
+		t.Errorf("without RecDebug = %d, want 404", rec.Code)
+	}
+	rec := doBody(t, newTestServer(Options{RecDebug: fakeDebug{}}), "GET", "/api/recommendations/debug/profile", "")
+	want := `{"trakt_connected":true,"enough_history":true,"profile_bytes":2,"profile":null,"pool":null,"pool_error":null}`
+	if rec.Code != 200 || rec.Body.String() != want {
+		t.Errorf("debug = %d %s, want %s", rec.Code, rec.Body, want)
+	}
+	rec = doBody(t, newTestServer(Options{RecDebug: fakeDebug{err: errors.New("db down")}}), "GET", "/api/recommendations/debug/profile", "")
+	if rec.Code != 500 || errorOf(t, rec.Body.Bytes()).Code != CodeInternalError {
+		t.Errorf("debug error = %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A TMDB id the database can't hold (int4) is a bad request, never a 500.
+func TestRecommendationFeedbackRoutes_IDRange(t *testing.T) {
+	f := &fakeFeedback{}
+	s := newTestServer(Options{RecFeedback: f})
+	for _, r := range []struct{ method, path, body string }{
+		{"POST", "/api/recommendations/feedback", `{"media_type":"movie","tmdb_id":2147483648,"signal":"like","source":"title"}`},
+		{"DELETE", "/api/recommendations/feedback/movie/2147483648", ""},
+	} {
+		if rec := doBody(t, s, r.method, r.path, r.body); rec.Code != 400 {
+			t.Errorf("%s %s = %d, want 400", r.method, r.path, rec.Code)
+		}
+	}
+	if rec := doBody(t, s, "DELETE", "/api/recommendations/feedback/movie/2147483647", ""); rec.Code != 204 {
+		t.Errorf("the largest int4 = %d, want 204", rec.Code)
+	}
+	if len(f.feedback) != 0 || len(f.cleared) != 1 {
+		t.Errorf("reached the store: %+v, %v", f.feedback, f.cleared)
+	}
+}

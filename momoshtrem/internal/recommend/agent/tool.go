@@ -16,8 +16,10 @@ import "github.com/shapedtime/momoshtrem/internal/aicore"
 //
 //   - Name, Description and Schema are sent with `strict: true`, so the
 //     schema must be a JSON Schema object with "additionalProperties": false
-//     and every property in "required" (optional values are nullable
-//     instead). They must be byte-stable across calls: they sit in the
+//     and every property in "required". Optional values take sentinels
+//     ("any", [], 0), not nullable unions: a request allows at most 16
+//     parameters with anyOf or a type array across every strict tool
+//     (aicore.Tool). They must be byte-stable across calls: they sit in the
 //     cached prompt prefix.
 //   - Run executes one call with the model's input (valid against Schema)
 //     and returns the tool_result content as JSON. An error the model should

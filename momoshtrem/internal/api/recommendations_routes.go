@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -41,6 +42,13 @@ type RecFeedback interface {
 	ClearFeedback(ctx context.Context, mediaType string, tmdbID int) error
 }
 
+// RecDebug builds R1's inputs for the dev-only GET
+// /recommendations/debug/profile: the taste profile and the candidate
+// pool as a run would see them now, stored nowhere.
+type RecDebug interface {
+	DebugProfile(ctx context.Context) (*recommend.DebugReport, error)
+}
+
 const (
 	defaultRunsLimit = 10
 	maxRunsLimit     = 50
@@ -53,7 +61,8 @@ var (
 
 // registerRecommendationRoutes adds /recommendations (but Ask's, in
 // ask_routes.go). Without Options.Recommendations the picks' routes
-// answer 503, and without Options.RecFeedback the feedback routes.
+// answer 503, and without Options.RecFeedback the feedback routes; the
+// debug route exists only with Options.RecDebug.
 func (s *Server) registerRecommendationRoutes(api *gin.RouterGroup) {
 	api.GET("/recommendations/home", s.getRecommendationsHome)
 	api.POST("/recommendations/refresh", s.refreshRecommendations)
@@ -61,6 +70,9 @@ func (s *Server) registerRecommendationRoutes(api *gin.RouterGroup) {
 	api.GET("/recommendations/runs/:id", s.getRecommendationRun)
 	api.POST("/recommendations/feedback", s.postRecommendationFeedback)
 	api.DELETE("/recommendations/feedback/:media_type/:tmdb_id", s.deleteRecommendationFeedback)
+	if s.opts.RecDebug != nil {
+		api.GET("/recommendations/debug/profile", s.getRecommendationsDebugProfile)
+	}
 }
 
 func (s *Server) recsReady(c *gin.Context) bool {
@@ -170,7 +182,7 @@ func (s *Server) postRecommendationFeedback(c *gin.Context) {
 func (s *Server) deleteRecommendationFeedback(c *gin.Context) {
 	mediaType := c.Param("media_type")
 	tmdbID, err := strconv.Atoi(c.Param("tmdb_id"))
-	if (mediaType != "movie" && mediaType != "tv") || err != nil || tmdbID <= 0 {
+	if (mediaType != "movie" && mediaType != "tv") || err != nil || !validTMDBID(tmdbID) {
 		errorResponse(c, http.StatusBadRequest, "Use /recommendations/feedback/{movie|tv}/{tmdb_id}.")
 		return
 	}
@@ -184,15 +196,30 @@ func (s *Server) deleteRecommendationFeedback(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// GET /recommendations/debug/profile → DebugReport (dev only: registered
+// with ai.recs_debug)
+func (s *Server) getRecommendationsDebugProfile(c *gin.Context) {
+	report, err := s.opts.RecDebug.DebugProfile(c.Request.Context())
+	if err != nil {
+		recsErrorResponse(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, report)
+}
+
 // parseFeedback reads the body: every field present and known.
 func parseFeedback(raw []byte) (recommend.Feedback, bool) {
 	var f recommend.Feedback
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return recommend.Feedback{}, false
 	}
-	ok := (f.MediaType == "movie" || f.MediaType == "tv") && f.TMDBID > 0 && feedbackSignals[f.Signal] && feedbackSources[f.Source]
+	ok := (f.MediaType == "movie" || f.MediaType == "tv") && validTMDBID(f.TMDBID) && feedbackSignals[f.Signal] && feedbackSources[f.Source]
 	return f, ok
 }
+
+// validTMDBID is a TMDB id the database can hold (int4): a larger one is
+// the client's mistake, never a 500.
+func validTMDBID(id int) bool { return id > 0 && id <= math.MaxInt32 }
 
 // recsErrorResponse maps the recommendations' and Ask's errors.
 func recsErrorResponse(c *gin.Context, err error) {
