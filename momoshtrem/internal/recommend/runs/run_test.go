@@ -407,10 +407,11 @@ func TestExecute_WebSearchCap(t *testing.T) {
 	t.Cleanup(func() { Caps = saved })
 	Caps.WebSearches = 3
 	h := newHarness(t,
-		fake.Response{Blocks: append([]fake.Block{
+		fake.Response{Blocks: append(append([]fake.Block{
 			fake.ServerToolUse("srvtoolu_1", "web_search", map[string]any{"query": "new"}),
 			fake.WebSearchResult("srvtoolu_1", "https://example.com"),
-		}, fourShelves()...), Usage: fake.Usage{InputTokens: 100, WebSearchRequests: 3, WebFetchRequests: 1}},
+		}, fourShelves()...), fake.ToolUse("toolu_h", NameSubmitHeroPicks, heroOf(1002, 1012, 1022))),
+			Usage: fake.Usage{InputTokens: 100, WebSearchRequests: 3, WebFetchRequests: 1}},
 	)
 	out := h.execute(t)
 	if out.Status != recommend.StatusSucceeded || len(h.srv.Requests()) != 1 || out.Usage.WebSearches != 3 {
@@ -428,6 +429,84 @@ func TestExecute_WebSearchCap(t *testing.T) {
 		left != (aicore.Caps{Calls: 3}) {
 		t.Errorf("zero caps = %+v, %q; want them kept as no cap", left, reached)
 	}
+}
+
+// The web search cap tripping before the shelves are written is stopping
+// short: one nudge turn, told to write from what it has, on the same
+// prefix (the tools and max_uses unchanged) with one search left. Shelves
+// submitted in a call that searches again still count.
+func TestExecute_WebCapNudge(t *testing.T) {
+	saved := Caps
+	t.Cleanup(func() { Caps = saved })
+	Caps.WebSearches = 20
+	searching := func(n int64) fake.Response {
+		return fake.Response{Blocks: []fake.Block{
+			fake.ServerToolUse("srvtoolu_1", "web_search", map[string]any{"query": "new"}),
+			fake.WebSearchResult("srvtoolu_1", "https://example.com"),
+			fake.ToolUse("toolu_c", "get_candidates", map[string]any{"media_type": "any", "genres": []string{}, "min_runtime": 0,
+				"max_runtime": 0, "year_from": 0, "year_to": 0, "language": "", "anime": "either", "limit": 5}),
+		}, Usage: fake.Usage{InputTokens: 100, WebSearchRequests: n}}
+	}
+	withHero := append(fourShelves(), fake.ToolUse("toolu_h", NameSubmitHeroPicks, heroOf(1002, 1012, 1022)))
+
+	t.Run("the nudge writes", func(t *testing.T) {
+		h := newHarness(t,
+			searching(5), searching(5), searching(5), searching(5), // 20: the cap
+			fake.Response{Blocks: withHero},
+			fake.Response{Blocks: []fake.Block{fake.Text("Saved.")}},
+		)
+		out := h.execute(t)
+		if out.Status != recommend.StatusSucceeded || !h.store.published || out.Shelves != 4 || out.HeroPicks != 3 {
+			t.Fatalf("outcome = %+v, failed %q", out, h.store.failed)
+		}
+		reqs := h.srv.Requests()
+		if len(reqs) != 6 {
+			t.Fatalf("requests = %d", len(reqs))
+		}
+		nudged, before := reqs[4], reqs[3]
+		if !bytes.Equal(nudged.Field("tools"), before.Field("tools")) || !bytes.Equal(nudged.Field("system"), before.Field("system")) {
+			t.Error("the nudge changed the tools or the system prompt")
+		}
+		prev, cur := before.Messages(), nudged.Messages()
+		for i := range prev {
+			if !bytes.Equal(prev[i], cur[i]) {
+				t.Errorf("message %d changed for the nudge", i)
+			}
+		}
+		// The nudge rides on the tool results the loop stopped on.
+		var last struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(cur[len(cur)-1], &last); err != nil {
+			t.Fatal(err)
+		}
+		n := len(last.Content)
+		if len(cur) != len(prev)+2 || last.Role != "user" || n < 2 || last.Content[0].Type != "tool_result" ||
+			!strings.HasPrefix(last.Content[n-1].Text, "No more web searches: save the shelves and Tonight's pick from what you have.") {
+			t.Errorf("nudge message = %s", cur[len(cur)-1])
+		}
+	})
+	t.Run("a search in the nudge ends it", func(t *testing.T) {
+		searchingShelves := fake.Response{Blocks: append([]fake.Block{
+			fake.ServerToolUse("srvtoolu_2", "web_search", map[string]any{"query": "one more"}),
+			fake.WebSearchResult("srvtoolu_2", "https://example.com/2"),
+		}, fourShelves()...), Usage: fake.Usage{WebSearchRequests: 1}}
+		h := newHarness(t, searching(20), searchingShelves)
+		out := h.execute(t)
+		if out.Status != recommend.StatusSucceeded || out.Shelves != 4 || len(h.srv.Requests()) != 2 || out.Usage.WebSearches != 21 {
+			t.Errorf("outcome = %+v after %d requests, failed %q", out, len(h.srv.Requests()), h.store.failed)
+		}
+	})
+	t.Run("still short", func(t *testing.T) {
+		h := newHarness(t, searching(20), fake.Response{Blocks: []fake.Block{fake.Text("Nothing to add.")}})
+		if out := h.execute(t); out.Status != recommend.StatusFailed || h.store.failed != "Noir saved 0 of the 4 shelves a run needs." {
+			t.Errorf("outcome = %+v, failed %q", out, h.store.failed)
+		}
+	})
 }
 
 // The dry run builds the same first request, storing nothing.

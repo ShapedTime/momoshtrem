@@ -45,8 +45,9 @@ const (
 	// Effort is output_config.effort: Opus 5.5's default, set explicitly.
 	Effort = "medium"
 	// WebSearchMaxUses and WebFetchMaxUses are the server tools' max_uses
-	// per API call; the prompt asks for a few searches in all.
-	WebSearchMaxUses = 8
+	// per API call, so one call can't take most of the run's web searches
+	// (Caps.WebSearches); the prompt asks for a few in all.
+	WebSearchMaxUses = 5
 	WebFetchMaxUses  = 4
 	// KeepRuns is how many runs are kept (the newest succeeded one always
 	// is).
@@ -272,14 +273,28 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 	}
 	res, err := r.d.AI.Run(ctx, req)
 	usage := res.Usage
-	if err == nil && (b.done() < MinShelves || len(b.picks) == 0) {
-		log.Info("Picks run stopped short; nudging once", "shelves", b.done(), "hero_picks", len(b.picks))
-		next := req
-		next.Messages = append(append(append([]aicore.Message{}, req.Messages...), res.Messages...), aicore.UserText(nudge(b.done(), len(b.picks) > 0)))
-		var reached string
-		if next.Caps, reached = remaining(Caps, res); reached != "" {
+	// Stopping at the web search cap is stopping short too: the searches
+	// are spent, the shelves aren't written.
+	webCapped := isCap(err, aicore.CapWebSearches)
+	if (err == nil || webCapped) && (b.done() < MinShelves || len(b.picks) == 0) {
+		msgs, ok := withUserText(append(append([]aicore.Message{}, req.Messages...), res.Messages...),
+			nudge(b.done(), len(b.picks) > 0, webCapped), err == nil)
+		left, reached := remaining(Caps, res)
+		if reached == aicore.CapWebSearches {
+			// One more search at most: one ends the run after its call (its
+			// shelves still count). Only the cap changes, never the tools.
+			left.WebSearches, reached = 1, ""
+		}
+		switch {
+		case !ok:
+			// A paused server turn takes no message: the run stops here.
+		case reached != "":
 			err = &aicore.CapError{Cap: reached}
-		} else {
+		default:
+			log.Info("Picks run stopped short; nudging once", "shelves", b.done(), "hero_picks", len(b.picks),
+				"web_capped", webCapped)
+			next := req
+			next.Messages, next.Caps = msgs, left
 			prior = usage
 			var more *aicore.Result
 			more, err = r.d.AI.Run(ctx, next)
@@ -442,6 +457,30 @@ func (r *Runner) prune(parent context.Context) {
 	} else if n > 0 {
 		r.log.Info("Pruned old picks runs", "runs", n)
 	}
+}
+
+// isCap reports whether err is the loop stopping at that cap.
+func isCap(err error, name string) bool {
+	var capErr *aicore.CapError
+	return errors.As(err, &capErr) && capErr.Cap == name
+}
+
+// withUserText adds a user's text to the end of msgs: a block of the last
+// message when it's the tool results the loop stopped on (never sent, so
+// the sent prefix stays as it was), else a new message after a complete
+// assistant turn. ok is false after an assistant turn the server paused
+// (pause_turn), which takes no message.
+func withUserText(msgs []aicore.Message, text string, complete bool) ([]aicore.Message, bool) {
+	block := aicore.UserText(text)
+	if len(msgs) > 0 && msgs[len(msgs)-1].Role == aicore.RoleUser {
+		last := msgs[len(msgs)-1]
+		last.Content = append(append([]json.RawMessage{}, last.Content...), block.Content...)
+		return append(msgs[:len(msgs)-1:len(msgs)-1], last), true
+	}
+	if !complete {
+		return msgs, false
+	}
+	return append(msgs, block), true
 }
 
 // remaining is what's left of caps after res, for the nudge turn, and the

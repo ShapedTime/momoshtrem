@@ -72,7 +72,13 @@ func firstTurn(now time.Time, p *profile.Profile, pool *candidates.Pool) (string
 }
 
 // nudge is the one extra turn a run gets when the agent stopped short.
-func nudge(shelves int, heroPicks bool) string {
+// When it stopped at the web search cap, it's told to write from what it
+// has.
+func nudge(shelves int, heroPicks, webCapped bool) string {
+	prefix := ""
+	if webCapped {
+		prefix = "No more web searches: save the shelves and Tonight's pick from what you have. "
+	}
 	var missing []string
 	if shelves < MinShelves {
 		missing = append(missing, fmt.Sprintf("%d of the %d shelves (at least %d)", ShelvesTarget-min(shelves, ShelvesTarget), ShelvesTarget, MinShelves))
@@ -80,7 +86,7 @@ func nudge(shelves int, heroPicks bool) string {
 	if !heroPicks {
 		missing = append(missing, "Tonight's pick")
 	}
-	return fmt.Sprintf("You've saved %d %s. Still missing: %s. Save them with %s and %s now, then end.",
+	return prefix + fmt.Sprintf("You've saved %d %s. Still missing: %s. Save them with %s and %s now, then end.",
 		shelves, pluralWord(shelves, "shelf", "shelves"), strings.Join(missing, " and "), NameSubmitShelf, NameSubmitHeroPicks)
 }
 
