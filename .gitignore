@@ -26,3 +26,8 @@ data/
 # Proxmox/deployment notes (personal)
 proxmox-installation.md
 *sudo-pass.txt
+
+# streamlab artifacts and agent worktrees
+.streamlab/
+.claude/worktrees/
+.claude/settings.local.json
