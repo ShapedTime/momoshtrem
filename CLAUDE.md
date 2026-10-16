@@ -144,6 +144,7 @@ GET  /api/search/torrents                  # Torrent search across Jackett's ind
 POST /api/search/torrents/resolve          # A release without a magnet: the server fetches its .torrent and answers the magnet
 POST /api/search/torrents/inspect          # Inspect: a dry-run mapping job for a release or magnet (202 {job_id})
 GET|PUT /api/settings/quality-profile      # The quality profile search ranks by
+GET|PUT /api/settings/storage              # The piece cache's limit (setting, config.yaml or auto: 75% of the disk), the free-space floor, usage, and the kept, smart and background settings; PUT is partial, 422 names the field, 409 limit_below_committed
 GET  /api/movies/{id}/subtitles/search   # OpenSubtitles, ranked by release (also /episodes/{id})
 GET  /api/integrations/trakt               # Trakt (read-only): state off|pending|connected|reauth, the live device code, sync progress, counts, settings
 POST /api/integrations/trakt/connect|sync  # Device-code connect (the backend polls Trakt); sync 202 (joins a running one)
@@ -207,6 +208,7 @@ GET /api/v2.0/indexers/{id}/results/torznab/api?apikey={key}&t=search&q={query}
 - `internal/vfs/library_fs.go` - Virtual filesystem; `remote_file.go` streams non-torrent (HDRezka) files
 - `internal/torrent/service.go` - Torrent service interface; `activity.go` the ActivityManager (idle unloading, sticky `StatePaused`), `hashlock.go` one add/wait/drop per hash, `metainfo_store.go` stored `.torrent`s (`{metadata_folder}/metainfo/`), `speed.go` the speed sampler, `detail.go` piece runs, files and trackers, `infohash.go` hex or base32 hashes
 - `internal/activity/` - Torrents and activity (PLAN §6 B6): the DB's known torrents merged with live state (`rules.go`: state order, titles, scope), the summary (speeds, counts, disk), pause and resume, the detail that never loads a torrent
+- `internal/storagecap/` - The piece cache's limit (#200): `Resolve` (setting → config.yaml → auto 75% of the disk, the 5 GiB free floor, the reserve, kept and smart caps), `ParsePatch` (422s), and the `Governor` (startup size, a one-minute loop and after each PUT, trims of at most 2 GiB, `/settings/storage`, `Downloads` for #77's usage); `Statfs`; `library/settings_storage.go` the `storage` document
 - `internal/sessions/` - Streaming sessions for every source: reads grouped by client, User-Agent and file, sniff reads skipped, client and device from the User-Agent (`useragent.go`), rate, position and buffer ahead; `request.go` carries the WebDAV request into `LibraryFS.Open`
 - `internal/streaming/prioritizer.go` - Piece prioritization (torrents stream on demand: pieces only around readers, kept in an LRU file cache)
 - `internal/secret/` - AES-256-GCM box for secrets at rest under `SECRET_KEY` (64 hex chars, or ≥ 32 chars hashed)

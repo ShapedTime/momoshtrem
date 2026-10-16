@@ -10,7 +10,7 @@ This page fixes three of the old VM's problems from the start:
 
 Docker, log caps, the firewall and the boot unit belong to Ansible (#34, [`HOST.md`](HOST.md)), not to this page.
 
-If the VM changes (RAM, a disk size, the cache cap), update this page in the same commit.
+If the VM changes (RAM or a disk size), update this page in the same commit.
 
 ## 1. Spec
 
@@ -24,7 +24,7 @@ If the VM changes (RAM, a disk size, the cache cap), update this page in the sam
 | RAM | 8 GiB; leave the ballooning device at its default | The same as today. Use less during the overlap if the host is short (§2). |
 | SCSI controller | VirtIO SCSI single | Gives each disk its own IO thread. |
 | Root disk | `scsi0`, 32 GiB, `discard=on`, `iothread=1`, `ssd=1` | See the sizing notes below. |
-| Data disk | `scsi1`, 120 GiB, `discard=on`, `iothread=1`, `ssd=1` | Holds `/mnt/data`. See the sizing notes below. |
+| Data disk | `scsi1`, 200 GiB, `discard=on`, `iothread=1`, `ssd=1` | Holds `/mnt/data`. See the sizing notes below. |
 | NIC | VirtIO (virtio-net) on `vmbr0`, no VLAN | |
 | QEMU guest agent | on, with guest-trim after a disk move | #34 installs the package. Until then Proxmox shows the agent as not running. |
 | Start at boot | on | A Proxmox host reboot brings the stack back. |
@@ -52,12 +52,13 @@ Set `ssd=1` only if the storage is an SSD.
 - The old 32 GiB disk filled up because of builds on the box, build cache and uncapped logs. None of these happen here.
 
 **Data disk sizing.**
-- The torrent cache is the only thing on `/mnt/data` that grows to fill the space. Its cap is `torrent.global_cache_size` in `config.yaml`, in MiB. Today it's 92160, which is 90 GiB.
+- The torrent cache is the only thing on `/mnt/data` that grows to fill the space. Its limit is set in the web UI under **Settings › Storage** (`GET|PUT /api/settings/storage`, #200).
+- **The default is auto: 75% of the data disk**, about 148 GiB of today's 200 GiB. It follows the disk: grow the disk and the limit grows with it, within a minute (§6).
+- The other 25% covers ext4 overhead and reserved blocks, the database and subtitles as they grow, and any local dumps #35 keeps.
 - Everything else on the disk is small today: Postgres 67 MB, subtitles 208 KB and Jackett 396 KB (AS-IS §9).
-- **Rule: keep the cap at or below 75% of the data disk.** The rest covers ext4 overhead and reserved blocks, the database and subtitles as they grow, and any local dumps #35 keeps.
-- With today's cap that gives 120 GiB, the same as the old disk, which ran at 81% used.
-- If either the cap or the disk size changes, change the other one too.
-- **Built at 70 GiB.** The VM was created with a 70 GiB data disk, which is grown to 120 GiB after cutover (§6). Until then the cap is 52 GiB (`global_cache_size: 53760`).
+- A custom limit can go from 4 GiB up to 90% of the disk. Whatever the limit, the cache always leaves 5 GiB of the disk free: it's held smaller while the disk is short.
+- `config.yaml` doesn't set `torrent.global_cache_size`. A value there replaces auto until a limit is saved in Settings, so leave it out.
+- **Built at 70 GiB.** The VM was created with a 70 GiB data disk, and grown to 200 GiB after cutover (§6).
 
 ## 2. Before you create it: can the host run both VMs?
 
@@ -77,7 +78,7 @@ lvs                    # if the storage is LVM-thin: the thin pool's Data%
 - **Snapshots.** The storage must support them: `lvmthin`, `zfspool`, or qcow2 on a directory. Plain `lvm` doesn't. Snapshots are the way back at cutover (PLAN §6).
 - **Space.** On thin storage the new VM uses little at first, because the torrent cache isn't copied (#42 §3).
   - After cutover the cache refills towards its cap, while the old VM still holds its own 90 GB.
-  - If the pool can't hold both caches, lower `global_cache_size` on the new VM until the old one is deleted.
+  - If the pool can't hold both caches, lower the cache's limit in Settings › Storage on the new VM until the old one is deleted.
   - Keep a thin pool's `Data%` under about 90%. A full thin pool can corrupt every VM on it.
 
 Record the result on #42.
@@ -93,7 +94,7 @@ Then go through **Create VM**, one tab at a time:
 | General | Name `momoshtrem`. Under Advanced, tick **Start at boot**. |
 | OS | The ISO. Guest OS: Linux, 6.x – 2.6 Kernel. |
 | System | Machine `q35`. BIOS `OVMF (UEFI)`. Tick **Add EFI Disk** (same storage) and **Pre-Enroll keys**. SCSI Controller `VirtIO SCSI single`. Tick **Qemu Agent**. No TPM. |
-| Disks | `scsi0`, 32 GiB. Tick Discard and IO thread. Under Advanced, tick SSD emulation (on SSD storage). Add `scsi1`, 120 GiB, with the same options. |
+| Disks | `scsi0`, 32 GiB. Tick Discard and IO thread. Under Advanced, tick SSD emulation (on SSD storage). Add `scsi1`, 200 GiB, with the same options. |
 | CPU | 1 socket, 4 cores, type `host`. |
 | Memory | 8192 MiB, or what §2 allows. |
 | Network | Bridge `vmbr0`, model VirtIO (paravirtualized). |
@@ -128,8 +129,8 @@ Start the VM and open the console. In the installer:
    - The disks show up as QEMU hard disks. Tell them apart by size, not by name.
 4. **Storage configuration** (the summary screen):
    - **Root.** Under Used devices, select `ubuntu-lv` → **Edit**, and set its size to the maximum shown. The default is about half the volume group, which is the old VM's mistake.
-   - **Data.** Under Available devices, select the **120 GiB** disk → **Add GPT Partition**. Leave the size empty (the whole disk), format it ext4, and set the mount to **Other** → `/mnt/data`.
-   - Check the summary. `/` should be on `ubuntu-lv` and fill the volume group, and `/mnt/data` should be on the 120 GiB disk.
+   - **Data.** Under Available devices, select the **200 GiB** disk → **Add GPT Partition**. Leave the size empty (the whole disk), format it ext4, and set the mount to **Other** → `/mnt/data`.
+   - Check the summary. `/` should be on `ubuntu-lv` and fill the volume group, and `/mnt/data` should be on the 200 GiB disk.
 5. **Profile:** server name `momoshtrem`, username `agha`, and a strong password. Save it in the password manager: it's the sudo password.
 6. **Ubuntu Pro:** skip.
 7. **SSH:** tick **Install OpenSSH server**. Allow password authentication, but only for the first login; §5 turns it off. Don't import keys.
@@ -209,10 +210,10 @@ These happen at or after the cutover (#42 §3–4). They're listed here because 
 - **The SSH alias.** `momoshtrem-v2` doesn't change. Drop `momoshtrem-vm` once the old VM is deleted.
 - **RAM.** Raise it to 8 GiB once the old VM is off: shut the VM down, set 8192 MiB and start it again. It was built with about 6 GiB for the overlap (§2).
 - **The old VM.** Turn its **Start at boot** off once it's stopped. Otherwise a host reboot brings it back, with its own stack, until it's deleted.
-- **The data disk.** After the cutover, grow it from 70 to 120 GiB:
-  1. In Proxmox, **Hardware → Hard Disk (scsi1) → Disk Action → Resize**, and add 50 GiB.
+- **The data disk.** It was grown from 70 to 200 GiB after the cutover. To grow it again:
+  1. In Proxmox, **Hardware → Hard Disk (scsi1) → Disk Action → Resize**, and add the space.
   2. On the VM, check with `lsblk` that the data disk is still `sdb`, then grow the partition and the filesystem while mounted:
      ```bash
      sudo growpart /dev/sdb 1 && sudo resize2fs /dev/sdb1
      ```
-  3. Raise `global_cache_size` to 92160 in `config.yaml` and restart momoshtrem.
+  3. Nothing else changes. On auto, the cache's limit stays 75% of the disk, and momoshtrem picks up the new size within a minute. A custom limit in Settings › Storage stays as it was set. Update §1 with the new size.

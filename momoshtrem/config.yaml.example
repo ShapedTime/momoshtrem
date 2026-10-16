@@ -56,7 +56,10 @@ database:
 
 torrent:
   metadata_folder: ./data/torrents
-  global_cache_size: 92160    # MB
+  # The piece cache's limit, in MiB. Leave it out: it's then auto (75% of the
+  # metadata folder's disk, following it as it grows) and set in the web UI's
+  # Settings › Storage. A value here replaces auto until a limit is saved there.
+  # global_cache_size: 92160
   add_timeout: 60            # seconds
   read_timeout: 120
   idle_enabled: true
