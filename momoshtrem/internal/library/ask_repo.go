@@ -315,6 +315,19 @@ func (r *AskRepository) EndTurn(ctx context.Context, end AskTurnEnd) (bool, erro
 	return true, nil
 }
 
+// AbandonTurn ends a streaming turn as an error, writing nothing else: the
+// last resort when its end can't be written (EndTurn keeps failing), so
+// the one-streaming index is free. A turn that isn't streaming is left as
+// it is.
+func (r *AskRepository) AbandonTurn(ctx context.Context, turnID int64) error {
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE ask_turns SET status = 'error', error_code = 'internal', finished_at = NOW() WHERE id = $1 AND status = 'streaming'
+	`, turnID); err != nil {
+		return fmt.Errorf("failed to abandon ask turn %d: %w", turnID, err)
+	}
+	return nil
+}
+
 // FailStreaming ends every streaming turn as an error with code and view:
 // at startup, the turns a crash left streaming. It returns how many.
 func (r *AskRepository) FailStreaming(ctx context.Context, code string, view []byte) (int64, error) {

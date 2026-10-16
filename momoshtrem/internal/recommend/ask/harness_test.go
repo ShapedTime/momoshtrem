@@ -41,8 +41,9 @@ type harness struct {
 }
 
 type harnessOpts struct {
-	noKey bool
-	model string
+	noKey        bool
+	model        string
+	writeTimeout time.Duration
 }
 
 func newHarness(t *testing.T, store ask.Store, script ...fake.Response) *harness {
@@ -62,6 +63,7 @@ func newHarnessWith(t *testing.T, store ask.Store, o harnessOpts, script ...fake
 		TMDB:     testTMDB,
 		Tools: tools.All(tools.Deps{Inputs: tools.Fixed{P: testProfile, C: testPool()}, TMDB: testTMDB,
 			Titles: h.titles}),
+		WriteTimeout: o.writeTimeout,
 	}
 	if !o.noKey {
 		opts := append(h.api.Options(), option.WithHTTPClient(&http.Client{Transport: h.upstream}))

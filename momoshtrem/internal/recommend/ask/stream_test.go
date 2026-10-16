@@ -220,6 +220,10 @@ func TestAsk_AppendOnlyReplay(t *testing.T) {
 		if got := field[*string](t, events[2], "detail"); got == nil || *got != "2 checked" {
 			t.Errorf("rerank detail = %v", got)
 		}
+		// The refinement offered no chips: it keeps the ones it came from.
+		if got := field[[]string](t, events[len(events)-1], "refinements"); strings.Join(got, "|") != "Lighter|Only movies|Older" {
+			t.Errorf("refinements = %v, want the previous turn's", got)
+		}
 
 		reqs := h.api.Requests()
 		if len(reqs) != 7 {

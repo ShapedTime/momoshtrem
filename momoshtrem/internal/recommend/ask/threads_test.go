@@ -91,7 +91,7 @@ func TestAsk_ShowPicksChecks(t *testing.T) {
 		pick("movie", 2099, "Soon", "Out in 2099."),
 	)
 	for i := 1; i <= 10; i++ {
-		items = append(items, pick("tv", 1003+i, "Filler", "One of many."))
+		items = append(items, pick("tv", 3000+i, "Filler", "One of many."))
 	}
 	h := newHarness(t, newMemStore(),
 		fake.Response{Blocks: []fake.Block{toolUse("toolu_1", "show_picks", picksInput("  Here goes.  ",
@@ -107,9 +107,9 @@ func TestAsk_ShowPicksChecks(t *testing.T) {
 			shown = append(shown, field[string](t, e, "title"))
 		}
 	}
-	// 2003 is watched, 1001 comes twice, 9999 and the fillers are unknown to
-	// TMDB, and the call's picks past its 10th are dropped up front.
-	if len(shown) != 2 || shown[0] != "Mythic Quest" || shown[1] != "Coming Up" {
+	// 2003 is watched, 1001 comes twice and 9999 is unknown to TMDB: the
+	// valid picks fill the turn's 10, and the rest are past the 10th.
+	if len(shown) != 10 || shown[0] != "Mythic Quest" || shown[1] != "Coming Up" || shown[9] != "Filler 3008" {
 		t.Errorf("shown = %v", shown)
 	}
 	for _, e := range events {
@@ -162,7 +162,8 @@ func TestAsk_ShowPicksChecks(t *testing.T) {
 		}
 	}
 	if why[2003] != "watched" || why[1001] != "already shown" || why[9999] != "TMDB has no such title" ||
-		why[1013] != "past the 10th pick" || answer.Total != 2 || answer.Room != 8 || answer.Next == "" {
+		why[3009] != "past the 10th pick" || why[3010] != "past the 10th pick" || answer.Total != 10 || answer.Room != 0 ||
+		!strings.Contains(answer.Next, "has its 10") {
 		t.Errorf("show_picks answered %s", result.Content[0].Content)
 	}
 }

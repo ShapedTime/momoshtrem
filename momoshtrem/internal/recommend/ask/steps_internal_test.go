@@ -53,6 +53,10 @@ func TestTracker(t *testing.T) {
 	if ended := tr.ended(); len(ended) != 3 || ended[2].Step != "tmdb" {
 		t.Errorf("ended = %+v, want the active write dropped", ended)
 	}
+	// write is last: nothing starts after it, and it stays active.
+	if after := tr.reach("rerank"); len(after) != 0 || tr.list[tr.active].Step != "write" {
+		t.Errorf("a step after write = %+v", after)
+	}
 	if done := tr.finish(); len(done) != 1 || done[0].Step != "write" || len(tr.ended()) != 4 {
 		t.Errorf("finish = %+v", done)
 	}

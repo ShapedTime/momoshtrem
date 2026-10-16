@@ -21,7 +21,8 @@
 //     context window (ErrTruncated), and on a response with no content
 //     (ErrEmptyAnswer), which it never keeps: it couldn't be replayed;
 //   - records every API call's usage (Recorder) and, after each call,
-//     checks the run's caps (ErrCapReached);
+//     checks the run's caps (ErrCapReached; Request.AllowFinal can let one
+//     last call past them end the turn);
 //   - stops at once when ctx is cancelled, recording the usage the cut-off
 //     call had reported.
 //
@@ -137,6 +138,12 @@ type Request struct {
 	DropMismatchedThinking bool
 	// Caps bound the run.
 	Caps Caps
+	// AllowFinal, when set, is asked once a cap is reached after a round of
+	// tools: true lets the run make one more call, past the cap, so the
+	// model can end a turn whose answer is already shown (Ask, after
+	// show_picks). That call may only end the turn: if it asks for tools
+	// again, the run stops with the cap's error before running them.
+	AllowFinal func() bool
 	// Hooks follow the run as it streams.
 	Hooks Hooks
 	// Feature and Ref label the ai_usage rows: library.AIFeatureRecs and
@@ -262,6 +269,9 @@ type run struct {
 	named map[string]Tool
 	wire  []anthropic.BetaMessageParam
 	res   *Result
+	// final is the cap the run went past for its one final call
+	// (AllowFinal); nil before.
+	final error
 }
 
 // Run runs a conversation to its end: until the model ends its turn, is
@@ -314,6 +324,10 @@ func (c *Client) Run(ctx context.Context, req Request) (*Result, error) {
 			}
 			r.res.Continuations++
 		case anthropic.BetaStopReasonToolUse:
+			if r.final != nil {
+				// The call past the cap may only end the turn.
+				return r.res, r.final
+			}
 			results, err := r.runTools(ctx, kept)
 			if err != nil {
 				return r.res, err
@@ -325,7 +339,10 @@ func (c *Client) Run(ctx context.Context, req Request) (*Result, error) {
 			return r.res, nil
 		}
 		if err := r.req.Caps.reached(r.res); err != nil {
-			return r.res, err
+			if r.final != nil || r.req.AllowFinal == nil || !r.req.AllowFinal() {
+				return r.res, err
+			}
+			r.final = err
 		}
 	}
 }
@@ -526,6 +543,12 @@ func (r *run) call(ctx context.Context) (*anthropic.BetaMessage, error) {
 		}
 	}
 	r.res.Usage = r.res.Usage.Add(usage)
+	if dropped := droppedThinking(msg.InputTransformations); len(dropped) > 0 {
+		// A replayed history whose prefix changed (or a model switch): the
+		// API dropped those thinking blocks (drop_block) instead of failing.
+		r.c.log.Warn("AI call: the API dropped replayed thinking blocks", "feature", r.req.Feature, "ref", r.req.Ref,
+			"call", n, "blocks", len(dropped), "reasons", strings.Join(dropped, ","))
+	}
 	r.c.log.Info("AI call", "feature", r.req.Feature, "ref", r.req.Ref, "call", n,
 		"model", r.req.Model, "served_by", msg.Model, "stop_reason", msg.StopReason,
 		"input_tokens", usage.Input, "cache_write_tokens", usage.CacheWrite, "cache_read_tokens", usage.CacheRead,
@@ -538,6 +561,19 @@ func (r *run) call(ctx context.Context) (*anthropic.BetaMessage, error) {
 		return nil, err
 	}
 	return &msg, nil
+}
+
+// droppedThinking is why each thinking block the API dropped from the
+// request was dropped (input_transformations' thinking_dropped entries:
+// prefix_binding_mismatch, model_binding_mismatch, …).
+func droppedThinking(ts []anthropic.BetaInputTransformationUnion) []string {
+	var reasons []string
+	for _, t := range ts {
+		if t.Type == "thinking_dropped" {
+			reasons = append(reasons, t.Reason)
+		}
+	}
+	return reasons
 }
 
 // runTools runs a response's custom tool calls one at a time, in block

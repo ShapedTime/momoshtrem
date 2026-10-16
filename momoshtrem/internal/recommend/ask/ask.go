@@ -54,6 +54,7 @@ type Store interface {
 	StartTurn(ctx context.Context, in library.NewAskTurn) (*library.AskThread, *library.AskTurn, error)
 	CancelTurn(ctx context.Context, turnID int64) error
 	EndTurn(ctx context.Context, end library.AskTurnEnd) (bool, error)
+	AbandonTurn(ctx context.Context, turnID int64) error
 	FailStreaming(ctx context.Context, code string, view []byte) (int64, error)
 	TurnsSince(ctx context.Context, since time.Time) (int, error)
 	MeanDoneCost(ctx context.Context, n int) (*float64, error)
@@ -98,7 +99,14 @@ type Deps struct {
 	Tools []agent.Tool
 	// Now is the clock; time.Now by default. Days are server-local.
 	Now func() time.Time
+	// WriteTimeout bounds a turn's final writes, retries included;
+	// DefaultWriteTimeout when 0.
+	WriteTimeout time.Duration
 }
+
+// DefaultWriteTimeout bounds a turn's final writes, which run after its
+// context may have ended, with their retries.
+const DefaultWriteTimeout = 10 * time.Second
 
 // Limits.
 const (
@@ -107,18 +115,18 @@ const (
 	estimateTurns = 20
 	// maxTokens bounds one response: adaptive thinking and a short answer.
 	maxTokens = 32000
-	// writeTimeout bounds a turn's final writes, which run after its
-	// context may have ended.
-	writeTimeout = 10 * time.Second
 	// closeWait is how long Close waits for the turns it cancelled to
 	// write how they ended.
 	closeWait = 5 * time.Second
 )
 
-// turnCaps bound one turn: it ends with limit_reached past them. Tokens
-// count every prompt token, cache reads included, so a long thread's
-// replays count too.
-var turnCaps = aicore.Caps{Calls: 12, ToolCalls: 24, Tokens: 3_000_000, CostUSD: 1.0}
+// turnCaps bound one turn: it ends with limit_reached past them. There's
+// no token cap: tokens count cache reads, so a long thread's replays would
+// trip one on a cheap turn; the cost cap bounds what they spend instead.
+// Once show_picks has shown a pick, one call past a cap may end the turn
+// (aicore.Request.AllowFinal), so a shown answer isn't turned into an
+// error.
+var turnCaps = aicore.Caps{Calls: 12, ToolCalls: 24, CostUSD: 1.0}
 
 // Service implements api.Ask, and aisettings.AskReporter for the usage
 // page.
@@ -126,10 +134,16 @@ type Service struct {
 	d   Deps
 	log *slog.Logger
 
+	writeTimeout time.Duration
+
 	mu      sync.Mutex
 	busy    bool // a turn holds the one slot
 	closed  bool
 	running map[*turn]struct{}
+	// unended are turns whose end couldn't be written: their rows may
+	// still say streaming, which answers ask_busy, so the next ask ends
+	// them (heal).
+	unended map[int64]bool
 	wg      sync.WaitGroup
 }
 
@@ -138,7 +152,12 @@ func New(d Deps) *Service {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &Service{d: d, log: slog.With("component", "ask"), running: map[*turn]struct{}{}}
+	timeout := d.WriteTimeout
+	if timeout <= 0 {
+		timeout = DefaultWriteTimeout
+	}
+	return &Service{d: d, log: slog.With("component", "ask"), writeTimeout: timeout,
+		running: map[*turn]struct{}{}, unended: map[int64]bool{}}
 }
 
 // Recover ends the turns a crash left streaming as errors (internal), at
@@ -265,6 +284,7 @@ func (s *Service) Ask(ctx context.Context, req recommend.AskRequest) (<-chan rec
 			s.release()
 		}
 	}()
+	s.heal(ctx)
 
 	now := s.d.Now()
 	dayStart, nextDay := aicore.DayBounds(now)
@@ -344,7 +364,7 @@ func (s *Service) prepare(ctx context.Context, t *turn, thread *library.AskThrea
 		if err != nil {
 			return err
 		}
-		if t.refine, err = isRefinement(t.message, turns); err != nil {
+		if t.refine, t.chips, err = isRefinement(t.message, turns); err != nil {
 			return err
 		}
 	} else {
@@ -369,9 +389,11 @@ func (s *Service) prepare(ctx context.Context, t *turn, thread *library.AskThrea
 		MaxTokens:              maxTokens,
 		DropMismatchedThinking: true,
 		Caps:                   turnCaps,
+		AllowFinal:             func() bool { return len(t.items) > 0 },
 		Hooks: aicore.Hooks{
 			BlockStart: t.blockStart,
 			Text:       t.textDelta,
+			ToolStart:  t.toolStart,
 			ToolResult: t.tracker.tally.toolResult,
 			Call:       t.callEnded,
 		},
@@ -381,24 +403,25 @@ func (s *Service) prepare(ctx context.Context, t *turn, thread *library.AskThrea
 }
 
 // isRefinement reports whether message is one of the chips the thread's
-// newest done turn offered (a refinement re-ranks: rerank).
-func isRefinement(message string, turns []library.AskTurn) (bool, error) {
+// newest done turn offered (a refinement re-ranks: rerank), and those
+// chips (a refinement that offers none keeps them).
+func isRefinement(message string, turns []library.AskTurn) (bool, []string, error) {
 	for i := len(turns) - 1; i >= 0; i-- {
 		if turns[i].Status != library.AskTurnDone {
 			continue
 		}
 		v, err := decodeView(turns[i].View)
 		if err != nil || v == nil {
-			return false, err
+			return false, nil, err
 		}
 		for _, r := range v.Refinements {
 			if strings.EqualFold(strings.TrimSpace(r), message) {
-				return true, nil
+				return true, v.Refinements, nil
 			}
 		}
-		return false, nil
+		return false, nil, nil
 	}
-	return false, nil
+	return false, nil, nil
 }
 
 // decodeMessages turns stored messages back into the API's, each block's
@@ -479,6 +502,34 @@ func (s *Service) release() {
 	s.busy = false
 }
 
+// stale remembers a turn whose end couldn't be written.
+func (s *Service) stale(turnID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unended[turnID] = true
+}
+
+// heal ends the turns whose end couldn't be written (their rows may still
+// say streaming, and the one-streaming index would answer ask_busy until a
+// restart). It runs holding the slot, so none of them is running.
+func (s *Service) heal(ctx context.Context) {
+	s.mu.Lock()
+	var ids []int64
+	for id := range s.unended {
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.d.Store.AbandonTurn(ctx, id); err != nil {
+			s.log.Warn("Ask: still can't end a turn whose end failed", "turn", id, "error", err)
+			continue
+		}
+		s.mu.Lock()
+		delete(s.unended, id)
+		s.mu.Unlock()
+	}
+}
+
 func (s *Service) untrack(t *turn) {
 	s.mu.Lock()
 	delete(s.running, t)
@@ -489,9 +540,10 @@ func (s *Service) untrack(t *turn) {
 // endUnstarted cancels a turn that was stored but never ran (shutdown
 // raced it).
 func (s *Service) endUnstarted(t *turn) {
-	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), s.writeTimeout)
 	defer cancel()
 	if err := s.d.Store.CancelTurn(ctx, t.turnID); err != nil {
 		s.log.Warn("Ask: failed to cancel a turn at shutdown", "turn", t.turnID, "error", err)
+		s.stale(t.turnID)
 	}
 }

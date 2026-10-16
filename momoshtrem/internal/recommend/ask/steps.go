@@ -12,12 +12,20 @@ import (
 )
 
 // A turn's steps (PLAN §6 "Ask momoshtrem", status events): a step starts
-// with the first tool block that belongs to it (history: the profile and
+// with the first tool that belongs to it (history: the profile and
 // check_seen; web: web search and fetch; tmdb: the candidates and TMDB
 // lookups; a refinement chip's every tool: rerank), and write with
 // show_picks or the answer's text. Each step happens at most once a turn,
 // in the order reached, with at most one active: starting one ends the
 // active one with its detail, the step's tally of what its tools did.
+// write is the last: once it's reached no other step starts, and its
+// detail is the turn's picks when the turn ends.
+//
+// A custom tool's step starts when it runs (Hooks.ToolStart), after the
+// tools before it in its response have answered, so the step it ends has
+// its whole tally; only the first custom tool of a response starts its
+// step as its block starts streaming (nothing before it is still waiting).
+// A server tool's step starts with its block: it has already run.
 
 // Server tools' names, as their blocks start.
 const (
@@ -58,14 +66,15 @@ func newTracker() *tracker {
 	return &tracker{active: -1, tally: tally{checked: map[library.TitleRef]bool{}}}
 }
 
-// reach starts step unless it was reached before, and returns the status
-// events: the active step's end, then the new one's start.
+// reach starts step unless it was reached before or write has started,
+// and returns the status events: the active step's end, then the new
+// one's start.
 func (t *tracker) reach(step string) []recommend.Step {
 	if step == "" {
 		return nil
 	}
 	for _, s := range t.list {
-		if s.Step == step {
+		if s.Step == step || s.Step == recommend.StepWrite {
 			return nil
 		}
 	}

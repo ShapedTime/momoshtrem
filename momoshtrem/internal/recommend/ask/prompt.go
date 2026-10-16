@@ -10,9 +10,14 @@ import (
 
 // A thread keeps the system prompt and the tools it started with
 // (ask_threads.prompt_version): an edited prefix would invalidate the
-// thinking blocks a replay carries, and miss the prompt cache. A new
-// prompt is a new version, added next to the old ones, which stay for the
-// threads that started on them.
+// thinking blocks a replay carries, and miss the prompt cache. A version
+// pins the system prompt and every tool definition (R1's five tools,
+// show_picks, the web tools' max_uses) as sent: TestAsk_PromptVersionPinned
+// hashes the first request's system and tools. Any change to them is a new
+// version. Only the system prompt and the web uses live here, not the old
+// tool definitions, so a change to the tools also retires the old version
+// from prompts: its threads then answer thread_full (start a new one)
+// instead of replaying under other tools.
 
 // PromptVersion is the version new threads start on.
 const PromptVersion = "ask-v1"

@@ -136,7 +136,14 @@ func (l live) excluded(ref library.TitleRef) string {
 func turnOf(t library.AskTurn, v *view, l live) recommend.Turn {
 	out := recommend.Turn{ID: t.ID, Message: t.Message, Status: t.Status, CreatedAt: t.CreatedAt,
 		Steps: []recommend.Step{}, Items: []recommend.AskItem{}, Refinements: []string{}}
-	if t.Status == library.AskTurnStreaming || v == nil {
+	if t.Status == library.AskTurnStreaming {
+		return out
+	}
+	if v == nil {
+		// An end that couldn't be written (AbandonTurn) has no view.
+		if t.Status == library.AskTurnError {
+			out.Error = errorOf(t.ErrorCode)
+		}
 		return out
 	}
 	out.Steps = orEmpty(v.Steps)
@@ -144,12 +151,23 @@ func turnOf(t library.AskTurn, v *view, l live) recommend.Turn {
 	out.Refinements = orEmpty(v.Refinements)
 	out.Error = v.Error
 	out.ElapsedMS = v.ElapsedMS
+	if t.Status == library.AskTurnError && out.Error == nil {
+		out.Error = errorOf(t.ErrorCode)
+	}
 	for _, it := range v.Items {
 		if !l.hidden(it.ref()) {
 			out.Items = append(out.Items, l.item(it))
 		}
 	}
 	return out
+}
+
+// errorOf is an error turn's error when its view has none.
+func errorOf(code string) *recommend.TurnError {
+	if code == "" {
+		code = recommend.AskErrorInternal
+	}
+	return &recommend.TurnError{Code: code, Message: "Noir couldn't finish this answer. Try again."}
 }
 
 // decodeView reads a stored view; nil without one.

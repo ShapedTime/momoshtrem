@@ -213,6 +213,16 @@ func (m *memStore) EndTurn(_ context.Context, end library.AskTurnEnd) (bool, err
 	return true, nil
 }
 
+func (m *memStore) AbandonTurn(_ context.Context, id int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t := m.turn(id); t != nil && t.Status == library.AskTurnStreaming {
+		now := time.Now()
+		t.Status, t.ErrorCode, t.FinishedAt = library.AskTurnError, "internal", &now
+	}
+	return nil
+}
+
 func (m *memStore) FailStreaming(_ context.Context, code string, view []byte) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -258,6 +268,52 @@ func (m *memStore) MeanDoneCost(_ context.Context, n int) (*float64, error) {
 
 var _ ask.Store = (*memStore)(nil)
 var _ ask.Store = (*library.AskRepository)(nil)
+
+// faultyStore fails or holds a turn's end: EndTurn and AbandonTurn fail
+// while their counts last, and EndTurn waits for gate when it's set.
+type faultyStore struct {
+	ask.Store
+	mu           sync.Mutex
+	endFails     int
+	abandonFails int
+	gate         chan struct{}
+}
+
+func (f *faultyStore) set(endFails, abandonFails int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.endFails, f.abandonFails = endFails, abandonFails
+}
+
+func (f *faultyStore) EndTurn(ctx context.Context, end library.AskTurnEnd) (bool, error) {
+	f.mu.Lock()
+	fail := f.endFails > 0
+	if fail {
+		f.endFails--
+	}
+	gate := f.gate
+	f.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
+	if fail {
+		return false, errors.New("the store is down")
+	}
+	return f.Store.EndTurn(ctx, end)
+}
+
+func (f *faultyStore) AbandonTurn(ctx context.Context, id int64) error {
+	f.mu.Lock()
+	fail := f.abandonFails > 0
+	if fail {
+		f.abandonFails--
+	}
+	f.mu.Unlock()
+	if fail {
+		return errors.New("the store is down")
+	}
+	return f.Store.AbandonTurn(ctx, id)
+}
 
 // ---- What the tools and the picks read.
 
@@ -321,9 +377,13 @@ func (f fakeTMDB) MovieDetails(_ context.Context, id int) (*tmdb.MovieDetails, e
 	return nil, tmdb.ErrNotFound
 }
 
+// ShowDetails knows the fixtures, and shows 3000–3999 as fillers.
 func (f fakeTMDB) ShowDetails(_ context.Context, id int) (*tmdb.ShowDetails, error) {
 	if s, ok := f.shows[id]; ok {
 		return s, nil
+	}
+	if id >= 3000 && id < 4000 {
+		return &tmdb.ShowDetails{ID: id, Name: fmt.Sprintf("Filler %d", id)}, nil
 	}
 	return nil, tmdb.ErrNotFound
 }

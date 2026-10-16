@@ -146,6 +146,38 @@ func TestAskRepository_TurnLifecycle(t *testing.T) {
 	}
 }
 
+// AbandonTurn, the last resort when a turn's end can't be written, frees
+// the one-streaming index with the status alone, and leaves an ended turn
+// as it is.
+func TestAskRepository_AbandonTurn(t *testing.T) {
+	r := openAskDB(t)
+	ctx := context.Background()
+	th, tu, err := r.StartTurn(ctx, NewAskTurn{Title: "One", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AbandonTurn(ctx, tu.ID); err != nil {
+		t.Fatal(err)
+	}
+	turns, _ := r.Turns(ctx, th.ID)
+	if turns[0].Status != AskTurnError || turns[0].ErrorCode != "internal" || turns[0].View != nil || turns[0].FinishedAt == nil {
+		t.Errorf("abandoned turn = %+v", turns[0])
+	}
+	_, tu2, err := r.StartTurn(ctx, NewAskTurn{ThreadID: th.ID, Message: "two"})
+	if err != nil {
+		t.Fatalf("after abandoning: %v", err)
+	}
+	if _, err := r.EndTurn(ctx, AskTurnEnd{TurnID: tu2.ID, Status: AskTurnDone, View: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AbandonTurn(ctx, tu2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if turns, _ := r.Turns(ctx, th.ID); turns[1].Status != AskTurnDone {
+		t.Errorf("abandoning a done turn made it %s", turns[1].Status)
+	}
+}
+
 // The threads list is the newest updated first, with turn counts; the
 // mean cost is over the newest done turns.
 func TestAskRepository_ListAndMean(t *testing.T) {

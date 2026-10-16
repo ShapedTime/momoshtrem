@@ -61,7 +61,7 @@ var showPicksSchema = compactSchema(`{
 			}
 		},
 		"refinements": {
-			"description": "2 to 5 follow-ups they might tap next, a few words each (\"Lighter\", \"Only anime\"); [] to keep the ones you gave.",
+			"description": "2 to 5 follow-ups they might tap next, a few words each (\"Lighter\", \"Only anime\"). When you call it again with replacements, [] keeps the ones you gave.",
 			"type": "array",
 			"items": {"type": "string"}
 		}
@@ -164,8 +164,6 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 			drop(it.MediaType, it.TMDBID, dropInvalid)
 		case seen[ref]:
 			drop(it.MediaType, it.TMDBID, dropDuplicate)
-		case len(picks) >= itemsMax:
-			drop(it.MediaType, it.TMDBID, dropFull)
 		default:
 			seen[ref] = true
 			picks = append(picks, pick{ref: ref, matchTag: clip(it.MatchTag, recommend.MatchTagMaxChars),

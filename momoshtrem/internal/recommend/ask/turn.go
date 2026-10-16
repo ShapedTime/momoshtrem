@@ -12,9 +12,16 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 )
 
+// Retrying a turn's final writes: the first retry after retryFirst, then
+// twice as long each time up to retryMax, until the write timeout ends.
+const (
+	retryFirst = 50 * time.Millisecond
+	retryMax   = time.Second
+)
+
 // turn is one ask in flight. Its hooks, show_picks and its end run on the
 // turn's goroutine, in order; only the cancel watcher runs beside them, and
-// it touches nothing but the outcome and the slot.
+// it touches nothing but the outcome, the store and the slot.
 type turn struct {
 	s       *Service
 	thread  library.AskThread
@@ -24,6 +31,9 @@ type turn struct {
 	started time.Time
 	user    aicore.Message
 	req     aicore.Request
+	// chips are the refinements the thread's newest done turn offered: a
+	// refinement that offers none keeps them.
+	chips []string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -38,6 +48,9 @@ type turn struct {
 	// text is the current response's text, held until the response ends:
 	// only a final answer's text is shown (a note before a tool call isn't).
 	text strings.Builder
+	// call is the API call whose blocks are streaming, and customTools how
+	// many custom tool blocks it has started.
+	call, customTools int
 
 	mu       sync.Mutex
 	outcome  string // the turn's status once decided; "" while it runs
@@ -90,11 +103,13 @@ func (t *turn) decided() string {
 }
 
 // cancelNow marks the turn cancelled in the database and frees the slot.
+// When the store can't take it, the turn is left for the next ask to end
+// (Service.heal): a row left streaming would answer ask_busy.
 func (t *turn) cancelNow() {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), writeTimeout)
-	defer cancel()
-	if err := t.s.d.Store.CancelTurn(ctx, t.turnID); err != nil {
-		t.s.log.Error("Ask: failed to mark a turn cancelled", "turn", t.turnID, "error", err)
+	if err := t.persist("cancel", func(ctx context.Context) error {
+		return t.s.d.Store.CancelTurn(ctx, t.turnID)
+	}); err != nil {
+		t.s.stale(t.turnID)
 	}
 	t.release()
 }
@@ -124,6 +139,9 @@ func (t *turn) end(res *aicore.Result, err error) {
 	} else {
 		outcome = t.decided() // cancelled by the watcher first
 	}
+	if t.refine && len(t.refinements) == 0 {
+		t.refinements = t.chips
+	}
 
 	elapsed := time.Since(t.started).Milliseconds()
 	v := view{Intro: t.intro, Items: t.items, Refinements: t.refinements, ElapsedMS: &elapsed}
@@ -140,12 +158,15 @@ func (t *turn) end(res *aicore.Result, err error) {
 		t.s.log.Warn("Ask turn failed", "turn", t.turnID, "code", code, "error", err)
 	}
 
-	if ok := t.write(v, end); !ok && outcome == library.AskTurnDone {
+	stored := t.write(v, end)
+	if !stored && outcome == library.AskTurnDone {
 		// Its messages aren't stored, so it can't count as done.
-		outcome, code = library.AskTurnError, recommend.AskErrorInternal
-		message = "Noir's answer couldn't be saved. Try again."
+		outcome, code, message = library.AskTurnError, recommend.AskErrorInternal, "Noir's answer couldn't be saved. Try again."
 		v.Error = &recommend.TurnError{Code: code, Message: message}
-		t.write(v, library.AskTurnEnd{TurnID: t.turnID, Status: outcome, ErrorCode: code, CostUSD: res.Usage.CostUSD})
+		stored = t.write(v, library.AskTurnEnd{TurnID: t.turnID, Status: outcome, ErrorCode: code, CostUSD: res.Usage.CostUSD})
+	}
+	if !stored && outcome != library.AskTurnCancelled {
+		t.abandon()
 	}
 	t.release()
 	t.s.log.Info("Ask turn ended", "thread", t.thread.ID, "turn", t.turnID, "status", outcome, "refine", t.refine,
@@ -163,8 +184,9 @@ func (t *turn) end(res *aicore.Result, err error) {
 	}
 }
 
-// write stores the turn's end, with a context of its own (the turn's may
-// be gone); false when it wasn't stored.
+// write stores the turn's end, retrying while the store fails; it reports
+// whether the turn ended that way (false too when it had already ended
+// otherwise).
 func (t *turn) write(v view, end library.AskTurnEnd) bool {
 	doc, err := v.encode()
 	if err != nil {
@@ -172,17 +194,52 @@ func (t *turn) write(v view, end library.AskTurnEnd) bool {
 		return false
 	}
 	end.View = doc
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), writeTimeout)
-	defer cancel()
-	ok, err := t.s.d.Store.EndTurn(ctx, end)
-	if err != nil {
-		t.s.log.Error("Ask: failed to store how a turn ended", "turn", t.turnID, "status", end.Status, "error", err)
+	var ok bool
+	if err := t.persist("end "+end.Status, func(ctx context.Context) error {
+		var err error
+		ok, err = t.s.d.Store.EndTurn(ctx, end)
+		return err
+	}); err != nil {
 		return false
 	}
 	if !ok {
 		t.s.log.Warn("Ask: the turn had already ended", "turn", t.turnID, "status", end.Status)
 	}
 	return ok
+}
+
+// abandon is the last resort when the turn's end can't be written: the
+// least that frees the one-streaming index (status error, nothing else).
+// If even that fails, the next ask tries again (Service.heal).
+func (t *turn) abandon() {
+	if err := t.persist("abandon", func(ctx context.Context) error {
+		return t.s.d.Store.AbandonTurn(ctx, t.turnID)
+	}); err != nil {
+		t.s.stale(t.turnID)
+	}
+}
+
+// persist runs a store write until it succeeds or the write timeout ends,
+// backing off between tries, with a context of its own (the turn's may be
+// gone). It returns the last error.
+func (t *turn) persist(what string, write func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), t.s.writeTimeout)
+	defer cancel()
+	delay := retryFirst
+	for {
+		err := write(ctx)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			t.s.log.Error("Ask: a turn's write failed", "turn", t.turnID, "write", what, "error", err)
+			return err
+		case <-time.After(delay):
+			t.s.log.Warn("Ask: retrying a turn's write", "turn", t.turnID, "write", what, "error", err)
+		}
+		delay = min(2*delay, retryMax)
+	}
 }
 
 // send sends an event unless the turn's context is done: the client has
@@ -201,27 +258,40 @@ func (t *turn) reach(step string) {
 	}
 }
 
-// emitText adds to the intro and sends it.
+// emitText adds to the intro and sends it. The intro is one paragraph.
 func (t *turn) emitText(text string) {
 	if t.intro != "" {
-		text = "\n\n" + text
+		text = " " + text
 	}
 	t.intro += text
 	t.send(recommend.Event{Name: recommend.EventText, Data: recommend.TextEvent{Delta: text}})
 }
 
-// blockStart: a tool's block starts its step. Text held before it was a
-// note between tool calls, never shown.
+// blockStart: a server tool's block starts its step (it has run by then);
+// a custom tool's does only when it's the first in its response, with no
+// other tool's answer pending (toolStart starts the rest). Text held
+// before a tool block was a note between tool calls, never shown.
 func (t *turn) blockStart(b aicore.Block) {
+	if b.Call != t.call {
+		t.call, t.customTools = b.Call, 0
+	}
 	switch b.Type {
-	case "tool_use", "server_tool_use":
+	case "server_tool_use":
 		t.text.Reset()
-		if b.Type == "server_tool_use" {
-			t.tracker.tally.serverTool(b.Name)
-		}
+		t.tracker.tally.serverTool(b.Name)
 		t.reach(stepOf(b.Name, t.refine))
+	case "tool_use":
+		t.text.Reset()
+		if t.customTools == 0 {
+			t.reach(stepOf(b.Name, t.refine))
+		}
+		t.customTools++
 	}
 }
+
+// toolStart: a custom tool is about to run, after the ones before it in
+// its response answered.
+func (t *turn) toolStart(call aicore.ToolCall) { t.reach(stepOf(call.Name, t.refine)) }
 
 func (t *turn) textDelta(delta string) { t.text.WriteString(delta) }
 

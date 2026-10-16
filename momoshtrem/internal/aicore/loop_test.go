@@ -503,6 +503,47 @@ func TestRun_CapsHold(t *testing.T) {
 	}
 }
 
+// AllowFinal lets one call past a cap end the turn (Ask, once its answer
+// is shown); that call may not run tools, and without AllowFinal's yes the
+// cap holds as before.
+func TestRun_AllowFinal(t *testing.T) {
+	again := func() fake.Response {
+		return fake.Response{Blocks: []fake.Block{fake.ToolUse("toolu_1", "alpha", map[string]any{"q": "again"})}}
+	}
+	end := fake.Response{Blocks: []fake.Block{fake.Text("Enjoy.")}}
+	for _, tt := range []struct {
+		name     string
+		allow    bool
+		script   []fake.Response
+		wantErr  bool
+		requests int
+	}{
+		{"ends the turn", true, []fake.Response{again(), end}, false, 2},
+		{"no tools past the cap", true, []fake.Response{again(), again()}, true, 2},
+		{"not allowed", false, []fake.Response{again(), end}, true, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := fake.New(t, tt.script...)
+			var ran []string
+			req := request(tool{name: "alpha", log: &ran})
+			req.Caps = aicore.Caps{Calls: 1}
+			asked := 0
+			req.AllowFinal = func() bool { asked++; return tt.allow }
+			res, err := newClient(t, srv, nil).Run(context.Background(), req)
+			var capErr *aicore.CapError
+			switch {
+			case tt.wantErr && (!errors.As(err, &capErr) || capErr.Cap != aicore.CapCalls):
+				t.Errorf("err = %v, want the calls cap", err)
+			case !tt.wantErr && (err != nil || res.Text() != "Enjoy."):
+				t.Errorf("err = %v, text %q; want the turn ended", err, res.Text())
+			}
+			if n := len(srv.Requests()); n != tt.requests || len(ran) != 1 || asked != 1 {
+				t.Errorf("%d requests, ran %v, asked %d times", n, ran, asked)
+			}
+		})
+	}
+}
+
 // Cancelling stops the stream at once and records what the call had
 // reported: its prompt.
 func TestRun_CancelRecordsPartialUsage(t *testing.T) {
