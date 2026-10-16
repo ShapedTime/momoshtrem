@@ -17,8 +17,9 @@
 //   - passes server tools (web_search_20260209, web_fetch_20260209) through,
 //     and resumes a pause_turn by sending the paused turn back, with no
 //     user message, at most MaxContinuations times;
-//   - stops on end_turn, on refusal (ErrRefused) and on max_tokens or the
-//     context window (ErrTruncated);
+//   - stops on end_turn, on refusal (ErrRefused), on max_tokens or the
+//     context window (ErrTruncated), and on a response with no content
+//     (ErrEmptyAnswer), which it never keeps: it couldn't be replayed;
 //   - records every API call's usage (Recorder) and, after each call,
 //     checks the run's caps (ErrCapReached);
 //   - stops at once when ctx is cancelled, recording the usage the cut-off
@@ -70,6 +71,8 @@ const (
 	DefaultEffort = "medium"
 	// MaxContinuations is how many times a run resumes a pause_turn.
 	MaxContinuations = 5
+	// recordTimeout bounds writing one call's usage.
+	recordTimeout = 5 * time.Second
 )
 
 // Config configures a Client.
@@ -262,8 +265,13 @@ type run struct {
 }
 
 // Run runs a conversation to its end: until the model ends its turn, is
-// refused, is cut off, a cap is reached, a call fails, or ctx is done. It
-// always returns a Result (see Result).
+// refused, is cut off, answers nothing, a cap is reached, a call fails, or
+// ctx is done. It always returns a Result (see Result).
+//
+// Its errors, for Ask's error codes: *RefusalError (refused); ErrTruncated
+// and *CapError (limit_reached); *APIError and ErrEmptyAnswer (upstream);
+// ctx's error (cancelled); a request Validate rejects, or a tool's own
+// failure (internal).
 func (c *Client) Run(ctx context.Context, req Request) (*Result, error) {
 	r := &run{c: c, req: req, res: &Result{Usage: Usage{Model: req.Model}}}
 	if err := r.prepare(); err != nil {
@@ -287,6 +295,12 @@ func (c *Client) Run(ctx context.Context, req Request) (*Result, error) {
 		msg, kept, err := echo(resp)
 		if err != nil {
 			return r.res, err
+		}
+		if len(msg.Content) == 0 {
+			// Never kept: an assistant message without content can't be
+			// replayed, and a thread that stored it would 400 on every
+			// later turn.
+			return r.res, fmt.Errorf("%w (%s)", ErrEmptyAnswer, resp.StopReason)
 		}
 		if err := r.append(msg); err != nil {
 			return r.res, err
@@ -316,16 +330,56 @@ func (c *Client) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 }
 
-// prepare checks the request and encodes its fixed parts.
-func (r *run) prepare() error {
-	req := &r.req
+// efforts are output_config.effort's values.
+var efforts = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+
+// webToolModels are the priced models that take the _20260209 web search
+// and fetch tools (Opus and Sonnet 4.6 and later; Haiku doesn't).
+var webToolModels = map[string]bool{
+	"claude-opus-5-5": true, "claude-sonnet-5-5": true,
+	"claude-opus-5": true, "claude-opus-4-8": true, "claude-sonnet-5": true,
+}
+
+// Validate checks a request without calling the API: Run does too, but a
+// caller can check first, before the budget check and before it starts a
+// run or a turn. An error here is a bug in the caller, not the API's.
+func (req Request) Validate() error {
 	switch {
 	case !Priced(req.Model):
 		return fmt.Errorf("%w: %q", ErrUnknownModel, req.Model)
+	case (req.WebSearchMaxUses > 0 || req.WebFetchMaxUses > 0) && !webToolModels[baseModel(req.Model)]:
+		return fmt.Errorf("aicore: %s can't use the web search and fetch tools", req.Model)
+	case req.Effort != "" && !efforts[req.Effort]:
+		return fmt.Errorf("aicore: effort %q isn't low, medium, high, xhigh or max", req.Effort)
 	case req.Feature == "":
 		return errors.New("aicore: a run needs a feature for its usage")
 	case len(req.Messages) == 0 || req.Messages[len(req.Messages)-1].Role != RoleUser:
 		return errors.New("aicore: a run starts from a conversation that ends with a user message")
+	}
+	for i, m := range req.Messages {
+		if len(m.Content) == 0 {
+			return fmt.Errorf("aicore: message %d (%s) has no content", i, m.Role)
+		}
+	}
+	seen := make(map[string]bool, len(req.Tools))
+	for _, t := range req.Tools {
+		name := t.Name()
+		if seen[name] || name == "web_search" || name == "web_fetch" {
+			return fmt.Errorf("aicore: tool %q is defined twice, or takes a server tool's name", name)
+		}
+		if !json.Valid(t.Schema()) {
+			return fmt.Errorf("aicore: tool %q has an invalid schema", name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// prepare checks the request and encodes its fixed parts.
+func (r *run) prepare() error {
+	req := &r.req
+	if err := req.Validate(); err != nil {
+		return err
 	}
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = DefaultMaxTokens
@@ -336,12 +390,6 @@ func (r *run) prepare() error {
 	r.named = make(map[string]Tool, len(req.Tools))
 	for _, t := range req.Tools {
 		name := t.Name()
-		if _, dup := r.named[name]; dup || name == "web_search" || name == "web_fetch" {
-			return fmt.Errorf("aicore: tool %q is defined twice, or takes a server tool's name", name)
-		}
-		if !json.Valid(t.Schema()) {
-			return fmt.Errorf("aicore: tool %q has an invalid schema", name)
-		}
 		r.named[name] = t
 		def, err := json.Marshal(struct {
 			Name        string          `json:"name"`
@@ -468,9 +516,13 @@ func (r *run) call(ctx context.Context) (*anthropic.BetaMessage, error) {
 		// prompt.
 		usage = PriceUsage(r.req.Model, msg.Usage)
 		if r.c.recorder != nil {
-			if rerr := r.c.recorder.Record(context.WithoutCancel(ctx), r.req.Feature, r.req.Ref, usage); rerr != nil {
+			// Recorded even when ctx is done (the tokens were spent), within
+			// its own deadline.
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+			if rerr := r.c.recorder.Record(rctx, r.req.Feature, r.req.Ref, usage); rerr != nil {
 				r.c.log.Warn("Failed to record AI usage", "error", rerr, "feature", r.req.Feature, "ref", r.req.Ref)
 			}
+			cancel()
 		}
 	}
 	r.res.Usage = r.res.Usage.Add(usage)

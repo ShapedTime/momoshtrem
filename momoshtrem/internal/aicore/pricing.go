@@ -45,12 +45,17 @@ const WebSearchUSD = 0.01
 // ("claude-opus-4-8-20260501"); the price is the model's.
 var datedSuffix = regexp.MustCompile(`-\d{8}$`)
 
+// baseModel is a model id without a snapshot date.
+func baseModel(model string) string {
+	if _, ok := prices[model]; ok {
+		return model
+	}
+	return datedSuffix.ReplaceAllString(model, "")
+}
+
 // cards finds a model's price cards.
 func cards(model string) ([]card, bool) {
-	if c, ok := prices[model]; ok {
-		return c, true
-	}
-	c, ok := prices[datedSuffix.ReplaceAllString(model, "")]
+	c, ok := prices[baseModel(model)]
 	return c, ok
 }
 

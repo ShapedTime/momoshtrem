@@ -589,6 +589,79 @@ func TestRun_Errors(t *testing.T) {
 	}
 }
 
+// A response with no content is never kept: an assistant message without
+// content can't be replayed, so a thread that stored it would 400 on every
+// later turn. The run fails instead, and its messages end on the last good
+// exchange.
+func TestRun_EmptyAnswerIsNotKept(t *testing.T) {
+	srv := fake.New(t,
+		fake.Response{Blocks: []fake.Block{fake.ToolUse("toolu_1", "alpha", map[string]any{"q": "x"})}, Usage: fake.Usage{InputTokens: 100}},
+		fake.Response{Usage: fake.Usage{InputTokens: 200}}, // end_turn, no blocks
+	)
+	rec := &recorder{}
+	res, err := newClient(t, srv, rec).Run(context.Background(), request(tool{name: "alpha"}))
+	if !errors.Is(err, aicore.ErrEmptyAnswer) {
+		t.Fatalf("err = %v, want ErrEmptyAnswer", err)
+	}
+	if len(res.Messages) != 2 || res.Messages[0].Role != "assistant" || res.Messages[1].Role != "user" {
+		t.Fatalf("messages = %+v", res.Messages)
+	}
+	for i, m := range res.Messages {
+		if len(m.Content) == 0 {
+			t.Errorf("message %d has no content", i)
+		}
+	}
+	if res.StopReason != "end_turn" || len(rec.rows) != 2 || res.Usage.Input != 300 {
+		t.Errorf("stop %s, %d rows, usage %+v", res.StopReason, len(rec.rows), res.Usage)
+	}
+}
+
+func TestRequest_Validate(t *testing.T) {
+	text := aicore.UserText("Hi")
+	for _, tt := range []struct {
+		name string
+		edit func(*aicore.Request)
+		ok   bool
+	}{
+		{"a plain request", func(*aicore.Request) {}, true},
+		{"Sonnet 5.5 with web tools", func(r *aicore.Request) { r.Model, r.WebSearchMaxUses, r.WebFetchMaxUses = "claude-sonnet-5-5", 8, 4 }, true},
+		{"a fallback model with web search", func(r *aicore.Request) { r.Model, r.WebSearchMaxUses = "claude-opus-4-8", 1 }, true},
+		{"a dated id with web fetch", func(r *aicore.Request) { r.Model, r.WebFetchMaxUses = "claude-opus-5-20260501", 1 }, true},
+		{"Haiku without web tools", func(r *aicore.Request) { r.Model = "claude-haiku-5-5" }, true},
+		{"Haiku with web search", func(r *aicore.Request) { r.Model, r.WebSearchMaxUses = "claude-haiku-5-5", 8 }, false},
+		{"Haiku with web fetch", func(r *aicore.Request) { r.Model, r.WebFetchMaxUses = "claude-haiku-5-5", 1 }, false},
+		{"every effort level", func(r *aicore.Request) { r.Effort = "xhigh" }, true},
+		{"max effort", func(r *aicore.Request) { r.Effort = "max" }, true},
+		{"an unknown effort", func(r *aicore.Request) { r.Effort = "extreme" }, false},
+		{"an unknown model", func(r *aicore.Request) { r.Model = "claude-unknown-1" }, false},
+		{"no feature", func(r *aicore.Request) { r.Feature = "" }, false},
+		{"no messages", func(r *aicore.Request) { r.Messages = nil }, false},
+		{"ending on the assistant", func(r *aicore.Request) {
+			r.Messages = []aicore.Message{text, {Role: "assistant", Content: text.Content}}
+		}, false},
+		{"a message without content", func(r *aicore.Request) {
+			r.Messages = []aicore.Message{text, {Role: "assistant"}, text}
+		}, false},
+		{"a tool named like a server tool", func(r *aicore.Request) { r.Tools = []aicore.Tool{tool{name: "web_search"}} }, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := request()
+			tt.edit(&req)
+			if err := req.Validate(); (err == nil) != tt.ok {
+				t.Errorf("Validate = %v, want ok %v", err, tt.ok)
+			}
+		})
+	}
+
+	// Run validates before any call.
+	srv := fake.New(t)
+	req := request()
+	req.Model, req.WebSearchMaxUses = "claude-haiku-5-5", 8
+	if _, err := newClient(t, srv, nil).Run(context.Background(), req); err == nil || len(srv.Requests()) != 0 {
+		t.Errorf("Haiku with web search: %v after %d requests", err, len(srv.Requests()))
+	}
+}
+
 func TestNew_WithoutKey(t *testing.T) {
 	if aicore.New(aicore.Config{}) != nil {
 		t.Error("New without a key isn't nil")

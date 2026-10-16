@@ -21,6 +21,10 @@ var (
 	ErrRefused = errors.New("the model declined to answer")
 	// ErrTruncated: the answer hit max_tokens or the context window.
 	ErrTruncated = errors.New("the model's answer was cut off")
+	// ErrEmptyAnswer: a response came back with no content, which can't
+	// be replayed. Not the caller's fault: treat it like an upstream error
+	// (Ask's upstream code).
+	ErrEmptyAnswer = errors.New("the model's answer was empty")
 	// ErrCapReached: a run reached one of its caps (*CapError says which)
 	// and stopped before its next API call.
 	ErrCapReached = errors.New("the AI run reached its limit")
