@@ -191,9 +191,7 @@ func proposalViews(j *library.AssignmentJob, all []*library.AssignmentProposal, 
 			Hinted:           p.Hinted,
 			SubtitleCount:    subtitles[p.ID],
 			SupersededBy:     p.SupersededBy,
-		}
-		if len(p.EpisodeIDs) > 0 {
-			v.Replaces = replacesOf(j, p, refs[p.EpisodeIDs[0]])
+			Replaces:         proposalReplaces(j, p, refs),
 		}
 		out = append(out, v)
 	}
@@ -219,6 +217,15 @@ func targetsOf(ids []int64, refs map[int64]*library.EpisodeRef) []ProposalTarget
 		})
 	}
 	return out
+}
+
+// proposalReplaces is a proposal's `replaces`: what its first target has
+// now (replacesOf); nil without a target. Auto-apply waits on it too.
+func proposalReplaces(j *library.AssignmentJob, p *library.AssignmentProposal, refs map[int64]*library.EpisodeRef) *ProposalReplaces {
+	if len(p.EpisodeIDs) == 0 {
+		return nil
+	}
+	return replacesOf(j, p, refs[p.EpisodeIDs[0]])
 }
 
 // replacesOf is the file the episode has now when it isn't this one: Apply

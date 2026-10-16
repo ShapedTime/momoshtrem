@@ -66,7 +66,8 @@ var (
 	ErrInvalidHint = errors.New("invalid hint")
 )
 
-// 409 codes, in the order apply checks them.
+// 409 codes, in the order apply checks them (PATCH and reclassify check
+// the first three).
 const (
 	CodeDryRun               = "dry_run"
 	CodeJobClosed            = "job_closed"
@@ -104,6 +105,7 @@ const (
 	FailureInvalidMagnet   = "invalid_magnet"   // the client rejected the magnet
 	FailureTorrent         = "torrent_error"    // the client failed otherwise
 	FailureInternal        = "internal"         // a bug or a database error
+	FailureTMDB            = "tmdb_unavailable" // a dry run outside the library couldn't read TMDB
 )
 
 // failure is a job failure: its code and the message the user sees.
@@ -117,6 +119,7 @@ var (
 	failInvalidMagnet   = failure{FailureInvalidMagnet, "The magnet link isn't valid."}
 	failTorrent         = failure{FailureTorrent, "The torrent couldn't be loaded."}
 	failInternal        = failure{FailureInternal, "Something went wrong while matching the files."}
+	failTMDB            = failure{FailureTMDB, "TMDB couldn't be reached, so the episodes aren't known."}
 )
 
 const (
@@ -144,8 +147,9 @@ type JobDeps struct {
 	Subtitles SubtitleCreator
 	// Metadata refreshes a show whose metadata is stale before matching.
 	Metadata ShowRefresher
-	// TMDB gives the classifier aliases and alternative orderings.
-	TMDB CatalogSource
+	// TMDB gives the classifier aliases and alternative orderings, and
+	// Inspect the titles that aren't in the library.
+	TMDB TitleContextTMDB
 	// Resolver is the AI resolver. Nil or identify.NoopResolver means AI
 	// isn't available.
 	Resolver identify.Resolver
@@ -176,7 +180,7 @@ type JobService struct {
 	tree        TreeInvalidator
 	subtitles   SubtitleCreator
 	refresher   ShowRefresher
-	tmdb        CatalogSource
+	tmdb        TitleContextTMDB
 	resolver    identify.Resolver
 	aiCache     CachePruner
 	workers     int
@@ -284,7 +288,8 @@ func (s *JobService) Assign(ctx context.Context, mediaType library.JobMediaType,
 }
 
 // Detail returns a job with its listed proposals (none before it's
-// classified). Three queries, besides the settings.
+// classified). Three queries, besides the settings; a dry run outside the
+// library reads its title and episodes from cached TMDB instead.
 func (s *JobService) Detail(ctx context.Context, id int64) (*JobDetail, error) {
 	job, err := s.jobs.Get(ctx, id)
 	if err != nil {
@@ -299,8 +304,13 @@ func (s *JobService) Detail(ctx context.Context, id int64) (*JobDetail, error) {
 		all = byJob[id]
 	}
 	refs := map[int64]*library.EpisodeRef{}
-	if job.ShowID != nil {
+	switch {
+	case job.ShowID != nil:
 		if refs, err = s.jobs.EpisodeRefs(ctx, *job.ShowID, episodeIDsOf(all)); err != nil {
+			return nil, err
+		}
+	case outsideLibrary(job):
+		if refs, err = s.tmdbView(ctx, job, all); err != nil {
 			return nil, err
 		}
 	}
@@ -441,12 +451,12 @@ func (s *JobService) resolverConfigured() bool {
 	return !noop
 }
 
-// aiAvailable reports whether the AI may look at the job's files: a show's
-// job (the resolver maps episodes; movie jobs never run it), a resolver is
-// configured, the classifier is enabled, and the show doesn't use rules
-// only.
+// aiAvailable reports whether the AI may look at the job's files: a library
+// show's job (the resolver maps episodes; movie jobs and dry runs on a show
+// outside the library never run it), a resolver is configured, the
+// classifier is enabled, and the show doesn't use rules only.
 func (s *JobService) aiAvailable(settings library.AISettings, job *library.AssignmentJob) bool {
-	return job.MediaType == library.JobTV && s.resolverConfigured() && settings.ClassifierEnabled &&
+	return job.MediaType == library.JobTV && job.ShowID != nil && s.resolverConfigured() && settings.ClassifierEnabled &&
 		job.ClassifierMode != library.ClassifierRulesOnly
 }
 

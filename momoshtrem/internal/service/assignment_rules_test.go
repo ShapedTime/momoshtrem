@@ -278,6 +278,16 @@ func TestAutoApplies(t *testing.T) {
 	ep := library.KindEpisode
 	matched := prop(1, ep, library.GroupMatched, acc, "high", 101)
 	extra := prop(9, library.KindExtra, library.GroupExtras, ign, "")
+	// E02 already plays from another torrent, E03 from HDRezka; E04's file
+	// is this torrent's own (an earlier apply of the same file).
+	refs := map[int64]*library.EpisodeRef{
+		101: {ID: 101},
+		102: {ID: 102, Active: &library.TorrentAssignment{InfoHash: "old", FilePath: "Old/E02.mkv"}},
+		103: {ID: 103, Active: &library.TorrentAssignment{Kind: library.AssignmentKindHDRezka, Stream: &library.StreamRef{TranslatorName: "LostFilm"}}},
+		104: {ID: 104, Active: &library.TorrentAssignment{InfoHash: "new", FilePath: "Pack/E04.mkv"}},
+	}
+	own := prop(4, ep, library.GroupMatched, acc, "high", 104)
+	own.FilePath = "Pack/E04.mkv"
 	tests := []struct {
 		name   string
 		dryRun bool
@@ -294,11 +304,15 @@ func TestAutoApplies(t *testing.T) {
 		{"an ignored unmatched video", false, []*library.AssignmentProposal{matched, prop(2, ep, library.GroupUnmatched, ign, "")}, true},
 		{"a conflict", false, []*library.AssignmentProposal{matched, prop(2, ep, library.GroupNeedsReview, acc, "high", 101)}, false},
 		{"one plausible film", false, []*library.AssignmentProposal{prop(1, library.KindMovie, library.GroupMatched, acc, "high"), prop(2, library.KindMovie, library.GroupExtras, ign, "low")}, true},
+		{"replaces another torrent's file", false, []*library.AssignmentProposal{matched, prop(2, ep, library.GroupMatched, acc, "high", 102)}, false},
+		{"replaces an HDRezka stream", false, []*library.AssignmentProposal{matched, prop(3, ep, library.GroupMatched, acc, "high", 103)}, false},
+		{"an ignored file would replace", false, []*library.AssignmentProposal{matched, prop(2, ep, library.GroupMatched, ign, "high", 102)}, true},
+		{"its own file again", false, []*library.AssignmentProposal{matched, own}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			job := &library.AssignmentJob{DryRun: tt.dryRun}
-			if got := autoApplies(job, tt.ps); got != tt.want {
+			job := &library.AssignmentJob{DryRun: tt.dryRun, InfoHash: "new"}
+			if got := autoApplies(job, tt.ps, refs); got != tt.want {
 				t.Errorf("autoApplies = %v, want %v", got, tt.want)
 			}
 		})

@@ -48,14 +48,17 @@ type ProposalChange struct {
 //   - user_decided is false again once a proposal is back on its suggestion
 //     with its group's default decision.
 //
-// It answers job_closed or job_working (409) when the job can't change,
-// and a ValidationError for an unknown proposal, an episode that isn't the
-// show's, episode ids on a movie job, accepting a file that maps to
-// nothing, or episodes for a file that isn't a video (or a subtitle).
+// It answers dry_run, job_closed or job_working (409) when the job can't
+// change (a dry run is read-only), and a ValidationError for an unknown
+// proposal, an episode that isn't the show's, episode ids on a movie job,
+// accepting a file that maps to nothing, or episodes for a file that isn't
+// a video (or a subtitle).
 func (s *JobService) PatchProposals(ctx context.Context, jobID int64, changes []ProposalChange) (*JobDetail, error) {
 	err := s.jobs.Locked(ctx, jobID, func(t *library.JobTx) error {
 		job := t.Job
 		switch {
+		case job.DryRun:
+			return conflict(CodeDryRun, "A dry run is read-only.")
 		case !job.Status.Open():
 			return conflict(CodeJobClosed, fmt.Sprintf("This mapping job is already %s.", job.Status))
 		case !job.Status.Classified():

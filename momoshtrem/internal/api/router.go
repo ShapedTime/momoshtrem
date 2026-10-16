@@ -69,6 +69,13 @@ type Options struct {
 	// Removals deletes torrents and titles and unassigns files, cleaning
 	// up after them. Nil makes those routes return 503.
 	Removals Removals
+	// Inspect creates Inspect's dry runs (POST /search/torrents/inspect).
+	// Nil makes the route return 503.
+	Inspect Inspector
+	// Releases resolves a search result's release_id for Inspect. Nil
+	// answers 404 "search again" for a release_id; a magnet_uri still
+	// works.
+	Releases ReleaseResolver
 }
 
 // NewServer creates a new API server
@@ -201,6 +208,7 @@ func (s *Server) setupRoutes() {
 	s.registerReviewRoutes(api)     // Proposal edits, episode picker, manual overrides, torrent files
 	s.registerHDRezkaRoutes(api)    // HDRezka search, titles, streams and assigns
 	s.registerQualityRoutes(api)    // GET and PUT /settings/quality-profile
+	s.registerInspectRoutes(api)    // Inspect: dry runs of a search result or magnet
 }
 
 // Handler returns the HTTP handler

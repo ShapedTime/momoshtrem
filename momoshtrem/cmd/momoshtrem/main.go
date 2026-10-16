@@ -468,6 +468,7 @@ func main() {
 	})
 	apiOpts.Assignments = jobService
 	apiOpts.Review = jobService
+	apiOpts.Inspect = jobService
 
 	// Removals: deleting torrents and titles and unassigning files, with
 	// their subtitles, jobs and the torrents nothing uses any more.

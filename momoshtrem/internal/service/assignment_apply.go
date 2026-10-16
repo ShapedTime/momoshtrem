@@ -85,8 +85,19 @@ func (s *JobService) applyLocked(t *library.JobTx, mode applyMode) (*applyResult
 	if err := applyChecks(job, shown, mode); err != nil {
 		return nil, err
 	}
-	if mode == applyAuto && !autoApplies(job, shown) {
-		return &applyResult{}, nil
+	if mode == applyAuto {
+		// The target episodes with their files: auto-apply waits on
+		// `replaces`.
+		refs := map[int64]*library.EpisodeRef{}
+		if job.ShowID != nil {
+			var err error
+			if refs, err = t.EpisodeRefs(*job.ShowID, episodeIDsOf(shown)); err != nil {
+				return nil, err
+			}
+		}
+		if !autoApplies(job, shown, refs) {
+			return &applyResult{}, nil
+		}
 	}
 
 	res, err := s.planApply(t)

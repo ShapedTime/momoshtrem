@@ -382,7 +382,7 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
   - no proposal has `replaces` (it would replace a file the item already has, a torrent or an HDRezka stream).
 - **Dry runs** (Inspect, §6 "Search") are read-only: PATCH and reclassify answer `409 dry_run`, as Apply does; Discard works. For a title not in the library, `item.id` is null and `ProposalTarget.episode_id` is a TMDB episode id.
 - **Restart.** Jobs before `resolving` start again from `queued`. An interrupted `resolving` gets `ai_error` and its status recomputed (`needs_review`, or `ready` when nothing is pending), keeping the rules' proposals; it isn't auto-applied. Apply and re-check never need the torrent loaded: the file list is stored as proposals.
-- **Failure.** A failed job has `error` for the user; the database also keeps why for code (`error_code`: `metadata_timeout`, `no_videos`, `no_torrents`, `title_gone`, `invalid_magnet`, `torrent_error`, `internal`).
+- **Failure.** A failed job has `error` for the user; the database also keeps why for code (`error_code`: `metadata_timeout`, `no_videos`, `no_torrents`, `title_gone`, `invalid_magnet`, `torrent_error`, `internal`; `tmdb_unavailable` for a dry run on a title outside the library whose episodes TMDB couldn't give).
 
 **Endpoints**
 
@@ -390,10 +390,10 @@ Types: `web/src/lib/api/contract/assignment.ts`. Assigning a torrent creates a *
 |---|---|---|
 | `POST /shows/{id}/assign-torrent` with `{magnet_uri, hint?: {season?, episode?, text?}, indexer?}` | `202 {job_id}`, or `200 {job_id}` of the open job for the same show and info hash (the new hint is ignored) | `400 bad_request` (no `magnet_uri`, no BitTorrent info hash, or an invalid hint: a negative season, an episode below 1, text over 500 characters), `404` |
 | `POST /movies/{id}/assign-torrent` with `{magnet_uri, file_path?, indexer?}` | As for shows. `file_path` picks the file up front: it's accepted, the other candidates are ignored, and the job applies once classified | As for shows |
-| `GET /assignment-jobs/{id}` | `200 AssignmentJobDetail` | `404` |
+| `GET /assignment-jobs/{id}` | `200 AssignmentJobDetail` | `404`, `502 tmdb_unavailable` (a dry run on a title outside the library, when TMDB fails and nothing is cached) |
 | `GET /assignment-jobs?status=` | `{items: [AssignmentJob]}`, newest first, no dry runs. `status` is `open` (the default) or a comma-separated list of statuses | `400 bad_request` (unknown status) |
-| `PATCH /assignment-jobs/{id}/proposals` with `{items: [{id, decision?, episode_ids?}]}` | `200 AssignmentJobDetail`, all or nothing | `400 bad_request` (malformed body: an item with neither field, an empty `episode_ids`), `404`, `409 job_working`, `409 job_closed`, `422 validation_error` (well-formed but invalid) |
-| `POST /assignment-jobs/{id}/reclassify` with `{scope: "unresolved"\|"all", hint?}` | `202 {job_id}`; the job goes to `resolving` | `400 bad_request` (malformed body), `409 job_working`, `409 job_closed`, `503 unavailable` (no AI) |
+| `PATCH /assignment-jobs/{id}/proposals` with `{items: [{id, decision?, episode_ids?}]}` | `200 AssignmentJobDetail`, all or nothing | `400 bad_request` (malformed body: an item with neither field, an empty `episode_ids`), `404`, `409` with `dry_run`, `job_closed` or `job_working` (checked in that order), `422 validation_error` (well-formed but invalid) |
+| `POST /assignment-jobs/{id}/reclassify` with `{scope: "unresolved"\|"all", hint?}` | `202 {job_id}`; the job goes to `resolving` | `400 bad_request` (malformed body), `409` with `dry_run`, `job_closed` or `job_working` (checked in that order), `503 unavailable` (no AI) |
 | `POST /assignment-jobs/{id}/apply` | `200 AssignmentJobDetail` (`applied`) | `409` with `dry_run`, `job_closed`, `job_working`, `conflicting_proposals` or `pending_proposals`, checked in that order |
 | `POST /assignment-jobs/{id}/discard` | `200 AssignmentJobDetail` (`cancelled`; again for a cancelled job) | `409 job_closed` once applied or failed |
 | `GET /shows/{id}/episodes` | `{items: [{season_number, name, episodes: [{id, episode_number, absolute_number, name, air_date, has_file}]}]}` | `404` |
@@ -674,17 +674,19 @@ PUT  /settings/quality-profile QualityProfile → QualityProfile
 - The `.torrent` file is capped at 5 MB, read with `metainfo.Load`, and turned into a magnet with `dn` and trackers.
 - Errors: `400`; `404 not_found` (expired: search again); `502 torrent_unavailable`; `504 timeout` (15 s).
 
-**`POST /search/torrents/inspect`** with `{media_type, tmdb_id, release_id | magnet_uri, hint?: {season?, episode?}}` → `202 {job_id}`, or `200 {job_id}` when the same title and torrent were inspected in the last hour.
-- The job is a dry run (`dry_run: true`) with the AssignmentJob shape; `hint` becomes the job's hint.
+**`POST /search/torrents/inspect`** with `{media_type, tmdb_id, release_id | magnet_uri, hint?: {season?, episode?}}` → `202 {job_id}`, or `200 {job_id}` when the same title and torrent (info hash) were inspected in the last hour.
+- **Reuse:** the earlier dry run is answered only when it wasn't cancelled and didn't fail, and the title's library state is the same: a title added to the library since gets a new dry run, with library ids. The new hint is then ignored.
+- The job is a dry run (`dry_run: true`) with the AssignmentJob shape; `hint` becomes the job's hint (season and episode; shows only). A `release_id` is resolved as `resolve` does, and the release's indexer fills `torrent.indexer`; a `magnet_uri` is used as it is.
 - For a title not in the library:
   - `item.id` is null, and `item.title`, `year` and `poster_path` come from TMDB;
   - for a show, `targets[].episode_id` is the TMDB episode id;
-  - there's no metadata refresh, and the classifier runs rules only.
+  - there's no metadata refresh, and the classifier runs rules only (`ai_available` is false);
+  - `progress.seasons` and `episodes` count TMDB's seasons and episodes, specials included.
 - A library show runs the normal pipeline, AI included.
 - Dry runs are read-only: PATCH and reclassify answer `409 dry_run`, as Apply already does. Discard works.
 - Dry runs are deleted after 24 h, and their torrent is dropped then unless something else uses it.
 - Inspect is a nested sheet inside the search sheet, not a URL sheet.
-- Errors: `400 bad_request` (neither `release_id` nor `magnet_uri`, a magnet without an info hash), `404 not_found` (an expired release or an unknown TMDB title), and resolve's `502` and `504` for a release without a magnet.
+- Errors: `400 bad_request` (neither `release_id` nor `magnet_uri`, an unknown `media_type`, no `tmdb_id`, a magnet without an info hash, a negative season or an episode below 1), `404 not_found` (an expired release or an unknown TMDB title), `502 tmdb_unavailable` (TMDB is down for a title outside the library), and resolve's `502 torrent_unavailable` and `504 timeout` for a `release_id`.
 
 **`GET` and `PUT /settings/quality-profile`**
 - `PUT` takes the whole profile and answers the saved one. Invalid values are `422 validation_error`, naming the field ("max_gb_per_hour must be between 1 and 20"); a value of the wrong JSON type is `400 bad_request`.
