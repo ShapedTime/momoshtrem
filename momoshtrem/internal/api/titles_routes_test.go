@@ -58,6 +58,12 @@ func (f *fakeCatalog) Library(_ context.Context, p catalog.LibraryParams) (*cata
 	if f.err != nil {
 		return nil, f.err
 	}
+	// As the catalog does: malformed ids are an invalid query
+	if p.IDs != "" {
+		if _, _, err := catalog.ParseLibraryIDs(p.IDs); err != nil {
+			return nil, err
+		}
+	}
 	return &catalog.LibraryPage{Items: []catalog.LibraryItem{}, Total: 0, Page: 1, PageSize: 50}, nil
 }
 
@@ -84,6 +90,15 @@ func doBody(t *testing.T, s *Server, method, path, body string) *httptest.Respon
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	return rec
+}
+
+// manyIDs is an ids parameter naming n movies.
+func manyIDs(n int) string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("movie:%d", i+1)
+	}
+	return strings.Join(ids, ",")
 }
 
 // tmdbErr wraps a tmdb error the way the catalog does.
@@ -147,6 +162,14 @@ func TestTitleRoutes_Status(t *testing.T) {
 		{"library database error", "GET", "/api/library", "", errors.New("conn reset"), false, 500, CodeInternalError},
 		{"library request canceled", "GET", "/api/library", "", fmt.Errorf("list: %w", context.Canceled), false, StatusClientClosedRequest, CodeClientClosed},
 		{"library without catalog", "GET", "/api/library", "", nil, true, 503, CodeUnavailable},
+		{"library ids", "GET", "/api/library?ids=movie:603,tv:1399", "", nil, false, 200, ""},
+		{"library ids unknown type", "GET", "/api/library?ids=person:1", "", nil, false, 400, CodeBadRequest},
+		{"library ids not a number", "GET", "/api/library?ids=movie:matrix", "", nil, false, 400, CodeBadRequest},
+		{"library ids without a type", "GET", "/api/library?ids=603", "", nil, false, 400, CodeBadRequest},
+		{"library ids empty entry", "GET", "/api/library?ids=movie:603,,tv:1399", "", nil, false, 400, CodeBadRequest},
+		{"library ids zero", "GET", "/api/library?ids=tv:0", "", nil, false, 400, CodeBadRequest},
+		{"library ids over 200", "GET", "/api/library?ids=" + manyIDs(201), "", nil, false, 400, CodeBadRequest},
+		{"library ids at 200", "GET", "/api/library?ids=" + manyIDs(200), "", nil, false, 200, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,8 +213,15 @@ func TestTitleRoutes_Bodies(t *testing.T) {
 	if rec.Code != 200 || cat.params != want {
 		t.Errorf("library params = %+v, want %+v", cat.params, want)
 	}
-	if got := rec.Body.String(); got != `{"items":[],"total":0,"page":1,"page_size":50}` {
+	if got := rec.Body.String(); got != `{"items":[],"total":0,"page":1,"page_size":50,`+
+		`"counts":{"all":0,"movie":0,"tv":0,"watching":0,"ready":0,"incomplete":0,"needs_review":0},`+
+		`"summary":{"total":0,"size_bytes":0,"ready":0}}` {
 		t.Errorf("library body = %s", got)
+	}
+
+	doBody(t, s, "GET", "/api/library?ids=movie:603,tv:1399&q=matrix", "")
+	if want := (catalog.LibraryParams{Query: "matrix", IDs: "movie:603,tv:1399"}); cat.params != want {
+		t.Errorf("library lookup params = %+v, want %+v", cat.params, want)
 	}
 }
 

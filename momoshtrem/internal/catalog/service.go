@@ -40,6 +40,7 @@ type Store interface {
 	ShowEpisodes(ctx context.Context, showID int64) ([]library.Season, error)
 	SeasonByTMDBID(ctx context.Context, tmdbID, seasonNumber int) (*library.SeasonView, error)
 	LibraryItems(ctx context.Context, q library.LibraryQuery) ([]library.LibraryItem, int, error)
+	ListLibrary(ctx context.Context, q library.LibraryQuery) (*library.LibraryListing, error)
 	ReviewState(ctx context.Context, mediaType string, libraryID int64) (*library.ReviewState, error)
 }
 

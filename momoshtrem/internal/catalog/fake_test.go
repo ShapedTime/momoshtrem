@@ -19,9 +19,11 @@ type fakeStore struct {
 	shows   map[int]*library.Show      // by TMDB ID
 	seasons map[int64][]library.Season // by show ID, full episode rows
 	// library answers LibraryItems; OnlyTMDB filters it.
-	library   []library.LibraryItem
-	libTotal  int
-	lastQuery library.LibraryQuery
+	library    []library.LibraryItem
+	libTotal   int
+	libCounts  library.LibraryCounts
+	libSummary library.LibrarySummary
+	lastQuery  library.LibraryQuery
 	// reviews answers ReviewState by "tv:<id>" or "movie:<id>"; none is
 	// an empty review.
 	reviews map[string]*library.ReviewState
@@ -152,6 +154,15 @@ func (f *fakeStore) LibraryItems(_ context.Context, q library.LibraryQuery) ([]l
 		}
 	}
 	return out, len(out), nil
+}
+
+// ListLibrary answers like LibraryItems, with libCounts and libSummary.
+func (f *fakeStore) ListLibrary(ctx context.Context, q library.LibraryQuery) (*library.LibraryListing, error) {
+	items, total, err := f.LibraryItems(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return &library.LibraryListing{Items: items, Total: total, Counts: f.libCounts, Summary: f.libSummary}, nil
 }
 
 // fakeTMDB serves canned details and counts calls; errs forces errors.

@@ -92,6 +92,17 @@ func (v *torrentView) downloadingFiles() []library.FileRef {
 	return refs
 }
 
+// filesProgress is how far along these files are together, as the client
+// sees them now; a file it doesn't know counts as nothing.
+func (v *torrentView) filesProgress(refs []library.FileRef) (done, length int64) {
+	for _, ref := range refs {
+		p := v.state(ref.InfoHash).files[ref.Path]
+		done += p.BytesCompleted
+		length += p.Length
+	}
+	return done, length
+}
+
 // pct is done/length in whole percent, rounded down so a file is only ever
 // 100 once it's complete.
 func pct(done, length int64) int {

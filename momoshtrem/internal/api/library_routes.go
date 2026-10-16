@@ -16,7 +16,9 @@ func (s *Server) registerLibraryRoutes(api *gin.RouterGroup) {
 
 // getLibrary lists the library a page at a time:
 // ?type=movie|tv&status=ready|incomplete|needs_review|watching
-// &sort=added|title|last_watched|size&q=&page=&page_size= (50, max 200).
+// &sort=added|title|last_watched|size&q=&page=&page_size= (50, max 200),
+// or looks titles up with &ids=movie:603,tv:1399 (at most 200). Malformed
+// ids, like unknown filters, answer 400.
 func (s *Server) getLibrary(c *gin.Context) {
 	page, ok := queryInt(c, "page")
 	if !ok {
@@ -34,6 +36,7 @@ func (s *Server) getLibrary(c *gin.Context) {
 		Query:     c.Query("q"),
 		Page:      page,
 		PageSize:  pageSize,
+		IDs:       c.Query("ids"),
 	})
 	if err != nil {
 		catalogErrorResponse(c, err)

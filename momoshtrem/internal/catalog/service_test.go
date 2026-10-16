@@ -520,12 +520,21 @@ func TestCallCounts_DontGrowWithEpisodes(t *testing.T) {
 
 func TestLibrary(t *testing.T) {
 	f := newFixture()
+	reviewJob := int64(101)
 	f.store.library = []library.LibraryItem{
 		{MediaType: "tv", ID: 3, TMDBID: frierenTMDB, Title: "Frieren", Year: 2023, PosterPath: "/f.jpg", CreatedAt: addedAt,
-			EpisodesTotal: intPtr(38), EpisodesReady: intPtr(28), SizeBytes: 28_000, Stage: "needs_torrent"},
-		{MediaType: "movie", ID: 7, TMDBID: duneTMDB, Title: "Dune", Year: 2024, CreatedAt: addedAt, SizeBytes: 18_400, Stage: "ready"},
+			EpisodesTotal: intPtr(38), EpisodesReady: intPtr(28), SizeBytes: 28_000, Stage: "needs_torrent",
+			NeedsReview: 2, ReviewJobID: &reviewJob, HasFile: true,
+			// E28 is 42% fetched (the fixture's torrent client)
+			Downloading: []library.FileRef{{InfoHash: frierenHash, Path: "Frieren S01/Frieren.S01E28.mkv"}},
+			Missing:     &library.FrontierRun{SeasonNumber: 1, From: 29, To: 38, AbsoluteFrom: intPtr(29), AbsoluteTo: intPtr(38), Count: 10}},
+		{MediaType: "movie", ID: 7, TMDBID: duneTMDB, Title: "Dune", Year: 2024, CreatedAt: addedAt, SizeBytes: 18_400, Stage: "ready",
+			Runtime: 166, Resolution: "2160p", HasFile: true, FilePath: "Dune.Part.Two.2024.2160p/Dune.mkv"},
+		{MediaType: "movie", ID: 9, TMDBID: 1054867, Title: "One Battle After Another", Year: 2025, CreatedAt: addedAt, Stage: "needs_torrent"},
 	}
 	f.store.libTotal = 51
+	f.store.libCounts = library.LibraryCounts{All: 51, Movies: 20, Shows: 31, Ready: 40, Incomplete: 11, NeedsReview: 2}
+	f.store.libSummary = library.LibrarySummary{Total: 60, SizeBytes: 2_000_000_000_000, Ready: 45}
 
 	page, err := f.svc.Library(context.Background(), LibraryParams{Status: StatusIncomplete, Sort: "size", Query: "fr", Page: 2, PageSize: 500})
 	if err != nil {
@@ -555,9 +564,12 @@ func TestLibrary(t *testing.T) {
 		t.Errorf("huge page = %+v (offset %d), %v; want it capped at %d", page, f.store.lastQuery.Offset, err, MaxPage)
 	}
 
+	// Watching matches nothing in the database until B5, but the page still
+	// carries the counts and summary.
 	before := f.store.total()
 	page, err = f.svc.Library(context.Background(), LibraryParams{Status: StatusWatching})
-	if err != nil || page.Total != 0 || len(page.Items) != 0 || page.Items == nil || f.store.total() != before {
+	if err != nil || f.store.lastQuery.Status != StatusWatching || f.store.total() != before+1 || page.Counts.All != 51 ||
+		page.Counts.Watching != 0 || page.Summary.Total != 60 {
 		t.Errorf("watching = %+v, %v (store calls %d)", page, err, f.store.total()-before)
 	}
 
@@ -568,9 +580,52 @@ func TestLibrary(t *testing.T) {
 		t.Errorf("needs_review = %+v (query %+v), %v", page, f.store.lastQuery, err)
 	}
 
-	for _, p := range []LibraryParams{{MediaType: "music"}, {Status: "done"}, {Sort: "rating"}, {Page: -1}, {PageSize: -5}} {
+	// ids: one page of every title named, whatever page and page_size say.
+	page, err = f.svc.Library(context.Background(), LibraryParams{IDs: "movie:693134, tv:209867,movie:693134,movie:603", Page: 3, PageSize: 1, Query: "d"})
+	q = f.store.lastQuery
+	if err != nil || page.Page != 1 || page.PageSize != 3 || q.Offset != 0 || q.Limit != 3 || q.Search != "d" ||
+		!reflect.DeepEqual(q.IDs, &library.TMDBIDs{Movies: []int{693134, 603}, Shows: []int{209867}}) || q.OnlyTMDB != nil {
+		t.Errorf("ids = page %d size %d, query %+v, %v", page.Page, page.PageSize, q, err)
+	}
+
+	for _, p := range []LibraryParams{{MediaType: "music"}, {Status: "done"}, {Sort: "rating"}, {Page: -1}, {PageSize: -5},
+		{IDs: "movie"}, {IDs: "show:1"}, {IDs: "movie:-1"}, {IDs: "movie:1,"}, {IDs: strings.Repeat("tv:1,", 200) + "tv:2"}} {
 		if _, err := f.svc.Library(context.Background(), p); !errors.Is(err, ErrInvalidQuery) {
 			t.Errorf("%+v: err = %v, want ErrInvalidQuery", p, err)
+		}
+	}
+}
+
+func TestParseLibraryIDs(t *testing.T) {
+	tests := []struct {
+		raw    string
+		movies []int
+		shows  []int
+		n      int
+		ok     bool
+	}{
+		{"movie:603", []int{603}, nil, 1, true},
+		{"movie:603,tv:1399", []int{603}, []int{1399}, 2, true},
+		{" tv:1399 , tv:1399,movie:1", []int{1}, []int{1399}, 2, true}, // spaces trimmed, repeats once
+		{strings.TrimSuffix(strings.Repeat("movie:7,", MaxLibraryIDs), ","), []int{7}, nil, 1, true},
+		{strings.Repeat("movie:7,", MaxLibraryIDs) + "movie:8", nil, nil, 0, false},
+		{"", nil, nil, 0, false},
+		{"movie:", nil, nil, 0, false},
+		{"tv:1x", nil, nil, 0, false},
+		{"TV:1", nil, nil, 0, false},
+		{"movie:0", nil, nil, 0, false},
+		{"movie:1:2", nil, nil, 0, false},
+	}
+	for _, tt := range tests {
+		ids, n, err := ParseLibraryIDs(tt.raw)
+		if !tt.ok {
+			if !errors.Is(err, ErrInvalidQuery) {
+				t.Errorf("%q: err = %v, want ErrInvalidQuery", tt.raw, err)
+			}
+			continue
+		}
+		if err != nil || n != tt.n || !reflect.DeepEqual(ids.Movies, tt.movies) || !reflect.DeepEqual(ids.Shows, tt.shows) {
+			t.Errorf("%q = %+v (%d), %v", tt.raw, ids, n, err)
 		}
 	}
 }
@@ -686,9 +741,13 @@ func TestContractFields(t *testing.T) {
 		{"TitleStream", TitleStream{}, []string{"provider", "title", "url", "translator", "quality", "size_bytes", "added_at"}},
 		{"EpisodeStream", EpisodeStream{}, []string{"translator", "quality"}},
 		{"EpisodeRange", season.Ranges[0], []string{"label", "kind", "from", "to", "absolute_from", "absolute_to", "missing"}},
-		{"Paginated", page, []string{"items", "total", "page", "page_size"}},
+		{"LibraryPage", page, []string{"items", "total", "page", "page_size", "counts", "summary"}},
+		{"LibraryCounts", page.Counts, []string{"all", "movie", "tv", "watching", "ready", "incomplete", "needs_review"}},
+		{"LibrarySummary", page.Summary, []string{"total", "size_bytes", "ready"}},
 		{"LibraryItem", page.Items[0], []string{"id", "media_type", "tmdb_id", "title", "year", "poster_path", "availability_stage",
-			"episodes_total", "episodes_ready", "episodes_watched", "needs_review", "size_bytes", "added_at", "last_watched_at"}},
+			"episodes_total", "episodes_ready", "episodes_watched", "needs_review", "size_bytes", "added_at", "last_watched_at",
+			"runtime", "resolution", "webdav_path", "webdav_url", "review_job_id", "download", "missing", "streaming"}},
+		{"LibraryDownload", LibraryDownload{}, []string{"pct", "info_hash"}},
 		{"EpisodeGroup", EpisodeGroup{}, []string{"id", "name", "type", "group_count", "episode_count"}},
 	}
 	for _, tt := range tests {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -318,7 +319,15 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 			_, err := it.svc.Library(ctx, LibraryParams{Query: it.tag, Status: StatusNeedsReview})
 			return err
 		}},
-		{"library past the end", 2, func() error {
+		{"library watching", 1, func() error {
+			_, err := it.svc.Library(ctx, LibraryParams{Status: StatusWatching})
+			return err
+		}},
+		{"library lookup", 1, func() error {
+			_, err := it.svc.Library(ctx, LibraryParams{IDs: fmt.Sprintf("movie:%d,tv:%d,tv:%d", movieID, showID, it.id(8))})
+			return err
+		}},
+		{"library past the end", 1, func() error {
 			_, err := it.svc.Library(ctx, LibraryParams{Query: it.tag, Page: 9})
 			return err
 		}},
@@ -358,6 +367,25 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 	}
 	if !strings.HasSuffix(*movieTitle.Library.WebDAVURL, "/Movies/Movie%20"+it.tag+"%20%282024%29/Movie%20"+it.tag+"%20%282024%29.mkv") {
 		t.Errorf("movie url = %s", *movieTitle.Library.WebDAVURL)
+	}
+
+	// The lookup Discover and Search use: the two titles in the library,
+	// with what their title pages say.
+	lookup, err := it.svc.Library(ctx, LibraryParams{IDs: fmt.Sprintf("movie:%d,tv:%d,tv:%d", movieID, showID, it.id(8))})
+	if err != nil || lookup.Total != 2 || len(lookup.Items) != 2 || lookup.PageSize != 3 || lookup.Counts.All != 2 || lookup.Summary.Total < 3 {
+		t.Fatalf("lookup = %+v, %v", lookup, err)
+	}
+	for _, item := range lookup.Items {
+		switch item.MediaType {
+		case "movie":
+			if !reflect.DeepEqual(item.WebDAVURL, movieTitle.Library.WebDAVURL) || item.Resolution == nil || *item.Resolution != "1080p" {
+				t.Errorf("movie item = %+v", item)
+			}
+		case "tv":
+			if !reflect.DeepEqual(item.Missing, lib.Missing) || !reflect.DeepEqual(item.WebDAVURL, lib.WebDAVURL) || item.Runtime != nil {
+				t.Errorf("show item = %+v, missing %+v", item, item.Missing)
+			}
+		}
 	}
 }
 
@@ -474,6 +502,13 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			t.Errorf("%s: title %s %d/%d, library %s %d/%d", item.Title, lib.AvailabilityStage, *lib.EpisodesReady, *lib.EpisodesTotal,
 				item.AvailabilityStage, *item.EpisodesReady, *item.EpisodesTotal)
 		}
+		// The fields the library card reads from the title page's state
+		if !reflect.DeepEqual(item.Missing, lib.Missing) || !reflect.DeepEqual(item.WebDAVPath, lib.WebDAVPath) ||
+			!reflect.DeepEqual(item.WebDAVURL, lib.WebDAVURL) || !reflect.DeepEqual(item.ReviewJobID, lib.ReviewJobID) ||
+			(item.Download == nil) != (lib.Download == nil) || (item.Download != nil && item.Download.Pct != lib.Download.Pct) {
+			t.Errorf("%s: library missing %+v path %v download %+v review %v; title missing %+v path %v download %+v review %v",
+				item.Title, item.Missing, item.WebDAVPath, item.Download, item.ReviewJobID, lib.Missing, lib.WebDAVPath, lib.Download, lib.ReviewJobID)
+		}
 		v := byTitle[item.Title]
 		if item.SizeBytes != v.size {
 			t.Errorf("%s: size %d, want %d", item.Title, item.SizeBytes, v.size)
@@ -497,8 +532,9 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 		t.Fatal(err)
 	}
 	lib := movieTitle.Library
-	if item := movies.Items[0]; item.AvailabilityStage != StageReady || lib.AvailabilityStage != StageReady || item.SizeBytes != streamSize {
-		t.Errorf("HDRezka movie: library %s %d, title %s", item.AvailabilityStage, item.SizeBytes, lib.AvailabilityStage)
+	if item := movies.Items[0]; item.AvailabilityStage != StageReady || lib.AvailabilityStage != StageReady || item.SizeBytes != streamSize ||
+		!reflect.DeepEqual(item.WebDAVPath, lib.WebDAVPath) || item.Download != nil || item.Resolution == nil || *item.Resolution != "1080p" {
+		t.Errorf("HDRezka movie: library %s %d %v, title %s %v", item.AvailabilityStage, item.SizeBytes, item.WebDAVPath, lib.AvailabilityStage, lib.WebDAVPath)
 	}
 	if lib.Torrent != nil || lib.Download != nil || lib.WebDAVPath == nil || !strings.HasSuffix(*lib.WebDAVPath, ").mp4") {
 		t.Errorf("HDRezka movie library = %+v", lib)

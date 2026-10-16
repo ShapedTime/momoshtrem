@@ -265,14 +265,53 @@ type LibraryItem struct {
 	SizeBytes         int64      `json:"size_bytes"`
 	AddedAt           time.Time  `json:"added_at"`
 	LastWatchedAt     *time.Time `json:"last_watched_at"`
+	Runtime           *int       `json:"runtime"`    // movies: minutes; null for shows and when unknown
+	Resolution        *string    `json:"resolution"` // movies: the assigned file's
+	// WebDAVPath and WebDAVURL are the title page's: null until something
+	// is assigned.
+	WebDAVPath  *string          `json:"webdav_path"`
+	WebDAVURL   *string          `json:"webdav_url"`
+	ReviewJobID *int64           `json:"review_job_id"` // the mapping job to review (review rules)
+	Download    *LibraryDownload `json:"download"`      // while a file is being fetched
+	Missing     *MissingRun      `json:"missing"`       // shows: the first frontier run
+	Streaming   bool             `json:"streaming"`     // false until B6c (#99) knows the readers
 }
 
-// LibraryPage is GET /library: a Paginated<LibraryItem>.
+// LibraryDownload is how far along a library title's files are.
+type LibraryDownload struct {
+	Pct int `json:"pct"` // shows: combined over the files being fetched
+	// InfoHash is one of the torrents being fetched, for "See download".
+	InfoHash string `json:"info_hash"`
+}
+
+// LibraryCounts are /library's filter counts. They honour q and ids, never
+// type or status.
+type LibraryCounts struct {
+	All         int `json:"all"`
+	Movie       int `json:"movie"`
+	TV          int `json:"tv"`
+	Watching    int `json:"watching"` // 0 until B5
+	Ready       int `json:"ready"`
+	Incomplete  int `json:"incomplete"`
+	NeedsReview int `json:"needs_review"`
+}
+
+// LibrarySummary is the whole library, whatever the parameters.
+type LibrarySummary struct {
+	Total     int   `json:"total"`
+	SizeBytes int64 `json:"size_bytes"`
+	Ready     int   `json:"ready"`
+}
+
+// LibraryPage is GET /library: a Paginated<LibraryItem>, plus the filter
+// counts and the library's summary.
 type LibraryPage struct {
-	Items    []LibraryItem `json:"items"`
-	Total    int           `json:"total"`
-	Page     int           `json:"page"`
-	PageSize int           `json:"page_size"`
+	Items    []LibraryItem  `json:"items"`
+	Total    int            `json:"total"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"page_size"`
+	Counts   LibraryCounts  `json:"counts"`
+	Summary  LibrarySummary `json:"summary"`
 }
 
 // EpisodeGroup is one entry of GET /shows/{id}/episode-groups.
