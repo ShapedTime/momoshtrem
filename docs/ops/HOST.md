@@ -104,6 +104,8 @@ MOMOSHTREM_PGDATA=/mnt/data/momoshtrem/pgdata
 JACKETT_DATA=/mnt/data/jackett
 ```
 
+The VM's own clock zone doesn't reach the containers. momoshtrem's zone is `TZ` in `.env`, UTC when unset. Set it to the local zone, e.g. `TZ=Europe/Berlin`, and the nightly picks run at 03:00 local time ([`DEPLOY.md`](DEPLOY.md) §1, with `ANTHROPIC_API_KEY`).
+
 ## 5. The boot unit
 
 `momoshtrem-stack.service` runs `docker compose up -d` in `/opt/momoshtrem` at boot. The old VM's unit pointed at a missing folder and failed (AS-IS §11). This one is fixed in three ways:

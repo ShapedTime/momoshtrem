@@ -70,7 +70,7 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 - **Migrations are embedded and run at startup, forward only.** An old binary on a newer schema only logs a warning.
 - **Moving from `e063821` to `main`** means:
   - the `web` service replaces `prettytvcatalog`;
-  - new env vars: `BACKEND_API_TOKEN`, `SECRET_KEY`, `APP_USERNAME`, `TRUSTED_PROXY_HOPS`, and the Trakt and Anthropic keys;
+  - new env vars: `BACKEND_API_TOKEN`, `SECRET_KEY`, `APP_USERNAME`, `TRUSTED_PROXY_HOPS`, the Trakt and Anthropic keys, and `TZ` (the AI features' zone; DEPLOY.md §1);
   - migrations 002, 003 and 007, followed by `backfill-metadata` (v2 PLAN H3).
 
 ## 4. Target shape

@@ -44,7 +44,9 @@ The service refuses to start without a database URL, with a port outside 1–655
 | `HDREZKA_ENABLED` | `hdrezka.enabled` | HDRezka as a second source of files ([epic #63](https://github.com/ShapedTime/momoshtrem/issues/63)). Default `false`. Run [`hdrezka-probe`](#checking-hdrezka) before turning it on. |
 | `HDREZKA_URL` | `hdrezka.url` | The HDRezka mirror, `http(s)://host[:port]` with no path. Default `https://rezka.ag`. |
 | `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | `opensubtitles.*` | Subtitle download. |
-| `ANTHROPIC_API_KEY` | `ai.anthropic_api_key` | AI classifier and recommendations; disabled when unset. |
+| `ANTHROPIC_API_KEY` | `ai.anthropic_api_key` | The AI features: the episode-mapping AI, the picks and Ask momoshtrem; disabled when unset. |
+| `RECS_DEBUG` | `ai.recs_debug` | Dev only: `true` serves `GET /api/recommendations/debug/profile` (the taste profile and candidate pool, built now, stored nowhere). Default `false`. |
+| `TZ` | | The service's time zone, an IANA name (compose passes `UTC` when unset; an unknown name falls back to UTC). The 03:00 picks run, the hero picks' day, Ask's daily limit and the AI budget's month are in this zone. The startup log prints it. |
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | `trakt.*` | Read-only Trakt integration. The secret is optional: new Trakt apps have none. |
 | `SECRET_KEY` | `security.secret_key` | Encrypts Trakt tokens at rest. |
 | `METRICS_ENABLED`, `METRICS_PORT` | `metrics.*` | Prometheus endpoint. |
@@ -143,7 +145,7 @@ Assigning a torrent (`POST /api/shows/{id}/assign-torrent`, or `/movies/{id}/…
 
 Apply writes the assignments in one transaction and rebuilds the WebDAV tree. A file that holds several episodes is one entry, `Show - S01E01-E02 - Name.ext`. Assignments made before #5 (`match_source` NULL) keep their per-episode names, so their Infuse paths don't move. `?wait=true` keeps the old synchronous call until H2. The state machine, endpoints and rules are in [PLAN §6 "Assignment"](../redesign/PLAN.md).
 
-- **AI settings** are the `ai` key of `app_settings`, with defaults: the classifier on, `claude-haiku-5-5`, auto-apply at high confidence, no monthly budget. #9 serves the endpoints to change them.
+- **AI settings** are the `ai` key of `app_settings`, with defaults: the classifier on, `claude-haiku-5-5`, auto-apply at high confidence, and a $15 monthly budget that every AI feature shares (`null`: no cap). `GET`/`PUT /api/settings/ai` read and change them (Settings › AI & picks).
 - **Accuracy** is measured on the corpus in `internal/identify/testdata/`: `go test ./internal/identify` checks the gates (≥ 95% exact, zero wrong `high`). `go run ./cmd/classifier-eval` runs the golden torrents through the rules and the AI and reports accuracy, cost and latency. Its AI modes cost cents; `-modes rules` and `-dry-run` are free.
 
 ## Torrent activity
@@ -169,7 +171,7 @@ Each torrent's metainfo is kept in `{metadata_folder}/metainfo/<hash>.torrent` w
 
 ## Tests
 
-`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service`, `internal/subtitle`, `internal/activity` and `internal/api`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
+`go vet ./... && go test ./...` needs no services: TMDB and HDRezka tests use an `httptest` server and fixtures in `internal/tmdb/testdata/` and `internal/hdrezka/testdata/` (recorded from the live site, with the signed CDN links and the client IP replaced), and Anthropic sits behind a fake. The Postgres tests (`internal/library`, `internal/metadata`, `internal/catalog`, `internal/service`, `internal/subtitle`, `internal/activity`, `internal/me`, `internal/trakt`, `internal/recommend/ask`, `internal/recommend/schedule`, `internal/api` and `cmd/momoshtrem`) skip unless `MOMOSHTREM_TEST_DATABASE_URL` points at a throwaway database (they write to it):
 
 ```bash
 docker run -d --rm --name momo-test-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=momo -p 55432:5432 postgres:16-alpine
