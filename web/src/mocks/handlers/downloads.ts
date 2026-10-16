@@ -26,6 +26,7 @@ import {
 } from '../fixtures/downloads';
 import { mockStorageDocument, storageCaps } from '../fixtures/settings';
 import { buildSeason, buildTitle, findByLibraryId, findEpisode, libraryKey } from '../fixtures/titles';
+import { scenario } from '../scenario';
 import { mockLibrary } from './titles';
 import { mockTorrents } from './torrents';
 import { apiError, isRecord, jsonBody, latency, noContent, notFound } from './util';
@@ -239,6 +240,8 @@ function targetFrom(search: URLSearchParams): Record<string, unknown> {
 }
 
 export const downloadsHandlers = [
+  // `downloads-absent`: a backend before #77's P4 has no /downloads routes at all (the others fall through)
+  http.all('*/api/downloads*', () => (scenario() === 'downloads-absent' ? notFound('404 page not found') : undefined)),
   http.get('*/api/downloads', async () => {
     await latency();
     return HttpResponse.json(mockDownloadList());

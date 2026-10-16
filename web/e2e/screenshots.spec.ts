@@ -606,6 +606,25 @@ test.describe('activity', () => {
     await shoot(page, testInfo, 'activity/offline', { fullPage: true });
   });
 
+  test('downloads waiting for the stream', async ({ page }, testInfo) => {
+    await signIn(page, '/activity');
+    await ready(page);
+    // Pause while streaming on: Severance streams, so the kept downloads wait (#77)
+    await page.evaluate(() =>
+      fetch('/api/settings/storage', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ background: { pause_while_streaming: true } }) })
+    );
+    await page.getByRole('status').filter({ hasText: 'Downloads wait for the stream to end' }).waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'activity/waiting', { fullPage: true });
+  });
+
+  test('kept torrent detail', async ({ page }, testInfo) => {
+    await signIn(page, '/activity/c9d4a7b3e5f60718293a4b5c6d7e8f90a1b2c3d4');
+    await page.getByRole('region', { name: 'Kept & smart' }).waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'activity/detail-kept', { fullPage: true });
+  });
+
   test('remove dialog', async ({ page }, testInfo) => {
     await signIn(page, '/activity');
     await ready(page);

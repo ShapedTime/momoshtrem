@@ -1,4 +1,5 @@
 import type { StreamingSession, TorrentListItem } from '@/lib/api/contract';
+import { wantsMore } from './downloads';
 import { isWeak } from './health';
 import { isActive } from './sections';
 
@@ -18,14 +19,17 @@ function player(session: StreamingSession): string {
 }
 
 /**
- * - nothing streaming or downloading, and no session (HDRezka's count): "All quiet…";
+ * - nothing streaming or downloading, no download waiting its turn (#77; a paused
+ *   torrent's wait for you), and no session (HDRezka's count): "All quiet…";
  * - otherwise "Everything's working.", plus "Infuse is streaming smoothly" when a
  *   session plays, and "{Title} is slow because it has few peers" for a weak torrent.
  *
  * `now` is the "Streaming now" session (paused torrents' sessions already skipped).
  */
 export function statusLine(items: readonly TorrentListItem[], now: StreamingSession | null): StatusLine {
-  if (!items.some(isActive) && !now) return { lead: null, text: 'All quiet. Nothing in the queue, and the server is fine.' };
+  // A torrent you paused isn't waiting: its downloads wait for you
+  const waiting = items.some((item) => item.state !== 'paused' && wantsMore(item));
+  if (!items.some(isActive) && !waiting && !now) return { lead: null, text: 'All quiet. Nothing in the queue, and the server is fine.' };
   const weak = items.find(isWeak);
   const weakName = weak ? (weak.titles[0]?.title ?? 'One torrent') : null;
   const streaming = now ? `${player(now)} is streaming smoothly` : null;

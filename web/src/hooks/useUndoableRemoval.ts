@@ -2,7 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import { type QueryKey, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { type LucideIcon, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui';
 import {
   addPendingRemoval,
@@ -32,6 +32,11 @@ export function usePendingRemovals(): ReadonlyMap<string, PendingRemoval> {
 export interface UndoableRemoval extends PendingRemoval {
   /** Queries to refresh once it's sent (or failed), e.g. `libraryKeys.all`. */
   invalidate?: readonly QueryKey[];
+  /**
+   * The toasts' words when "Removed {label}" isn't what happens (Stop keeping a
+   * download): the Undo toast's title and line, and the failure's title.
+   */
+  copy?: { title: string; body: string; failed: string; icon?: LucideIcon };
 }
 
 /**
@@ -47,7 +52,7 @@ export function useUndoableRemoval() {
 
   return useCallback(
     (removal: UndoableRemoval) => {
-      const { invalidate = [], ...pending } = removal;
+      const { invalidate = [], copy, ...pending } = removal;
       // Inactive caches are dropped rather than marked stale: a page opened later
       // must not show the removed item from its old cache while it refetches.
       const refresh = () =>
@@ -61,9 +66,9 @@ export function useUndoableRemoval() {
       addPendingRemoval(pending);
       toast({
         tone: 'info',
-        icon: Trash2,
-        title: `Removed ${removal.label}`,
-        body: 'Undo within 10 seconds',
+        icon: copy?.icon ?? Trash2,
+        title: copy?.title ?? `Removed ${removal.label}`,
+        body: copy ? `${copy.body} Undo within 10 seconds.` : 'Undo within 10 seconds',
         durationMs: UNDO_MS,
         action: { label: 'Undo', onClick: () => undoPendingRemoval(removal.key) },
         onClose: async () => {
@@ -82,7 +87,7 @@ export function useUndoableRemoval() {
             }, UNCERTAIN_HOLD_MS);
           } else if (outcome.result === 'failed') {
             const cause = outcome.error instanceof Error ? outcome.error.message : '';
-            toast({ tone: 'error', title: `Couldn’t remove ${removal.label}`, body: [cause, 'It’s back where it was.'].filter(Boolean).join(' · ') });
+            toast({ tone: 'error', title: copy?.failed ?? `Couldn’t remove ${removal.label}`, body: [cause, 'It’s back where it was.'].filter(Boolean).join(' · ') });
             await refresh().catch(() => undefined);
           }
         },

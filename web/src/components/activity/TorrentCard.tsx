@@ -2,33 +2,36 @@ import Link from 'next/link';
 import { ArrowDown, ArrowUp, HardDrive, Pause, Play, Trash2, TriangleAlert, Tv, Users } from 'lucide-react';
 import { Button, ButtonLink, IconButton, Media, Progress, ReleaseName, StatusPill } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
-import type { TorrentListItem } from '@/lib/api/contract';
+import type { TorrentHold, TorrentListItem } from '@/lib/api/contract';
+import { holdReasons, torrentPill, wantedProgress, wantsMore } from '@/lib/activity/downloads';
 import { formatRate, sessionBanner, torrentLabel } from '@/lib/activity/format';
 import { isWeak } from '@/lib/activity/health';
 import { formatBytes, plural } from '@/lib/title/format';
+import { keepReasonPill } from '@/lib/title/keep';
 import { cx } from '@/lib/utils/cx';
 
-/** The state pill (core.js `tcard`): Streaming now, a ring with %, Paused, Complete (only when it is), or Idle. */
+/**
+ * The state pill (core.js `tcard`): Streaming now, a ring with % (of what its
+ * downloads want, #77), Paused, On disk or why its downloads wait, Complete
+ * (only when it is), or Idle.
+ */
 export function TorrentStatePill({ torrent, size = 'md' }: { torrent: TorrentListItem; size?: 'md' | 'lg' }) {
-  const pct = torrent.progress !== null ? Math.floor(torrent.progress * 100) : null;
-  switch (torrent.state) {
-    case 'streaming':
-      return <StatusPill status="streaming" label="Streaming now" size={size} />;
-    case 'downloading':
-      return pct !== null ? (
-        <StatusPill status="downloading" label={size === 'lg' ? `Downloading ${pct}%` : `${pct}%`} pct={pct} size={size} />
-      ) : (
-        <StatusPill status="downloading" size={size} />
-      );
-    case 'paused':
-      return <StatusPill status="paused" size={size} />;
-    default:
-      return torrent.complete ? (
-        <StatusPill status="complete" label={size === 'lg' ? 'Complete · ready in Infuse' : undefined} size={size} />
-      ) : (
-        <StatusPill status="idle" size={size} />
-      );
-  }
+  const pill = torrentPill(torrent, size);
+  return <StatusPill status={pill.status} label={pill.label} pct={pill.pct} size={size} />;
+}
+
+/** Kept and Smart: the downloads that want its files (#77), each reason once. */
+export function HoldPills({ holds, size = 'md', className }: { holds: readonly TorrentHold[]; size?: 'md' | 'lg'; className?: string }) {
+  const reasons = holdReasons(holds);
+  if (reasons.length === 0) return null;
+  return (
+    <span className={cx('hold-pills', className)}>
+      {reasons.map((reason) => {
+        const pill = keepReasonPill(reason);
+        return <StatusPill key={reason} status={pill.status} label={pill.label} size={size} />;
+      })}
+    </span>
+  );
 }
 
 interface TorrentCardProps {
@@ -44,8 +47,9 @@ interface TorrentCardProps {
 
 /**
  * One torrent on Activity (core.js `ui.tcard`, HANDOFF §3 TorrentCard): poster
- * and label linking to its title, the release name, a state pill, progress,
- * speeds, peers and size, a few-peers warning, the streaming session, and
+ * and label linking to its title, the release name, Kept and Smart pills, a
+ * state pill, progress (of what its downloads want, with their ETA), speeds,
+ * peers and size, a few-peers warning, the streaming session, and
  * Pause/Resume, Details and Remove. Not the Jackett result card in components/torrent.
  */
 export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compact }: TorrentCardProps) {
@@ -55,7 +59,11 @@ export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compac
   const active = streaming || torrent.state === 'downloading';
   const session = streaming ? torrent.streaming[0] : undefined;
   const banner = session ? sessionBanner(session) : null;
-  const pct = torrent.progress !== null ? torrent.progress * 100 : null;
+  // What its downloads want counts, not the whole torrent; without downloads, anacrolix's progress
+  const wanted = wantedProgress(torrent);
+  const pct = torrent.wanted === null && torrent.progress !== null ? torrent.progress * 100 : null;
+  // A waiting download can be paused too: it would start on its own
+  const canPause = active || wantsMore(torrent);
   const detailHref = `/activity/${torrent.info_hash}`;
 
   return (
@@ -69,7 +77,7 @@ export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compac
       )}
       <div className="flex min-w-0 flex-col gap-2">
         <div className="top">
-          <div className="flex min-w-0 flex-col">
+          <div className="tcard-id">
             {label.href ? (
               <Link href={label.href} className="label">
                 {label.text}
@@ -81,7 +89,15 @@ export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compac
           </div>
           <TorrentStatePill torrent={torrent} />
         </div>
-        {pct !== null && pct < 100 && <Progress value={pct} label={`${label.text} progress`} />}
+        <HoldPills holds={torrent.holds} />
+        {wanted ? (
+          <div className="tcard-wanted">
+            <Progress value={wanted.pct} label={`${label.text} progress`} />
+            <span>{wanted.detail}</span>
+          </div>
+        ) : (
+          pct !== null && pct < 100 && <Progress value={pct} label={`${label.text} progress`} />
+        )}
         <div className="stats">
           {active && (
             <>
@@ -131,7 +147,7 @@ export function TorrentCard({ torrent, onPause, onResume, onRemove, busy, compac
           <Button size="sm" onClick={() => onResume(torrent)} loading={busy} aria-label={`Resume ${label.text}`}>
             <Play size={15} aria-hidden="true" /> Resume
           </Button>
-        ) : active ? (
+        ) : canPause ? (
           <Button size="sm" onClick={() => onPause(torrent)} loading={busy} aria-label={`Pause ${label.text}`}>
             <Pause size={15} aria-hidden="true" /> Pause
           </Button>

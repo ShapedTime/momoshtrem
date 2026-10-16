@@ -1370,6 +1370,10 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 
 - **Expiry** reads "Kept until watched", "Kept until Nov 16", or "Kept until watched · by Nov 16". With neither, it's "Kept".
 - **Activity.** Cards take Kept and Smart pills from `holds` and progress and ETA from `wanted`, and say a waiting state with the copy above. An idle torrent whose downloads are done reads "On disk".
+  - The Downloading section's line counts what downloads still want, not the whole torrents: "36.6 GB left for kept downloads". A torrent whose downloads wait can be paused like a downloading one.
+  - The "Kept & smart" list (`GET /downloads`, P9 #207) sits in the side column on desktop and below the busy sections on phone. Each row has its state, size, progress, expiry and Stop keeping (a smart pick's is "Dismiss"), which removes the row with a 10 s Undo before the DELETE. Above the rows, `paused_reason` reads "Downloads wait for the stream to end", "Downloads wait until 01:00" or "Background downloads are off", while some download still wants bytes.
+  - The disk tile splits the cache into kept, smart and streaming cache, with a marker at `cache_limit_bytes`.
+  - A backend without downloads (`GET /downloads` 404, no `wanted` or `holds`) shows no list and the cards as before (mock scenario `downloads-absent`).
 
 **The Keep sheet** ("Download & keep"):
 - Options:

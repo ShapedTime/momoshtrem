@@ -6,15 +6,18 @@ import { CheckCheck, Pause, Tv } from 'lucide-react';
 import { MappingJobsBanner } from '@/components/mapping';
 import { Button, ButtonLink, EmptyState } from '@/components/ui';
 import { usePendingRemovals } from '@/hooks/useUndoableRemoval';
+import { isApiError } from '@/lib/api/client';
 import type { StreamingSession, TorrentListItem } from '@/lib/api/contract';
-import { torrentsListQuery, torrentsSummaryQuery } from '@/lib/api/endpoints';
+import { downloadsQuery, torrentsListQuery, torrentsSummaryQuery } from '@/lib/api/endpoints';
+import { downloadRemovalKey, downloadingLine } from '@/lib/activity/downloads';
 import { formatTimeOfDay } from '@/lib/activity/format';
 import { torrentRemovalKey } from '@/lib/activity/remove';
-import { groupTorrents, isActive, isQuiet, streamingNow } from '@/lib/activity/sections';
+import { groupTorrents, isActive, isQuiet, onlyIdle, streamingNow } from '@/lib/activity/sections';
 import { statusLine } from '@/lib/activity/status';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { cx } from '@/lib/utils/cx';
 import { ActivityLoading, ActivitySkeletonBody } from './ActivitySkeleton';
+import { DownloadsSection } from './DownloadsSection';
 import { OfflineBanner } from './OfflineBanner';
 import { SummaryStrip } from './SummaryStrip';
 import { type CardHandlers, TorrentSection } from './TorrentSection';
@@ -23,11 +26,15 @@ import { useTorrentActions } from './useTorrentActions';
 /** Speeds sample every 2 s on the server; the list and the strip follow every 5 s while the tab is visible. */
 export const ACTIVITY_POLL_MS = 5000;
 
+/** A backend without downloads (#77's P4 not deployed) has no /downloads: no "Kept & smart" list, and no error. */
+const noDownloads = (error: unknown) => isApiError(error) && error.status === 404;
+
 /**
  * /activity (PLAN F7, #102; screens/activity): is everything working? A status
  * line, the summary strip, then the torrents in four sections: Streaming now,
- * Downloading, Paused and Idle (a side column on desktop). Offline, it keeps
- * what momoshtrem last said, greyed and inert, and retries on a countdown.
+ * Downloading, Paused and Idle, with the kept and smart downloads (#77) and the
+ * idle torrents in a side column on desktop. Offline, it keeps what momoshtrem
+ * last said, greyed and inert, and retries on a countdown.
  */
 export function ActivityView() {
   const pending = usePendingRemovals();
@@ -38,21 +45,38 @@ export function ActivityView() {
   const list = useQuery({ ...torrentsListQuery(), refetchInterval: (query) => (query.state.status === 'error' ? false : ACTIVITY_POLL_MS) });
   const offline = list.isError;
   const summary = useQuery({ ...torrentsSummaryQuery(), refetchInterval: offline ? false : ACTIVITY_POLL_MS });
+  // Downloads move with the torrents (a smart pick appears, a wait ends), so they follow the page's poll
+  const downloads = useQuery({ ...downloadsQuery(), refetchInterval: (query) => (offline || query.state.status === 'error' ? false : ACTIVITY_POLL_MS) });
+  const downloadsAbsent = noDownloads(downloads.error);
 
-  // Torrents waiting out their Undo are hidden everywhere on the page
+  // Torrents and downloads waiting out their Undo are hidden everywhere on the page
   const items = useMemo(() => (list.data?.items ?? []).filter((item) => !pending.has(torrentRemovalKey(item.info_hash))), [list.data, pending]);
+  const kept = useMemo(() => (downloads.data?.items ?? []).filter((download) => !pending.has(downloadRemovalKey(download.id))), [downloads.data, pending]);
   const sections = groupTorrents(items);
   const now = streamingNow(summary.data?.streaming ?? [], items);
-  // The page shows once both have answered, so "Nothing playing" is never a guess
+  // The page shows once both have answered, so "Nothing playing" is never a guess; the kept downloads join when they answer
   const ready = list.data !== undefined && (summary.data !== undefined || summary.isError);
   const quiet = isQuiet(items);
+  const wide = onlyIdle(items);
   const canPauseAll = !offline && items.some(isActive);
 
   const { refetch: refetchList } = list;
   const { refetch: refetchSummary } = summary;
-  const retry = useCallback(() => Promise.all([refetchList(), refetchSummary()]), [refetchList, refetchSummary]);
+  const { refetch: refetchDownloads } = downloads;
+  const retry = useCallback(() => Promise.all([refetchList(), refetchSummary(), refetchDownloads()]), [refetchList, refetchSummary, refetchDownloads]);
 
   const handlers: CardHandlers = { onPause: actions.pause, onResume: actions.resume, onRemove: (torrent) => void actions.remove(torrent), busy: actions.busy };
+  const showDownloads = kept.length > 0 || (downloads.isError && !downloadsAbsent && !offline);
+  const keptSection = showDownloads ? (
+    <DownloadsSection
+      list={downloads.data}
+      items={kept}
+      failed={downloads.isError && !downloadsAbsent}
+      retrying={downloads.isFetching}
+      onRetry={() => void refetchDownloads()}
+    />
+  ) : null;
+  const hasSide = sections.idle.length > 0 || showDownloads;
 
   return (
     <div className="act-page">
@@ -87,37 +111,41 @@ export function ActivityView() {
             <SummaryStrip summary={summary.data} items={items} now={now} stale={offline} />
             <div className={cx('flex flex-col gap-8', offline && 'is-stale')} inert={offline || undefined} aria-label={offline ? 'Last known torrents (offline)' : undefined} role={offline ? 'group' : undefined}>
               {!offline && <MappingJobsBanner />}
-              {quiet ? (
+              {wide ? (
                 <>
-                  <EmptyState
-                    cat="sleep"
-                    title="Nothing downloading."
-                    className="act-quiet"
-                    headingLevel="h2"
-                    actions={
-                      <>
-                        <ButtonLink href="/library?filter=ready">See what’s ready</ButtonLink>
-                        <Button variant="ghost" onClick={() => sheets.open('infuse-setup')}>
-                          <Tv size={18} aria-hidden="true" /> How to play
-                        </Button>
-                      </>
-                    }
-                  >
-                    Infuse can still play everything that’s ready.
-                  </EmptyState>
+                  {quiet && (
+                    <EmptyState
+                      cat="sleep"
+                      title="Nothing downloading."
+                      className="act-quiet"
+                      headingLevel="h2"
+                      actions={
+                        <>
+                          <ButtonLink href="/library?filter=ready">See what’s ready</ButtonLink>
+                          <Button variant="ghost" onClick={() => sheets.open('infuse-setup')}>
+                            <Tv size={18} aria-hidden="true" /> How to play
+                          </Button>
+                        </>
+                      }
+                    >
+                      Infuse can still play everything that’s ready.
+                    </EmptyState>
+                  )}
                   <div className="act-groups is-wide">
+                    {keptSection}
                     <TorrentSection state="idle" items={sections.idle} {...handlers} />
                   </div>
                 </>
               ) : (
-                <div className={cx('act-groups', sections.idle.length > 0 && 'has-side')}>
+                <div className={cx('act-groups', hasSide && 'has-side')}>
                   <div className="act-col-main">
                     <TorrentSection state="streaming" items={sections.streaming} {...handlers} />
-                    <TorrentSection state="downloading" items={sections.downloading} {...handlers} />
+                    <TorrentSection state="downloading" items={sections.downloading} sub={downloadingLine(sections.downloading)} {...handlers} />
                     <TorrentSection state="paused" items={sections.paused} {...handlers} />
                   </div>
-                  {sections.idle.length > 0 && (
+                  {hasSide && (
                     <div className="act-col-side">
+                      {keptSection}
                       <TorrentSection state="idle" items={sections.idle} compact {...handlers} />
                     </div>
                   )}

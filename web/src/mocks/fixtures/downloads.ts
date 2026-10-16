@@ -250,13 +250,20 @@ const cloneRecord = (d: MockDownload): MockDownload => ({
 /** Scenarios that start with no downloads. */
 const EMPTY: ReadonlySet<MockScenario | null> = new Set(['downloads-empty']);
 
+/** The seeds a scenario starts with: none, only those on disk (`torrents-quiet`: nothing downloads), or all of them. */
+function seedsFor(from: MockScenario | null): MockDownload[] {
+  if (EMPTY.has(from)) return [];
+  const seeds = from === 'torrents-quiet' ? SEED_DOWNLOADS.filter((d) => d.download.state === 'done') : SEED_DOWNLOADS;
+  return seeds.map(cloneRecord);
+}
+
 /** Rebuilt when the scenario changes: `downloads-empty` starts with none. */
 let state: { from: MockScenario | null; items: MockDownload[]; nextId: number } | undefined;
 
 function current() {
   const from = scenario();
   if (!state || state.from !== from) {
-    const items = EMPTY.has(from) ? [] : SEED_DOWNLOADS.map(cloneRecord);
+    const items = seedsFor(from);
     state = { from, items, nextId: SEED_DOWNLOADS.length + 1 };
   }
   return state;

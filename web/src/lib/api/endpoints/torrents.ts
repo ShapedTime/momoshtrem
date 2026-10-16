@@ -19,15 +19,32 @@ const torrentPath = (infoHash: string) => `/api/torrents/${encodeURIComponent(in
 export const removeTorrentUrl = (infoHash: string, { deleteData = false }: { deleteData?: boolean } = {}) =>
   `${torrentPath(infoHash)}${toQuery({ delete_data: deleteData })}`;
 
+/**
+ * A backend without downloads (#77's P4 and P6 not deployed) sends no `wanted`
+ * or `holds`, and no disk `kept_bytes` or `smart_bytes`: they read as nothing
+ * wanting the torrent and nothing pinned, so every reader can trust the types.
+ */
+export function withDownloadFields<T extends TorrentListItem>(item: T): T {
+  return { ...item, wanted: item.wanted ?? null, holds: item.holds ?? [] };
+}
+
+export function withDiskFields(summary: TorrentsSummary): TorrentsSummary {
+  const { disk } = summary;
+  return disk ? { ...summary, disk: { ...disk, kept_bytes: disk.kept_bytes ?? 0, smart_bytes: disk.smart_bytes ?? 0 } } : summary;
+}
+
 export const torrentsApi = {
-  list: () => apiJson<{ items: TorrentListItem[] }>('/api/torrents'),
-  summary: () => apiJson<TorrentsSummary>('/api/torrents/summary'),
+  list: async () => {
+    const { items } = await apiJson<{ items: TorrentListItem[] }>('/api/torrents');
+    return { items: items.map(withDownloadFields) };
+  },
+  summary: async () => withDiskFields(await apiJson<TorrentsSummary>('/api/torrents/summary')),
   /** The list item plus pieces, files, trackers and totals; never loads the torrent. 404 for one nothing knows. */
-  detail: (infoHash: string) => apiJson<TorrentDetail>(torrentPath(infoHash)),
+  detail: async (infoHash: string) => withDownloadFields(await apiJson<TorrentDetail>(torrentPath(infoHash))),
   /** Sticky: the network stays off and reads don't wake it, across restarts. Idempotent. */
-  pause: (infoHash: string) => apiJson<TorrentListItem>(`${torrentPath(infoHash)}/pause`, { method: 'POST' }),
+  pause: async (infoHash: string) => withDownloadFields(await apiJson<TorrentListItem>(`${torrentPath(infoHash)}/pause`, { method: 'POST' })),
   /** A loaded torrent comes back on until the idle timeout; one that isn't loaded stays unloaded. */
-  resume: (infoHash: string) => apiJson<TorrentListItem>(`${torrentPath(infoHash)}/resume`, { method: 'POST' }),
+  resume: async (infoHash: string) => withDownloadFields(await apiJson<TorrentListItem>(`${torrentPath(infoHash)}/resume`, { method: 'POST' })),
   /** Pauses the streaming and downloading torrents. */
   pauseAll: () => apiJson<TorrentsPauseCount>('/api/torrents/pause-all', { method: 'POST' }),
   /** Resumes every paused torrent. */

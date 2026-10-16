@@ -48,14 +48,16 @@ describe('health', () => {
     expect(isWeak(torrent({ seeders: null }))).toBe(false);
   });
 
-  it('writes Healthy, Slow but moving, Paused, Idle and Complete without an ETA', () => {
+  it('writes Healthy, Slow but moving, Paused, Idle and Complete without an ETA when nothing keeps it', () => {
+    // Without downloads (#77) there's no finish time to promise
+    const bare = (t: TorrentListItem): TorrentListItem => ({ ...t, wanted: null, holds: [] });
     const cases = [
       [healthFor(FRIEREN), 'healthy', 'Healthy', /31 seeders and 48 peers connected, at 6\.4 MB\/s/],
-      [healthFor(INTERSTELLAR), 'slow', 'Slow but moving', /Only 3 seeders and 6 peers connected, at 2\.3 MB\/s/],
+      [healthFor(bare(INTERSTELLAR)), 'slow', 'Slow but moving', /Only 3 seeders and 6 peers connected, at 2\.3 MB\/s/],
       [healthFor(torrent({ seeders: 0, peers: 0, download_bps: 0 })), 'slow', 'Waiting for peers', /No seeders are connected/],
-      [healthFor(PAUSED), 'paused', 'Paused', /What’s on disk \(31%\) still plays in Infuse/],
+      [healthFor(bare(PAUSED)), 'paused', 'Paused', /What’s on disk \(31%\) still plays in Infuse/],
       [healthFor(TORRENTS.find((t) => !t.loaded)!), 'idle', 'Idle', /It fetches pieces when Infuse plays a file/],
-      [healthFor(TORRENTS.find((t) => t.state === 'idle' && t.complete)!), 'complete', 'Complete', /Everything is on disk/],
+      [healthFor(bare(TORRENTS.find((t) => t.state === 'idle' && t.complete)!)), 'complete', 'Complete', /Everything is on disk/],
       [healthFor(STREAMING, STREAMING_SESSION), 'healthy', 'Healthy', /never waits for the network/],
     ] as const;
     for (const [health, kind, title, body] of cases) {

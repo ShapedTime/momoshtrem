@@ -22,12 +22,15 @@ interface TorrentSectionProps extends CardHandlers {
   state: TorrentState;
   items: readonly TorrentListItem[];
   compact?: boolean;
+  /** Replaces the section's line: Downloading says what its downloads still want (#77). */
+  sub?: string;
 }
 
 /** One of Activity's sections (activity.js `group`); hidden when empty. */
-export function TorrentSection({ state, items, compact, busy, ...handlers }: TorrentSectionProps) {
+export function TorrentSection({ state, items, compact, sub: line, busy, ...handlers }: TorrentSectionProps) {
   if (items.length === 0) return null;
-  const { title, sub } = SECTION_COPY[state];
+  const { title } = SECTION_COPY[state];
+  const sub = line ?? SECTION_COPY[state].sub;
   const headingId = `act-${state}-h`;
   return (
     <section className={cx('act-group', `act-group--${state}`)} aria-labelledby={headingId}>
