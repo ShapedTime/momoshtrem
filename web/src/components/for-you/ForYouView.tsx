@@ -6,7 +6,6 @@ import { RefreshCw } from 'lucide-react';
 import { Banner, Button, ButtonLink, EmptyState, LoadingRegion, PosterSkeletons, Skeleton, WideSkeletons } from '@/components/ui';
 import { useAskAvailable } from '@/hooks/useAskAvailable';
 import { useTraktIntegration } from '@/hooks/useTraktIntegration';
-import { isApiError } from '@/lib/api/client';
 import type { RunProgress, Shelf, TraktIntegration } from '@/lib/api/contract';
 import {
   discoverPagesQuery,
@@ -174,9 +173,6 @@ function CaughtUp() {
   );
 }
 
-/** Picks aren't served yet (a 503 until #157 wires them): quietly no picks, as without a key. */
-const picksUnavailable = (error: unknown) => isApiError(error) && error.status === 503;
-
 /**
  * When a run ends, the runs list (the failed-refresh note) and the title
  * pages' "Why it's for you" are stale, and /home is read once more for the
@@ -220,7 +216,7 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
   const refreshing = activeRun && hasShelves ? refreshingShelfSlug(shelves) : null;
   const latestRun = useQuery({ ...recRunsQuery(1), enabled: home !== undefined });
   const failed = activeRun ? null : failedRefresh(latestRun.data?.items[0], run);
-  const picksFailed = recs.isError && !recs.data && !picksUnavailable(recs.error);
+  const picksFailed = recs.isError && !recs.data;
   useRunEnd(activeRun?.id ?? null);
 
   const upNextRail = railQuery(upNext, (data) => data.items.map((item) => upNextCard(item, today)));

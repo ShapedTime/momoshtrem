@@ -971,9 +971,6 @@ export function clearRecFeedback(mediaType: MediaType, tmdbId: number): void {
   current().feedback.delete(keyOf(mediaType, tmdbId));
 }
 
-/** Tests: the stored signal. */
-export const recFeedback = (mediaType: MediaType, tmdbId: number) => current().feedback.get(keyOf(mediaType, tmdbId)) ?? null;
-
 // ---- Ask -------------------------------------------------------------------------------------
 
 const streamingTurn = (s: MockRecs) => s.threads.flatMap((t) => t.turns).find((turn) => turn.status === 'streaming');

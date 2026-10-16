@@ -71,7 +71,7 @@ func TestAISettingsRoutes(t *testing.T) {
 	}
 
 	// Partial: what's sent, nothing else; unknown fields are ignored
-	rec = doBody(t, s, "PUT", "/api/settings/ai", `{"rec_schedule":"weekly","monthly_budget_usd":null,"rec_schedule_cron":"0 4 * * *"}`)
+	rec = doBody(t, s, "PUT", "/api/settings/ai", `{"rec_schedule":"weekly","monthly_budget_usd":null,"unknown_field":"ignored"}`)
 	var saved recommend.Settings
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &saved) != nil || saved.RecSchedule != "weekly" || saved.MonthlyBudgetUSD != nil || saved.RecModel != recommend.ModelOpus {
 		t.Errorf("PUT = %d %s", rec.Code, rec.Body)
