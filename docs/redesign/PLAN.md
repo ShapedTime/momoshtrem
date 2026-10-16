@@ -1203,6 +1203,12 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - Connect and disconnect work end to end.
   - Incremental sync fetches only deltas: an unchanged `last_activities` is one request.
   - Up next is correct for a show with specials and for a show whose next episode hasn't aired.
+- **Landed in #8:** #130 (the contract, migration 005, the web mocks), #131 + #140 (connect; the client secret is optional), #132 (sync), #133 (`/me`, watch state), #147 (the legacy `/shows/recently-aired` and `/shows/sync-air-dates` are gone; the air date sync stays).
+- **Live check** (2026-10-16, a real Trakt API app and account on a scratch stack):
+  - A new API app gets a Client ID and no secret; the device flow, refresh and revoke work without one (#140). `verification_url` is `https://auth.trakt.tv/activate`.
+  - The access token Trakt issued lasts 7 days.
+  - The initial import (1,865 plays, 1 rating, 42 watchlist titles, 69 progress rows before the fix below) took about 22 s; a reconcile after it (45 progress rows) 8 s; an incremental sync with nothing changed 0.25–0.4 s (one request).
+  - Trakt's bulk progress also returns watchlisted shows never started (`completed: 0`); without the filter in §6 they made 24 of 30 Up next cards.
 
 **B6 · Torrent and activity hygiene** (independent)
 - Owns `internal/torrent` and `internal/api/torrent_routes.go`.
@@ -1364,6 +1370,7 @@ Then, in parallel (they live in separate route folders):
     - **Long seasons** (Frieren has 38 episodes, One Piece 1,000+): a compact row mode, virtualised lists, range/arc chunks and "jump to episode".
   - **Primary action** reflects the real state. Once a title is ready, the torrent card moves above the fold and "Search torrents" becomes secondary.
   - **Subtitles** panel, ranked by release match (B7).
+  - **Landed in #136 (F2b, #8):** watch state on the show page (the Up next row from `watch_state.next_episode`, else the frontier; watched rows with and without a file) and the Library's Watching filter and Last watched sort.
 - **F3 · Torrent search sheet** (depends on B4; B2 for Inspect)
   - Delivered by #6's slices (#92–#95; Settings › Quality: #94). §6 "Search" is the contract; where the bullets below differ, §6 wins.
   - **Context-aware defaults.** Movie, season or episode, with a scope switch: Episode · Season pack · Any.
@@ -1383,6 +1390,7 @@ Then, in parallel (they live in separate route folders):
   - **Home rows.** Up next (with an availability call to action), new episodes for your shows, and AI shelves with reasons and feedback.
   - **More rows.** Watchlist, and trending when Trakt isn't connected.
   - **Ask** (page or drawer). Streaming status steps, result cards, refine chips and threads.
+  - **Landed in #135 (F5a, #8):** For You without AI: the hero's deterministic picks (a ready Up next show, ready watchlist titles, then trending; stable per day), Up next, New episodes and the watchlist with one action per availability (`EpisodeCard`), the trending fallback, and the first-time, Trakt-off and first-sync states. The AI shelves, Tonight's pick, feedback, the Ask band and the refreshing state are #9's; #9 hands `hero_picks` to `HomeHero`.
 - **F6 · Discover and search** (no new backend dependencies; TMDB via web)
   - **Filters.** Several genres at once, year range, rating, runtime, language/origin with an anime toggle, type and sort.
   - **URL state and loading.** Filters stay in the URL (e.g. `nuqs`); results load with infinite scroll.
@@ -1397,6 +1405,7 @@ Then, in parallel (they live in separate route folders):
   - **AI.** Model, schedule, budget and usage.
   - **Quality profile** and **Playback** (the WebDAV URL and an Infuse setup guide).
   - **System status.**
+  - **Landed in #134 (F8a, #8):** Settings › Trakt (off, device code, waiting, connected with sync status, counts and the three switches, disconnect) and the palette's Connect / Sync Trakt now. Settings › AI is #9's.
 
 Acceptance for every F task:
 - It matches the design at 390 px and 1440 px.
