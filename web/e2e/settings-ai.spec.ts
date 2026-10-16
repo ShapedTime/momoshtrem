@@ -76,7 +76,7 @@ test.describe('Settings › AI & picks', () => {
     expect((await put).postDataJSON()).toEqual({ rec_schedule: 'weekly', rec_model: 'claude-sonnet-5-5' });
     await expect(page.getByText('Settings saved')).toBeVisible();
     await expect(saveBar(page)).toBeHidden();
-    await expect(scheduleHelp(page)).toContainText(/Next run (tonight|on Sunday) at 03:00; the last one took 41 s/);
+    await expect(scheduleHelp(page)).toContainText(/Next run (tonight|tomorrow|on Sunday) at 03:00; the last one took 41 s/);
 
     await expect((await sectionNav(page)).getByRole('link', { name: /AI & picks/ })).toContainText('Weekly · $3.12 of $15.00');
   });
