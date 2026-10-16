@@ -41,6 +41,13 @@ type RecFeedback interface {
 	ClearFeedback(ctx context.Context, mediaType string, tmdbID int) error
 }
 
+// RecDebug builds R1's inputs for the dev-only GET
+// /recommendations/debug/profile: the taste profile and the candidate
+// pool as a run would see them now, stored nowhere.
+type RecDebug interface {
+	DebugProfile(ctx context.Context) (*recommend.DebugReport, error)
+}
+
 const (
 	defaultRunsLimit = 10
 	maxRunsLimit     = 50
@@ -53,7 +60,8 @@ var (
 
 // registerRecommendationRoutes adds /recommendations (but Ask's, in
 // ask_routes.go). Without Options.Recommendations the picks' routes
-// answer 503, and without Options.RecFeedback the feedback routes.
+// answer 503, and without Options.RecFeedback the feedback routes; the
+// debug route exists only with Options.RecDebug.
 func (s *Server) registerRecommendationRoutes(api *gin.RouterGroup) {
 	api.GET("/recommendations/home", s.getRecommendationsHome)
 	api.POST("/recommendations/refresh", s.refreshRecommendations)
@@ -61,6 +69,9 @@ func (s *Server) registerRecommendationRoutes(api *gin.RouterGroup) {
 	api.GET("/recommendations/runs/:id", s.getRecommendationRun)
 	api.POST("/recommendations/feedback", s.postRecommendationFeedback)
 	api.DELETE("/recommendations/feedback/:media_type/:tmdb_id", s.deleteRecommendationFeedback)
+	if s.opts.RecDebug != nil {
+		api.GET("/recommendations/debug/profile", s.getRecommendationsDebugProfile)
+	}
 }
 
 func (s *Server) recsReady(c *gin.Context) bool {
@@ -182,6 +193,17 @@ func (s *Server) deleteRecommendationFeedback(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// GET /recommendations/debug/profile → DebugReport (dev only: registered
+// with ai.recs_debug)
+func (s *Server) getRecommendationsDebugProfile(c *gin.Context) {
+	report, err := s.opts.RecDebug.DebugProfile(c.Request.Context())
+	if err != nil {
+		recsErrorResponse(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, report)
 }
 
 // parseFeedback reads the body: every field present and known.

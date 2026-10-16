@@ -97,6 +97,10 @@ type Options struct {
 	// RecFeedback serves /recommendations/feedback (R1, #153;
 	// wire_recs.go). Nil makes those routes return 503.
 	RecFeedback RecFeedback
+	// RecDebug serves the dev-only GET /recommendations/debug/profile
+	// (R1, #153), set only with ai.recs_debug (RECS_DEBUG). Nil leaves
+	// the route unregistered (404).
+	RecDebug RecDebug
 	// Ask serves Ask momoshtrem over SSE and its threads (R3, #158;
 	// wire_ask.go). Nil makes those routes return 503.
 	Ask Ask
