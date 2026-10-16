@@ -3,7 +3,6 @@ package piececache
 import (
 	"io"
 	"os"
-	"strings"
 
 	"github.com/anacrolix/missinggo/v2/resource"
 )
@@ -63,14 +62,15 @@ func (me *uniformResource) Delete() error {
 	return me.Cache.Remove(me.Location)
 }
 
+// piececache: Readdirnames reads the directory index instead of walking
+// every item. Upstream matches each item's path against Location + "/", so
+// only a clean, non-empty Location matches anything: item paths are
+// sanitized and never start with "/".
 func (me *uniformResource) Readdirnames() (names []string, err error) {
-	prefix := me.Location + "/"
-	me.Cache.WalkItems(func(info ItemInfo) {
-		//log.Printf("%q %q", me.Location, info.Path)
-		name := string(info.Path)
-		if strings.HasPrefix(name, prefix) {
-			names = append(names, name[len(prefix):])
-		}
-	})
-	return
+	if me.Location == "" || string(sanitizePath(me.Location)) != me.Location {
+		return
+	}
+	me.Cache.mu.Lock()
+	defer me.Cache.mu.Unlock()
+	return me.Cache.dirs.names(key(me.Location)), nil
 }

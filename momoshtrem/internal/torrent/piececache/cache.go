@@ -16,6 +16,10 @@ import (
 	"github.com/anacrolix/missinggo/v2/resource"
 )
 
+// This is missinggo v2.10.0's filecache with pins, a streaming reserve,
+// deferred trimming and a directory index. UPSTREAM.md lists every change;
+// each one is marked "piececache:" in the code.
+
 const (
 	dirPerm  = 0755
 	filePerm = 0644
@@ -28,12 +32,31 @@ type Cache struct {
 	filled   int64
 	policy   Policy
 	items    map[key]itemState
+
+	// piececache: the additions. Pinned items stay in items and filled but
+	// are out of the policy, so the trim never picks them.
+
+	// dirs holds the names under each directory, for Readdirnames.
+	dirs dirIndex
+	// reserve is the unpinned bytes the trim never goes below.
+	reserve int64
+	// pinned is the bytes of the pinned items, part of filled.
+	pinned int64
+	// owners holds the piece hexes each owner pins, and pinCount how many
+	// owners pin each hex. A hex is pinned while its count is above 0.
+	owners   map[string]map[string]struct{}
+	pinCount map[string]int
+	// deferring skips every trim until Ready (DeferTrim).
+	deferring  bool
+	readyTimer *time.Timer
 }
 
 type CacheInfo struct {
 	Capacity int64
 	Filled   int64
 	NumItems int
+	// piececache: Pinned is the bytes of pinned items, part of Filled.
+	Pinned int64
 }
 
 type ItemInfo struct {
@@ -61,6 +84,7 @@ func (me *Cache) Info() (ret CacheInfo) {
 	ret.Capacity = me.capacity
 	ret.Filled = me.filled
 	ret.NumItems = len(me.items)
+	ret.Pinned = me.pinned
 	return
 }
 
@@ -76,6 +100,9 @@ func NewCache(root string) (ret *Cache, err error) {
 	ret = &Cache{
 		root:     root,
 		capacity: -1, // unlimited
+		// piececache: the pin tables.
+		owners:   make(map[string]map[string]struct{}),
+		pinCount: make(map[string]int),
 	}
 	ret.mu.Lock()
 	go func() {
@@ -126,6 +153,8 @@ func pruneEmptyDirs(root string, leaf string) (err error) {
 	}
 }
 
+// Remove deletes the item even when it's pinned: a piece that fails its
+// hash must go. Its hex stays pinned, so a new download of it is pinned too.
 func (me *Cache) Remove(path string) error {
 	me.mu.Lock()
 	defer me.mu.Unlock()
@@ -222,6 +251,10 @@ func (me *Cache) rescan() {
 	me.filled = 0
 	me.policy = new(lru)
 	me.items = make(map[key]itemState)
+	// piececache: the index is rebuilt with the items. No pins exist yet:
+	// Pin waits for the rescan, which holds the lock.
+	me.dirs = make(dirIndex)
+	me.pinned = 0
 	err := filepath.Walk(me.root, func(path string, info os.FileInfo, err error) error {
 		if os.IsNotExist(err) {
 			return nil
@@ -265,18 +298,41 @@ func (me *Cache) statKey(k key) (i itemState, ok bool) {
 	return
 }
 
+// piececache: updateItem is upstream's applied as two steps, the update and
+// the trim, so that the trim can protect k (see trimToCapacity).
 func (me *Cache) updateItem(k key, u func(*itemState, bool) bool) {
+	me.applyUpdate(k, u)
+	me.trimToCapacity(k)
+}
+
+// applyUpdate is upstream's updateItem without the trim. It also keeps the
+// pinned bytes and the directory index: a pinned item counts in pinned
+// instead of going to the policy.
+func (me *Cache) applyUpdate(k key, u func(*itemState, bool) bool) {
 	ii, ok := me.items[k]
+	pinned := me.isPinned(k)
 	me.filled -= ii.Size
+	if pinned {
+		me.pinned -= ii.Size
+	}
 	if u(&ii, ok) {
 		me.filled += ii.Size
-		me.policy.Used(k, ii.Accessed)
+		if pinned {
+			me.pinned += ii.Size
+		} else {
+			me.policy.Used(k, ii.Accessed)
+		}
 		me.items[k] = ii
+		if !ok {
+			me.dirs.add(k)
+		}
 	} else {
 		me.policy.Forget(k)
 		delete(me.items, k)
+		if ok {
+			me.dirs.remove(k)
+		}
 	}
-	me.trimToCapacity()
 }
 
 func (me *Cache) realpath(path key) string {
@@ -286,7 +342,7 @@ func (me *Cache) realpath(path key) string {
 func (me *Cache) TrimToCapacity() {
 	me.mu.Lock()
 	defer me.mu.Unlock()
-	me.trimToCapacity()
+	me.trimToCapacity("")
 }
 
 func (me *Cache) pruneEmptyDirs(path key) error {
@@ -294,6 +350,15 @@ func (me *Cache) pruneEmptyDirs(path key) error {
 }
 
 func (me *Cache) remove(path key) error {
+	err := me.removeFile(path)
+	me.updateItem(path, func(*itemState, bool) bool {
+		return false
+	})
+	return err
+}
+
+// piececache: removeFile is the file half of upstream's remove.
+func (me *Cache) removeFile(path key) error {
 	err := os.Remove(me.realpath(path))
 	if os.IsNotExist(err) {
 		err = nil
@@ -305,22 +370,39 @@ func (me *Cache) remove(path key) error {
 	if err == nil {
 		err = pruneErr
 	}
-	me.updateItem(path, func(*itemState, bool) bool {
-		return false
-	})
 	return err
 }
 
-func (me *Cache) trimToCapacity() {
-	if me.capacity < 0 {
+// piececache: the trim. Upstream evicts the least recently used item while
+// filled > capacity, through remove, whose own update trims again; this
+// loop does the same evictions in the same order without the recursion, so
+// that protect holds throughout. It also:
+//   - evicts only unpinned items (pinned ones aren't in the policy), and only
+//     while the unpinned bytes are above the reserve;
+//   - stops when nothing is left to evict, where upstream's Choose panics;
+//   - skips every trim while DeferTrim holds them;
+//   - keeps protect, the key whose update runs this trim, when it is the
+//     last unpinned item and fits the capacity on its own: only pinned bytes
+//     hold the cache over its capacity then. Without pins the last item is
+//     everything that's filled, so it doesn't fit and goes as upstream's does.
+func (me *Cache) trimToCapacity(protect key) {
+	if me.capacity < 0 || me.deferring {
 		return
 	}
-	for me.filled > me.capacity {
-		// We can fail to remove things on Windows. We can get stuck in an infinite loop here I
-		// think.
-		if me.remove(me.policy.Choose().(key)) != nil {
-			//return
+	for me.filled > me.capacity && me.filled-me.pinned > me.reserve {
+		if me.policy.NumItems() == 0 {
+			return
 		}
+		k := me.policy.Choose().(key)
+		if k == protect && me.policy.NumItems() == 1 && me.items[k].Size <= me.capacity {
+			return
+		}
+		// We can fail to remove things on Windows. The item is forgotten
+		// anyway, so the loop moves on.
+		me.removeFile(k)
+		me.applyUpdate(k, func(*itemState, bool) bool {
+			return false
+		})
 	}
 }
 
