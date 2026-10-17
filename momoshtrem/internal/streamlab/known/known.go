@@ -28,6 +28,17 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 )
 
+// Sep joins several known issues in one Outcome's Known.
+const Sep = "+"
+
+// IDs splits an Outcome's Known into its issues.
+func IDs(known string) []string {
+	if known == "" {
+		return nil
+	}
+	return strings.Split(known, Sep)
+}
+
 // DefaultMaxRate is the share of repetitions an intermittent issue may
 // fire on and stay an expected failure.
 const DefaultMaxRate = 0.25
@@ -82,7 +93,7 @@ func Fired(rep map[string]Outcome) (string, bool) {
 			continue
 		}
 		for _, c := range is.Checks {
-			if o, ok := rep[c]; ok && o.Status == report.Fail && o.Known == is.ID {
+			if o, ok := rep[c]; ok && o.Status == report.Fail && slices.Contains(IDs(o.Known), is.ID) {
 				return is.ID, true
 			}
 		}
@@ -108,7 +119,7 @@ func TallyRun(reps []map[string]Outcome) map[string]Tally {
 					continue
 				}
 				ran = true
-				fired = fired || (o.Status == report.Fail && o.Known == is.ID)
+				fired = fired || (o.Status == report.Fail && slices.Contains(IDs(o.Known), is.ID))
 			}
 			if ran {
 				t.Reps++
@@ -209,10 +220,11 @@ var Issues = []Issue{
 		Ref:     "#215",
 		Checks:  []string{"cache-holds-complete", "play-ok"},
 		MaxRate: Always,
-		Doc: "The piece cache (a filecache LRU) evicts data anacrolix still believes it has: complete pieces, and the " +
-			"dirty chunks of incomplete ones the responsive PriorityReader reads. Reading it fails: anacrolix resyncs the " +
-			"piece's completion but returns the error, and the response ends early. Its play-ok signature: a body that " +
-			"broke within 3 s of its last byte, at a piece the leecher had downloaded and the cache no longer holds.",
+		Doc: "The piece cache (a filecache LRU) evicts pieces anacrolix still believes complete. Reading one fails: " +
+			"anacrolix resyncs the piece's completion but returns the error, and the response ends early. Its play-ok " +
+			"signature: a body that broke within 3 s of its last byte, at a piece anacrolix had complete and the cache no " +
+			"longer holds. (The dirty chunks of incomplete pieces the responsive PriorityReader reads can be evicted too, " +
+			"when the readahead window outgrows the cache; nothing proves that yet, so such a break is a plain fail.)",
 	},
 	{
 		ID:      "F12",
@@ -279,7 +291,9 @@ func ForCheck(check string) []Issue {
 }
 
 // Outcome is a check's result in one repetition: pass, fail or n/a, with
-// the known issue whose signature a failure carries.
+// the known issues whose signatures a failure carries: one ID, or several
+// joined by Sep when the repetition's failures carry different ones, each
+// matching its own (a #195 stall and an F11 break, say).
 type Outcome struct {
 	Status   report.Status
 	Known    string
@@ -323,21 +337,23 @@ func Judge(check string, reps []Outcome, env Env) Verdict {
 		if r.Known == "" {
 			return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s", i+1, r.Evidence)}
 		}
-		is, ok := Lookup(r.Known)
-		if !ok || !slices.Contains(is.Checks, check) {
-			return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s doesn't explain %s: %s", i+1, r.Known, check, r.Evidence)}
+		for _, id := range IDs(r.Known) {
+			is, ok := Lookup(id)
+			if !ok || !slices.Contains(is.Checks, check) {
+				return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s doesn't explain %s: %s", i+1, id, check, r.Evidence)}
+			}
+			if applies, why := is.Applies(env); !applies {
+				return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s can't explain it here (%s): %s", i+1, id, why, r.Evidence)}
+			}
+			if !is.Intermittent() && !slices.Contains(env.Guards, is.ID) {
+				return Verdict{Status: report.Fail, Note: fmt.Sprintf(
+					"rep %d: %s explains failures only in the scenarios that guard it: %s", i+1, id, r.Evidence)}
+			}
+			if fired[id] == 0 {
+				order = append(order, id)
+			}
+			fired[id]++
 		}
-		if applies, why := is.Applies(env); !applies {
-			return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s can't explain it here (%s): %s", i+1, r.Known, why, r.Evidence)}
-		}
-		if !is.Intermittent() && !slices.Contains(env.Guards, is.ID) {
-			return Verdict{Status: report.Fail, Note: fmt.Sprintf(
-				"rep %d: %s explains failures only in the scenarios that guard it: %s", i+1, r.Known, r.Evidence)}
-		}
-		if fired[r.Known] == 0 {
-			order = append(order, r.Known)
-		}
-		fired[r.Known]++
 	}
 	if n == 0 {
 		return Verdict{Status: report.NA, Note: "no repetition could tell"}

@@ -343,7 +343,7 @@ func runRep(ctx context.Context, exe string, sc *scenario.Scenario, i int, warmu
 
 	// The child's temp files (the stack's folder) go in a folder of its
 	// own, removed whatever becomes of the child.
-	tmp, err := os.MkdirTemp("", "streamlab-rep-*")
+	tmp, err := os.MkdirTemp("", tempPrefix+"*")
 	if err != nil {
 		return failed(report.RepError, "creating a temp folder: %v", err)
 	}

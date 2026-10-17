@@ -257,9 +257,13 @@ func (p *Play) Pause() {
 
 // Resume restarts the playhead after Pause.
 func (p *Play) Resume() {
-	if !p.ended {
-		p.model.Resume(p.s.opts.Now())
+	if p.ended || p.model.State() != Paused {
+		return
 	}
+	now := p.s.opts.Now()
+	p.model.Resume(now)
+	// A pause isn't silence: a break's silence counts from here.
+	p.lastData = now
 }
 
 // Abort drops the current request, as a player seeking away or losing

@@ -11,5 +11,6 @@ import (
 // exits: without SIGQUIT there's no goroutine dump.
 func watchParent() {
 	io.Copy(io.Discard, os.Stdin)
+	removeOwnTemp()
 	os.Exit(ChildToolError)
 }

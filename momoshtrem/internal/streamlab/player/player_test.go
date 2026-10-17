@@ -199,6 +199,39 @@ func TestBrokenBodyReconnects(t *testing.T) {
 	}
 }
 
+// A pause isn't silence: a body that breaks after one reports only the
+// time since the resume.
+func TestSilenceSkipsPauses(t *testing.T) {
+	l := media.MustNew(media.SingleFile("f.bin", 11, 64<<10, 2*mib, media.Raw))
+	f := &file{layout: l, hook: func(req int, off int64) error {
+		if req == 1 && off >= mib {
+			return errors.New("lab: the read broke")
+		}
+		return nil
+	}}
+	dev, integrity := setup(t, f)
+	conn := dev.Conn()
+	defer conn.Close()
+	var silence time.Duration
+	s := session(player.Config{Bitrate: 8 * mib, Playable: 64 << 10, MaxBuffer: 512 << 10}, l, integrity,
+		func(off int64, d time.Duration, err error) { silence = d })
+	p, err := s.Open(context.Background(), conn, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Fill(256 << 10); err != nil {
+		t.Fatal(err)
+	}
+	p.Pause()
+	time.Sleep(1500 * time.Millisecond)
+	if err := p.UntilEOF(); err != nil {
+		t.Fatal(err)
+	}
+	if silence <= 0 || silence >= 1200*time.Millisecond {
+		t.Errorf("silence before the break = %v, want under the 1.5 s pause", silence)
+	}
+}
+
 // A wrong answer is an HTTP error and ends the playback.
 func TestWrongAnswer(t *testing.T) {
 	l := media.MustNew(media.SingleFile("f.bin", 10, 64<<10, mib, media.Raw))

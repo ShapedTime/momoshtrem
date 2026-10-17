@@ -9,8 +9,10 @@ import (
 )
 
 // watchParent waits for EOF on stdin, the pipe the parent holds, then
-// quits this process with a goroutine dump (SIGQUIT).
+// removes this repetition's temp folder (the parent can't any more) and
+// quits with a goroutine dump (SIGQUIT).
 func watchParent() {
 	io.Copy(io.Discard, os.Stdin)
+	removeOwnTemp()
 	syscall.Kill(os.Getpid(), syscall.SIGQUIT)
 }

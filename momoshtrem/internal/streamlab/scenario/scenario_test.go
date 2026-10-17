@@ -74,8 +74,10 @@ func TestParams(t *testing.T) {
 
 // TestGate runs the gate scenarios once each, in this process, with
 // STREAMLAB=1 (STREAMLAB_SCENARIO=name for one). The runner runs each
-// repetition in a process of its own; this is the scenarios' own test.
-// A check that fails without a known issue to explain it fails the test.
+// repetition in a process of its own; this is the scenarios' own test,
+// judged by the runner's rule: when an intermittent known issue fires, the
+// scenario runs known.ConfirmReps more times, and each check is judged
+// over all of them (known.Judge). A check that fails fails the test.
 func TestGate(t *testing.T) {
 	if os.Getenv("STREAMLAB") == "" {
 		t.Skip("set STREAMLAB=1 to run the gate scenarios")
@@ -87,28 +89,56 @@ func TestGate(t *testing.T) {
 		}
 		env := known.Env{MIMEResolvesMKV: checks.MIME().ResolvesMKV(), Guards: sc.Guards}
 		t.Run(sc.Name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), sc.HardTimeout())
-			defer cancel()
-			rep, err := scenario.Run(ctx, sc, scenario.RunOptions{Rep: 1})
-			if err != nil {
-				t.Fatalf("run: %v", err)
+			var reps []*report.Rep
+			run := func() {
+				ctx, cancel := context.WithTimeout(context.Background(), sc.HardTimeout())
+				defer cancel()
+				rep, err := scenario.Run(ctx, sc, scenario.RunOptions{Rep: len(reps) + 1})
+				if err != nil {
+					t.Fatalf("run: %v", err)
+				}
+				for _, n := range rep.Notes {
+					t.Logf("rep %d note: %s", rep.Rep, n)
+				}
+				t.Logf("rep %d: wall %.1f s", rep.Rep, rep.WallMS/1000)
+				reps = append(reps, rep)
 			}
-			for _, n := range rep.Notes {
-				t.Logf("note: %s", n)
+			run()
+			if id, fired := known.Fired(outcomes(reps[0])); fired {
+				t.Logf("%s fired: %d confirmation reps", id, known.ConfirmReps)
+				for range known.ConfirmReps {
+					run()
+				}
 			}
-			for _, c := range rep.Checks {
-				v := known.Judge(c.ID, []known.Outcome{{Status: c.Status, Known: c.Known, Evidence: c.Evidence}}, env)
-				t.Logf("%-20s %-5s %-5s %s", c.ID, v.Status, c.Known, c.Evidence)
+			for _, id := range sc.AllChecks() {
+				var per []known.Outcome
+				for _, rep := range reps {
+					o, ok := outcomes(rep)[id]
+					if !ok {
+						o = known.Outcome{Status: report.NA, Evidence: "not reported"}
+					}
+					per = append(per, o)
+				}
+				v := known.Judge(id, per, env)
+				t.Logf("%-20s %-5s %-9s %s", id, v.Status, v.Known, per[0].Evidence)
 				if v.Status == report.Fail {
-					t.Errorf("%s failed: %s", c.ID, v.Note)
+					t.Errorf("%s failed: %s", id, v.Note)
 				}
 			}
 			for _, k := range sc.Key {
-				if v, ok := rep.Metrics[k]; ok {
+				if v, ok := reps[0].Metrics[k]; ok {
 					t.Logf("%s = %s", k, report.Num(v))
 				}
 			}
-			t.Logf("wall %.1f s", rep.WallMS/1000)
 		})
 	}
+}
+
+// outcomes are a repetition's checks by ID.
+func outcomes(rep *report.Rep) map[string]known.Outcome {
+	m := map[string]known.Outcome{}
+	for _, c := range rep.Checks {
+		m[c.ID] = known.Outcome{Status: c.Status, Known: c.Known, Evidence: c.Evidence}
+	}
+	return m
 }

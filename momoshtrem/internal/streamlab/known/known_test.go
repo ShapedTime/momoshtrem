@@ -76,6 +76,11 @@ func TestJudge(t *testing.T) {
 		{"#195 in 3 scenarios of 14, once each (confirmed)", "play-ok", reps("fail:#195", "pass", "pass"), runOf(3, 42), report.XFail, "#195"},
 		{"#195 in many scenarios", "play-ok", reps("fail:#195", "pass", "pass"), runOf(12, 42), report.Fail, "#195"},
 		{"#195 absent isn't a fix", "play-ok", reps("pass", "pass"), known.Env{}, report.Pass, ""},
+
+		// Several known issues in one rep, each with its own signature.
+		{"F11 and #195 in one rep", "play-ok", reps("fail:F11+#195", "pass", "pass"), runOf(1, 16), report.XFail, "F11"},
+		{"F11 and an unguarded issue", "play-ok", reps("fail:F11+F12"), prod, report.Fail, ""},
+		{"F11 and #195 again on a confirmation", "play-ok", reps("fail:F11+#195", "fail:#195", "pass"), runOf(2, 16), report.Fail, "#195"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,6 +99,9 @@ func TestFired(t *testing.T) {
 	o := func(status, id string) known.Outcome { return known.Outcome{Status: report.Status(status), Known: id} }
 	if id, ok := known.Fired(map[string]known.Outcome{"play-ok": o("fail", "#195")}); !ok || id != "#195" {
 		t.Errorf("Fired = %q, %v", id, ok)
+	}
+	if id, ok := known.Fired(map[string]known.Outcome{"play-ok": o("fail", "F11+#195")}); !ok || id != "#195" {
+		t.Errorf("Fired with two issues = %q, %v", id, ok)
 	}
 	for _, rep := range []map[string]known.Outcome{
 		{"play-ok": o("pass", "")},

@@ -676,17 +676,25 @@ var smallCache = &Scenario{
 	Tier: Gate,
 	Doc: `A player reads the first 48 MiB of a movie through a 16 MiB piece cache, then seeks back to the start.
 
-The filecache LRU evicts pieces anacrolix still believes complete (F11): cache-holds-complete counts them, from anacrolix's completion and the cache's completed/ files. The seek back replays evicted pieces: its latency and any broken read show what that costs. The seeder runs faster here so the cache fills quickly.`,
+The filecache LRU evicts pieces anacrolix still believes complete (F11): cache-holds-complete counts them, from anacrolix's completion and the cache's completed/ files. The seek back replays evicted pieces: its latency and any broken read show what that costs. The seeder runs faster here so the cache fills quickly.
+
+The streaming window (urgent and readahead, 8 MiB here) stays inside the cache, as production's does (72 MB against 4 GB), so what's evicted is behind the reader. A window larger than the cache also evicts the dirty chunks of pieces ahead of it; the reader breaks on those too, but nothing proves that eviction yet, so it'd be a plain fail.`,
 	Guards: []string{"F11"},
 	Params: []Param{
 		{Name: "cache_size", Kind: Bytes, Default: "16MiB", Doc: "torrent.global_cache_size (whole MiB)."},
 		{Name: "fill", Kind: Bytes, Default: "48MiB", Doc: "How much the player reads before seeking back."},
+		{Name: "urgent_bytes", Kind: Bytes, Default: "4MiB", Doc: "streaming.urgent_buffer_bytes: with readahead_bytes, the window stays inside the cache."},
+		{Name: "readahead_bytes", Kind: Bytes, Default: "4MiB", Doc: "streaming.readahead_bytes."},
 		{Name: "seeder_rate", Kind: Bytes, Default: "8MiB"},
 		{Name: "max_buffer", Kind: Bytes, Default: "64MiB"},
 		{Name: "watch", Kind: Duration, Default: "3s", Doc: "How much media to play after seeking back."},
 	},
 	Stack: func(p Params) Stack {
-		return Stack{Tune: func(c *config.Config) { c.Torrent.GlobalCacheSize = max(p.Bytes("cache_size")>>20, 1) }}
+		return Stack{Tune: func(c *config.Config) {
+			c.Torrent.GlobalCacheSize = max(p.Bytes("cache_size")>>20, 1)
+			c.Streaming.UrgentBufferBytes = p.Bytes("urgent_bytes")
+			c.Streaming.ReadaheadBytes = p.Bytes("readahead_bytes")
+		}}
 	},
 	Checks: []string{"cache-holds-complete"},
 	Key:    []string{"evicted_complete_pieces", "seek_latency_p50", "read_timeouts"},

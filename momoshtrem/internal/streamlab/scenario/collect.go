@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/known"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/player"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
@@ -392,26 +393,32 @@ func (c *collector) checks() {
 
 // orphanedReads is #225's signature on a quiescence failure: nothing left
 // but goroutines blocked in anacrolix's waitAvailable under
-// TorrentFile.readContext, after a read timed out in the repetition: the
-// read goroutine a timed-out read leaves outlives its closed file. ""
-// otherwise.
+// TorrentFile.readContext, at most one per server read that timed out in
+// the repetition (readContext drains a timed-out read before the next, so
+// each leaves one at most): the read goroutine a timed-out read leaves
+// outlives its closed file. "" otherwise.
 func orphanedReads(q checks.QuiescenceResult, timeouts float64) string {
 	if timeouts == 0 || len(q.Leaked) == 0 || q.Requests != 0 || q.Readers != 0 || q.OpenFiles != 0 ||
 		q.BlockedReads != 0 || q.InFlight != 0 || q.Sessions != 0 {
 		return ""
 	}
+	orphans := 0
 	for _, g := range q.Leaked {
 		if !strings.Contains(g.Stack, "github.com/anacrolix/torrent.(*reader).waitAvailable") ||
 			!strings.Contains(g.Stack, "internal/vfs.(*TorrentFile).readContext") {
 			return ""
 		}
+		orphans += g.Count
+	}
+	if float64(orphans) > timeouts {
+		return ""
 	}
 	return "#225"
 }
 
-// playOK judges the broken bodies: none passes. When all of them carry
-// one known issue's signature, the failure does: #195's stall (on at most
-// two pieces), or F11's quick break at an evicted piece.
+// playOK judges the broken bodies: none passes. When each of them carries
+// a known issue's signature (#195's stall, F11's quick break at an
+// evicted piece), the failure names them all.
 func (c *collector) playOK() (string, report.Status, string, string) {
 	fs := c.e.rec.failures
 	plays := 0
@@ -421,20 +428,47 @@ func (c *collector) playOK() (string, report.Status, string, string) {
 	if len(fs) == 0 {
 		return "play-ok", report.Pass, "", fmt.Sprintf("%d playbacks and %d probes got their bytes", plays, c.e.rec.probesDone)
 	}
-	known := fs[0].known()
 	pieces := map[string]bool{}
 	var lines []string
 	for _, f := range fs {
-		if f.known() != known {
-			known = ""
-		}
-		pieces[fmt.Sprintf("%s/%d", f.title.Hash, f.piece)] = true
+		pieces[pieceKey(f)] = true
 		lines = append(lines, fmt.Sprintf("%s %s at %d: %s (%s)", f.device, f.title.Name, f.offset, f.err, f.diagnosis()))
 	}
-	if known == "#195" && len(pieces) > 2 {
-		known = "" // a stall wedges one connection: more pieces is something else
+	return "play-ok", report.Fail, playKnown(fs, c.rep.Metrics["read_timeouts"]),
+		fmt.Sprintf("%d broken bodies on %d pieces: %s", len(fs), len(pieces), quote(first3(lines)))
+}
+
+func pieceKey(f failure) string { return fmt.Sprintf("%s/%d", f.title.Hash, f.piece) }
+
+// playKnown is the known issues the broken bodies' signatures name, joined
+// by known.Sep: every failure must carry one. #195's are on at most two
+// pieces (a stall wedges one connection) and at most as many as the
+// server's read timeouts (each is a timed-out read). "" when any failure
+// is unexplained.
+func playKnown(fs []failure, readTimeouts float64) string {
+	ids := map[string]bool{}
+	stalled := map[string]bool{}
+	stalls := 0
+	for _, f := range fs {
+		id := f.known()
+		if id == "" {
+			return ""
+		}
+		ids[id] = true
+		if id == "#195" {
+			stalled[pieceKey(f)] = true
+			stalls++
+		}
 	}
-	return "play-ok", report.Fail, known, fmt.Sprintf("%d broken bodies on %d pieces: %s", len(fs), len(pieces), quote(first3(lines)))
+	if len(stalled) > 2 || float64(stalls) > readTimeouts {
+		return ""
+	}
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return strings.Join(out, known.Sep)
 }
 
 // abortLag judges the handlers' lag after their client dropped them (F12).
