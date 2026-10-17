@@ -59,7 +59,7 @@ func BadByte(off int64) bool { return off%ChunkSize == 0 }
 type Storage struct {
 	layout *media.Layout
 	pace   *rate.Limiter // nil: unpaced
-	// ctx ends the paced and held waits when the seeder stops.
+	// ctx ends the paced and held waits when the seeder stops (Stop).
 	ctx  context.Context
 	stop context.CancelFunc
 
@@ -115,8 +115,12 @@ func (s *Storage) BadServes() int {
 	return s.badServes
 }
 
-// Stop ends the paced and held reads waiting: they fail. A seeder stops
-// its storage when it closes.
+// Stop ends the pace and the holds: the reads waiting, and every read
+// after, are served at once. A stopped storage never fails a read, because
+// anacrolix v1.60.0 can't take one at close: a peer-request read that
+// fails once its torrent is closed is left unread, and servePeerRequest
+// panics (#237). A seeder stops its storage once its client has closed,
+// so what the released reads serve reaches no leecher (Seeder.Close).
 func (s *Storage) Stop() { s.stop() }
 
 // OpenTorrent opens the layout's torrent. Its info must describe the
@@ -134,30 +138,28 @@ func (s *Storage) OpenTorrent(_ context.Context, info *metainfo.Info, _ metainfo
 	}, nil
 }
 
-// wait paces a read of n bytes; an error once the storage stopped.
-func (s *Storage) wait(n int) error {
+// wait paces a read of n bytes, until the storage stops (Stop). WaitN
+// fails only then: no step exceeds the burst, and ctx has no deadline.
+func (s *Storage) wait(n int) {
 	if s.pace == nil {
-		return nil
+		return
 	}
 	for n > 0 {
 		step := min(n, s.pace.Burst())
-		if err := s.pace.WaitN(s.ctx, step); err != nil {
-			return err
+		if s.pace.WaitN(s.ctx, step) != nil {
+			return
 		}
 		n -= step
 	}
-	return nil
 }
 
 // sleep waits d, or until the storage stops.
-func (s *Storage) sleep(d time.Duration) error {
+func (s *Storage) sleep(d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
 	case <-t.C:
-		return nil
 	case <-s.ctx.Done():
-		return s.ctx.Err()
 	}
 }
 
@@ -214,13 +216,9 @@ func (p generatedPiece) ReadAt(b []byte, off int64) (int, error) {
 	}
 	bad, hold := p.s.serve(p.index, p.length, off, len(b))
 	if hold > 0 {
-		if err := p.s.sleep(hold); err != nil {
-			return 0, fmt.Errorf("swarm: the seeder stopped: %w", err)
-		}
+		p.s.sleep(hold)
 	}
-	if err := p.s.wait(len(b)); err != nil {
-		return 0, fmt.Errorf("swarm: the seeder stopped: %w", err)
-	}
+	p.s.wait(len(b))
 	n, err := p.s.layout.ReadAt(b, p.off+off)
 	for _, c := range bad {
 		if i := c - off; i < int64(n) {
