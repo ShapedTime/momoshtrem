@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	atorrent "github.com/anacrolix/torrent"
@@ -34,61 +33,6 @@ func init() {
 		report.MetricDef{Name: observe.MetricLogWarnings, Kind: report.Count, Unit: "records", Better: report.Lower, Doc: "WARN log records, momoshtrem's and anacrolix's."},
 		report.MetricDef{Name: observe.MetricOverhead, Kind: report.Timing, Unit: "%", Better: report.Lower, Doc: "The observer's samplers, piece mirror and log capture: their busy time over the process's CPU time. The budget is 2%. The mutex and block profiles' cost inside the runtime isn't in it: an A/B against observe=false measures that."},
 	)
-}
-
-// Fault declares a fault starting now that starves t's torrent (a paused
-// seeder, a dropped link), or every torrent when t is nil: the watchdog
-// doesn't trip for that torrent while it runs. Call the returned func
-// when it ends; one still running when the script ends fails the
-// watchdog check (the script forgot it, and a forgotten fault would hide
-// a hang).
-func (e *Env) Fault(name string, t *Title) (end func()) {
-	hash := ""
-	if t != nil {
-		hash = t.Hash
-	}
-	return e.obs.Fault(name, hash)
-}
-
-// PauseSeeder pauses t's seeder (swarm.Seeder.Pause) as a declared fault,
-// until the returned func resumes it; calling it again does nothing. A
-// pause the script doesn't resume is resumed when the script ends.
-func (e *Env) PauseSeeder(t *Title) (resume func()) {
-	end := e.Fault("seeder-pause", t)
-	t.Seeder.Pause()
-	var once sync.Once
-	resume = func() {
-		once.Do(func() {
-			t.Seeder.Resume()
-			end()
-		})
-	}
-	e.faults.mu.Lock()
-	e.faults.resumes = append(e.faults.resumes, resume)
-	e.faults.mu.Unlock()
-	return resume
-}
-
-// envFaults are the faults a script injected through the Env.
-type envFaults struct {
-	mu      sync.Mutex
-	resumes []func() // PauseSeeder's
-	// open are the faults still running when the script ended.
-	open []string
-}
-
-// endFaults, once the script has ended, notes the faults it left running,
-// ends them and resumes the seeders it paused, so the teardown and the
-// quiescence check run on a healthy swarm.
-func (e *Env) endFaults() {
-	open := e.obs.EndFaults()
-	e.faults.mu.Lock()
-	resumes := e.faults.resumes
-	e.faults.open = open
-	e.faults.mu.Unlock()
-	for _, r := range resumes {
-		r()
-	}
 }
 
 // chunkCached reports whether the piece cache still holds the written
@@ -127,7 +71,7 @@ func (e *Env) startObserver(opts RunOptions) {
 	titles := make([]observe.Title, len(e.Titles))
 	for i, t := range e.Titles {
 		titles[i] = observe.Title{Name: t.Name, Path: t.Path, Hash: t.Hash, Offset: t.Offset, Size: t.Size,
-			PieceLength: t.Layout.PieceLength(), Seeder: t.Seeder}
+			PieceLength: t.Layout.PieceLength(), Seeder: t.Seeder, Remote: t.Remote != nil}
 	}
 	lagMax := time.Second
 	if v, ok := e.P.Values()["abort_lag_max"]; ok {

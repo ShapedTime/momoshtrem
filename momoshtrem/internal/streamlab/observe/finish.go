@@ -69,7 +69,7 @@ func (o *Observer) Finish(f Facts) Result {
 			Known: t.known, Why: t.why, Artifacts: t.artifacts})
 	}
 	for _, ft := range o.faultList() {
-		obs.Faults = append(obs.Faults, report.Fault{Name: ft.name, Torrent: ft.hash, StartMS: o.ms(ft.start), EndMS: o.ms(ft.end)})
+		obs.Faults = append(obs.Faults, report.Fault{Name: ft.name, Torrent: ft.key, StartMS: o.ms(ft.start), EndMS: o.ms(ft.end)})
 	}
 	res.Observation = obs
 	res.Findings = o.findings(f, reqs, logs)

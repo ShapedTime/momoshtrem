@@ -82,6 +82,20 @@ type Title struct {
 	Offset, Size, PieceLength int64
 	// Seeder serves its torrent.
 	Seeder *swarm.Seeder
+	// Remote is an HDRezka movie, a file on the fake CDN: no torrent, so
+	// nothing to sample but its requests. Its RemoteFile's reads don't
+	// count in blocked_reads, so the watchdog can't see them stall (the
+	// remote-watchdog check covers its own).
+	Remote bool
+}
+
+// FaultKey is what a fault on the title declares: its torrent's hash, or
+// its path for an HDRezka movie.
+func (t Title) FaultKey() string {
+	if t.Remote {
+		return "remote:" + t.Path
+	}
+	return t.Hash
 }
 
 // piece is the torrent piece holding the file offset off.
@@ -170,7 +184,7 @@ func Start(cfg Config) *Observer {
 		o.startRecorder(false)
 	}
 	for _, t := range cfg.Titles {
-		if _, ok := o.watches[t.Hash]; ok {
+		if _, ok := o.watches[t.Hash]; ok || t.Remote {
 			continue
 		}
 		o.hashes = append(o.hashes, t.Hash)

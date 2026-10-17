@@ -86,13 +86,14 @@ func (o *Observer) endStretch(now time.Time) {
 	w.tripped = false
 }
 
-// activeTorrents are the torrents whose titles have a request running.
+// activeTorrents are the fault keys (Title.FaultKey) of the titles with a
+// request running.
 func (o *Observer) activeTorrents() map[string]bool {
 	out := map[string]bool{}
 	for _, r := range o.cfg.Stack.Requests.Active() {
 		for _, t := range o.cfg.Titles {
 			if t.Path == r.Path {
-				out[t.Hash] = true
+				out[t.FaultKey()] = true
 			}
 		}
 	}

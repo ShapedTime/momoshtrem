@@ -162,8 +162,10 @@ type failure struct {
 	// now: the cache evicted dirty data (F11 in forward play).
 	chunkGone bool
 	// seederPaused: the lab paused the torrent's seeder (a fault, not
-	// #195).
+	// #195); faulted: a fault the script declared on the title ran while
+	// the body was silent (faultlog.go).
 	seederPaused bool
+	faulted      bool
 }
 
 // known is the known issue whose signature the failure carries: #195's
@@ -214,6 +216,9 @@ func (f failure) diagnosis() string {
 	}
 	if f.seederPaused {
 		why = append(why, "the seeder paused (the lab's fault)")
+	}
+	if f.faulted {
+		why = append(why, "during a fault the script declared")
 	}
 	if f.chunkGone {
 		why = append(why, "its written chunk gone from the cache")
@@ -315,10 +320,13 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
 		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
 	f.seederPaused = t.Seeder != nil && t.Seeder.Paused()
+	f.faulted = e.faultedDuring(t, f.at.Add(-silence), f.at)
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
 	f.resyncFailed = e.logs.ReadFailed(t.Hash, f.piece, f.at)
 	if tor, ok := e.Stack.Torrent(t.Hash); ok {
-		f.stalled = e.stuck(tor, t.Hash, f.piece) && !f.seederPaused
+		// A stall the lab made (a paused seeder, a declared fault) isn't
+		// #195's.
+		f.stalled = e.stuck(tor, t.Hash, f.piece) && !f.seederPaused && !f.faulted
 		f.evicted = !e.cached(tor, f.piece)
 		// anacrolix reads only data it holds, so a read that failed after
 		// the resync had the chunk at the break written: missing now, it

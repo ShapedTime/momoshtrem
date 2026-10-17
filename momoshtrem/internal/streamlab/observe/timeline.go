@@ -74,26 +74,13 @@ func (o *Observer) writeTimeline(f Facts, hist map[string]history, reqs []stack.
 			Pos: &pos, EndMS: o.ms(s.End)})
 	}
 	for _, ft := range o.faultList() {
-		evs = append(evs, timelineEvent{TMS: o.ms(ft.start), Kind: "fault", Name: ft.name, Torrent: ft.hash, EndMS: o.ms(ft.end)})
+		evs = append(evs, timelineEvent{TMS: o.ms(ft.start), Kind: "fault", Name: ft.name, Torrent: ft.key, EndMS: o.ms(ft.end)})
 	}
 	for _, t := range o.trips {
 		evs = append(evs, timelineEvent{TMS: o.ms(t.at), Kind: "trip", Known: t.known, Name: t.why})
 	}
 	slices.SortStableFunc(evs, func(a, b timelineEvent) int { return cmp.Compare(a.TMS, b.TMS) })
 	return writeNDJSON(o.cfg.Dir, "timeline.ndjson", evs)
-}
-
-// faultList is the declared faults, a running one ending at the stop.
-func (o *Observer) faultList() []fault {
-	o.faultMu.Lock()
-	defer o.faultMu.Unlock()
-	out := slices.Clone(o.faults)
-	for i := range out {
-		if out[i].end.IsZero() {
-			out[i].end = o.stopped
-		}
-	}
-	return out
 }
 
 // titleTimelines sums up each title's pieces against its readers, and
@@ -197,7 +184,7 @@ func (o *Observer) plot(ti int, h history, f Facts, reqs []stack.Request) string
 		}
 	}
 	for _, ft := range o.faultList() {
-		if ft.hash != "" && ft.hash != t.Hash {
+		if ft.key != "" && ft.key != t.FaultKey() {
 			continue
 		}
 		fmt.Fprintf(&b, `<rect x="%.1f" y="%.0f" width="%.1f" height="%.0f" fill="#6b7280" fill-opacity="0.15"/>`+"\n",
