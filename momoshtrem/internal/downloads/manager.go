@@ -172,6 +172,9 @@ type Service struct {
 	marks    map[string]*watchMark
 	holdKey  string
 	restored bool
+	// onStreams gets the episodes streaming now after every session read:
+	// the smart picks' (smart.go).
+	onStreams atomic.Pointer[func(map[int64][]episodeNumber)]
 
 	loadMu     sync.Mutex
 	loading    map[string]bool
@@ -227,19 +230,25 @@ func (s *Service) RestorePins(ctx context.Context) error {
 	s.apply(ctx, p, false)
 	s.snap.Store(p.snapshot)
 	s.log.Info("Download pins restored", "downloads", len(p.stage.covs), "torrents", len(p.refs))
+	s.demoteReleasedWatched(ctx, p.now.Add(-demoteSince), p.refs)
+	return nil
+}
 
-	released, err := s.d.Store.ResolveReleasedWatched(ctx, p.now.Add(-demoteSince))
+// demoteReleasedWatched demotes the files of the downloads released as
+// watched since since, but those a download still wants (passMu held):
+// after a restart, and after the smart picks release one (smart.go).
+func (s *Service) demoteReleasedWatched(ctx context.Context, since time.Time, wanted map[string]*pieceRefs) {
+	released, err := s.d.Store.ResolveReleasedWatched(ctx, since)
 	if err != nil {
 		s.log.Warn("Couldn't read the downloads released as watched; their data isn't evicted first", "error", err)
-		return nil
+		return
 	}
 	var covs []*coverage
 	in := fileInput{pieces: s.pieceMap}
 	for i := range released {
 		covs = append(covs, cover(&released[i], in))
 	}
-	s.demote(covs, true, p.refs)
-	return nil
+	s.demote(covs, true, wanted)
 }
 
 // Start runs the loop: a pass every Interval and on Wake, the sessions
@@ -925,6 +934,9 @@ func (s *Service) observeSessions(ctx context.Context, now time.Time) bool {
 		if !seen[id] {
 			delete(s.marks, id)
 		}
+	}
+	if fn := s.onStreams.Load(); fn != nil {
+		(*fn)(st.episodes)
 	}
 	return recorded
 }

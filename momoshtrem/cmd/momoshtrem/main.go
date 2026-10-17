@@ -639,12 +639,24 @@ func main() {
 	// what the Trakt sync imported, with the title pages' library state and
 	// download progress. Without Trakt the lists are empty, but new
 	// episodes of the library's shows.
-	apiOpts.Me = me.New(me.Deps{
+	meService := me.New(me.Deps{
 		Store:           library.NewCatalogRepository(db),
 		Settings:        settingsRepo,
 		Catalog:         catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db), Torrents: torrentService, Downloads: catalogDownloads(downloadsService)}),
 		WebDAVPublicURL: webdavPublicURL,
 	})
+	apiOpts.Me = meService
+
+	// Smart downloads (#77): the next episodes of the shows being watched,
+	// from Trakt's Up next and what streams now, while smart.enabled is on.
+	smartPicker := wireSmart(smartDeps{
+		db:        db,
+		downloads: downloadsService,
+		governor:  storageGovernor,
+		me:        meService,
+		traktSync: traktSync,
+	})
+	smartPicker.Start()
 
 	// AI recommendations and Ask momoshtrem (#9): the AI core and its
 	// settings (#154), the picks (#153, #157) and Ask (#158), each set up in
@@ -780,8 +792,10 @@ func main() {
 	traktSync.Stop()
 	traktAuth.Close()
 
-	// Stop the download manager (loads in flight end with the client), then
-	// the storage governor; a trim stops between two steps
+	// Stop the smart picks and the download manager (loads in flight end
+	// with the client), then the storage governor; a trim stops between two
+	// steps
+	smartPicker.Close()
 	downloadsService.Close()
 	storageGovernor.Close()
 

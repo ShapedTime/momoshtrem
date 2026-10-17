@@ -27,6 +27,9 @@ type Snapshot struct {
 	downloading []FileKey
 	torrents    map[string]TorrentShare
 	usage       Usage
+	// smartLeft is what the smart cap has left after the admitted smart
+	// files (smart.go: a new pick that can't fit isn't made).
+	smartLeft int64
 }
 
 type seasonKey struct {
@@ -185,6 +188,7 @@ func buildSnapshot(in snapshotInput) *Snapshot {
 		at: in.at, byID: map[int64]int{},
 		movies: map[int64]Keep{}, shows: map[int64]Keep{}, seasons: map[seasonKey]Keep{}, episodes: map[int64]Keep{},
 		files: map[FileKey]FileStatus{}, torrents: map[string]TorrentShare{}, usage: in.usage,
+		smartLeft: max(0, in.usage.SmartMaxBytes-in.stage.adm.committedSmart),
 	}
 	items := make([]Download, 0, len(in.views))
 	for _, v := range in.views {

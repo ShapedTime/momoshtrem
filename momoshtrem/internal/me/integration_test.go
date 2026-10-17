@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -150,7 +151,7 @@ func TestIntegration_Me(t *testing.T) {
 
 	// Alpha has specials; Trakt names a special next, so the calendar's
 	// next regular episode is it, and the library has its file.
-	_, alpha := s.show(9001, "Alpha", map[int][]string{0: {date(-90), date(-30)}, 1: {date(-60), date(-53), date(-46), date(-39), date(-32), date(-1)}})
+	alphaShow, alpha := s.show(9001, "Alpha", map[int][]string{0: {date(-90), date(-30)}, 1: {date(-60), date(-53), date(-46), date(-39), date(-32), date(-1)}})
 	s.file(alpha["1x6"], "Alpha/S01E06.mkv")
 	s.progress(1, 9001, "Alpha", now.Add(-24*time.Hour), 5, 0, 2)
 	s.calendar(1, 9001, 1, 6, now.Add(-30*time.Hour))
@@ -158,7 +159,7 @@ func TestIntegration_Me(t *testing.T) {
 	s.progress(2, 9002, "Bravo", now.Add(-72*time.Hour), 2, 1, 3)
 	s.calendar(2, 9002, 1, 3, now.Add(26*time.Hour))
 	// Charlie was caught up; then E9 aired an hour ago.
-	s.show(9003, "Charlie", map[int][]string{1: {date(-70), date(-63), date(-56), date(-49), date(-42), date(-35), date(-28), date(-21), date(0)}})
+	charlieShow, charlie := s.show(9003, "Charlie", map[int][]string{1: {date(-70), date(-63), date(-56), date(-49), date(-42), date(-35), date(-28), date(-21), date(0)}})
 	s.progress(3, 9003, "Charlie", now.Add(-48*time.Hour), 8, -1, 0)
 	s.calendar(3, 9003, 1, 9, now.Add(-time.Hour))
 	s.calendar(3, 9003, 1, 10, now.Add(7*24*time.Hour))
@@ -169,7 +170,7 @@ func TestIntegration_Me(t *testing.T) {
 	s.progress(4, 9004, "Delta", now.Add(-time.Hour), 1, 1, 2)
 	s.exec(`INSERT INTO trakt_hidden (section, trakt_id, tmdb_id) VALUES ('dropped', 4, 9004)`)
 	// Echo is watchlisted and in the library, not started.
-	s.show(9005, "Echo", map[int][]string{1: {date(-3), date(4)}})
+	echoShow, echo := s.show(9005, "Echo", map[int][]string{1: {date(-3), date(4)}})
 	s.exec(`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES
 		('tv', 5, 9005, 'Echo', 2026, $1), ('movie', 6, 603, 'The Matrix', 1999, $2), ('tv', 7, 9100, 'Elsewhere', 2025, $3)`,
 		now.Add(-5*24*time.Hour), now.Add(-time.Hour), now.Add(-10*24*time.Hour))
@@ -221,6 +222,32 @@ func TestIntegration_Me(t *testing.T) {
 		}
 	}
 
+	// What smart downloads read (#203): the library's shows with the
+	// library episode each names next; Bravo isn't in the library.
+	var nextEps []UpNextEpisode
+	n = queries(func() (err error) { nextEps, err = svc.UpNextEpisodes(ctx); return err })
+	if n > 3 {
+		t.Errorf("up next episodes: %d queries, budget 3", n)
+	}
+	got = nil
+	for _, e := range nextEps {
+		last := "never"
+		if e.LastWatchedAt != nil {
+			last = e.LastWatchedAt.UTC().Format(time.RFC3339)
+		}
+		got = append(got, fmt.Sprintf("%d:%d S%dE%d %s", e.ShowID, e.EpisodeID, e.SeasonNumber, e.EpisodeNumber, last))
+	}
+	slices.Sort(got)
+	wantEps := []string{
+		fmt.Sprintf("%d:%d S1E6 %s", alphaShow.ID, alpha["1x6"], now.Add(-24*time.Hour).Format(time.RFC3339)),
+		fmt.Sprintf("%d:%d S1E9 %s", charlieShow.ID, charlie["1x9"], now.Add(-48*time.Hour).Format(time.RFC3339)),
+		fmt.Sprintf("%d:%d S1E1 never", echoShow.ID, echo["1x1"]),
+	}
+	slices.Sort(wantEps)
+	if !slices.Equal(got, wantEps) {
+		t.Errorf("up next episodes = %v\nwant                %v", got, wantEps)
+	}
+
 	var fresh []NewEpisodeItem
 	n = queries(func() (err error) { fresh, err = svc.NewEpisodes(ctx, 7); return err })
 	t.Logf("new episodes: %d queries (budget 3)", n)
@@ -268,6 +295,9 @@ func TestIntegration_Me(t *testing.T) {
 	}
 	if upNext, err := svc.UpNext(ctx); err != nil || len(upNext) != 0 {
 		t.Errorf("up next without Trakt = %+v, %v", upNext, err)
+	}
+	if eps, err := svc.UpNextEpisodes(ctx); err != nil || len(eps) != 0 {
+		t.Errorf("up next episodes without Trakt = %+v, %v", eps, err)
 	}
 	if watchlist, err := svc.Watchlist(ctx, ""); err != nil || len(watchlist) != 0 {
 		t.Errorf("watchlist without Trakt = %+v, %v", watchlist, err)

@@ -805,6 +805,37 @@ func TestSync_OnImported(t *testing.T) {
 	}
 }
 
+// SetOnSynced's hook (smart downloads, #203) runs after every sync that
+// ends well, its run recorded; a sync that doesn't end well doesn't call it.
+func TestSync_OnSynced(t *testing.T) {
+	se := newSyncEnv(t, newFakeClock())
+	var (
+		mu   sync.Mutex
+		seen []SyncRun
+	)
+	se.syncer.SetOnSynced(func() {
+		st, err := se.syncer.Status(se.ctx)
+		if err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		seen = append(seen, st.Run)
+		mu.Unlock()
+	})
+	se.syncNow()
+	se.syncNow()
+	unauthorized := trakttest.Reply{Status: http.StatusUnauthorized}
+	se.srv.Queue("/sync/last_activities", unauthorized, unauthorized)
+	se.syncNow() // reauth
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("hook called %d times, want twice (the import and the check)", len(seen))
+	}
+	wantRun(t, seen[0], SyncIdle, SyncInitial)
+	wantRun(t, seen[1], SyncIdle, SyncIncremental)
+}
+
 func TestSync_ConnectStartsTheInitialImport(t *testing.T) {
 	e := newEnv(t)
 	art := &fakeArtwork{steps: map[SyncStep]bool{}}

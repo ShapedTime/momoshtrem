@@ -101,6 +101,7 @@ type Syncer struct {
 	lastCheck time.Time
 
 	onImported func(context.Context) // SetOnImported
+	onSynced   func()                // SetOnSynced
 }
 
 // SetOnImported installs a function called when an initial import has
@@ -110,6 +111,16 @@ func (s *Syncer) SetOnImported(fn func(context.Context)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onImported = fn
+}
+
+// SetOnSynced installs a function called after every sync that ends
+// well (an initial import, a check or a reconcile), once its run is
+// recorded: smart downloads pick again from the new Up next (#203). It
+// runs on the sync's goroutine, so it must not block.
+func (s *Syncer) SetOnSynced(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onSynced = fn
 }
 
 // NewSyncer creates the sync. Plug it in with Auth.SetHooks(s.Hooks()),
@@ -393,7 +404,7 @@ func (s *Syncer) finish(r *run, err error) {
 		s.mu.Unlock()
 		return
 	}
-	out := s.run
+	out, onSynced := s.run, s.onSynced
 	switch {
 	case err == nil:
 		out = r.result
@@ -420,6 +431,9 @@ func (s *Syncer) finish(r *run, err error) {
 		s.log.Info("Trakt sync finished", "kind", r.plan.kind, "plays", out.Progress.Plays,
 			"ratings", out.Progress.Ratings, "watchlist", out.Progress.Watchlist, "shows", out.Progress.Shows,
 			"duration", now.Sub(*out.StartedAt).Round(time.Millisecond))
+		if onSynced != nil {
+			onSynced()
+		}
 		return
 	case errors.Is(err, ErrReauth):
 		s.log.Warn("Trakt sync stopped: connect Trakt again", "kind", r.plan.kind, "step", r.step)
