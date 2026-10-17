@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { type ReactNode, useId } from 'react';
 import { Play } from 'lucide-react';
 import { CopyField, FilePath, Progress } from '@/components/ui';
 import type { StageCopy, StageIntent } from '@/lib/title/stage-copy';
@@ -27,6 +27,8 @@ interface PrimaryPanelProps {
   busy?: StageIntent | null;
   /** Names the progress bar: "Interstellar download". */
   titleName: string;
+  /** What keeps it on disk (#206), under the stage's state: `KeepStatus`. */
+  keep?: ReactNode;
 }
 
 /**
@@ -34,7 +36,7 @@ interface PrimaryPanelProps {
  * one next thing to do. On phone its buttons move to the ActionDock; the
  * panel keeps the state, steps and hint.
  */
-export function PrimaryPanel({ copy, onAction, busy, titleName }: PrimaryPanelProps) {
+export function PrimaryPanel({ copy, onAction, busy, titleName, keep }: PrimaryPanelProps) {
   const headingId = useId();
   const heading = (
     <h2 className="pp-title" id={headingId}>
@@ -69,6 +71,7 @@ export function PrimaryPanel({ copy, onAction, busy, titleName }: PrimaryPanelPr
           <StageHint copy={copy} />
         </>
       )}
+      {keep}
       {copy.path && (
         <div className="flex min-w-0 flex-col gap-2">
           <span className="t-micro text-fg-3">WebDAV path</span>

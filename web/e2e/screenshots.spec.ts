@@ -791,3 +791,67 @@ test.describe('Ask momoshtrem (#156)', () => {
     await shoot(page, testInfo, 'ask/palette');
   });
 });
+
+test.describe('Download & keep (#206)', () => {
+  const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
+  const settle = async (page: Page) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(600);
+  };
+
+  test('the Keep sheet', async ({ page }, testInfo) => {
+    await signIn(page, '/movie/693134?sheet=keep&movie=693134');
+    await page.getByText(/left for kept downloads/).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/sheet');
+  });
+
+  test('kept space is full', async ({ page }, testInfo) => {
+    await scenario(page, 'downloads-full');
+    await signIn(page, '/movie/693134?sheet=keep&movie=693134');
+    await page.getByText(/^Not enough space/).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/full');
+  });
+
+  test('a kept movie: change duration or stop keeping', async ({ page }, testInfo) => {
+    await signIn(page, '/movie/157336?sheet=keep&movie=157336');
+    await page.getByRole('heading', { name: 'Kept', exact: true }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/manage');
+  });
+
+  test('a smart pick', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/209867?season=1&sheet=keep&show=209867&scope=episode&se=S01E27');
+    await page.getByRole('heading', { name: 'Keep this smart pick' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/smart');
+  });
+
+  test('the movie panel, ready with Download & keep, and kept while downloading', async ({ page }, testInfo) => {
+    await signIn(page, '/movie/693134');
+    await page.getByRole('heading', { name: 'Ready in Infuse' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/movie-ready');
+    await page.goto('/movie/157336');
+    await page.getByText(/^Kept until watched/).waitFor();
+    await page.locator('.primary-panel').evaluate((panel) => panel.scrollIntoView({ block: 'center' }));
+    await settle(page);
+    await shoot(page, testInfo, 'keep/movie-kept');
+  });
+
+  test('a kept season: the season row and the episode pills', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/82728?season=3');
+    await page.getByRole('heading', { name: 'Episodes', exact: true }).evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+    await page.getByRole('button', { name: /^Season kept/ }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/season');
+  });
+
+  test('an episode its season keeps', async ({ page }, testInfo) => {
+    await signIn(page, '/tv/82728?season=3&sheet=episode&tmdb=82728&se=S03E01');
+    await page.getByRole('region', { name: 'Kept', exact: true }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'keep/episode');
+  });
+});

@@ -1,5 +1,6 @@
 import type { AvailabilityStage, MissingRun, ShowTitle, Title } from '@/lib/api/contract';
 import { formatBytes, formatSpeed, plural } from './format';
+import { downloadsAvailable } from './keep-sheet';
 import { releaseHighlights } from './release';
 
 /**
@@ -15,10 +16,10 @@ export const STAGE_STEPS = ['Add', 'Source', 'Download', 'Ready'] as const;
 
 const STEP_INDEX: Record<AvailabilityStage, number> = { none: 0, needs_torrent: 1, downloading: 2, ready: 3 };
 
-export type StageIcon = 'plus' | 'search' | 'activity' | 'tv' | 'stream';
+export type StageIcon = 'plus' | 'search' | 'activity' | 'tv' | 'stream' | 'keep' | 'kept';
 
-/** What a button does; the page maps each intent to a handler. */
-export type StageIntent = 'add' | 'find' | 'hdrezka' | 'view_download' | 'how_to_play';
+/** What a button does; the page maps each intent to a handler. `keep` opens the Keep sheet (#206): a new Keep, or a change. */
+export type StageIntent = 'add' | 'find' | 'hdrezka' | 'view_download' | 'how_to_play' | 'keep';
 
 export interface StageButton {
   label: string;
@@ -62,6 +63,18 @@ const HDREZKA: StageButton = { label: 'Stream from HDRezka', icon: 'stream', int
 const VIEW_DOWNLOAD: StageButton = { label: 'View download', icon: 'activity', intent: 'view_download', variant: 'secondary', href: '/activity' };
 const HOW_TO_PLAY: StageButton = { label: 'How to play in Infuse', icon: 'tv', intent: 'how_to_play', variant: 'primary' };
 const PLAY_IN_INFUSE: StageButton = { ...HOW_TO_PLAY, label: 'Play in Infuse' };
+const KEEP: StageButton = { label: 'Download & keep', icon: 'keep', intent: 'keep', variant: 'secondary' };
+const CHANGE_KEEP: StageButton = { label: 'Change duration', icon: 'kept', intent: 'keep', variant: 'secondary' };
+
+/**
+ * A ready movie's second action (#206): Download & keep, or once it's kept, change how long. A
+ * stream can't be kept (HDRezka plays from the CDN), and shows keep from the ⋯ menu and seasons.
+ * A backend without downloads (before #202 and #204) leaves `keep` out: then there's none.
+ */
+function keepButton(title: Title): StageButton | null {
+  if (title.media_type !== 'movie' || !title.library.torrent || !downloadsAvailable(title.library)) return null;
+  return title.library.keep?.reason === 'kept' ? CHANGE_KEEP : KEEP;
+}
 
 const FREE = 'Adding is free: nothing downloads until you pick a torrent.';
 const STREAMS = 'Pick a release and it streams to Infuse while it downloads.';
@@ -173,6 +186,7 @@ export function primaryActionFor(title: Title, options: StageOptions = {}): Stag
         hint: '',
         path,
         primary: HOW_TO_PLAY,
+        secondary: keepButton(title),
         dock: { button: PLAY_IN_INFUSE, copyPath: path !== null, icon: null },
       };
     }

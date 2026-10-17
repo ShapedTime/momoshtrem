@@ -91,7 +91,11 @@ defined. Every surface (cards, rows, panels, Activity, Settings) uses
 torrents: `healthy` · `no_seeders` · `added` · `complete` · `few_peers`; trackers: `working` · `status_unknown`; subtitle matches: `match_exact` ·
 `match_same_source` · `match_different_timing` · `match_unknown`; files in a mapping
 job: `matched` · `special` · `unmatched` · `ignored` (the mapping review's group titles,
-summary words and foot messages live with its rules in `lib/mapping/review.ts`)
+summary words and foot messages live with its rules in `lib/mapping/review.ts`); downloads (#77):
+`kept` · `smart` · `queued` · `waiting_for_stream` · `waiting_for_window` · `stalled` · `disk_full` ·
+`storage_full` · `on_disk` · `no_file` · `not_keepable`, with `downloading` and `paused`
+(`DOWNLOAD_STATE_STATUS` maps a download's state to its key; the copy that needs a number or a time,
+"Downloading 42%", "Waits until 01:00", "Kept until watched · by Nov 16", lives in `lib/title/keep.ts`)
 
 On narrow cards, pass a short `label` the design uses, for example "No torrent" or
 "Review"; the tone and icon stay the same. If a new state is needed, add it
@@ -166,8 +170,14 @@ and the pure helpers in `lib/title/`. Build any page about one title from them.
   - leading watched runs (10 or more) collapse into "Show episodes 1–20 (all watched)", never past the Up next row;
   - seasons over 60 rows render through the window virtualiser (`@tanstack/react-virtual`).
   Rows outside the window aren't in the DOM, so jump with `scrollToEpisode`, never by element id.
+- **Download & keep** (#206): the Keep sheet (`KeepSheet`) opens from a ready movie's second
+  action, the ⋯ menu ("Download & keep show"), the season row and the episode sheet. Once kept, the
+  same places offer Change duration (the sheet) and Stop keeping (confirmed). `KeepStatus` shows what
+  holds a title on its panel, and `EpisodeRow` gets one keep pill beside its state ("Kept", "Smart", or
+  why the file isn't really held). The words come from `lib/title/keep.ts`.
 - **URL state.** `?season=`, `?view=rich`, the sheets (`?sheet=episode&tmdb=&se=S01E05`,
-  `?sheet=show-settings&tmdb=`, `?sheet=infuse-setup&path=&url=`), and the one-off `?ep=` that a
+  `?sheet=show-settings&tmdb=`, `?sheet=infuse-setup&path=&url=`, `?sheet=keep&movie=` or
+  `?sheet=keep&show=&scope=show|season|episode` with `season` or `se`), and the one-off `?ep=` that a
   cross-season jump scrolls to.
 
 ## 9. Copy
