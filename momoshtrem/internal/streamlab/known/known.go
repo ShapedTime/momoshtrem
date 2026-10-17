@@ -223,8 +223,10 @@ var Issues = []Issue{
 		Doc: "The piece cache (a filecache LRU) evicts pieces anacrolix still believes complete. Reading one fails: " +
 			"anacrolix resyncs the piece's completion but returns the error, and the response ends early. Its play-ok " +
 			"signature: a body that broke within 3 s of its last byte, at a piece anacrolix had complete and the cache no " +
-			"longer holds. (The dirty chunks of incomplete pieces the responsive PriorityReader reads can be evicted too, " +
-			"when the readahead window outgrows the cache; nothing proves that yet, so such a break is a plain fail.)",
+			"longer holds. When the readahead window outgrows the cache, the LRU also evicts the dirty chunks of incomplete " +
+			"pieces the responsive PriorityReader reads (forward play). Such a break carries the signature only with the log " +
+			"capture's proof: anacrolix logged \"error reading\" for that piece, then \"read failed after completion resync\" " +
+			"(reader.go:339), within 3 s before the break. Without it, it's a plain fail.",
 	},
 	{
 		ID:      "F12",
@@ -249,11 +251,13 @@ var Issues = []Issue{
 		ID:     "#195",
 		Title:  "anacrolix loses a writer wakeup: a read waits up to the 1-minute keep-alive",
 		Ref:    "#195",
-		Checks: []string{"play-ok", "idle-resume"},
+		Checks: []string{"play-ok", "idle-resume", "watchdog"},
 		Doc: "anacrolix v1.60.0's connection writer can miss a wakeup; with one useful peer a read then waits until the " +
 			"keep-alive (60 s), past the lab's read timeout. Its signature: every broken body of the repetition was silent " +
 			"for half the read timeout or more and broke at an incomplete piece with the seeder connected and downloads on " +
-			"(the torrent neither idle nor paused), on at most two pieces. It hits about 1-4% of reads: one firing is confirmed with more " +
+			"(the torrent neither idle nor paused), on at most two pieces. A watchdog trip carries it when, at the trip, every " +
+			"stuck piece is wanted and incomplete with a seeder connected (not one the lab paused) and downloads on, on at " +
+			"most two pieces: the same signature, measured live. It hits about 1-4% of reads: one firing is confirmed with more " +
 			"repetitions, and firing on every repetition, or on two or more and over 25% of them, is a fail.",
 	},
 	{

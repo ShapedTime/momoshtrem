@@ -20,6 +20,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/client"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/observe"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/player"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
@@ -86,6 +87,8 @@ type Env struct {
 	// quietKnown names the known issues a quiescence failure carries
 	// beyond #225's: a stress script's (stress_deadlock.go). Optional.
 	quietKnown func(checks.QuiescenceResult) string
+	// obs observes the repetition (observe.go); nil when it's off.
+	obs *observe.Observer
 }
 
 // recorder keeps what a repetition did.
@@ -146,17 +149,28 @@ type failure struct {
 	// expected is why the script expected it (Env.Expect): a fault
 	// meant to break it. play-ok leaves it out.
 	expected string
+	// resyncFailed: anacrolix logged that its read of the piece failed
+	// after a completion resync, just before the break: the storage lost
+	// data anacrolix believed it had (F11's log proof,
+	// observe.Capture.ReadFailed).
+	resyncFailed bool
 }
 
 // known is the known issue whose signature the failure carries: #195's
 // stall (a body silent through a read timeout, at an incomplete piece
 // with the seeder connected and downloads on), or F11's quick break at a
-// piece anacrolix had complete and the cache no longer holds.
+// piece the cache lost: one anacrolix had complete and the cache no
+// longer holds, or (forward play, the readahead window outgrowing the
+// cache) any piece whose read anacrolix logged failing after the
+// completion resync. Without that log proof, a quick break at a piece
+// that was never complete is no known issue's.
 func (f failure) known() string {
 	switch {
 	case f.timedOut && f.stalled:
 		return "#195"
 	case f.silence < quickBreak && f.broke && f.evicted && f.wasComplete:
+		return "F11"
+	case f.silence < quickBreak && f.broke && f.resyncFailed:
 		return "F11"
 	}
 	return ""
@@ -171,7 +185,14 @@ func (f failure) diagnosis() string {
 	case "#195":
 		return fmt.Sprintf("known stall (#195): %s, piece %d incomplete, seeder connected, downloads on", silent, f.piece)
 	case "F11":
-		return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds", silent, f.piece)
+		if f.evicted && f.wasComplete {
+			proof := ""
+			if f.resyncFailed {
+				proof = "; anacrolix logged the read failing after the completion resync"
+			}
+			return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds%s", silent, f.piece, proof)
+		}
+		return fmt.Sprintf("F11: broke at once (%s) at piece %d, whose read anacrolix logged failing after the completion resync: the cache lost its data", silent, f.piece)
 	}
 	var why []string
 	if f.timedOut {
@@ -185,6 +206,9 @@ func (f failure) diagnosis() string {
 	}
 	if f.wasComplete {
 		why = append(why, "piece was complete")
+	}
+	if f.resyncFailed {
+		why = append(why, "anacrolix's read failed after the completion resync")
 	}
 	if f.title != nil && f.title.Remote != nil {
 		return fmt.Sprintf("no known signature: %s, an HDRezka file", silent)
@@ -278,6 +302,7 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 		f.evicted = !e.cached(tor, f.piece)
 	}
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
+	f.resyncFailed = e.obs.ReadFailed(t.Hash, f.piece, f.at)
 	e.rec.mu.Lock()
 	f.expected = e.rec.expected(f)
 	e.rec.failures = append(e.rec.failures, f)
