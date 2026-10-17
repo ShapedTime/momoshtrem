@@ -147,7 +147,10 @@ func (ss *swarmSet) infos() []*metainfo.MetaInfo {
 
 // discover adds each torrent's peers to the leecher's torrent delay after
 // the leecher adds it, as a tracker's answer (or the DHT) would: untrusted
-// peers from a tracker. It returns at once; the adds stop with stop.
+// peers from a tracker. It does so on the torrent's first load only: a
+// torrent dropped and loaded again (an idle unload) gets no peers. A
+// script re-adds peers with Env.AddPeers. It returns at once; the adds
+// stop with stop.
 func (ss *swarmSet) discover(s *stack.Stack, delay time.Duration, stop <-chan struct{}) {
 	for _, ts := range ss.torrents {
 		go func() {

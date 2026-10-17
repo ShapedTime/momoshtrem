@@ -12,13 +12,16 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
 )
 
-// Expectation is a failure a fault is meant to cause: a broken body or a
-// failed request of one title, at most Max of them, while it's open. The
-// play-ok check leaves those out; one more is a failure like any other.
-// A script opens it just before the fault and ends it once the player has
-// recovered.
+// Expectation is a failure a fault is meant to cause: a body of one title
+// that breaks before its first byte, at the file offset its request
+// asked for, at most max of them, while it's open. The play-ok check
+// leaves those out; any other failure, or one more, is a failure like any
+// other. A script opens it just before the fault and ends it once the
+// player has recovered. It's an excuse beside the known-issue registry
+// (PLAN D6), for faults the lab injects, so it's kept that narrow.
 type Expectation struct {
 	title *Title
+	at    int64
 	why   string
 	max   int
 	// got counts the failures it explained; ended is when End was called.
@@ -26,9 +29,10 @@ type Expectation struct {
 	ended time.Time
 }
 
-// Expect expects up to max failures of t, for why, until End.
-func (e *Env) Expect(t *Title, max int, why string) *Expectation {
-	x := &Expectation{title: t, why: why, max: max}
+// Expect expects up to max bodies of t requested at the file offset at to
+// break before their first byte, for why, until End.
+func (e *Env) Expect(t *Title, at int64, max int, why string) *Expectation {
+	x := &Expectation{title: t, at: at, why: why, max: max}
 	e.rec.mu.Lock()
 	defer e.rec.mu.Unlock()
 	e.rec.expects = append(e.rec.expects, x)
@@ -45,11 +49,13 @@ func (e *Env) End(x *Expectation) int {
 	return x.got
 }
 
-// expected is why a failure of t now was expected: an open expectation of
-// t with room left takes it. "" when none. Called with r.mu held.
-func (r *recorder) expected(t *Title) string {
+// expected is why f, a failure now, was expected: an open expectation of
+// its title with room left takes it when f is a body that broke at the
+// expectation's offset, before its first byte. "" when none. Called with
+// r.mu held.
+func (r *recorder) expected(f failure) string {
 	for _, x := range r.expects {
-		if x.title == t && x.ended.IsZero() && x.got < x.max {
+		if x.title == f.title && x.ended.IsZero() && x.got < x.max && f.broke && f.offset == x.at {
 			x.got++
 			return x.why
 		}

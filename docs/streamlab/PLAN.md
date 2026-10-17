@@ -171,6 +171,7 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 |---|---|
 | Integrity | Zero mismatched bytes. |
 | HTTP | A Range GET answers 206 with the right `Content-Range` and `Content-Length`, and no handler panics. |
+| Play-ok | Every playback and probe gets its bytes: no body breaks and no request fails. Besides the known issues (D6), one more excuse exists, for faults the lab injects on purpose: a script's `Env.Expect(title, offset, n, why)`. It excuses at most *n* bodies of that title that break before their first byte at that offset while it's open. Only `hdrezka-503`'s burst of two 503s uses it. |
 | Quiescence | After the last request, within the settle time: `ReaderTracker.Count()==0`; the `open_files`, `blocked_reads` and `requests_inflight` gauges are 0; no `slreq`-labelled goroutine running momoshtrem code, or started by momoshtrem on a library function (anacrolix-rooted ones a request started, such as peer connections and hashers, are reported as inherited); `sessions.Count()==0` after skewing the session clock 31 s; zero open CDN bodies, and all 8 streamer slots free (a probe through the real `Streamer` that reaches no CDN). This is the leak signal that matters, because production never tears down. |
 | Priority invariants | Stated over the **effective** priority of incomplete pieces while downloads are allowed: `Piece.State()` can't read the explicit priority. During playback, `[pos, pos+urgent)` is Now. `residual_download_bytes` measures what downloads after the last close. |
 
@@ -222,6 +223,8 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 Comparing reports from different machines is refused without `--force`.
 
 **Baseline.** `testdata/baseline.json` holds only exact and correctness expectations. `baseline update --reason` is the only way to change it. `affected` warns when one diff touches both streaming code and lab thresholds.
+
+S6 (#177) changed how lab seeders limit their rate: from anacrolix's `UploadRateLimiter` to paced storage reads. Timing medians from before S6 aren't comparable with later ones, so S8's (#179) baselines and calibrations must be taken after S6.
 
 ## 7. streamtrace: the flight recorder
 

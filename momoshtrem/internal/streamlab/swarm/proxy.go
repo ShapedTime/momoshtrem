@@ -41,6 +41,9 @@ type ProxyStats struct {
 	// Down is what it forwarded from the target, Up what it forwarded to
 	// it.
 	Down, Up int64
+	// FirstConn is when it accepted its first connection, LastDown when it
+	// last forwarded bytes from the target; zero before.
+	FirstConn, LastDown time.Time
 }
 
 // Proxy is an in-process TCP proxy on loopback, between a leecher and a
@@ -62,8 +65,10 @@ type Proxy struct {
 	conns     map[*proxyConn]struct{}
 	goneUntil time.Time
 	stats     ProxyStats
-	// Down and Up count as bytes pass, without the lock.
+	// Down and Up count as bytes pass, without the lock, and lastDown is
+	// when bytes last went down (Unix nanoseconds).
 	downBytes, upBytes atomic.Int64
+	lastDown           atomic.Int64
 }
 
 // StartProxy starts a proxy to target (host:port) on 127.0.0.1 on a free
@@ -159,6 +164,9 @@ func (p *Proxy) Stats() ProxyStats {
 	st := p.stats
 	p.mu.Unlock()
 	st.Down, st.Up = p.downBytes.Load(), p.upBytes.Load()
+	if ns := p.lastDown.Load(); ns != 0 {
+		st.LastDown = time.Unix(0, ns)
+	}
 	return st
 }
 
@@ -213,6 +221,9 @@ func (p *Proxy) serve(client net.Conn) {
 	if !gone {
 		p.conns[c] = struct{}{}
 		p.stats.Accepted++
+		if p.stats.FirstConn.IsZero() {
+			p.stats.FirstConn = time.Now()
+		}
 	} else {
 		p.stats.Refused++
 	}
@@ -223,8 +234,8 @@ func (p *Proxy) serve(client net.Conn) {
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); p.pipe(ctx, c, target, client, p.up, &p.upBytes) }()
-	go func() { defer wg.Done(); p.pipe(ctx, c, client, target, p.down, &p.downBytes) }()
+	go func() { defer wg.Done(); p.pipe(ctx, c, target, client, p.up, &p.upBytes, nil) }()
+	go func() { defer wg.Done(); p.pipe(ctx, c, client, target, p.down, &p.downBytes, &p.lastDown) }()
 	wg.Wait()
 	c.close()
 	p.mu.Lock()
@@ -241,7 +252,7 @@ type segment struct {
 // pipe forwards src to dst, each segment after the latency and jitter and
 // within the bandwidth, until src ends or the connection is cut. Bytes
 // read before src ended are still delivered.
-func (p *Proxy) pipe(ctx context.Context, c *proxyConn, dst, src net.Conn, lim *rate.Limiter, count *atomic.Int64) {
+func (p *Proxy) pipe(ctx context.Context, c *proxyConn, dst, src net.Conn, lim *rate.Limiter, count, last *atomic.Int64) {
 	q := make(chan segment, proxyQueue)
 	go func() {
 		defer close(q)
@@ -287,6 +298,9 @@ func (p *Proxy) pipe(ctx context.Context, c *proxyConn, dst, src net.Conn, lim *
 			}
 			m, err := dst.Write(b[:n])
 			count.Add(int64(m))
+			if last != nil && m > 0 {
+				last.Store(time.Now().UnixNano())
+			}
 			if err != nil {
 				return
 			}

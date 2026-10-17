@@ -31,7 +31,7 @@ var hdrezkaChecks = []CheckDef{
 	{ID: "remote-one-open-per-get", Doc: "Each GET of an HDRezka file made one CDN request: its body read straight through, without a reopen (#66)."},
 	{ID: "link-refresh", Doc: "Each expiry of the CDN's links cost one Invalidate and one fresh resolve, with no other resolve, and the playback carried on: the streamer refreshes a refused link once (#66)."},
 	{ID: "retry-503", Doc: "A burst of one 503 is absorbed by the streamer's retry, at a seek and at a mid-stream reopen alike; a burst of two breaks exactly one body (the streamer retries once), which the player's reconnect recovers."},
-	{ID: "remote-watchdog", Doc: "A stalled CDN body ends (the RemoteFile's idle watchdog closes it once it has had nothing for the read timeout) and is reopened where it stopped, and a dropped one is reopened at once: no read breaks."},
+	{ID: "remote-watchdog", Doc: "A stalled CDN body ends within twice the read timeout plus 2 s (the RemoteFile's idle watchdog closes it once it has had nothing for the read timeout, after the connection's buffers drain) and is reopened where it stopped, and a dropped one is reopened within 2 s: no read breaks."},
 }
 
 var hdrezkaMetrics = []report.MetricDef{
@@ -49,15 +49,19 @@ const RemoteSlots = "#232"
 
 // lagKnown is the known issue whose signature a handler's lag after its
 // drop carries: F12 for a torrent file's that ended within the read
-// timeout, RemoteSlots for an HDRezka file's that ended within 3× the
-// remote read timeout (the watchdog, then the reopen's open and its
-// read), each plus abortLagSlack. "" otherwise.
+// timeout, RemoteSlots for an HDRezka file's that ended within the remote
+// read timeout (its watchdog), each plus abortLagSlack. "" otherwise.
+//
+// A handler can outlive its drop by up to 3× the remote read timeout in
+// general (the watchdog, then the reopen's open and its read), but the
+// lab's stall ends with the watchdog, so a lag past one timeout is a
+// regression, not #232.
 func (c *collector) lagKnown(l abortLag, timeout time.Duration) string {
 	if !l.done {
 		return ""
 	}
 	if c.e.remoteTitle(l.path) {
-		if l.lag <= 3*c.e.Stack.HDRezkaReadTimeout+abortLagSlack {
+		if l.lag <= c.e.Stack.HDRezkaReadTimeout+abortLagSlack {
 			return RemoteSlots
 		}
 		return ""
@@ -396,11 +400,16 @@ A burst of one meets a seek: the streamer retries once a second later, so the se
 		}
 		var notes []string
 		ok := true
-		phase := func(name string, wantBreaks int, burst int, move func() error) error {
+		// phase runs a burst of 503s with move, then watches. breakAt is
+		// where the one body the burst breaks asks from (before its first
+		// byte), or -1 when nothing may break.
+		phase := func(name string, burst int, breakAt int64, move func() error) error {
 			before := failures()
+			wantBreaks := 0
 			var x *Expectation
-			if wantBreaks > 0 {
-				x = e.Expect(t, wantBreaks, fmt.Sprintf("a burst of %d 503s exhausts the streamer's one retry", burst))
+			if breakAt >= 0 {
+				wantBreaks = 1
+				x = e.Expect(t, breakAt, 1, fmt.Sprintf("a burst of %d 503s exhausts the streamer's one retry", burst))
 			}
 			c.Unavailable(burst)
 			if err := move(); err != nil {
@@ -424,13 +433,13 @@ A burst of one meets a seek: the streamer retries once a second later, so the se
 				return e.Live(err)
 			}
 		}
-		if err := phase("a burst of 1 at a seek", 0, 1, seek(0.30)); err != nil {
+		if err := phase("a burst of 1 at a seek", 1, -1, seek(0.30)); err != nil {
 			return err
 		}
-		if err := phase("a burst of 2 at a seek", 1, 2, seek(0.60)); err != nil {
+		if err := phase("a burst of 2 at a seek", 2, at(t, 0.60), seek(0.60)); err != nil {
 			return err
 		}
-		if err := phase("a burst of 1 at a mid-stream reopen", 0, 1, func() error { c.Drop(); return nil }); err != nil {
+		if err := phase("a burst of 1 at a mid-stream reopen", 1, -1, func() error { c.Drop(); return nil }); err != nil {
 			return err
 		}
 		p.Stop()
@@ -448,16 +457,16 @@ A burst of one meets a seek: the streamer retries once a second later, so the se
 var hdrezkaStall = &Scenario{
 	Name: "hdrezka-stall",
 	Tier: Gate,
-	Doc: `The CDN body a player reads stalls, and the RemoteFile's idle watchdog closes it after the read timeout (hdrezka_read_timeout; production's is 30 s) and reopens at its position: the player sees a pause, not a break. Then the CDN drops the body mid-stream, and the RemoteFile reopens at once. Then the CDN slows to half the bitrate for slow_time: the player drains its buffer and may stall (a timing metric, expected), but no read breaks. remote-watchdog checks the stalled body ended (its watchdog counts from the last bytes the RemoteFile got, which the connection's buffers still deliver after the stall) and both reopens resumed where the body stopped.
+	Doc: `The CDN body a player reads stalls, and the RemoteFile's idle watchdog closes it after the read timeout (hdrezka_read_timeout; production's is 30 s) and reopens at its position: the player sees a pause, not a break. Then the CDN drops the body mid-stream, and the RemoteFile reopens at once. Then the CDN slows to half the bitrate for slow_time: the player drains its buffer and may stall (a timing metric, expected), but no read breaks. remote-watchdog checks the stalled body ended within twice the read timeout plus 2 s (its watchdog counts from the last bytes the RemoteFile got, which the connection's buffers still deliver after the stall) and both reopens resumed where the body stopped.
 
-Last, a scrub while every CDN body stalls: stall_scrub GETs, each dropped scrub_time/stall_scrub after it was sent, as Infuse drops seeks that haven't started. Each one's handler blocks in a remote read, holding one of the streamer's 8 slots, until the watchdog gives up: the later GETs wait for a slot (cdn_peak_bodies shows the cap), and abort-lag fails with #232's signature, F12's HDRezka counterpart. quiescence checks no CDN body or slot is left once they end.`,
+Last, a scrub while every CDN body stalls: stall_scrub GETs, each dropped scrub_time/stall_scrub after it was sent, as Infuse drops seeks that haven't started. Each one's handler blocks in a remote read, holding one of the streamer's 8 slots, until the watchdog gives up: the later GETs wait for a slot (cdn_peak_bodies shows the cap), and abort-lag fails with #232's signature (F12's HDRezka counterpart): each slow handler ended within hdrezka_read_timeout plus a second, its watchdog. The stall lasts no longer than the watchdog (scrub_time is the stall too), so the reopen doesn't stall again, and a lag past one timeout is a regression, not #232. quiescence checks no CDN body or slot is left once they end.`,
 	Guards: []string{"#66", RemoteSlots},
 	Params: withHDRezka(
 		Param{Name: "watch", Kind: Duration, Default: "3s", Doc: "How much media to play between faults."},
 		Param{Name: "slow_time", Kind: Duration, Default: "6s", Doc: "How long the CDN sends at half the bitrate."},
 		Param{Name: "max_buffer", Kind: Bytes, Default: "6MiB"},
 		Param{Name: "stall_scrub", Kind: Int, Default: "12", Doc: "GETs of the scrub while every CDN body stalls; 0 skips it."},
-		Param{Name: "scrub_time", Kind: Duration, Default: "3s", Doc: "How long that scrub takes, and the stall."},
+		Param{Name: "scrub_time", Kind: Duration, Default: "3s", Doc: "How long that scrub takes, and the stall. Keep it within hdrezka_read_timeout: a longer stall stalls the reopen too, and the lags run past #232's signature."},
 		Param{Name: "abort_lag_max", Kind: Duration, Default: "1s", Doc: "The longest a handler may run after its client dropped it."},
 	),
 	Media:  hdrezkaMedia,
@@ -490,9 +499,10 @@ Last, a scrub while every CDN body stalls: stall_scrub GETs, each dropped scrub_
 		}
 		// The watchdog counts from the RemoteFile's last progress, and the
 		// bytes already in the connection's buffers still arrive after the
-		// stall: the bound is loose. Without the watchdog the body would
-		// never end.
-		if msg, ok := reopened(c.Log(), logged, stalled, timeout+10*time.Second); ok {
+		// stall (measured: 1.3-2.1 s at a 3 s timeout), so the bound is twice
+		// the timeout plus slack. Without the watchdog the body would never
+		// end.
+		if msg, ok := reopened(c.Log(), logged, stalled, 2*timeout+2*time.Second); ok {
 			notes = append(notes, "stall: "+msg)
 		} else {
 			problems = append(problems, "stall: "+msg)

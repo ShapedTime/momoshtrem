@@ -28,9 +28,11 @@ const UnverifiedReads = "#231"
 var faultChecks = []CheckDef{
 	{ID: "swarm-recovers", Doc: "The fast seeder the proxy cut off was found again once it came back: the leecher reconnected through the proxy and downloaded from it again, and the playback carried on."},
 	{ID: "corrupt-caught", Doc: "The corrupt seeder's piece failed the leecher's hash check and came again, anacrolix banned the corrupt seeder alone (its alias), and the good seeder stayed connected. n/a when the corrupt seeder never served its bad chunks."},
+	{ID: "swarm-shaped", Doc: "The swarm was as slow as the scenario says: every byte came through the proxy, its first connection came no sooner than discovery after the first request, and the download ran at most 15% over the seeder's rate. A pacing, proxy or discovery that silently does nothing fails it."},
 }
 
 var faultMetrics = []report.MetricDef{
+	{Name: "swarm_rate", Kind: report.Count, Unit: "B/s", Better: report.None, Doc: "What came through the slow seeder's proxy, per second from its first connection to its last byte: the pacing as the leecher saw it."},
 	{Name: "hash_failures", Kind: report.Count, Unit: "pieces", Better: report.Lower, Doc: "Pieces that failed the leecher's hash check: PiecesDirtiedBad."},
 	{Name: "bad_chunks_served", Kind: report.Count, Unit: "chunks", Better: report.None, Doc: "Chunks the lab's corrupt seeders served wrong."},
 }
@@ -38,7 +40,7 @@ var faultMetrics = []report.MetricDef{
 var seederLoss = &Scenario{
 	Name: "seeder-loss",
 	Tier: Gate,
-	Doc: `A movie plays from two seeders: a fast one (seeder_rate) behind a TCP proxy, and a slow one (slow_rate, under the bitrate) dialled directly. Mid-play the fast seeder vanishes for outage: the proxy cuts its connection and refuses new ones. The playback goes on from the slow seeder, draining its buffer (a stall, if it runs dry, is a timing metric, expected). Once the fast seeder is back, the lab finds it again rediscover later, as a tracker's next answer would (Torrent.AddPeers), and the playback catches up.
+	Doc: `A movie plays from two seeders: a fast one (seeder_rate) behind a TCP proxy, and a slow one (slow_rate, under the bitrate) dialled directly. Mid-play the fast seeder vanishes for outage: the proxy cuts its connection and refuses new ones. The playback goes on from the slow seeder, draining its buffer (a stall, if it runs dry, is a timing metric, expected). Once the fast seeder is back, the lab adds it again rediscover later (Torrent.AddPeers), as a tracker's next answer would, and the playback catches up.
 
 No read may break meanwhile: the slow seeder keeps every read under the read timeout. swarm-recovers checks the leecher reconnected to the fast seeder and downloaded from it again.`,
 	Params: []Param{
@@ -106,7 +108,7 @@ var slowSwarm = &Scenario{
 	Tier: Gate,
 	Doc: `A fresh magnet on a poor swarm: one seeder at swarm_ratio of the bitrate (0.8×), behind a proxy with latency and jitter, found after a discovery lag (no x.pe: the lab adds it as a tracker would), and the info dict fetched from it (stored=false). The player plays from the start.
 
-The player stalls whenever its buffer runs dry: those stalls are expected here, and stall counts and times are timing metrics, which the gate doesn't judge. What it judges is that no read breaks (a slow swarm is slow, not broken: each piece still arrives well within the read timeout), every byte is right, and nothing is left behind.`,
+The player stalls whenever its buffer runs dry: those stalls are expected here, and stall counts and times are timing metrics, which the gate doesn't judge. What it judges is that no read breaks (a slow swarm is slow, not broken: each piece still arrives well within the read timeout), every byte is right, and nothing is left behind; and, so the scenario can't pass by testing nothing, that the swarm was as slow as it says (swarm-shaped: every byte through the proxy, found no sooner than discovery, paced at the seeder's rate).`,
 	Params: []Param{
 		{Name: "swarm_ratio", Kind: Float, Default: "0.8", Doc: "The seeder's upload cap as a fraction of the bitrate."},
 		{Name: "latency", Kind: Duration, Default: "40ms", Doc: "The proxy's latency, each way."},
@@ -120,7 +122,8 @@ The player stalls whenever its buffer runs dry: those stalls are expected here, 
 		return Swarm{Seeders: []SeederSpec{{Rate: rate,
 			Proxy: &swarm.ProxyConfig{Latency: p.Duration("latency"), Jitter: p.Duration("jitter")}}}}
 	},
-	Key: []string{"time_to_playable", "stall_count", "rebuffer_ratio", "read_timeouts"},
+	Checks: []string{"swarm-shaped"},
+	Key:    []string{"time_to_playable", "stall_count", "swarm_rate", "read_timeouts"},
 	Script: func(e *Env) error {
 		t := e.Titles[0]
 		dev := e.Device("infuse")
@@ -132,8 +135,45 @@ The player stalls whenever its buffer runs dry: those stalls are expected here, 
 			return err
 		}
 		p.Stop()
+		e.swarmShaped(t, int64(e.P.Float("swarm_ratio")*float64(e.P.Bytes("bitrate"))), e.P.Duration("discovery"))
 		return nil
 	},
+}
+
+// swarmShaped checks a one-seeder swarm behind a proxy was what the
+// scenario set up (swarm-shaped): all its bytes through the proxy, found
+// no sooner than discovery after the first request, and paced at rate.
+func (e *Env) swarmShaped(t *Title, rate int64, discovery time.Duration) {
+	px := t.Peers[0].Proxy
+	st := px.Stats()
+	reqs := e.Stack.Requests.Requests()
+	downloaded := e.Downloaded()
+	if st.FirstConn.IsZero() || len(reqs) == 0 || downloaded == 0 {
+		e.Check("swarm-shaped", report.Fail, "", fmt.Sprintf("nothing came through the proxy (%+v), %d requests, %s downloaded",
+			st, len(reqs), report.Bytes(downloaded)))
+		return
+	}
+	found := st.FirstConn.Sub(reqs[0].Start)
+	measured := float64(st.Down) / st.LastDown.Sub(st.FirstConn).Seconds()
+	e.Metric("swarm_rate", measured)
+	ev := fmt.Sprintf("%s through the proxy for %s downloaded; found %v after the first request (discovery %v); %s/s against the seeder's %s/s",
+		report.Bytes(st.Down), report.Bytes(downloaded), found.Round(time.Millisecond), discovery,
+		report.Bytes(int64(measured)), report.Bytes(rate))
+	var wrong []string
+	if st.Down < downloaded {
+		wrong = append(wrong, "data came around the proxy")
+	}
+	if found < discovery {
+		wrong = append(wrong, "the seeder was found before the discovery lag")
+	}
+	if measured > 1.15*float64(rate) {
+		wrong = append(wrong, "the download ran faster than the seeder's rate")
+	}
+	if len(wrong) == 0 {
+		e.Check("swarm-shaped", report.Pass, "", ev)
+	} else {
+		e.Check("swarm-shaped", report.Fail, "", ev+": "+strings.Join(wrong, ", "))
+	}
 }
 
 var corruptPiece = &Scenario{

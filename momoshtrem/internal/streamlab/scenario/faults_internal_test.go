@@ -64,28 +64,37 @@ func TestExplainUnverified(t *testing.T) {
 	}
 }
 
-// An expectation takes up to its count of its title's failures while
-// it's open, and no more.
+// An expectation takes up to its count of its title's bodies that broke
+// before their first byte at its offset, while it's open, and nothing
+// else.
 func TestExpectation(t *testing.T) {
 	a, b := &Title{Name: "a"}, &Title{Name: "b"}
+	const at = 1 << 20
 	e := &Env{}
-	x := e.Expect(a, 1, "a burst")
-	if why := e.rec.expected(b); why != "" {
-		t.Errorf("another title's failure was expected: %q", why)
+	x := e.Expect(a, at, 1, "a burst")
+	for _, f := range []failure{
+		{title: b, offset: at, broke: true},        // another title
+		{title: a, offset: at + 1, broke: true},    // past the first byte
+		{title: a, offset: at - 4096, broke: true}, // another request
+		{title: a, offset: at},                     // a request that failed, not a body that broke
+	} {
+		if why := e.rec.expected(f); why != "" {
+			t.Errorf("%+v was expected: %q", f, why)
+		}
 	}
-	if why := e.rec.expected(a); why != "a burst" {
-		t.Errorf("the first failure: %q", why)
+	if why := e.rec.expected(failure{title: a, offset: at, broke: true}); why != "a burst" {
+		t.Errorf("the break: %q", why)
 	}
-	if why := e.rec.expected(a); why != "" {
-		t.Errorf("a second failure past the count: %q", why)
+	if why := e.rec.expected(failure{title: a, offset: at, broke: true}); why != "" {
+		t.Errorf("a second break past the count: %q", why)
 	}
 	if n := e.End(x); n != 1 {
 		t.Errorf("End = %d, want 1", n)
 	}
-	y := e.Expect(a, 5, "later")
+	y := e.Expect(a, at, 5, "later")
 	e.End(y)
-	if why := e.rec.expected(a); why != "" {
-		t.Errorf("a failure after End: %q", why)
+	if why := e.rec.expected(failure{title: a, offset: at, broke: true}); why != "" {
+		t.Errorf("a break after End: %q", why)
 	}
 	fs, note := unexpected([]failure{{expected: "a burst"}, {err: "plain"}})
 	if len(fs) != 1 || fs[0].err != "plain" || note == "" {
@@ -93,9 +102,9 @@ func TestExpectation(t *testing.T) {
 	}
 }
 
-// A remote handler's lag is #232's within 3× the remote read timeout; a
-// torrent's is F12's within the read timeout; a handler still running,
-// or a longer lag, is neither.
+// A remote handler's lag is #232's within the remote read timeout; a
+// torrent's is F12's within the read timeout (each plus a second); a
+// handler still running, or a longer lag, is neither.
 func TestLagKnown(t *testing.T) {
 	remote := &Title{Path: "/Movies/R (2014)/R (2014).mp4", Remote: &cdn.File{}}
 	tor := &Title{Path: "/Movies/T (2020)/T (2020).mkv"}
@@ -106,8 +115,9 @@ func TestLagKnown(t *testing.T) {
 		want string
 	}{
 		{abortLag{path: remote.Path, lag: 2750 * time.Millisecond, done: true}, RemoteSlots},
-		{abortLag{path: remote.Path, lag: 9900 * time.Millisecond, done: true}, RemoteSlots},
-		{abortLag{path: remote.Path, lag: 11 * time.Second, done: true}, ""},
+		{abortLag{path: remote.Path, lag: 3900 * time.Millisecond, done: true}, RemoteSlots},
+		{abortLag{path: remote.Path, lag: 4100 * time.Millisecond, done: true}, ""},
+		{abortLag{path: remote.Path, lag: 9900 * time.Millisecond, done: true}, ""},
 		{abortLag{path: remote.Path, lag: 2 * time.Second}, ""},
 		{abortLag{path: tor.Path, lag: 5 * time.Second, done: true}, "F12"},
 		{abortLag{path: tor.Path, lag: 12 * time.Second, done: true}, ""},

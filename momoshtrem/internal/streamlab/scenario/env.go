@@ -276,7 +276,7 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	}
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
 	e.rec.mu.Lock()
-	f.expected = e.rec.expected(t)
+	f.expected = e.rec.expected(f)
 	e.rec.failures = append(e.rec.failures, f)
 	n := len(e.rec.failures)
 	e.rec.mu.Unlock()

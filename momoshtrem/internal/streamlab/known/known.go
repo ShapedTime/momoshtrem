@@ -276,8 +276,9 @@ var Issues = []Issue{
 		Doc: "RemoteFile opens and reads under context.Background and its idle watchdog, not the request's context: a " +
 			"handler blocked on a stalled CDN body outlives its client's drop, holding one of the streamer's 8 slots, so " +
 			"a scrub during a CDN stall can take them all (F12's HDRezka counterpart). Its signature: every handler over " +
-			"abort_lag_max served an HDRezka file and ended within 3× the remote read timeout (the watchdog, then the " +
-			"reopen's open and its read) plus a second.",
+			"abort_lag_max served an HDRezka file and ended within the remote read timeout (its watchdog) plus a second. " +
+			"In general a handler can linger up to 3× that (the reopen's open and read too), but the lab's stall ends " +
+			"with the watchdog, so a longer lag is a regression.",
 	},
 	{
 		ID:     "#225",
