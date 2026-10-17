@@ -96,6 +96,10 @@ type Summary struct {
 	Hangs []Hang `json:"hangs"`
 	// Tests is go test -race's outcome; nil when skipped.
 	Tests *Tests `json:"go_test,omitempty"`
+
+	// notRace is set when a repetition's process said it wasn't a race
+	// build.
+	notRace bool
 }
 
 // Race is a race and the scenarios it was reported in.
@@ -259,6 +263,23 @@ func raceCheck(races []report.Race) report.RepCheck {
 func summarize(res *runner.Result, b Build) *Summary {
 	s := &Summary{Schema: Schema, Tool: res.Index.Tool, Env: res.Index.Env, Build: b, Verdict: res.Index.Verdict,
 		Run: res.Index.Run, Scenarios: res.Index.Scenarios, Races: []Race{}, Hangs: []Hang{}}
+	// The env is the repetitions' own: the first that reported one (a hung
+	// or crashed one reports none), else the binary's build info.
+	childEnv := false
+	for _, r := range res.Reports {
+		for _, rep := range r.Reps {
+			if rep.Env == nil {
+				continue
+			}
+			if !childEnv {
+				s.Env, childEnv = *rep.Env, true
+			}
+			s.notRace = s.notRace || !rep.Env.Race
+		}
+	}
+	if !childEnv {
+		s.Env.Race = b.Race
+	}
 	for _, r := range res.Reports {
 		for _, rc := range r.Races {
 			i := slices.IndexFunc(s.Races, func(x Race) bool { return x.Signature == rc.Signature })
@@ -300,10 +321,23 @@ func prefixed(dir string, paths []string) []string {
 // isn't a race build after all.
 func (s *Summary) judge() {
 	var why []string
-	if !s.Env.Race {
-		s.Verdict = report.VerdictError
+	notRace := s.notRace || !s.Env.Race
+	if notRace {
 		why = append(why, "the repetitions didn't run a race build (env.race false)")
 	}
+	// fail beats error, as in the run's index; a run that wasn't a race
+	// build is an error whatever it found.
+	failed, errored := s.Verdict == report.VerdictFail, s.Verdict == report.VerdictError
+	defer func() {
+		switch {
+		case notRace, errored && !failed:
+			s.Verdict = report.VerdictError
+		case failed:
+			s.Verdict = report.VerdictFail
+		default:
+			s.Verdict = report.VerdictPass
+		}
+	}()
 	var bad []string
 	for _, e := range s.Scenarios {
 		if e.Verdict != report.VerdictPass {
@@ -320,29 +354,23 @@ func (s *Summary) judge() {
 		}
 	}
 	if newRaces > 0 {
-		if s.Verdict == report.VerdictPass {
-			s.Verdict = report.VerdictFail
-		}
+		failed = true
 		why = append(why, fmt.Sprintf("%d new data races", newRaces))
 	}
 	if n := len(s.Races) - newRaces; n > 0 {
 		why = append(why, fmt.Sprintf("%d known races", n))
 	}
 	if len(s.Hangs) > 0 {
-		s.Verdict = report.VerdictFail
+		failed = true
 		why = append(why, fmt.Sprintf("%d repetitions hung past the hard timeout (goroutine dumps kept)", len(s.Hangs)))
 	}
 	if t := s.Tests; t != nil {
 		switch t.Verdict {
 		case report.VerdictFail:
-			if s.Verdict != report.VerdictError {
-				s.Verdict = report.VerdictFail
-			}
+			failed = true
 			why = append(why, "go test -race failed: "+strings.Join(t.failed(), ", "))
 		case report.VerdictError:
-			if s.Verdict == report.VerdictPass {
-				s.Verdict = report.VerdictError
-			}
+			errored = true
 			why = append(why, "go test -race couldn't run: "+t.Error)
 		}
 		if len(t.Races) > 0 {

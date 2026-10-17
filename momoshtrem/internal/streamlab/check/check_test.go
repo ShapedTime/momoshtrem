@@ -381,6 +381,36 @@ func TestNotARaceBuild(t *testing.T) {
 	}
 }
 
+// The verdict: a new race, a hang or a failed test fails; go test that
+// can't run is an error unless something failed; a run that wasn't a
+// race build is an error whatever it found.
+func TestJudge(t *testing.T) {
+	race := report.Env{Race: true}
+	newRace := []Race{{Race: report.Race{Signature: "x"}}}
+	knownRace := []Race{{Race: report.Race{Signature: "y", Known: "#9"}}}
+	for _, tt := range []struct {
+		name string
+		s    Summary
+		want report.Verdict
+	}{
+		{"clean", Summary{Verdict: report.VerdictPass, Env: race}, report.VerdictPass},
+		{"a known race", Summary{Verdict: report.VerdictPass, Env: race, Races: knownRace}, report.VerdictPass},
+		{"a new race", Summary{Verdict: report.VerdictPass, Env: race, Races: newRace}, report.VerdictFail},
+		{"a hang", Summary{Verdict: report.VerdictPass, Env: race, Hangs: []Hang{{Scenario: "x"}}}, report.VerdictFail},
+		{"a scenario errored", Summary{Verdict: report.VerdictError, Env: race}, report.VerdictError},
+		{"errored and a new race", Summary{Verdict: report.VerdictError, Env: race, Races: newRace}, report.VerdictFail},
+		{"tests failed", Summary{Verdict: report.VerdictPass, Env: race, Tests: &Tests{Verdict: report.VerdictFail}}, report.VerdictFail},
+		{"tests couldn't run", Summary{Verdict: report.VerdictPass, Env: race, Tests: &Tests{Verdict: report.VerdictError, Error: "x"}}, report.VerdictError},
+		{"not a race build", Summary{Verdict: report.VerdictFail, Env: race, Races: newRace, notRace: true}, report.VerdictError},
+	} {
+		s := tt.s
+		s.judge()
+		if s.Verdict != tt.want || s.Why == "" {
+			t.Errorf("%s: verdict %s (%s), want %s", tt.name, s.Verdict, s.Why, tt.want)
+		}
+	}
+}
+
 func TestRaceCheck(t *testing.T) {
 	newRace := report.Race{Signature: "write a | write b"}
 	knownA := report.Race{Signature: "x", Known: "#2"}
