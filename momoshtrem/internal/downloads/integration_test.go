@@ -3,6 +3,7 @@ package downloads
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -290,9 +291,16 @@ func TestStickyPauseAndKillSwitch(t *testing.T) {
 	if share, ok := h.svc.Snapshot().Torrent(tt.hash); !ok || share.Wanted.State != StatePaused || len(share.Holds) != 1 {
 		t.Errorf("torrent share = %+v %v", share, ok)
 	}
+	// A paused download's file isn't downloading (/library's set, P6).
+	if got := h.svc.Snapshot().DownloadingFiles(); len(got) != 0 {
+		t.Errorf("paused: downloading files = %v, want none", got)
+	}
 	h.client.set(func(c *fakeClient) { delete(c.paused, tt.hash) })
 	if d = h.download(d.ID); d.State != StateDownloading {
 		t.Errorf("resumed: %s", d.State)
+	}
+	if got := h.svc.Snapshot().DownloadingFiles(); !slices.Equal(got, []FileKey{{tt.hash, tt.path(0)}}) {
+		t.Errorf("resumed: downloading files = %v, want the movie's file", got)
 	}
 
 	h.storage(`{"background":{"enabled":false}}`)

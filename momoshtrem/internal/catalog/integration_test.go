@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -474,6 +475,21 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-p", "E01.mkv")
 			it.assign(library.ItemTypeEpisode, ids[2], hash+"-p", "E02.mkv")
 		}, map[string]downloads.FileStatus{"E02.mkv": {Bytes: 10, DoneBytes: 3, State: downloads.StatePaused}}, "-p", 2000, "ready 2/2"},
+		// A download that waits (for its window, or a slot) still wants bytes.
+		{"download waits", func(s *library.Show) {
+			ids := it.season(s, 1, 2, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, ids[1], hash+"-q", "E01.mkv")
+			it.assign(library.ItemTypeEpisode, ids[2], hash+"-q", "E02.mkv")
+		}, map[string]downloads.FileStatus{"E01.mkv": {Bytes: 10, State: downloads.StateQueued},
+			"E02.mkv": {Bytes: 10, DoneBytes: 3, State: downloads.StateWaitingForWindow}}, "-q", 2000, "downloading 2/2"},
+		// Hidden specials don't count, even while one downloads.
+		{"specials hidden, one downloading", func(s *library.Show) {
+			it.exec(`UPDATE shows SET include_specials = FALSE WHERE id = $1`, s.ID)
+			ids := it.season(s, 1, 1, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, ids[1], hash+"-sd", "E01.mkv")
+			sp := it.season(s, 0, 1, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, sp[1], hash+"-sd", "SP01.mkv")
+		}, map[string]downloads.FileStatus{"E01.mkv": onDisk, "SP01.mkv": fetching}, "-sd", 1000, "ready 1/1"},
 		{"specials hidden", func(s *library.Show) {
 			it.exec(`UPDATE shows SET include_specials = FALSE WHERE id = $1`, s.ID)
 			it.season(s, 1, 2, "2099-01-01")
@@ -543,16 +559,30 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			it.downloads.files[downloads.FileKey{Hash: hash + v.activeHash, Path: path}] = f
 		}
 	}
-	// And a movie that plays from HDRezka.
+	// And movies: one that plays from HDRezka, one a download fetches, and
+	// one nothing keeps (its torrent loaded and active: it streams on
+	// demand, so it's ready).
 	movie := it.movie(it.id(30), fmt.Sprintf("Variant %s hdrezka movie", it.tag), "")
 	it.stream(library.ItemTypeMovie, movie.ID, movie.ID, 0)
-	routes[fmt.Sprintf("/movie/%d", movie.TMDBID)] = tmdb.MovieDetails{ID: movie.TMDBID, Title: movie.Title}
+	kept := it.movie(it.id(31), fmt.Sprintf("Variant %s kept movie", it.tag), "")
+	it.assign(library.ItemTypeMovie, kept.ID, hash+"-km", "Kept.mkv")
+	it.torrents.loaded[hash+"-km"] = fakeTorrent{active: true, seeders: 3}
+	it.downloads.files[downloads.FileKey{Hash: hash + "-km", Path: "Kept.mkv"}] = fetching
+	streamed := it.movie(it.id(32), fmt.Sprintf("Variant %s streamed movie", it.tag), "")
+	it.assign(library.ItemTypeMovie, streamed.ID, hash+"-sm", "Streamed.mkv")
+	it.torrents.loaded[hash+"-sm"] = fakeTorrent{active: true, seeders: 3, speedBps: 1_000}
+	wantMovies := map[int]Stage{movie.TMDBID: StageReady, kept.TMDBID: StageDownloading, streamed.TMDBID: StageReady}
+	for id := range wantMovies {
+		routes[fmt.Sprintf("/movie/%d", id)] = tmdb.MovieDetails{ID: id, Title: fmt.Sprintf("Movie %d", id)}
+	}
 	srv := fakeTMDBServer(t, routes)
 	t.Cleanup(func() {
 		for i := range variants {
 			_, _ = it.db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, fmt.Sprintf("%%/tv/%d", it.id(10+i)))
 		}
-		_, _ = it.db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, fmt.Sprintf("%%/movie/%d", movie.TMDBID))
+		for id := range wantMovies {
+			_, _ = it.db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, fmt.Sprintf("%%/movie/%d", id))
+		}
 	})
 	it.svc = New(Deps{
 		Store:     library.NewCatalogRepository(it.db),
@@ -599,17 +629,64 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 		t.Errorf("stages covered = %v, want all three", seen)
 	}
 
-	// The HDRezka movie is ready on both, with no torrent.
+	// The movies agree too: their stage and download.
 	movies, err := it.svc.Library(ctx, LibraryParams{MediaType: "movie", Query: "Variant " + it.tag})
-	if err != nil || movies.Total != 1 {
+	if err != nil || movies.Total != len(wantMovies) {
 		t.Fatalf("movies = %+v, %v", movies, err)
 	}
+	movieItems := map[int]LibraryItem{}
+	for _, item := range movies.Items {
+		movieItems[item.TMDBID] = item
+		title, err := it.svc.MovieTitle(ctx, item.TMDBID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lib := title.Library
+		if item.AvailabilityStage != wantMovies[item.TMDBID] || lib.AvailabilityStage != item.AvailabilityStage ||
+			(item.Download == nil) != (lib.Download == nil) || (item.Download != nil && item.Download.Pct != lib.Download.Pct) {
+			t.Errorf("%s: library %s %+v, title %s %+v; want %s", item.Title, item.AvailabilityStage, item.Download,
+				lib.AvailabilityStage, lib.Download, wantMovies[item.TMDBID])
+		}
+	}
+	if d := movieItems[kept.TMDBID].Download; d == nil || d.Pct != 30 || d.InfoHash != hash+"-km" {
+		t.Errorf("kept movie download = %+v, want 30%% of %s", d, hash+"-km")
+	}
+
+	// The filter counts and the status filters follow the same stages:
+	// ready is ready, incomplete the rest (needs a torrent, or downloading).
+	all := append(slices.Clone(page.Items), movies.Items...)
+	want := map[string][]string{}
+	for _, item := range all {
+		status := StatusIncomplete
+		if item.AvailabilityStage == StageReady {
+			status = StatusReady
+		}
+		want[status] = append(want[status], item.Title)
+	}
+	if c := page.Counts; c.Ready != len(want[StatusReady]) || c.Incomplete != len(want[StatusIncomplete]) || c.All != len(all) {
+		t.Errorf("counts = %+v, want %d ready and %d incomplete of %d", c, len(want[StatusReady]), len(want[StatusIncomplete]), len(all))
+	}
+	for _, status := range []string{StatusReady, StatusIncomplete} {
+		filtered, err := it.svc.Library(ctx, LibraryParams{Status: status, Query: "Variant " + it.tag, PageSize: MaxPageSize})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, item := range filtered.Items {
+			got = append(got, item.Title)
+		}
+		if slices.Sort(got); !slices.Equal(got, slices.Sorted(slices.Values(want[status]))) || filtered.Total != len(got) {
+			t.Errorf("status=%s: %v (total %d), want %v", status, got, filtered.Total, want[status])
+		}
+	}
+
+	// The HDRezka movie is ready on both, with no torrent.
 	movieTitle, err := it.svc.MovieTitle(ctx, movie.TMDBID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	lib := movieTitle.Library
-	if item := movies.Items[0]; item.AvailabilityStage != StageReady || lib.AvailabilityStage != StageReady || item.SizeBytes != streamSize ||
+	if item := movieItems[movie.TMDBID]; item.AvailabilityStage != StageReady || lib.AvailabilityStage != StageReady || item.SizeBytes != streamSize ||
 		!reflect.DeepEqual(item.WebDAVPath, lib.WebDAVPath) || item.Download != nil || item.Resolution == nil || *item.Resolution != "1080p" {
 		t.Errorf("HDRezka movie: library %s %d %v, title %s %v", item.AvailabilityStage, item.SizeBytes, item.WebDAVPath, lib.AvailabilityStage, lib.WebDAVPath)
 	}

@@ -59,6 +59,13 @@ func Wanted(share downloads.TorrentShare, ok bool, downloadBps int64) *downloads
 	return &w
 }
 
+// queuedForDownload reports whether pause-all pauses an idle torrent too:
+// a download still wants bytes of it (anything but done), and the user
+// hasn't paused it already.
+func queuedForDownload(it Item) bool {
+	return it.State != StatePaused && it.Wanted != nil && it.Wanted.State != downloads.StateDone
+}
+
 // stateRank orders the list: streaming, downloading, paused, idle.
 func stateRank(s State) int {
 	switch s {

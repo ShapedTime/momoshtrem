@@ -130,9 +130,10 @@ type Deps struct {
 	// Downloads is the latest DownloadsSnapshot ((*downloads.Service).
 	// Snapshot): wanted, holds and the disk's kept and smart bytes.
 	Downloads func() DownloadsSnapshot
-	// OnPauseChange runs after every pause and resume: the download
-	// manager's Wake (#77), so a paused torrent's downloads stop at once.
-	// Optional.
+	// OnPauseChange is the download manager's Wake (#77), so a paused
+	// torrent's downloads stop at once. It runs after pause-all and
+	// resume-all, and after one torrent's pause or resume when there's no
+	// RefreshDownloads or its pass fails. Optional.
 	OnPauseChange func()
 	// RefreshDownloads runs a download pass ((*downloads.Service).Refresh)
 	// after one torrent's pause or resume, in OnPauseChange's place, so the
@@ -420,10 +421,10 @@ func (s *Service) refreshDownloads(ctx context.Context) {
 		s.pauseChanged()
 		return
 	}
-	if err := s.refresh(ctx); err != nil {
-		if ctx.Err() == nil {
-			s.log.Warn("Couldn't run a download pass after a pause; the next poll has it", "error", err)
-		}
+	// The pause is stored already: the pass runs to its end even when the
+	// client goes away, so it doesn't drop the local watches it writes.
+	if err := s.refresh(context.WithoutCancel(ctx)); err != nil {
+		s.log.Warn("Couldn't run a download pass after a pause or resume; the next poll has it", "error", err)
 		s.pauseChanged()
 	}
 }
@@ -448,8 +449,10 @@ func (s *Service) lookup(ctx context.Context, hash string) (*library.KnownTorren
 	return &known[0], st, nil
 }
 
-// PauseAll pauses every streaming and downloading torrent and returns how
-// many it paused.
+// PauseAll pauses every streaming and downloading torrent, and every one a
+// download still wants bytes of (queued or waiting too, #77: paused
+// torrents give up their download slots, and the manager would load the
+// next in the queue), and returns how many it paused.
 func (s *Service) PauseAll(ctx context.Context) (int, error) {
 	s.writes.Lock()
 	defer s.writes.Unlock()
@@ -461,7 +464,7 @@ func (s *Service) PauseAll(ctx context.Context) (int, error) {
 	now := s.now()
 	targets := map[string]time.Time{}
 	for _, it := range items {
-		if it.State == StateStreaming || it.State == StateDownloading {
+		if it.State == StateStreaming || it.State == StateDownloading || queuedForDownload(it) {
 			targets[it.InfoHash] = now
 		}
 	}

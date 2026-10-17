@@ -526,13 +526,26 @@ func TestDownloadsJSON(t *testing.T) {
 		t.Errorf("holds = %v, want []", nothing["holds"])
 	}
 
-	// The torrent states the manager has are the web's TorrentWantedState:
-	// DownloadState without no_file, unavailable and storage_full.
+	// Each state the manager gives a torrent goes out as the web's
+	// TorrentWantedState (DownloadState without no_file, unavailable and
+	// storage_full), and only "downloading" puts the loaded torrent (at
+	// 0 B/s) in Downloading; an ETA only comes with a speed then.
+	webStates := []string{"queued", "downloading", "waiting_for_stream", "waiting_for_window", "paused", "stalled", "disk_full", "done"}
+	idle := newEnv()
+	st := idle.torrents.loaded[dune]
+	st.DownloadSpeed = 0
+	idle.torrents.loaded[dune] = st
 	for _, s := range []downloads.State{downloads.StateDone, downloads.StatePaused, downloads.StateDiskFull, downloads.StateWaitingForWindow,
 		downloads.StateWaitingForStream, downloads.StateStalled, downloads.StateDownloading, downloads.StateQueued} {
-		if !slices.Contains([]string{"queued", "downloading", "waiting_for_stream", "waiting_for_window", "paused", "stalled", "disk_full", "done"},
-			string(s)) {
-			t.Errorf("torrent state %q isn't the web's", s)
+		idle.downloads.torrents[dune] = downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, DoneBytes: 360, State: s},
+			Holds: duneHolds}
+		it := idle.list(t)[dune]
+		w := object(it)["wanted"].(map[string]any)
+		if !slices.Contains(webStates, w["state"].(string)) || w["state"] != string(s) || w["eta_seconds"] != nil {
+			t.Errorf("%s: wanted = %v", s, w)
+		}
+		if want := map[bool]State{true: StateDownloading, false: StateIdle}[s == downloads.StateDownloading]; it.State != want {
+			t.Errorf("%s: torrent state %s, want %s", s, it.State, want)
 		}
 	}
 
@@ -554,8 +567,10 @@ func TestPause_RefreshesTheDownloads(t *testing.T) {
 	e := newEnv()
 	refreshes := 0
 	var refreshErr error
-	e.svc.refresh = func(context.Context) error {
+	var passCtxErr error
+	e.svc.refresh = func(ctx context.Context) error {
 		refreshes++
+		passCtxErr = ctx.Err()
 		if refreshErr != nil {
 			return refreshErr
 		}
@@ -590,6 +605,15 @@ func TestPause_RefreshesTheDownloads(t *testing.T) {
 	// Pause-all and resume-all answer counts: they only wake the manager.
 	if _, err := e.svc.ResumeAll(ctx); err != nil || refreshes != 3 || e.pauseChanges != 2 {
 		t.Errorf("resume-all: %v, refreshes %d, wakes %d", err, refreshes, e.pauseChanges)
+	}
+
+	// The client went away: the pause is stored, and the pass still runs
+	// to its end (it writes local watches).
+	refreshErr = nil
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := e.svc.Pause(gone, dune); err != nil || refreshes != 4 || passCtxErr != nil {
+		t.Errorf("pause, client gone: %v, refreshes %d, the pass's context %v; want it not cancelled", err, refreshes, passCtxErr)
 	}
 }
 
@@ -726,6 +750,46 @@ func TestPauseAllAndResumeAll(t *testing.T) {
 	}
 	if items := e.list(t); items[dune].State != StateDownloading || items[severance].State != StateStreaming {
 		t.Errorf("after resume all: dune %s, severance %s", items[dune].State, items[severance].State)
+	}
+}
+
+// Pause all stops the download queue too (#77): the torrents a download
+// still wants bytes of, queued or waiting, loaded or not. Otherwise the
+// paused ones give up their slots and the manager loads the next. One
+// whose downloads are done, or that nothing wants, isn't touched. Resume
+// all brings them all back.
+func TestPauseAll_StopsTheDownloadQueue(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv()
+	e.downloads.torrents[frieren] = downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateQueued}}
+	e.downloads.torrents[legacy] = downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateWaitingForWindow}}
+
+	n, err := e.svc.PauseAll(ctx)
+	if err != nil || n != 4 {
+		t.Fatalf("PauseAll = %d, %v; want streaming, downloading, queued and waiting", n, err)
+	}
+	for _, h := range []string{severance, dune, frieren, legacy} {
+		if _, ok := e.store.paused[h]; !ok {
+			t.Errorf("%s: pause not stored", h[:1])
+		}
+		if _, ok := e.torrents.paused[h]; !ok {
+			t.Errorf("%s: not paused in the client", h[:1])
+		}
+	}
+	for _, h := range []string{done, inspect} {
+		if _, ok := e.torrents.paused[h]; ok {
+			t.Errorf("%s: paused, but no download wants bytes of it", h[:1])
+		}
+	}
+	if e.pauseChanges != 1 {
+		t.Errorf("wakes = %d, want 1", e.pauseChanges)
+	}
+
+	if n, err = e.svc.ResumeAll(ctx); err != nil || n != 5 {
+		t.Fatalf("ResumeAll = %d, %v; want the four and the one paused before", n, err)
+	}
+	if len(e.torrents.paused) != 0 || len(e.store.paused) != 0 {
+		t.Errorf("left paused: client %v, store %v", e.torrents.paused, e.store.paused)
 	}
 }
 

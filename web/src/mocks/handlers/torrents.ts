@@ -101,9 +101,10 @@ export const torrentsHandlers = [
   }),
   http.post('*/api/torrents/pause-all', async () => {
     await latency();
+    // And every torrent a download still wants bytes of (#77), so the queue doesn't load the next one
     const targets = torrents.filter((t) => {
-      const { state } = answer(t);
-      return state === 'streaming' || state === 'downloading';
+      const { state, wanted } = answer(t);
+      return state === 'streaming' || state === 'downloading' || (state !== 'paused' && !!wanted && wanted.state !== 'done');
     });
     targets.forEach(pause);
     return HttpResponse.json<TorrentsPauseCount>({ count: targets.length });

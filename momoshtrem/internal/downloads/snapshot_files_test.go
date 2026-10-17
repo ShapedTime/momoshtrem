@@ -13,7 +13,7 @@ func TestSnapshot_DownloadingFiles(t *testing.T) {
 		t.Errorf("nil snapshot = %v, want nil", got)
 	}
 
-	s := &Snapshot{files: map[FileKey]FileStatus{
+	files := map[FileKey]FileStatus{
 		{"bb", "Show/E02.mkv"}:  {Bytes: 10, DoneBytes: 3, State: StateDownloading},
 		{"bb", "Show/E01.mkv"}:  {Bytes: 10, DoneBytes: 0, State: StateQueued},
 		{"bb", "Show/E03.mkv"}:  {Bytes: 10, DoneBytes: 10, Complete: true, State: StateDone},
@@ -25,12 +25,15 @@ func TestSnapshot_DownloadingFiles(t *testing.T) {
 		{"00", "Over-cap.mkv"}:  {Bytes: 10, State: StateStorageFull},
 		{"01", "Nothing.mkv"}:   {Bytes: 10, State: StateNoFile},
 		{"02", "Elsewhere.mkv"}: {Bytes: 10, State: StateUnavailable},
-	}}
+	}
 	want := []FileKey{
 		{"aa", "Movie.mkv"}, {"bb", "Show/E01.mkv"}, {"bb", "Show/E02.mkv"},
 		{"dd", "DiskFull.mkv"}, {"ee", "Stalled.mkv"}, {"ff", "Streamed.mkv"},
 	}
-	if got := s.DownloadingFiles(); !slices.Equal(got, want) {
+	if got := downloadingOf(files); !slices.Equal(got, want) {
 		t.Errorf("downloading files =\n%v\nwant\n%v", got, want)
+	}
+	if got := downloadingOf(map[FileKey]FileStatus{{"cc", "Paused.mkv"}: files[FileKey{"cc", "Paused.mkv"}]}); got != nil {
+		t.Errorf("nothing downloading = %v, want nil", got)
 	}
 }
