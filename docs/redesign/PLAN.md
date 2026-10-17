@@ -1279,8 +1279,27 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
   - **Re-picks:**
     - A watched episode is never a candidate.
     - An episode whose smart row was released `deleted` (dismissed) is never picked again.
-    - After `expired`, it's picked again only if there's a play of the show after `released_at`.
+    - After a pick ran its whole lifetime (released `expired` at its `expires_at`, 14 days after `created_at`), it's picked again only if there's a play of the show after `released_at`.
+    - A pick released early as `expired`, because it stopped being a candidate (its window moved, `episodes_ahead` went down, its file went, the show aged out of Up next, Trakt was disconnected, or a stream needed its room), can be picked again at once.
   - A Keep on a smart pick turns it kept: the same row, with `created_at` reset to now and its duration from the request or the defaults.
+- **The smart picks' details** (P5 #203, `internal/downloads/smart.go`), where the rules above leave room:
+  - **When:** a pass every 5 minutes, after every Trakt sync that ends well, after a storage PUT, and when an episode starts streaming (the manager's 5 s session poll). While `smart.enabled` is off a pass does nothing: it neither picks nor releases. After a storage PUT the pass refreshes the manager's plan before it fits picks, so they fit the new caps.
+  - **The windows:** Up next's counts from the episode it names, that one included; a stream's from the episode after the one streaming. Specials anchor nothing. `episodes_ahead` counts episodes in regular seasons whose active assignment is a torrent file.
+    - A watched episode and a dismissed one are passed over, not counted: with E5 dismissed and two ahead, E4's stream picks E6 and E7.
+    - An episode held back after its lifetime keeps its slot without being picked. So on day 14, when Up next's E3 and E4 expire and nobody has played the show since, nothing new is picked for it until a play.
+
+    A candidate two signals name takes the first one's source: streams come first.
+  - **Not picked:**
+    - an episode a Keep holds;
+    - an episode before one of its show streaming now (Up next naming E1, skipped or stopped at 85%, while E3 streams): the manager would release it as watched at once;
+    - a pick whose file doesn't fit what the smart cap has left after the admitted smart files (it would only read `storage_full`; a later pass makes it once there's room). A file a download has already costs nothing, and a later, smaller file may still fit.
+  - **The show streaming gets the room first:** a stream's pick that doesn't fit `smart.max_bytes` releases Up next's picks of other shows (`expired`, so they can be picked again), the least recently watched show's first, until it fits, and the manager is woken.
+    - It never releases a pick all on disk of a show watched within the last 7 days to make room, nor a pick of any show streaming now.
+    - Only a pick whose file smart pays for, and no other download wants, counts: releasing one whose file a Keep or another pick has frees nothing.
+    - Up next's released picks then wait: they don't fit while the stream's hold the room.
+  - **Releases (`expired`):** a pick that's no longer a candidate, when its show streams now (the window moved, or `episodes_ahead` went down), when Up next picked it (the show left the 21 days, or Trakt was disconnected), or when its episode lost its torrent file. A streaming pick whose stream ended (or paused: a session ends 30 s after its last read) stays until it's watched or its 14 days end, at most `episodes_ahead` + 1 of them per show in episode order: the episode that streamed and the ones after it, so resuming finds them picked. The episode streaming now stays picked.
+  - **Watched picks** are the manager's (`watched`), a later episode streaming included. A pick watched before it was made (a play that synced late, which "after `created_at`" never counts) is released `watched` by the smart pass, and its pieces are demoted.
+  - **Order:** there's no score. Smart picks are admitted by creation, then episode order, and a pass makes its picks in its signals' order: the episodes streaming now, then Up next by last watched, newest first. So a pick made earlier keeps its room, and a new signal never unpins what's on disk, but for the stream's room above. Stale picks leave on their own: Up next's after 21 days without a play, a stream's within its 14 days.
 ```
 GET /downloads → 200 DownloadList
 DownloadList {

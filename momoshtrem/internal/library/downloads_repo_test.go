@@ -235,8 +235,8 @@ func TestDownloadsRepository_Resolve(t *testing.T) {
 	}
 }
 
-// The smart re-pick rules: watched never, dismissed never, expired only
-// after a later play of the show.
+// The smart re-pick rules: watched never, dismissed never, a lifetime
+// expiry only after a later play of the show, an early release at once.
 func TestDownloadsRepository_SmartPicks(t *testing.T) {
 	f := newDownloadsFixture(t)
 	ctx := context.Background()
@@ -267,8 +267,15 @@ func TestDownloadsRepository_SmartPicks(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(e11, "dismissed")
-	// Expired, nothing played since: blocked; a play of the show after: not.
-	exp, _, _ := f.repo.UpsertSmartDownload(ctx, e12, SmartUpNext, now, now.Add(time.Hour))
+	// Released early (it stopped being a candidate): picked again at once.
+	early, _, _ := f.repo.UpsertSmartDownload(ctx, e12, SmartUpNext, now, now.Add(time.Hour))
+	if _, err := f.repo.ReleaseDownloads(ctx, []DownloadRelease{{ID: early, Reason: ReleaseExpired}}, now); err != nil {
+		t.Fatal(err)
+	}
+	check(e12, "")
+	// Its lifetime ran out, nothing played since: blocked; a play of the
+	// show after: not.
+	exp, _, _ := f.repo.UpsertSmartDownload(ctx, e12, SmartUpNext, now.Add(-time.Hour), now)
 	if _, err := f.repo.ReleaseDownloads(ctx, []DownloadRelease{{ID: exp, Reason: ReleaseExpired}}, now); err != nil {
 		t.Fatal(err)
 	}

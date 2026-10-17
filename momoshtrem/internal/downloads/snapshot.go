@@ -27,6 +27,16 @@ type Snapshot struct {
 	downloading []FileKey
 	torrents    map[string]TorrentShare
 	usage       Usage
+	// For the smart picks (smart.go): smartLeft is what the smart cap has
+	// left after the admitted smart files (a new pick that can't fit isn't
+	// made), smartFiles are those files (each paid by smart, none a kept
+	// download has), smartOn says smart downloads were on for the pass,
+	// so they count the picks, and storageGen is the storage changes the
+	// pass had seen (Service.StorageChanged).
+	smartLeft  int64
+	smartFiles map[FileKey]bool
+	smartOn    bool
+	storageGen int64
 }
 
 type seasonKey struct {
@@ -173,6 +183,8 @@ type snapshotInput struct {
 	usage    Usage
 	reason   *PausedReason
 	resumes  *time.Time
+	smart    bool  // smart.enabled
+	gen      int64 // the storage changes seen before the settings were read
 }
 
 // narrowness ranks scopes for an episode's keep: its own first.
@@ -185,6 +197,8 @@ func buildSnapshot(in snapshotInput) *Snapshot {
 		at: in.at, byID: map[int64]int{},
 		movies: map[int64]Keep{}, shows: map[int64]Keep{}, seasons: map[seasonKey]Keep{}, episodes: map[int64]Keep{},
 		files: map[FileKey]FileStatus{}, torrents: map[string]TorrentShare{}, usage: in.usage,
+		smartLeft:  max(0, in.usage.SmartMaxBytes-in.stage.adm.committedSmart),
+		smartFiles: in.stage.adm.smart, smartOn: in.smart, storageGen: in.gen,
 	}
 	items := make([]Download, 0, len(in.views))
 	for _, v := range in.views {

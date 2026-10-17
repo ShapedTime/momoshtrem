@@ -35,18 +35,28 @@ type UpNextItem struct {
 // watched, then watchlist starts, then what airs next. Queries: the
 // settings, the candidates and their episodes in the library.
 func (s *Service) UpNext(ctx context.Context) ([]UpNextItem, error) {
+	now := s.now()
+	shows, episodes, err := s.readUpNext(ctx, now)
+	if err != nil || len(shows) == 0 {
+		return []UpNextItem{}, err
+	}
+	return upNextItems(shows, episodes, s.cards(), now, s.today()), nil
+}
+
+// readUpNext reads Up next's shows (upNextShows) with what the library
+// knows of the episode each names, one each, in order.
+func (s *Service) readUpNext(ctx context.Context, now time.Time) ([]library.UpNextCandidate, []library.KeyedEpisode, error) {
 	settings, err := s.settings.TraktSettings(ctx)
 	if err != nil {
 		slog.Warn("Trakt settings unreadable; Up next uses the defaults", "component", "me", "error", err)
 	}
 	candidates, err := s.store.UpNextCandidates(ctx, s.today())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	now := s.now()
 	shows := upNextShows(candidates, settings, now)
 	if len(shows) == 0 {
-		return []UpNextItem{}, nil
+		return nil, nil, nil
 	}
 	keys := make([]library.TraktEpisodeKey, len(shows))
 	for i, c := range shows {
@@ -54,9 +64,44 @@ func (s *Service) UpNext(ctx context.Context) ([]UpNextItem, error) {
 	}
 	episodes, err := s.store.EpisodesByKeys(ctx, keys)
 	if err != nil {
+		return nil, nil, err
+	}
+	return shows, episodes, nil
+}
+
+// UpNextEpisode is a library show Up next lists, with the library episode
+// it names next: what smart downloads start from (#203).
+type UpNextEpisode struct {
+	ShowID int64 // the library show's
+	// EpisodeID, SeasonNumber and EpisodeNumber are the library episode
+	// the matching rule finds, in the library's numbering.
+	EpisodeID     int64
+	SeasonNumber  int
+	EpisodeNumber int
+	// LastWatchedAt is the show's last Trakt play; nil for a watchlist
+	// start.
+	LastWatchedAt *time.Time
+}
+
+// UpNextEpisodes lists Up next's shows the library has with the episode
+// each names next, when the library lists it: the shows upNextShows picks
+// (as GET /me/up-next does, without its cap or its order), in no
+// particular order. Empty without Trakt. Queries: the settings, the
+// candidates and their episodes.
+func (s *Service) UpNextEpisodes(ctx context.Context) ([]UpNextEpisode, error) {
+	shows, episodes, err := s.readUpNext(ctx, s.now())
+	if err != nil {
 		return nil, err
 	}
-	return upNextItems(shows, episodes, s.cards(), now, s.today()), nil
+	var out []UpNextEpisode
+	for i, k := range episodes {
+		if k.Show == nil || k.Episode == nil {
+			continue
+		}
+		out = append(out, UpNextEpisode{ShowID: k.Show.ID, EpisodeID: k.Episode.ID,
+			SeasonNumber: k.SeasonNumber, EpisodeNumber: k.Episode.EpisodeNumber, LastWatchedAt: shows[i].LastWatchedAt})
+	}
+	return out, nil
 }
 
 // upNextShows picks Up next's shows (PLAN §6 "Trakt (B5)"), each with the
