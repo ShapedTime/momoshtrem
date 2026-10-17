@@ -72,7 +72,16 @@
       "count": 10
     },
     "torrent": null,
-    "stream": null
+    "stream": null,
+    "keep": {
+      "download_id": 4,
+      "reason": "kept",
+      "scope": "show",
+      "state": "downloading",
+      "pct": 71,
+      "until_watched": true,
+      "expires_at": null
+    }
   },
   "recommendation_reason": null,
   "watch_state": null,

@@ -369,7 +369,7 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
   ```
   `download` describes the files a download wants (#77) that aren't all on disk.
   - `pct` is what's on disk of them, from the piece cache.
-  - `eta_seconds` is set while they download with a speed, and null otherwise.
+  - `eta_seconds` is set while they download with a speed, and null otherwise: every torrent they're in is `downloading` (`TorrentWanted.state`, in a slot) with a speed. It's the slowest torrent's, their bytes left there at its speed (torrents download side by side), rounded up. This differs on purpose from `Download.eta_seconds` ("Downloads (#77)"), which is the download's bytes left over its torrents' summed speed: the title says nothing while a torrent of it waits or is queued.
   - `speed_bps` is the torrent's smoothed download speed (B6, #98). For a show, it's the speeds of the torrents its downloading episodes are in, each torrent once.
   - A paused torrent is never downloading.
 - `GET /titles/tv/{tmdb_id}/seasons/{n}`: one season at a time, so 1,000-episode shows stay light. `404 not_in_library` for a show that isn't in the library; `404 not_found` for an unknown season (or season 0 while specials are off).
@@ -1060,6 +1060,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   TorrentHold { download_id, reason: kept|smart, scope: movie|show|season|episode,
                 title }                // the movie's or the show's title
   ```
+  - **`wanted` and `holds`** are the download manager's last pass (`downloads.Snapshot`: every 30 s and on every change), so a poll never reads the piece cache; `wanted.eta_seconds` is its bytes left at the torrent's speed now, rounded up. A torrent's own `pause` and `resume` run a pass before they answer, so their `wanted.state` is the new one.
   - **Order:** by state (streaming, downloading, paused, idle), then `last_active_at` newest first (nulls last), then `added_at` newest first.
   - **`name`:** the info dict's name when loaded, else the newest job's `torrent_name` (preferring a job that has seen the file list), else the stored metainfo's name (#99), else the magnet's `dn`, else the hash.
   - **`size_bytes`:** the info dict's total when loaded, else that job's `size_bytes`, else the sum of its stored proposals, else the stored metainfo's total (#99), else null. The stored metainfo is read only for a torrent that isn't loaded and lacks a job's name or size, and cached by hash (an info dict never changes).
@@ -1104,7 +1105,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   - **Pause is sticky.** It's stored, so it survives restarts. The torrent's network goes off and reads don't wake it (the activity manager ignores them, and the VFS's wait for peers returns at once). On a torrent that isn't loaded it applies when it loads. The downloads that want it are `paused` (#77): the download manager sets their files back to no priority and never wakes it.
   - **Resume** clears it. A loaded torrent's network comes back on, and it counts as just accessed, so it stays on until `idle_timeout`. One that isn't loaded stays unloaded.
   - Pausing an already paused torrent keeps its first time; resuming one that isn't paused changes nothing.
-- **`POST /torrents/pause-all`** → `200 {count}`: pauses the streaming and downloading torrents only. **`POST /torrents/resume-all`** → `200 {count}`: resumes every paused torrent, loaded or not.
+- **`POST /torrents/pause-all`** → `200 {count}`: pauses the streaming and downloading torrents, and every torrent a download still wants bytes of (`wanted.state` anything but `done`: queued and waiting ones too, loaded or not; #77). Paused torrents give up their download slots, so without that the manager would load the next one in the queue. Idle torrents nothing fetches stay as they are. **`POST /torrents/resume-all`** → `200 {count}`: resumes every paused torrent, loaded or not.
 - **Stored pauses.** `app_settings` key `torrents`, `{paused: {"<hash>": "<RFC 3339 time>"}}`. Every write is one atomic jsonb statement (an insert on conflict, `||`, `-` or `#-`), never a read-modify-write. They're loaded at startup, before anything loads a torrent, after the pauses of torrents the library doesn't know are pruned (see "Releasing" below). Without idle mode (`idle_enabled: false`) pauses still work: torrents stay active until paused.
 - **`GET /torrents/{hash}`** (#99) → `200 TorrentDetail`, Activity's detail page; `400` for a malformed hash, `404` for an unknown one (the "known" rule above). It replaces the legacy status. **It never loads the torrent**: its facts come from the client when it's loaded, else from its stored metainfo (`{metadata_folder}/metainfo/<hash>.torrent`, read without loading), else from the newest job's file list (preferring one that isn't a dry run). The legacy `GET /torrents/{hash}/debug` is gone (#102): the detail's `pieces` and `streaming` replace it.
   ```

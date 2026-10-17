@@ -10,15 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
-	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -72,31 +73,22 @@ func TestMovieTitle_Golden(t *testing.T) {
 	}
 }
 
+// The torrent's state is the client's. Nothing keeps Dune, so it streams
+// on demand: ready, never downloading, however much of it is cached.
 func TestMovieTitle_TorrentStates(t *testing.T) {
-	const duneFile = "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv"
 	tests := []struct {
 		name        string
 		loaded      *fakeTorrent
 		paused      bool
-		wantStage   Stage
 		wantState   TorrentState
 		wantSeeders *int
-		wantPct     int
-		wantSpeed   int64
 	}{
-		{"not loaded", nil, false, StageReady, TorrentNotLoaded, nil, -1, 0},
-		{"loaded and idle", &fakeTorrent{active: false, seeders: 3}, false, StageReady, TorrentIdle, intPtr(3), -1, 0},
-		{"active, file complete", &fakeTorrent{active: true, seeders: 5, files: map[string]torrent.FileProgress{
-			duneFile: {Length: 100, BytesCompleted: 100}}},
-			false, StageReady, TorrentActive, intPtr(5), -1, 0},
-		{"active, file partial", &fakeTorrent{active: true, seeders: 9, speedBps: 2_500_000, files: map[string]torrent.FileProgress{
-			duneFile: {Length: 1000, BytesCompleted: 429}}},
-			false, StageDownloading, TorrentActive, intPtr(9), 42, 2_500_000},
-		{"paused, not loaded", nil, true, StageReady, TorrentPaused, nil, -1, 0},
+		{"not loaded", nil, false, TorrentNotLoaded, nil},
+		{"loaded and idle", &fakeTorrent{active: false, seeders: 3}, false, TorrentIdle, intPtr(3)},
+		{"active, fetching around a reader", &fakeTorrent{active: true, seeders: 9, speedBps: 2_500_000}, false, TorrentActive, intPtr(9)},
+		{"paused, not loaded", nil, true, TorrentPaused, nil},
 		// A paused torrent's network is off, so the client reports it inactive.
-		{"paused, loaded with a partial file", &fakeTorrent{active: false, seeders: 4, files: map[string]torrent.FileProgress{
-			duneFile: {Length: 1000, BytesCompleted: 429}}},
-			true, StageReady, TorrentPaused, intPtr(4), -1, 0},
+		{"paused, loaded", &fakeTorrent{active: false, seeders: 4}, true, TorrentPaused, intPtr(4)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,17 +103,79 @@ func TestMovieTitle_TorrentStates(t *testing.T) {
 				t.Fatal(err)
 			}
 			lib := title.Library
-			if lib.AvailabilityStage != tt.wantStage || lib.Torrent.State != tt.wantState || !reflect.DeepEqual(lib.Torrent.Seeders, tt.wantSeeders) {
+			if lib.AvailabilityStage != StageReady || lib.Torrent.State != tt.wantState || !reflect.DeepEqual(lib.Torrent.Seeders, tt.wantSeeders) {
 				t.Errorf("stage %s state %s seeders %v", lib.AvailabilityStage, lib.Torrent.State, deref2(lib.Torrent.Seeders))
 			}
-			if tt.wantPct < 0 && lib.Download != nil {
-				t.Errorf("download = %+v, want nil", lib.Download)
-			}
-			if tt.wantPct >= 0 && (lib.Download == nil || lib.Download.Pct != tt.wantPct || lib.Download.ETASeconds != nil ||
-				lib.Download.SpeedBps != tt.wantSpeed || lib.Download.Seeders != *tt.wantSeeders) {
-				t.Errorf("download = %+v, want %d%%", lib.Download, tt.wantPct)
+			if lib.Download != nil || lib.Keep != nil {
+				t.Errorf("download %+v, keep %+v; want nil: nothing keeps it", lib.Download, lib.Keep)
 			}
 		})
+	}
+}
+
+// A movie is downloading only while a download wants its file and it
+// isn't all on disk (#77), not while that download is paused. The ETA is
+// what's left at the torrent's speed, while the manager downloads it.
+func TestMovieTitle_Downloading(t *testing.T) {
+	const duneFile = "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv"
+	keep := downloads.Keep{DownloadID: 9, Reason: library.DownloadKept, Scope: library.DownloadScopeMovie,
+		State: downloads.StateDownloading, Pct: 42, UntilWatched: true, ExpiresAt: &keepExpires}
+	tests := []struct {
+		name      string
+		done      int64 // of 1,000 bytes
+		state     downloads.State
+		speedBps  int64
+		wantStage Stage
+		wantPct   int  // -1: no download
+		wantETA   *int // seconds
+	}{
+		{"downloading", 429, downloads.StateDownloading, 100, StageDownloading, 42, intPtr(6)},
+		{"downloading, no speed yet", 429, downloads.StateDownloading, 0, StageDownloading, 42, nil},
+		{"queued, bytes arriving from a stream", 429, downloads.StateQueued, 100, StageDownloading, 42, nil},
+		{"waiting for the window", 0, downloads.StateWaitingForWindow, 0, StageDownloading, 0, nil},
+		{"stalled", 10, downloads.StateStalled, 0, StageDownloading, 1, nil},
+		{"held by a full disk", 10, downloads.StateDiskFull, 0, StageDownloading, 1, nil},
+		{"paused", 429, downloads.StatePaused, 0, StageReady, -1, nil},
+		{"on disk", 1_000, downloads.StateDownloading, 100, StageReady, -1, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture()
+			f.torrents.loaded[duneHash] = fakeTorrent{active: true, seeders: 9, speedBps: tt.speedBps}
+			f.downloads.want(duneHash, duneFile, 1_000, tt.done, tt.state)
+			f.downloads.movies[7] = keep
+			title, err := f.svc.MovieTitle(context.Background(), duneTMDB)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lib := title.Library
+			if lib.AvailabilityStage != tt.wantStage || !reflect.DeepEqual(lib.Keep, &keep) {
+				t.Errorf("stage %s keep %+v", lib.AvailabilityStage, lib.Keep)
+			}
+			if tt.wantPct < 0 {
+				if lib.Download != nil {
+					t.Errorf("download = %+v, want nil", lib.Download)
+				}
+				return
+			}
+			d := lib.Download
+			if d == nil {
+				t.Fatalf("download = nil, want %d%%", tt.wantPct)
+			}
+			if d.Pct != tt.wantPct || d.SpeedBps != tt.speedBps || d.Seeders != 9 || !reflect.DeepEqual(d.ETASeconds, tt.wantETA) {
+				t.Errorf("download = %+v (eta %v), want %d%%, eta %v", d, deref2(d.ETASeconds), tt.wantPct, deref2(tt.wantETA))
+			}
+		})
+	}
+
+	// Without a downloads service nothing is ever downloading, and keep is
+	// null.
+	f := newFixture()
+	f.torrents.loaded[duneHash] = fakeTorrent{active: true, speedBps: 100}
+	svc := New(Deps{Store: f.store, TMDB: f.tmdb, Torrents: f.torrents, Now: func() time.Time { return fixedNow }})
+	title, err := svc.MovieTitle(context.Background(), duneTMDB)
+	if err != nil || title.Library.AvailabilityStage != StageReady || title.Library.Download != nil || title.Library.Keep != nil {
+		t.Errorf("no downloads: %+v, %v", title.Library, err)
 	}
 }
 
@@ -232,6 +286,9 @@ func TestShowTitle_Golden(t *testing.T) {
 	if lib.Download == nil || lib.Download.Pct != 42 || lib.Download.Seeders != 41 {
 		t.Errorf("download = %+v, want E28's 42%%", lib.Download)
 	}
+	if lib.Keep == nil || lib.Keep.DownloadID != 4 || lib.Keep.Scope != library.DownloadScopeShow {
+		t.Errorf("keep = %+v, want the show-scope download", lib.Keep)
+	}
 	if *lib.WebDAVPath != "/TV Shows/Frieren- Beyond Journey's End (2023)/" {
 		t.Errorf("webdav path = %s", *lib.WebDAVPath)
 	}
@@ -243,39 +300,51 @@ func TestShowTitle_Golden(t *testing.T) {
 	}
 }
 
-// A show's download speed is its fetching torrents' speeds added up, each
-// torrent once however many of its files are fetching; a paused torrent
-// isn't fetching.
+// A show's download is its downloading files together: what's on disk of
+// them, their torrents' speeds added up (each torrent once, however many of
+// its files download), and the slowest torrent's ETA while every one is in
+// a download slot. A paused download's files aren't downloading.
 func TestShowTitle_DownloadSpeed(t *testing.T) {
 	const otherHash = "0123456789abcdef0123456789abcdef01234567"
 	f := newFixture()
 	e25 := &f.store.seasons[3][1].Episodes[24]
 	e25.Assignment.InfoHash, e25.Assignment.FilePath = otherHash, "Other/Frieren.S01E25.mkv"
-	f.torrents.loaded[frierenHash] = fakeTorrent{active: true, seeders: 41, speedBps: 1_000_000, files: map[string]torrent.FileProgress{
-		"Frieren S01/Frieren.S01E26.mkv": {Length: 1_000, BytesCompleted: 100},
-		"Frieren S01/Frieren.S01E27.mkv": {Length: 1_000, BytesCompleted: 1_000},
-		"Frieren S01/Frieren.S01E28.mkv": {Length: 1_000, BytesCompleted: 420},
-	}}
-	f.torrents.loaded[otherHash] = fakeTorrent{active: true, seeders: 7, speedBps: 500_000, files: map[string]torrent.FileProgress{
-		"Other/Frieren.S01E25.mkv": {Length: 1_000, BytesCompleted: 0},
-	}}
+	f.torrents.loaded[frierenHash] = fakeTorrent{active: true, seeders: 41, speedBps: 100}
+	f.torrents.loaded[otherHash] = fakeTorrent{active: true, seeders: 7, speedBps: 50}
+	f.downloads.want(frierenHash, "Frieren S01/Frieren.S01E26.mkv", 1_000, 100, downloads.StateDownloading)
+	f.downloads.want(otherHash, "Other/Frieren.S01E25.mkv", 1_000, 0, downloads.StateDownloading)
 
 	title, err := f.svc.ShowTitle(context.Background(), frierenTMDB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := title.Library.Download; d == nil || d.SpeedBps != 1_500_000 || d.Pct != 17 || d.Seeders != 41 || d.ETASeconds != nil {
-		t.Fatalf("download = %+v, want 1.5 MB/s over both torrents, 17%%", d)
+	// Frieren's torrent has 900 + 580 bytes left at 100 B/s (15 s), the
+	// other 1,000 at 50 B/s (20 s).
+	if d := title.Library.Download; d == nil || d.SpeedBps != 150 || d.Pct != 17 || d.Seeders != 41 || !reflect.DeepEqual(d.ETASeconds, intPtr(20)) {
+		t.Fatalf("download = %+v, want 150 B/s over both torrents, 17%%, 20 s", d)
 	}
 
-	f.torrents.paused = map[string]bool{otherHash: true}
-	f.torrents.loaded[otherHash] = fakeTorrent{active: false, files: f.torrents.loaded[otherHash].files}
+	// The other torrent waits for a slot: its speed still counts, but
+	// there's no ETA.
+	f.downloads.want(otherHash, "Other/Frieren.S01E25.mkv", 1_000, 0, downloads.StateQueued)
+	f.torrents.loaded[otherHash] = fakeTorrent{active: true, seeders: 7}
 	title, err = f.svc.ShowTitle(context.Background(), frierenTMDB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := title.Library.Download; d == nil || d.SpeedBps != 1_000_000 || d.Pct != 26 {
-		t.Fatalf("download = %+v, want only Frieren's torrent at 1 MB/s, 26%%", d)
+	if d := title.Library.Download; d == nil || d.SpeedBps != 100 || d.Pct != 17 || d.ETASeconds != nil {
+		t.Fatalf("download = %+v, want 100 B/s, 17%%, no ETA", d)
+	}
+
+	// Its download is paused: only Frieren's torrent downloads.
+	f.torrents.paused = map[string]bool{otherHash: true}
+	f.downloads.want(otherHash, "Other/Frieren.S01E25.mkv", 1_000, 0, downloads.StatePaused)
+	title, err = f.svc.ShowTitle(context.Background(), frierenTMDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := title.Library.Download; d == nil || d.SpeedBps != 100 || d.Pct != 26 || !reflect.DeepEqual(d.ETASeconds, intPtr(15)) {
+		t.Fatalf("download = %+v, want only Frieren's torrent at 100 B/s, 26%%, 15 s", d)
 	}
 }
 
@@ -291,7 +360,8 @@ func TestShowTitle_ReadyAndDownloading(t *testing.T) {
 		t.Errorf("stage = %s, missing %+v; want downloading", title.Library.AvailabilityStage, title.Library.Missing)
 	}
 
-	f.torrents.loaded[frierenHash] = fakeTorrent{active: false}
+	// E28's download is paused (its torrent, or background downloads off).
+	f.downloads.want(frierenHash, "Frieren S01/Frieren.S01E28.mkv", 1_000, 420, downloads.StatePaused)
 	title, err = f.svc.ShowTitle(context.Background(), frierenTMDB)
 	if err != nil {
 		t.Fatal(err)
@@ -349,6 +419,25 @@ func TestSeason_Golden(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "season.json", season)
+
+	// The season's own keep; each episode's keep is the season's, with its
+	// own file's state and pct (E27 is on disk, E28 downloading).
+	if k := season.Keep; k == nil || k.DownloadID != 5 || k.Scope != library.DownloadScopeSeason || k.Pct != 71 {
+		t.Errorf("season keep = %+v", k)
+	}
+	if k := season.Episodes[26].Keep; k == nil || k.DownloadID != 5 || k.State != downloads.StateDone || k.Pct != 100 ||
+		season.Episodes[26].State != EpisodeReady || season.Episodes[26].Pct != nil {
+		t.Errorf("E27 = %+v, keep %+v", season.Episodes[26], k)
+	}
+	if k := season.Episodes[27].Keep; k == nil || k.State != downloads.StateDownloading || k.Pct != 42 {
+		t.Errorf("E28 keep = %+v", k)
+	}
+	if season.Episodes[0].Keep != nil || season.Episodes[28].Keep != nil {
+		t.Errorf("E01 keep %+v, E29 keep %+v; want nil", season.Episodes[0].Keep, season.Episodes[28].Keep)
+	}
+	if specials, err := f.svc.Season(context.Background(), frierenTMDB, 0); err != nil || specials.Keep != nil {
+		t.Errorf("specials keep = %+v, %v; want nil", specials, err)
+	}
 
 	e28, e29 := season.Episodes[27], season.Episodes[28]
 	if e28.State != EpisodeDownloading || *e28.Pct != 42 ||
@@ -597,8 +686,14 @@ func TestLibrary(t *testing.T) {
 		got[ref] = true
 	}
 	if len(got) != 1 || !got[library.FileRef{InfoHash: frierenHash, Path: "Frieren S01/Frieren.S01E28.mkv"}] {
-		t.Errorf("downloading = %+v, want Frieren's E28 only (Dune's torrent is idle)", q.Downloading)
+		t.Errorf("downloading = %+v, want Frieren's E28 only (E27 is on disk, and nothing keeps Dune)", q.Downloading)
 	}
+	// A paused download's files aren't downloading.
+	f.downloads.want(frierenHash, "Frieren S01/Frieren.S01E28.mkv", 1_000, 420, downloads.StatePaused)
+	if _, err := f.svc.Library(context.Background(), LibraryParams{}); err != nil || f.store.lastQuery.Downloading != nil {
+		t.Errorf("paused: downloading = %+v, %v; want none", f.store.lastQuery.Downloading, err)
+	}
+	f.downloads.want(frierenHash, "Frieren S01/Frieren.S01E28.mkv", 1_000, 420, downloads.StateDownloading)
 
 	page, err = f.svc.Library(context.Background(), LibraryParams{})
 	if err != nil || page.Page != 1 || page.PageSize != DefaultPageSize || f.store.lastQuery.Offset != 0 || f.store.lastQuery.Limit != 50 {
@@ -778,6 +873,78 @@ func TestRecommendationReason(t *testing.T) {
 	}
 }
 
+// keep is the web's Keep or null (contract/downloads.ts, the titles mock):
+// null, not left out, when nothing holds the title, season or episode;
+// expires_at null without a maximum; the state, reason and scope the
+// contract's.
+func TestKeepJSON(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	movie, err := f.svc.MovieTitle(ctx, duneTMDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	show, err := f.svc.ShowTitle(ctx, frierenTMDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	season, err := f.svc.Season(ctx, frierenTMDB, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := func(v any) map[string]any {
+		t.Helper()
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	for name, v := range map[string]any{"movie": movie.Library, "E01": season.Episodes[0], "E29": season.Episodes[28]} {
+		if k, ok := object(v)["keep"]; !ok || k != nil {
+			t.Errorf("%s keep = %v (present %v), want null", name, k, ok)
+		}
+	}
+
+	// The web's DownloadState, DownloadReason and DownloadScope.
+	states := []string{"queued", "downloading", "waiting_for_stream", "waiting_for_window", "paused", "stalled", "disk_full",
+		"storage_full", "done", "no_file", "unavailable"}
+	for name, v := range map[string]any{"show": show.Library, "season": season, "E27": season.Episodes[26], "E28": season.Episodes[27]} {
+		k, ok := object(v)["keep"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s keep = %v, want an object", name, object(v)["keep"])
+		}
+		if !slices.Contains(states, k["state"].(string)) || !slices.Contains([]string{"kept", "smart"}, k["reason"].(string)) ||
+			!slices.Contains([]string{"movie", "show", "season", "episode"}, k["scope"].(string)) {
+			t.Errorf("%s keep = %v", name, k)
+		}
+		if _, ok := k["pct"].(float64); !ok {
+			t.Errorf("%s keep pct = %v, want a number", name, k["pct"])
+		}
+		if _, ok := k["until_watched"].(bool); !ok {
+			t.Errorf("%s keep until_watched = %v, want a boolean", name, k["until_watched"])
+		}
+	}
+	if k := object(show.Library)["keep"].(map[string]any); k["expires_at"] != nil {
+		t.Errorf("show keep expires_at = %v, want null (no maximum)", k["expires_at"])
+	}
+	if k := object(season)["keep"].(map[string]any); k["expires_at"] != "2026-11-13T12:00:00Z" {
+		t.Errorf("season keep expires_at = %v", k["expires_at"])
+	}
+	// Every state the downloads have is one the web knows.
+	for _, s := range []downloads.State{downloads.StateUnavailable, downloads.StateNoFile, downloads.StateDone, downloads.StatePaused,
+		downloads.StateDiskFull, downloads.StateStorageFull, downloads.StateWaitingForWindow, downloads.StateWaitingForStream,
+		downloads.StateStalled, downloads.StateDownloading, downloads.StateQueued} {
+		if !slices.Contains(states, string(s)) {
+			t.Errorf("state %q isn't the web's", s)
+		}
+	}
+}
+
 // Every JSON shape carries exactly the fields of the TypeScript contract
 // (web/src/lib/api/contract/titles.ts and library.ts).
 func TestContractFields(t *testing.T) {
@@ -804,7 +971,7 @@ func TestContractFields(t *testing.T) {
 		"backdrop_dominant_color", "genres", "vote_average", "vote_count", "original_language", "cast", "trailer_youtube_key",
 		"similar", "library", "watch_state", "recommendation_reason"}
 	libraryState := []string{"in_library", "library_id", "added_at", "availability_stage", "webdav_path", "webdav_url", "download",
-		"needs_review", "review_job_id", "episodes_total", "episodes_ready", "missing", "torrent", "stream"}
+		"needs_review", "review_job_id", "episodes_total", "episodes_ready", "missing", "torrent", "stream", "keep"}
 
 	tests := []struct {
 		name string
@@ -824,9 +991,12 @@ func TestContractFields(t *testing.T) {
 		{"SimilarTitle.library", movie.Similar[0].Library, []string{"library_id", "availability_stage", "episodes_total", "episodes_ready"}},
 		{"SeasonSummary", show.Seasons[0], []string{"season_number", "name", "episodes_total", "ready", "missing", "needs_review",
 			"upcoming", "absolute_from", "absolute_to"}},
-		{"SeasonDetail", season, []string{"season_number", "name", "episodes", "ranges"}},
+		{"SeasonDetail", season, []string{"season_number", "name", "episodes", "ranges", "keep"}},
 		{"EpisodeSummary", season.Episodes[0], []string{"id", "season_number", "episode_number", "absolute_number", "name", "overview",
-			"air_date", "still_path", "runtime", "episode_type", "state", "pct", "webdav_path", "source", "stream"}},
+			"air_date", "still_path", "runtime", "episode_type", "state", "pct", "webdav_path", "source", "stream", "keep"}},
+		// web/src/lib/api/contract/downloads.ts Keep
+		{"Keep", season.Keep, []string{"download_id", "reason", "scope", "state", "pct", "until_watched", "expires_at"}},
+		{"Keep (show)", show.Library.Keep, []string{"download_id", "reason", "scope", "state", "pct", "until_watched", "expires_at"}},
 		{"TitleStream", TitleStream{}, []string{"provider", "title", "url", "translator", "quality", "size_bytes", "added_at"}},
 		{"EpisodeStream", EpisodeStream{}, []string{"translator", "quality"}},
 		{"EpisodeRange", season.Ranges[0], []string{"label", "kind", "from", "to", "absolute_from", "absolute_to", "missing"}},

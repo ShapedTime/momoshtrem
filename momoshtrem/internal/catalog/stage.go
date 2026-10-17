@@ -2,12 +2,16 @@ package catalog
 
 // The availability rules of PLAN §6. library.libraryItemsSQL computes the
 // same stages in SQL for /library; keep the two in step.
+//
+// A file is downloading only while a download (#77) wants it and it isn't
+// all on disk, and not while that download is paused (downloads.
+// FileStatus.Downloading). A file nothing keeps streams on demand, so it's
+// ready as soon as it's assigned, whatever is cached.
 
 // MovieStage is a movie's availability:
 //   - none: not in the library;
 //   - needs_torrent: no active assignment;
-//   - downloading: its torrent is loaded and active and the file isn't
-//     fully on disk;
+//   - downloading: its file is downloading;
 //   - ready: otherwise.
 func MovieStage(inLibrary, assigned, downloading bool) Stage {
 	switch {

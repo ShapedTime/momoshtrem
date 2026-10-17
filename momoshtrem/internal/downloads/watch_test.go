@@ -2,7 +2,9 @@ package downloads
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -19,16 +21,28 @@ import (
 type watchStore struct {
 	Store
 	mu      sync.Mutex
+	items   []library.ItemRef // what the file plays as; nil: the movie
+	fails   map[library.ItemRef]int
+	writes  int
 	watches []library.ItemRef
 }
 
 func (w *watchStore) FileItems(context.Context, string, string) ([]library.ItemRef, error) {
+	if w.items != nil {
+		return w.items, nil
+	}
 	return []library.ItemRef{{Type: library.ItemTypeMovie, ID: 7}}, nil
 }
 
+// UpsertLocalWatch fails an item's first fails[item] writes.
 func (w *watchStore) UpsertLocalWatch(_ context.Context, item library.ItemRef, _ time.Time) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.writes++
+	if w.fails[item] > 0 {
+		w.fails[item]--
+		return errors.New("connection reset")
+	}
 	w.watches = append(w.watches, item)
 	return nil
 }
@@ -133,5 +147,26 @@ func TestWatch_ReadsOnThroughTheEnd(t *testing.T) {
 	})
 	if n := r.store.count(); n != 1 {
 		t.Errorf("a playback through the end recorded %d watches, want 1", n)
+	}
+}
+
+// A write that fails is tried again on the next poll, and only the items
+// whose watch didn't get written: a grouped file (two episodes) whose
+// second episode's first write fails ends up with each recorded once.
+func TestWatch_FailedWriteIsRetried(t *testing.T) {
+	r := newWatchRig()
+	e1, e2 := library.ItemRef{Type: library.ItemTypeEpisode, ID: 11}, library.ItemRef{Type: library.ItemTypeEpisode, ID: 12}
+	r.store.items = []library.ItemRef{e1, e2}
+	r.store.fails = map[library.ItemRef]int{e2: 1}
+	r.read(0, 128<<10)
+	at := int64(filmSize * 90 / 100)
+	r.polls(8, func(int) {
+		r.read(at, 8<<20)
+		at += 8 << 20
+	})
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	if !slices.Equal(r.store.watches, []library.ItemRef{e1, e2}) || r.store.writes != 3 {
+		t.Errorf("watches = %v after %d writes, want E1 and E2 once each, E2 on its second try", r.store.watches, r.store.writes)
 	}
 }

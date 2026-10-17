@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 )
 
@@ -14,13 +15,19 @@ type Facts struct {
 	Loaded   bool // the torrent client has it
 	Sessions int  // its streaming sessions
 	Active   bool // its network is on: not idled by the activity manager
-	Complete bool // every piece is on disk
+	// Wanted is the download manager's state for it (TorrentWanted.state,
+	// #77); "" when no download wants it.
+	Wanted      downloads.State
+	DownloadBps int64 // smoothed
 }
 
 // StateOf is a torrent's state: the first rule that matches wins.
 //   - paused: the user paused it;
 //   - streaming: loaded, with a streaming session;
-//   - downloading: loaded, its network on, and not complete;
+//   - downloading: loaded, its network on, and the download manager is
+//     downloading it, or bytes are arriving (#77). A queued or waiting
+//     torrent isn't, and nor is one that's only cached: a torrent nothing
+//     keeps fetches pieces only around readers;
 //   - idle: anything else, including a torrent that isn't loaded.
 func StateOf(f Facts) State {
 	switch {
@@ -28,11 +35,35 @@ func StateOf(f Facts) State {
 		return StatePaused
 	case f.Loaded && f.Sessions > 0:
 		return StateStreaming
-	case f.Loaded && f.Active && !f.Complete:
+	case f.Loaded && f.Active && (f.Wanted == downloads.StateDownloading || f.DownloadBps > 0):
 		return StateDownloading
 	default:
 		return StateIdle
 	}
+}
+
+// Wanted is TorrentListItem.wanted: what downloads want of a torrent at
+// the download manager's last pass (#77), with the ETA from the torrent's
+// speed now (the pass's can be 30 s old), while the manager downloads it
+// and bytes arrive. Nil when no download wants it.
+func Wanted(share downloads.TorrentShare, ok bool, downloadBps int64) *downloads.TorrentWanted {
+	if !ok {
+		return nil
+	}
+	w := share.Wanted
+	w.EtaSeconds = nil
+	if left := w.Bytes - w.DoneBytes; w.State == downloads.StateDownloading && downloadBps > 0 && left > 0 {
+		eta := (left + downloadBps - 1) / downloadBps
+		w.EtaSeconds = &eta
+	}
+	return &w
+}
+
+// queuedForDownload reports whether pause-all pauses an idle torrent too:
+// a download still wants bytes of it (anything but done), and the user
+// hasn't paused it already.
+func queuedForDownload(it Item) bool {
+	return it.State != StatePaused && it.Wanted != nil && it.Wanted.State != downloads.StateDone
 }
 
 // stateRank orders the list: streaming, downloading, paused, idle.

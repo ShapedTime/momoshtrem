@@ -876,11 +876,13 @@ func (st *streamState) key(now time.Time) string {
 }
 
 // watchMark is a session past WatchedAt: since when, where it read then,
-// and whether it was recorded.
+// whether it was recorded (every item's watch written), and the items
+// whose watch is written so far.
 type watchMark struct {
 	since    time.Time
 	offset   int64
 	recorded bool
+	written  map[library.ItemRef]bool
 }
 
 // observeSessions reads the sessions into the stream state and records
@@ -954,15 +956,26 @@ func (s *Service) markWatch(ctx context.Context, sess sessions.Session, now time
 		s.log.Warn("Couldn't find what a session plays to record it watched", "session", sess.ID, "error", err)
 		return false
 	}
-	m.recorded = true
+	// It's recorded once every item's watch is written: a write that fails
+	// is tried again on the next poll that still sees it playing on.
+	wrote, failed := false, false
 	for _, item := range items {
-		if err := s.d.Store.UpsertLocalWatch(ctx, item, now); err != nil {
-			s.log.Warn("Couldn't record a local watch", "item_type", item.Type, "item_id", item.ID, "error", err)
+		if m.written[item] {
 			continue
 		}
+		if err := s.d.Store.UpsertLocalWatch(ctx, item, now); err != nil {
+			s.log.Warn("Couldn't record a local watch; the next poll tries again", "item_type", item.Type, "item_id", item.ID, "error", err)
+			failed = true
+			continue
+		}
+		if m.written == nil {
+			m.written = map[library.ItemRef]bool{}
+		}
+		m.written[item], wrote = true, true
 		s.log.Info("Watched here", "item_type", item.Type, "item_id", item.ID, "file", sess.FileName)
 	}
-	return len(items) > 0
+	m.recorded = !failed
+	return wrote
 }
 
 // sessionItems are the items a session plays: a torrent file's active

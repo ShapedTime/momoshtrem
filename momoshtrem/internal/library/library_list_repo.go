@@ -36,8 +36,10 @@ type LibraryQuery struct {
 
 	// Today is the date (YYYY-MM-DD) episodes count as aired by.
 	Today string
-	// Downloading lists the files the torrent client is fetching right now
-	// (loaded, active, incomplete): their items are "downloading".
+	// Downloading lists the files that are downloading now: a download
+	// wants them and they aren't all on disk (PLAN §6 "Availability rules",
+	// #77; the download manager's snapshot, which SQL can't see). Their
+	// items are "downloading", in the stages, filters and counts alike.
 	Downloading []FileRef
 
 	// IDs keeps only these titles (GET /library?ids=), ANDed with the other
@@ -142,10 +144,10 @@ type LibraryListing struct {
 // (PLAN §6), which compute the same from loaded rows for title pages; an
 // integration test keeps the two in step:
 //   - movie: needs_torrent without an active assignment, downloading while
-//     its file is being fetched, else ready;
+//     its file is downloading (in LibraryQuery.Downloading), else ready;
 //   - show: needs_torrent with nothing assigned or a non-empty frontier
 //     (a regular episode aired after the last one with a file or a play),
-//     downloading while any assigned file is being fetched, else ready.
+//     downloading while any assigned file is downloading, else ready.
 //     Specials never count towards the frontier, and are left out entirely
 //     while the show's include_specials is off.
 //

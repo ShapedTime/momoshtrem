@@ -5,7 +5,9 @@
 // Torrents stream on demand: pieces are fetched only around readers and
 // kept in an LRU cache, and a torrent loads on its first WebDAV read. So a
 // torrent the library knows but the client hasn't loaded is idle, with no
-// progress, and nothing has an ETA.
+// progress. Downloads (#77) fetch the files they want in the background:
+// only those have an ETA, and their progress, state and holds come from
+// the download manager's last pass, never from the piece cache per poll.
 package activity
 
 import (
@@ -20,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/storagecap"
@@ -98,9 +101,21 @@ type Cache interface {
 
 var _ Cache = (*piececache.Cache)(nil)
 
-// Deps are a Service's dependencies. Sessions, Metainfo, Speeds and Cache
-// are optional: without them nothing streams, an unloaded torrent's detail
-// has only the job's file list, speeds are 0 and the disk is null.
+// DownloadsSnapshot is the downloads as the download manager's last pass
+// planned them (#77): what they want of each torrent, and what they hold
+// on disk. A request reads one snapshot throughout. *downloads.Snapshot
+// implements it; a nil one answers nothing.
+type DownloadsSnapshot interface {
+	Torrent(infoHash string) (downloads.TorrentShare, bool)
+	Usage() downloads.Usage
+}
+
+var _ DownloadsSnapshot = (*downloads.Snapshot)(nil)
+
+// Deps are a Service's dependencies. Sessions, Metainfo, Speeds, Cache and
+// the downloads are optional: without them nothing streams, an unloaded
+// torrent's detail has only the job's file list, speeds are 0, the disk is
+// null and nothing is wanted.
 type Deps struct {
 	Torrents Torrents
 	Sessions Sessions
@@ -112,10 +127,18 @@ type Deps struct {
 	// DiskPath is the folder whose file system the summary reports: the
 	// torrent metadata folder, which holds the cache.
 	DiskPath string
-	// OnPauseChange runs after every pause and resume: the download
-	// manager's Wake (#77), so a paused torrent's downloads stop at once.
-	// Optional.
+	// Downloads is the latest DownloadsSnapshot ((*downloads.Service).
+	// Snapshot): wanted, holds and the disk's kept and smart bytes.
+	Downloads func() DownloadsSnapshot
+	// OnPauseChange is the download manager's Wake (#77), so a paused
+	// torrent's downloads stop at once. It runs after pause-all and
+	// resume-all, and after one torrent's pause or resume when there's no
+	// RefreshDownloads or its pass fails. Optional.
 	OnPauseChange func()
+	// RefreshDownloads runs a download pass ((*downloads.Service).Refresh)
+	// after one torrent's pause or resume, in OnPauseChange's place, so the
+	// answer's wanted.state is the new one. Optional.
+	RefreshDownloads func(ctx context.Context) error
 	// Now and Statfs are swapped in tests.
 	Now    func() time.Time
 	Statfs func(path string) (total, free int64, err error)
@@ -131,7 +154,9 @@ type Service struct {
 	speeds   Speeds
 	cache    Cache
 	diskPath string
+	dl       func() DownloadsSnapshot
 	onPause  func()
+	refresh  func(ctx context.Context) error
 	now      func() time.Time
 	statfs   func(path string) (total, free int64, err error)
 	log      *slog.Logger
@@ -160,7 +185,9 @@ func New(d Deps) *Service {
 		speeds:   d.Speeds,
 		cache:    d.Cache,
 		diskPath: d.DiskPath,
+		dl:       d.Downloads,
 		onPause:  d.OnPauseChange,
+		refresh:  d.RefreshDownloads,
 		now:      d.Now,
 		statfs:   d.Statfs,
 		log:      slog.With("component", "activity"),
@@ -222,10 +249,21 @@ func (s *Service) RestorePauses(ctx context.Context) error {
 // streaming, then downloading, paused and idle; then the most recently
 // active first (not loaded last), then the newest.
 func (s *Service) List(ctx context.Context) ([]Item, error) {
-	return s.list(ctx, s.streams(ctx))
+	return s.list(ctx, s.streams(ctx), s.snapshot())
 }
 
-func (s *Service) list(ctx context.Context, live streams) ([]Item, error) {
+// snapshot is the download manager's latest pass; without downloads, one
+// that answers nothing.
+func (s *Service) snapshot() DownloadsSnapshot {
+	if s.dl != nil {
+		if snap := s.dl(); snap != nil {
+			return snap
+		}
+	}
+	return (*downloads.Snapshot)(nil)
+}
+
+func (s *Service) list(ctx context.Context, live streams, snap DownloadsSnapshot) ([]Item, error) {
 	known, err := s.library.KnownTorrents(ctx, "")
 	if err != nil {
 		return nil, err
@@ -243,11 +281,11 @@ func (s *Service) list(ctx context.Context, live streams) ([]Item, error) {
 	items := make([]Item, 0, len(known)+len(statuses))
 	for i := range known {
 		k := &known[i]
-		items = append(items, s.item(k.InfoHash, k, loaded[k.InfoHash], pauses, live))
+		items = append(items, s.item(k.InfoHash, k, loaded[k.InfoHash], pauses, live, snap))
 		delete(loaded, k.InfoHash)
 	}
 	for hash, st := range loaded {
-		items = append(items, s.item(hash, nil, st, pauses, live))
+		items = append(items, s.item(hash, nil, st, pauses, live, snap))
 	}
 	sortItems(items)
 	return items, nil
@@ -279,14 +317,14 @@ func (s *Service) streams(ctx context.Context) streams {
 // peers, how many torrents are in each state, the disk, and every
 // streaming session (HDRezka's too).
 func (s *Service) Summary(ctx context.Context) (*Summary, error) {
-	live := s.streams(ctx)
-	items, err := s.list(ctx, live)
+	live, snap := s.streams(ctx), s.snapshot()
+	items, err := s.list(ctx, live, snap)
 	if err != nil {
 		return nil, err
 	}
 	sum := &Summary{
 		History:   History{DownloadBps: []int64{}, UploadBps: []int64{}},
-		Disk:      s.disk(),
+		Disk:      s.disk(snap),
 		Streaming: live.all,
 	}
 	for _, it := range items {
@@ -364,14 +402,31 @@ func (s *Service) setPaused(ctx context.Context, infoHash string, pause bool) (*
 	} else {
 		s.log.Info("Torrent resumed", "info_hash", hash)
 	}
-	s.pauseChanged()
+	s.refreshDownloads(ctx)
 
 	known, st, err := s.lookup(ctx, hash)
 	if err != nil {
 		return nil, err
 	}
-	item := s.item(hash, known, st, s.torrents.Pauses(), s.streams(ctx))
+	item := s.item(hash, known, st, s.torrents.Pauses(), s.streams(ctx), s.snapshot())
 	return &item, nil
+}
+
+// refreshDownloads runs a download pass before a pause or resume answers,
+// so its wanted.state is the new one (the torrent's downloads are paused,
+// or want bytes again). Without RefreshDownloads, or when the pass fails,
+// it wakes the manager instead: the next poll then has it.
+func (s *Service) refreshDownloads(ctx context.Context) {
+	if s.refresh == nil {
+		s.pauseChanged()
+		return
+	}
+	// The pause is stored already: the pass runs to its end even when the
+	// client goes away, so it doesn't drop the local watches it writes.
+	if err := s.refresh(context.WithoutCancel(ctx)); err != nil {
+		s.log.Warn("Couldn't run a download pass after a pause or resume; the next poll has it", "error", err)
+		s.pauseChanged()
+	}
 }
 
 // lookup returns what the library and the client know of a torrent:
@@ -394,8 +449,10 @@ func (s *Service) lookup(ctx context.Context, hash string) (*library.KnownTorren
 	return &known[0], st, nil
 }
 
-// PauseAll pauses every streaming and downloading torrent and returns how
-// many it paused.
+// PauseAll pauses every streaming and downloading torrent, and every one a
+// download still wants bytes of (queued or waiting too, #77: paused
+// torrents give up their download slots, and the manager would load the
+// next in the queue), and returns how many it paused.
 func (s *Service) PauseAll(ctx context.Context) (int, error) {
 	s.writes.Lock()
 	defer s.writes.Unlock()
@@ -407,7 +464,7 @@ func (s *Service) PauseAll(ctx context.Context) (int, error) {
 	now := s.now()
 	targets := map[string]time.Time{}
 	for _, it := range items {
-		if it.State == StateStreaming || it.State == StateDownloading {
+		if it.State == StateStreaming || it.State == StateDownloading || queuedForDownload(it) {
 			targets[it.InfoHash] = now
 		}
 	}
@@ -451,16 +508,18 @@ func (s *Service) ResumeAll(ctx context.Context) (int, error) {
 }
 
 // item merges what the library (k, nil for a torrent nothing references),
-// the client (st, nil while not loaded) and the streaming sessions know of
-// a torrent. A torrent that isn't loaded falls back to its stored metainfo
-// for a name and size no job gives.
-func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.TorrentStatus, pauses map[string]time.Time, live streams) Item {
+// the client (st, nil while not loaded), the streaming sessions and the
+// downloads (snap) know of a torrent. A torrent that isn't loaded falls
+// back to its stored metainfo for a name and size no job gives.
+func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.TorrentStatus, pauses map[string]time.Time, live streams,
+	snap DownloadsSnapshot) Item {
 	_, paused := pauses[hash]
 	it := Item{
 		InfoHash:  hash,
 		Loaded:    st != nil,
 		Titles:    []Title{},
 		Streaming: live.byHash[hash],
+		Holds:     []downloads.TorrentHold{},
 	}
 	if it.Streaming == nil {
 		it.Streaming = []StreamingSession{}
@@ -469,7 +528,7 @@ func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.Torrent
 
 	if st != nil {
 		facts.Active = !st.IsPaused
-		facts.Complete = st.Complete
+		facts.DownloadBps = st.DownloadSpeed
 		it.Complete = &st.Complete
 		it.Progress = &st.Progress
 		it.BytesCompleted = &st.Downloaded
@@ -501,6 +560,11 @@ func (s *Service) item(hash string, k *library.KnownTorrent, st *torrent.Torrent
 	}
 	if it.SizeBytes == nil && stored != nil {
 		it.SizeBytes = &stored.TotalSize
+	}
+	share, wanted := snap.Torrent(hash)
+	if it.Wanted = Wanted(share, wanted, it.DownloadBps); it.Wanted != nil {
+		facts.Wanted = it.Wanted.State
+		it.Holds = append(it.Holds, share.Holds...)
 	}
 	it.Name = name(hash, k, st, stored)
 	it.State = StateOf(facts)
@@ -610,9 +674,10 @@ func sortItems(items []Item) {
 	})
 }
 
-// disk reads the metadata folder's file system and the cache; nil when
-// either can't be read.
-func (s *Service) disk() *Disk {
+// disk reads the metadata folder's file system and the cache, and what the
+// downloads pin on it (the snapshot's); nil when the disk or the cache
+// can't be read.
+func (s *Service) disk(snap DownloadsSnapshot) *Disk {
 	if s.cache == nil || s.diskPath == "" {
 		return nil
 	}
@@ -621,6 +686,7 @@ func (s *Service) disk() *Disk {
 		s.log.Warn("Can't read the disk usage", "path", s.diskPath, "error", err)
 		return nil
 	}
-	info := s.cache.Info()
-	return &Disk{TotalBytes: total, FreeBytes: free, TorrentsBytes: info.Filled, CacheLimitBytes: info.Capacity}
+	info, usage := s.cache.Info(), snap.Usage()
+	return &Disk{TotalBytes: total, FreeBytes: free, TorrentsBytes: info.Filled, CacheLimitBytes: info.Capacity,
+		KeptBytes: usage.KeptBytes, SmartBytes: usage.SmartBytes}
 }

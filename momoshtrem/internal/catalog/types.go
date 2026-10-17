@@ -1,6 +1,10 @@
 package catalog
 
-import "time"
+import (
+	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/downloads"
+)
 
 // The JSON shapes of PLAN §6 "Titles and library", field for field with
 // web/src/lib/api/contract/titles.ts and library.ts. Nullable fields are
@@ -22,7 +26,7 @@ type EpisodeState string
 const (
 	EpisodeWatched     EpisodeState = "watched"      // B5
 	EpisodeReady       EpisodeState = "ready"        // has a file
-	EpisodeDownloading EpisodeState = "downloading"  // has a file being fetched
+	EpisodeDownloading EpisodeState = "downloading"  // has a file a download is fetching (#77)
 	EpisodeMissing     EpisodeState = "missing"      // aired, no file
 	EpisodeUpcoming    EpisodeState = "upcoming"     // not aired, or no air date
 	EpisodeNeedsReview EpisodeState = "needs_review" // B2
@@ -74,12 +78,15 @@ type NextEpisode struct {
 	AirDate        *string `json:"air_date"`
 }
 
-// DownloadProgress is what's being fetched for a title.
+// DownloadProgress is a title's downloading files (#77): those a download
+// wants that aren't all on disk.
 type DownloadProgress struct {
-	Pct        int   `json:"pct"`         // 0–100
-	SpeedBps   int64 `json:"speed_bps"`   // smoothed; shows: summed over the torrents fetching
-	ETASeconds *int  `json:"eta_seconds"` // null: torrents fetch on demand
-	Seeders    int   `json:"seeders"`
+	Pct      int   `json:"pct"`       // 0–100: what's on disk of them, from the piece cache
+	SpeedBps int64 `json:"speed_bps"` // smoothed; shows: summed over their torrents, each once
+	// ETASeconds is set while they download with a speed (every torrent of
+	// them is in a download slot); null otherwise.
+	ETASeconds *int `json:"eta_seconds"`
+	Seeders    int  `json:"seeders"`
 }
 
 // TitleTorrent is a movie's assigned torrent.
@@ -123,6 +130,9 @@ type TitleLibraryState struct {
 	Missing           *MissingRun       `json:"missing"`
 	Torrent           *TitleTorrent     `json:"torrent"`
 	Stream            *TitleStream      `json:"stream"` // movies playing from HDRezka; Torrent is null then
+	// Keep is a movie's download, or a show's show-scope one (#77); null
+	// when there's none.
+	Keep *downloads.Keep `json:"keep"`
 }
 
 // TitleStream is a movie's HDRezka stream (PLAN §6 "HDRezka (#63)").
@@ -252,6 +262,11 @@ type EpisodeSummary struct {
 	WebDAVPath     *string        `json:"webdav_path"` // while it has a file
 	Source         *string        `json:"source"`      // the file's: torrent or hdrezka; null without one
 	Stream         *EpisodeStream `json:"stream"`      // an HDRezka file's stream
+	// Keep is what holds the episode (#77): its own download, its season's,
+	// its show's or a smart pick (kept wins, then the narrowest), with the
+	// state and pct of its own file; null when nothing does, or an
+	// until-watched show or season keep released it as watched.
+	Keep *downloads.Keep `json:"keep"`
 }
 
 // EpisodeRange is a jump target in a long season.
@@ -271,6 +286,7 @@ type SeasonDetail struct {
 	Name         string           `json:"name"`
 	Episodes     []EpisodeSummary `json:"episodes"`
 	Ranges       []EpisodeRange   `json:"ranges"`
+	Keep         *downloads.Keep  `json:"keep"` // the season-scope download (#77); null when there's none
 }
 
 // LibraryItem is one row of GET /library.
@@ -296,14 +312,15 @@ type LibraryItem struct {
 	WebDAVPath  *string          `json:"webdav_path"`
 	WebDAVURL   *string          `json:"webdav_url"`
 	ReviewJobID *int64           `json:"review_job_id"` // the mapping job to review (review rules)
-	Download    *LibraryDownload `json:"download"`      // while a file is being fetched
+	Download    *LibraryDownload `json:"download"`      // while a file is downloading (a download wants it, #77)
 	Missing     *MissingRun      `json:"missing"`       // shows: the first frontier run
 	Streaming   bool             `json:"streaming"`     // a streaming session plays it (a show: any episode)
 }
 
-// LibraryDownload is how far along a library title's files are.
+// LibraryDownload is how far along a library title's downloading files
+// are: those a download wants that aren't all on disk (#77).
 type LibraryDownload struct {
-	Pct int `json:"pct"` // shows: combined over the files being fetched
+	Pct int `json:"pct"` // on disk, from the piece cache; shows: combined over the downloading files
 	// InfoHash is one of the torrents being fetched, for "See download".
 	InfoHash string `json:"info_hash"`
 }

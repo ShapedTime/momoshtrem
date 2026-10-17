@@ -22,8 +22,11 @@ type Snapshot struct {
 	seasons  map[seasonKey]Keep
 	episodes map[int64]Keep
 	files    map[FileKey]FileStatus
-	torrents map[string]TorrentShare
-	usage    Usage
+	// downloading are the keys of the files that are downloading, by hash
+	// and path (DownloadingFiles).
+	downloading []FileKey
+	torrents    map[string]TorrentShare
+	usage       Usage
 }
 
 type seasonKey struct {
@@ -207,6 +210,7 @@ func buildSnapshot(in snapshotInput) *Snapshot {
 			s.files[FileKey{hash, path}] = st
 		}
 	}
+	s.downloading = downloadingOf(s.files)
 
 	// Titles, seasons and episodes.
 	holds := map[int64]episodeHold{}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/catalog"
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 )
 
@@ -282,6 +284,64 @@ func TestUpNext_Cards(t *testing.T) {
 	if e := o.NextEpisode; e.Season != 4 || e.Episode != 2 || e.AbsoluteNumber != nil || *e.Name != "Trakt's name" ||
 		*e.AirDate != "2026-10-15" || *e.TMDBID != 777 || o.Show.LibraryID != nil || o.Show.Title != "Show 3" {
 		t.Errorf("Trakt's episode = %+v, show %+v", e, o.Show)
+	}
+}
+
+// fakeDownloads is a downloads snapshot (#77) that wants these files and
+// holds nothing.
+type fakeDownloads map[downloads.FileKey]downloads.FileStatus
+
+func (fakeDownloads) Movie(int64) (downloads.Keep, bool)       { return downloads.Keep{}, false }
+func (fakeDownloads) Show(int64) (downloads.Keep, bool)        { return downloads.Keep{}, false }
+func (fakeDownloads) Season(int64, int) (downloads.Keep, bool) { return downloads.Keep{}, false }
+func (fakeDownloads) Episode(int64) (downloads.Keep, bool)     { return downloads.Keep{}, false }
+func (fakeDownloads) DownloadingFiles() []downloads.FileKey    { return nil }
+
+func (f fakeDownloads) File(hash, path string) (downloads.FileStatus, bool) {
+	s, ok := f[downloads.FileKey{Hash: hash, Path: path}]
+	return s, ok
+}
+
+// A card is downloading by the title pages' rule (#77): while a download
+// wants its file and it isn't all on disk, not while that download is
+// paused. A file nothing keeps streams on demand, so its card is ready.
+func TestCards_FollowTheDownloads(t *testing.T) {
+	snap := fakeDownloads{
+		{Hash: "kept", Path: "Show/E01.mkv"}:    {Bytes: 1_000, DoneBytes: 420, State: downloads.StateDownloading},
+		{Hash: "waiting", Path: "Show/E01.mkv"}: {Bytes: 1_000, DoneBytes: 0, State: downloads.StateWaitingForWindow},
+		{Hash: "paused", Path: "Show/E01.mkv"}:  {Bytes: 1_000, DoneBytes: 420, State: downloads.StatePaused},
+		{Hash: "done", Path: "Show/E01.mkv"}:    {Bytes: 1_000, DoneBytes: 1_000, Complete: true, State: downloads.StateDone},
+	}
+	svc := New(Deps{Catalog: catalog.New(catalog.Deps{Downloads: func() catalog.DownloadsSnapshot { return snap }})})
+	c := svc.cards()
+	tests := []struct {
+		hash string
+		want Availability
+		pct  int
+	}{
+		{"kept", AvailabilityDownloading, 42},
+		{"waiting", AvailabilityDownloading, 0},
+		{"paused", AvailabilityReady, -1},
+		{"done", AvailabilityReady, -1},
+		{"streamed", AvailabilityReady, -1}, // nothing keeps it
+	}
+	for _, tt := range tests {
+		card := c.card(listed("2020-01-01", withFile(tt.hash)), true)
+		if card.Availability != tt.want || card.WebDAVPath == nil {
+			t.Errorf("%s: card = %+v, want %s", tt.hash, card, tt.want)
+		}
+		switch {
+		case tt.pct < 0 && card.Download != nil:
+			t.Errorf("%s: download = %+v, want nil", tt.hash, card.Download)
+		case tt.pct >= 0 && (card.Download == nil || card.Download.Pct != tt.pct || card.Download.InfoHash != tt.hash):
+			t.Errorf("%s: download = %+v, want %d%%", tt.hash, card.Download, tt.pct)
+		}
+	}
+
+	// Without downloads, nothing is downloading.
+	c = New(Deps{Catalog: catalog.New(catalog.Deps{})}).cards()
+	if card := c.card(listed("2020-01-01", withFile("kept")), true); card.Availability != AvailabilityReady || card.Download != nil {
+		t.Errorf("no downloads: card = %+v", card)
 	}
 }
 

@@ -123,8 +123,9 @@ func (s *Service) movieLibrary(movie *library.Movie, tv *torrentView) TitleLibra
 		return notInLibrary()
 	}
 	state := inLibrary(movie.ID, movie.CreatedAt)
+	state.Keep = keepOf(tv.downloads.Movie(movie.ID))
 	a := movie.Assignment
-	downloading, done, length, seeders := tv.fileProgress(a)
+	f, downloading := tv.fileDownload(a)
 	state.AvailabilityStage = MovieStage(true, a != nil, downloading)
 	if a == nil {
 		return state
@@ -133,7 +134,9 @@ func (s *Service) movieLibrary(movie *library.Movie, tv *torrentView) TitleLibra
 	state.WebDAVPath = strPtr(vfs.MovieFilePath(movie.Title, movie.Year, a.FilePath))
 	state.WebDAVURL = s.webdavURL(state.WebDAVPath)
 	if downloading {
-		state.Download = &DownloadProgress{Pct: pct(done, length), SpeedBps: tv.state(a.InfoHash).speedBps, Seeders: seeders}
+		var d downloadTotals
+		d.add(a, f, tv.state(a.InfoHash))
+		state.Download = d.progress()
 	}
 	if !a.IsTorrent() {
 		state.Stream = s.titleStream(a) // torrent stays null

@@ -47,7 +47,10 @@ type LibraryParams struct {
 
 // Library lists the library, a page at a time, each item with its
 // availability and mapping review, plus the filter counts and the
-// library's summary. One query, whatever the page. Unknown values return
+// library's summary. One query, whatever the page. What's downloading (a
+// download wants it and it isn't all on disk) comes from one snapshot of
+// the downloads, passed to the query as its downloading set, so the stages,
+// filters and counts agree with the items' download. Unknown values return
 // ErrInvalidQuery.
 func (s *Service) Library(ctx context.Context, p LibraryParams) (*LibraryPage, error) {
 	if p.Page == 0 {
@@ -181,8 +184,7 @@ func (s *Service) libraryItem(row library.LibraryItem, tv *torrentView) LibraryI
 		item.WebDAVURL = s.webdavURL(&p)
 	}
 	if len(row.Downloading) > 0 {
-		done, length := tv.filesProgress(row.Downloading)
-		item.Download = &LibraryDownload{Pct: pct(done, length), InfoHash: row.Downloading[0].InfoHash}
+		item.Download = &LibraryDownload{Pct: tv.filesPct(row.Downloading), InfoHash: row.Downloading[0].InfoHash}
 	}
 	if m := row.Missing; m != nil {
 		item.Missing = &MissingRun{SeasonNumber: m.SeasonNumber, From: m.From, To: m.To,

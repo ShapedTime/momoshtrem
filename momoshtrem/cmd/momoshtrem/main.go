@@ -546,6 +546,7 @@ func main() {
 		Store:           library.NewCatalogRepository(db),
 		TMDB:            cachedTMDB,
 		Torrents:        torrentService,
+		Downloads:       catalogDownloads(downloadsService),
 		Sessions:        sessionRegistry,
 		Colors:          heroColors,
 		Settings:        syncer,
@@ -619,6 +620,10 @@ func main() {
 		DiskPath: cfg.Torrent.MetadataFolder,
 		// A pause stops a torrent's downloads at once (#77).
 		OnPauseChange: downloadsService.Wake,
+		// wanted, holds and the disk's kept and smart bytes (#77); one
+		// torrent's pause or resume runs a pass before it answers.
+		Downloads:        activityDownloads(downloadsService),
+		RefreshDownloads: downloadsService.Refresh,
 	})
 	if err := activityService.RestorePauses(context.Background()); err != nil {
 		slog.Error("Failed to restore torrent pauses; paused torrents run until paused again", "error", err)
@@ -637,7 +642,7 @@ func main() {
 	apiOpts.Me = me.New(me.Deps{
 		Store:           library.NewCatalogRepository(db),
 		Settings:        settingsRepo,
-		Catalog:         catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db), Torrents: torrentService}),
+		Catalog:         catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db), Torrents: torrentService, Downloads: catalogDownloads(downloadsService)}),
 		WebDAVPublicURL: webdavPublicURL,
 	})
 

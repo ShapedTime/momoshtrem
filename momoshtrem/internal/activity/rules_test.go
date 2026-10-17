@@ -2,7 +2,9 @@ package activity
 
 import (
 	"testing"
+	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 )
 
@@ -14,12 +16,28 @@ func TestStateOf(t *testing.T) {
 	}{
 		{"not loaded", Facts{}, StateIdle},
 		{"not loaded, paused", Facts{Paused: true}, StatePaused},
+		{"not loaded, wanted", Facts{Wanted: downloads.StateDownloading}, StateIdle},
 		{"loaded, network off", Facts{Loaded: true}, StateIdle},
-		{"loaded, network on, partial", Facts{Loaded: true, Active: true}, StateDownloading},
-		{"loaded, network on, complete", Facts{Loaded: true, Active: true, Complete: true}, StateIdle},
+		// Nothing keeps it: it fetches only around readers, so a partial
+		// torrent left on after a stream isn't downloading (#77).
+		{"loaded, network on, nothing wanted", Facts{Loaded: true, Active: true}, StateIdle},
+		{"the manager downloads it", Facts{Loaded: true, Active: true, Wanted: downloads.StateDownloading, DownloadBps: 2_000_000}, StateDownloading},
+		{"the manager downloads it, no bytes yet", Facts{Loaded: true, Active: true, Wanted: downloads.StateDownloading}, StateDownloading},
+		{"network off, wanted", Facts{Loaded: true, Wanted: downloads.StateDownloading}, StateIdle},
+		{"queued at 0 B/s", Facts{Loaded: true, Active: true, Wanted: downloads.StateQueued}, StateIdle},
+		{"waiting for the window", Facts{Loaded: true, Active: true, Wanted: downloads.StateWaitingForWindow}, StateIdle},
+		{"waiting for the stream", Facts{Loaded: true, Active: true, Wanted: downloads.StateWaitingForStream}, StateIdle},
+		{"stalled", Facts{Loaded: true, Active: true, Wanted: downloads.StateStalled}, StateIdle},
+		{"its downloads are done", Facts{Loaded: true, Active: true, Wanted: downloads.StateDone}, StateIdle},
+		{"bytes arriving, nothing wanted", Facts{Loaded: true, Active: true, DownloadBps: 1}, StateDownloading},
+		{"bytes arriving while queued", Facts{Loaded: true, Active: true, Wanted: downloads.StateQueued, DownloadBps: 6_400_000}, StateDownloading},
 		{"a session", Facts{Loaded: true, Active: true, Sessions: 1}, StateStreaming},
-		{"sessions on a complete torrent", Facts{Loaded: true, Complete: true, Sessions: 2}, StateStreaming},
+		{"a session while the manager downloads it", Facts{Loaded: true, Active: true, Sessions: 1, Wanted: downloads.StateDownloading,
+			DownloadBps: 9_000_000}, StateStreaming},
+		{"sessions with the network off", Facts{Loaded: true, Sessions: 2}, StateStreaming},
 		{"paused wins over a session", Facts{Paused: true, Loaded: true, Active: true, Sessions: 1}, StatePaused},
+		{"paused wins over a download", Facts{Paused: true, Loaded: true, Active: true, Wanted: downloads.StateDownloading, DownloadBps: 5},
+			StatePaused},
 		{"sessions don't count while not loaded", Facts{Sessions: 1}, StateIdle},
 	}
 	for _, tt := range tests {
@@ -29,6 +47,54 @@ func TestStateOf(t *testing.T) {
 			}
 		})
 	}
+}
+
+// wanted is the last pass's, with the ETA from the speed now while the
+// manager downloads the torrent.
+func TestWanted(t *testing.T) {
+	resumes := time.Date(2026, 10, 17, 1, 0, 0, 0, time.UTC)
+	share := downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 1_000, DoneBytes: 400, EtaSeconds: ptr(int64(99)),
+		State: downloads.StateDownloading}}
+	tests := []struct {
+		name    string
+		state   downloads.State
+		done    int64
+		bps     int64
+		wantETA *int64
+	}{
+		{"downloading", downloads.StateDownloading, 400, 100, ptr(int64(6))},
+		{"downloading, rounded up", downloads.StateDownloading, 400, 7, ptr(int64(86))},
+		{"downloading, no speed", downloads.StateDownloading, 400, 0, nil},
+		{"queued, bytes from a stream", downloads.StateQueued, 400, 100, nil},
+		{"waiting", downloads.StateWaitingForWindow, 400, 0, nil},
+		{"done", downloads.StateDone, 1_000, 100, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sh := share
+			sh.Wanted.State, sh.Wanted.DoneBytes, sh.Wanted.ResumesAt = tt.state, tt.done, &resumes
+			w := Wanted(sh, true, tt.bps)
+			if w == nil || w.Bytes != 1_000 || w.DoneBytes != tt.done || w.State != tt.state || w.ResumesAt != &resumes {
+				t.Fatalf("wanted = %+v", w)
+			}
+			if (w.EtaSeconds == nil) != (tt.wantETA == nil) || (w.EtaSeconds != nil && *w.EtaSeconds != *tt.wantETA) {
+				t.Errorf("eta = %v, want %v", derefInt(w.EtaSeconds), derefInt(tt.wantETA))
+			}
+		})
+	}
+	if w := Wanted(downloads.TorrentShare{}, false, 100); w != nil {
+		t.Errorf("nothing wants it: %+v, want nil", w)
+	}
+	if *share.Wanted.EtaSeconds != 99 {
+		t.Error("Wanted changed the snapshot's share")
+	}
+}
+
+func derefInt(p *int64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 func TestScope(t *testing.T) {

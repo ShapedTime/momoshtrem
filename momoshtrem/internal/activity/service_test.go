@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
@@ -172,6 +173,20 @@ func (f fakeSpeeds) Total() torrent.Rate     { return f.total }
 func (f fakeSpeeds) History() []torrent.Rate { return f.history }
 func (f fakeSpeeds) Interval() time.Duration { return 2 * time.Second }
 
+// fakeDownloads is a downloads snapshot (#77): what they want of each
+// torrent, and what they pin on disk.
+type fakeDownloads struct {
+	torrents map[string]downloads.TorrentShare
+	usage    downloads.Usage
+}
+
+func (f *fakeDownloads) Torrent(hash string) (downloads.TorrentShare, bool) {
+	s, ok := f.torrents[hash]
+	return s, ok
+}
+
+func (f *fakeDownloads) Usage() downloads.Usage { return f.usage }
+
 // fakeCache holds 1 GB of a 4 GB cache.
 type fakeCache struct{}
 
@@ -196,22 +211,34 @@ func episodes(season, from, to int) (out []library.EpisodeNumber) {
 
 // env is a Service over fakes holding one torrent of each kind:
 //   - frieren: a show's, not loaded, with an open job;
-//   - dune: a movie's, loaded and fetching;
+//   - dune: a movie's, loaded and fetching: kept, and the download manager
+//     downloads it;
 //   - severance: a show's, loaded, with a streaming session (and an
 //     HDRezka session elsewhere);
 //   - past: a movie's, not loaded, paused;
 //   - inspect: loaded, nothing references it (a dry run);
 //   - legacy: a movie's, not loaded, no job (its magnet has a dn);
-//   - done: a movie's, loaded, complete.
+//   - done: a movie's, loaded, complete: a smart pick and a Keep have it
+//     all on disk.
 type env struct {
-	svc      *Service
-	torrents *fakeTorrents
-	lib      *fakeLibrary
-	store    *fakePauseStore
-	statfs   error
+	svc       *Service
+	torrents  *fakeTorrents
+	lib       *fakeLibrary
+	store     *fakePauseStore
+	downloads *fakeDownloads
+	statfs    error
 	// pauseChanges counts OnPauseChange calls (the download manager's wakes).
 	pauseChanges int
 }
+
+// The downloads of the env's torrents.
+var (
+	duneHolds = []downloads.TorrentHold{{DownloadID: 5, Reason: library.DownloadKept, Scope: library.DownloadScopeMovie, Title: "Dune: Part Two"}}
+	doneHolds = []downloads.TorrentHold{
+		{DownloadID: 2, Reason: library.DownloadKept, Scope: library.DownloadScopeMovie, Title: "Done"},
+		{DownloadID: 1, Reason: library.DownloadSmart, Scope: library.DownloadScopeEpisode, Title: "Done"},
+	}
+)
 
 var (
 	frieren, dune, severance, past = hash('a'), hash('b'), hash('c'), hash('d')
@@ -247,11 +274,20 @@ func newEnv() *env {
 	e.torrents.loaded[done] = torrent.TorrentStatus{InfoHash: done, Name: "Done.2020", TotalSize: 100, Downloaded: 100,
 		Progress: 1, Complete: true, LoadedAt: at(23), LastActive: at(40)}
 	e.torrents.paused[past] = at(10)
+	e.downloads = &fakeDownloads{
+		torrents: map[string]downloads.TorrentShare{
+			dune: {Wanted: downloads.TorrentWanted{Bytes: 900, DoneBytes: 360, EtaSeconds: ptr(int64(999)), State: downloads.StateDownloading},
+				Holds: duneHolds},
+			done: {Wanted: downloads.TorrentWanted{Bytes: 100, DoneBytes: 100, State: downloads.StateDone}, Holds: doneHolds},
+		},
+		usage: downloads.Usage{KeptBytes: 3 << 29, SmartBytes: 1 << 28, CommittedKeptBytes: 2 << 30},
+	}
 	e.svc = New(Deps{
 		Torrents: e.torrents, Library: e.lib, Pauses: e.store,
-		Sessions: fakeSessions{session("1", severance, at(49)), session("2", "", at(48))},
-		Speeds:   fakeSpeeds{total: torrent.Rate{Down: 2_000_000, Up: 30_000}, history: []torrent.Rate{{Down: 1, Up: 2}, {Down: 3, Up: 4}}},
-		Cache:    fakeCache{}, DiskPath: "/data/torrents",
+		Downloads: func() DownloadsSnapshot { return e.downloads },
+		Sessions:  fakeSessions{session("1", severance, at(49)), session("2", "", at(48))},
+		Speeds:    fakeSpeeds{total: torrent.Rate{Down: 2_000_000, Up: 30_000}, history: []torrent.Rate{{Down: 1, Up: 2}, {Down: 3, Up: 4}}},
+		Cache:     fakeCache{}, DiskPath: "/data/torrents",
 		OnPauseChange: func() { e.pauseChanges++ },
 		Now:           func() time.Time { return at(50) },
 		Statfs: func(path string) (int64, int64, error) {
@@ -376,6 +412,211 @@ func TestList_NotLoadedJSON(t *testing.T) {
 	}
 }
 
+// wanted and holds come from the downloads (#77): what they want of the
+// torrent, with the ETA from its speed now, and who holds it. Downloading
+// is the manager downloading a loaded torrent with its network on, or bytes
+// arriving; a torrent that's only cached (left on after a stream) isn't.
+func TestList_Downloads(t *testing.T) {
+	e := newEnv()
+	byHash := e.list(t)
+
+	d := byHash[dune]
+	if d.State != StateDownloading || d.Wanted == nil || d.Wanted.Bytes != 900 || d.Wanted.DoneBytes != 360 ||
+		d.Wanted.State != downloads.StateDownloading || !slices.Equal(d.Holds, duneHolds) {
+		t.Errorf("dune = %+v (wanted %+v, holds %+v)", d, d.Wanted, d.Holds)
+	}
+	// 540 bytes left at 2 MB/s: the live speed's ETA, not the pass's.
+	if d.Wanted.EtaSeconds == nil || *d.Wanted.EtaSeconds != 1 {
+		t.Errorf("dune eta = %v, want 1 s", derefInt(d.Wanted.EtaSeconds))
+	}
+	// Kept and smart, all on disk: idle, kept first.
+	if dn := byHash[done]; dn.State != StateIdle || dn.Wanted == nil || dn.Wanted.State != downloads.StateDone ||
+		dn.Wanted.EtaSeconds != nil || !slices.Equal(dn.Holds, doneHolds) {
+		t.Errorf("done = %+v (wanted %+v)", dn, dn.Wanted)
+	}
+	for _, h := range []string{frieren, severance, past, inspect, legacy} {
+		if it := byHash[h]; it.Wanted != nil || it.Holds == nil || len(it.Holds) != 0 {
+			t.Errorf("%s: wanted %+v, holds %#v; want null and []", h[:1], it.Wanted, it.Holds)
+		}
+	}
+
+	tests := []struct {
+		name  string
+		bps   int64
+		share *downloads.TorrentShare
+		want  State
+	}{
+		{"cached after a stream, nothing wants it", 0, nil, StateIdle},
+		{"bytes still arriving, nothing wants it", 40_000, nil, StateDownloading},
+		{"queued at 0 B/s", 0, &downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateQueued}}, StateIdle},
+		{"waiting for the window", 0, &downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateWaitingForWindow}}, StateIdle},
+		{"stalled", 0, &downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateStalled}}, StateIdle},
+		{"in a slot, no bytes yet", 0, &downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateDownloading}}, StateDownloading},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv()
+			st := e.torrents.loaded[dune]
+			st.DownloadSpeed = tt.bps
+			e.torrents.loaded[dune] = st
+			delete(e.downloads.torrents, dune)
+			if tt.share != nil {
+				e.downloads.torrents[dune] = *tt.share
+			}
+			it := e.list(t)[dune]
+			if it.State != tt.want || (tt.share == nil) != (it.Wanted == nil) {
+				t.Errorf("state %s, wanted %+v; want %s", it.State, it.Wanted, tt.want)
+			}
+			if it.Wanted != nil && it.Wanted.EtaSeconds != nil {
+				t.Errorf("eta = %d, want null at 0 B/s or while waiting", *it.Wanted.EtaSeconds)
+			}
+		})
+	}
+}
+
+// wanted and holds follow the web's TorrentListItem (contract/torrents.ts,
+// the torrents mock): null and [] when nothing wants the torrent, and the
+// fields of TorrentWanted, TorrentHold and the summary's disk.
+func TestDownloadsJSON(t *testing.T) {
+	e := newEnv()
+	byHash := e.list(t)
+	object := func(v any) map[string]any {
+		t.Helper()
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	keys := func(m map[string]any) []string { return slices.Sorted(maps.Keys(m)) }
+	sorted := func(s ...string) []string { return slices.Sorted(slices.Values(s)) }
+
+	item := object(byHash[dune])
+	if got, want := keys(item), sorted("info_hash", "name", "state", "loaded", "complete", "progress", "bytes_completed", "size_bytes",
+		"download_bps", "upload_bps", "peers", "seeders", "added_at", "last_active_at", "titles", "open_job", "streaming",
+		"wanted", "holds"); !slices.Equal(got, want) {
+		t.Errorf("TorrentListItem fields =\n%v\nwant\n%v", got, want)
+	}
+	wanted := item["wanted"].(map[string]any)
+	if got, want := keys(wanted), sorted("bytes", "done_bytes", "eta_seconds", "state", "resumes_at"); !slices.Equal(got, want) {
+		t.Errorf("TorrentWanted fields = %v, want %v", got, want)
+	}
+	if wanted["resumes_at"] != nil || wanted["state"] != "downloading" {
+		t.Errorf("wanted = %v", wanted)
+	}
+	hold := item["holds"].([]any)[0].(map[string]any)
+	if got, want := keys(hold), sorted("download_id", "reason", "scope", "title"); !slices.Equal(got, want) {
+		t.Errorf("TorrentHold fields = %v, want %v", got, want)
+	}
+	if hold["reason"] != "kept" || hold["scope"] != "movie" || hold["title"] != "Dune: Part Two" {
+		t.Errorf("hold = %v", hold)
+	}
+	if w := object(byHash[done])["wanted"].(map[string]any); w["eta_seconds"] != nil || w["state"] != "done" {
+		t.Errorf("done's wanted = %v", w)
+	}
+	nothing := object(byHash[frieren])
+	if w, ok := nothing["wanted"]; !ok || w != nil {
+		t.Errorf("wanted = %v (present %v), want null", w, ok)
+	}
+	if h, ok := nothing["holds"].([]any); !ok || len(h) != 0 {
+		t.Errorf("holds = %v, want []", nothing["holds"])
+	}
+
+	// Each state the manager gives a torrent goes out as the web's
+	// TorrentWantedState (DownloadState without no_file, unavailable and
+	// storage_full), and only "downloading" puts the loaded torrent (at
+	// 0 B/s) in Downloading; an ETA only comes with a speed then.
+	webStates := []string{"queued", "downloading", "waiting_for_stream", "waiting_for_window", "paused", "stalled", "disk_full", "done"}
+	idle := newEnv()
+	st := idle.torrents.loaded[dune]
+	st.DownloadSpeed = 0
+	idle.torrents.loaded[dune] = st
+	for _, s := range []downloads.State{downloads.StateDone, downloads.StatePaused, downloads.StateDiskFull, downloads.StateWaitingForWindow,
+		downloads.StateWaitingForStream, downloads.StateStalled, downloads.StateDownloading, downloads.StateQueued} {
+		idle.downloads.torrents[dune] = downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, DoneBytes: 360, State: s},
+			Holds: duneHolds}
+		it := idle.list(t)[dune]
+		w := object(it)["wanted"].(map[string]any)
+		if !slices.Contains(webStates, w["state"].(string)) || w["state"] != string(s) || w["eta_seconds"] != nil {
+			t.Errorf("%s: wanted = %v", s, w)
+		}
+		if want := map[bool]State{true: StateDownloading, false: StateIdle}[s == downloads.StateDownloading]; it.State != want {
+			t.Errorf("%s: torrent state %s, want %s", s, it.State, want)
+		}
+	}
+
+	sum, err := e.svc.Summary(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := keys(object(sum)["disk"].(map[string]any)), sorted("total_bytes", "free_bytes", "torrents_bytes", "cache_limit_bytes",
+		"kept_bytes", "smart_bytes"); !slices.Equal(got, want) {
+		t.Errorf("disk fields = %v, want %v", got, want)
+	}
+}
+
+// A torrent's pause or resume runs a download pass before it answers, so
+// its wanted.state is the new one; when the pass fails the manager is woken
+// instead, and the answer is the last pass's.
+func TestPause_RefreshesTheDownloads(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv()
+	refreshes := 0
+	var refreshErr error
+	var passCtxErr error
+	e.svc.refresh = func(ctx context.Context) error {
+		refreshes++
+		passCtxErr = ctx.Err()
+		if refreshErr != nil {
+			return refreshErr
+		}
+		share := e.downloads.torrents[dune]
+		share.Wanted.State = downloads.StateDownloading
+		if _, paused := e.torrents.paused[dune]; paused {
+			share.Wanted.State = downloads.StatePaused
+		}
+		e.downloads.torrents[dune] = share
+		return nil
+	}
+
+	item, err := e.svc.Pause(ctx, dune)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != StatePaused || item.Wanted == nil || item.Wanted.State != downloads.StatePaused || item.Wanted.EtaSeconds != nil ||
+		refreshes != 1 || e.pauseChanges != 0 {
+		t.Errorf("paused = %+v (wanted %+v), refreshes %d, wakes %d", item, item.Wanted, refreshes, e.pauseChanges)
+	}
+	if item, err = e.svc.Resume(ctx, dune); err != nil || item.Wanted.State != downloads.StateDownloading || refreshes != 2 {
+		t.Errorf("resumed = %+v (wanted %+v), %v, refreshes %d", item, item.Wanted, err, refreshes)
+	}
+
+	refreshErr = errors.New("db down")
+	if item, err = e.svc.Pause(ctx, dune); err != nil || item.State != StatePaused || item.Wanted.State != downloads.StateDownloading ||
+		e.pauseChanges != 1 {
+		t.Errorf("pass failed: %+v (wanted %+v), %v, wakes %d; want the pause, the last pass's state and a wake", item, item.Wanted, err,
+			e.pauseChanges)
+	}
+
+	// Pause-all and resume-all answer counts: they only wake the manager.
+	if _, err := e.svc.ResumeAll(ctx); err != nil || refreshes != 3 || e.pauseChanges != 2 {
+		t.Errorf("resume-all: %v, refreshes %d, wakes %d", err, refreshes, e.pauseChanges)
+	}
+
+	// The client went away: the pause is stored, and the pass still runs
+	// to its end (it writes local watches).
+	refreshErr = nil
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := e.svc.Pause(gone, dune); err != nil || refreshes != 4 || passCtxErr != nil {
+		t.Errorf("pause, client gone: %v, refreshes %d, the pass's context %v; want it not cancelled", err, refreshes, passCtxErr)
+	}
+}
+
 func TestSummary(t *testing.T) {
 	e := newEnv()
 	sum, err := e.svc.Summary(context.Background())
@@ -389,11 +630,22 @@ func TestSummary(t *testing.T) {
 	if h := sum.History; h.IntervalSeconds != 2 || !slices.Equal(h.DownloadBps, []int64{1, 3}) || !slices.Equal(h.UploadBps, []int64{2, 4}) {
 		t.Errorf("history = %+v", h)
 	}
-	if d := sum.Disk; d == nil || *d != (Disk{TotalBytes: 100 << 30, FreeBytes: 40 << 30, TorrentsBytes: 1 << 30, CacheLimitBytes: 4 << 30}) {
+	// What downloads pin is the snapshot's usage (#77), within the cache's
+	// fill.
+	if d := sum.Disk; d == nil || *d != (Disk{TotalBytes: 100 << 30, FreeBytes: 40 << 30, TorrentsBytes: 1 << 30, CacheLimitBytes: 4 << 30,
+		KeptBytes: 3 << 29, SmartBytes: 1 << 28}) {
 		t.Errorf("disk = %+v", d)
 	}
 	if sum.Streaming == nil {
 		t.Error("streaming is null")
+	}
+
+	// Without downloads nothing is pinned, and only bytes arriving make a
+	// torrent downloading.
+	e.svc.dl = nil
+	if sum, _ = e.svc.Summary(context.Background()); sum.Disk == nil || sum.Disk.KeptBytes != 0 || sum.Disk.SmartBytes != 0 ||
+		sum.Counts.Downloading != 1 {
+		t.Errorf("without downloads: disk %+v, counts %+v", sum.Disk, sum.Counts)
 	}
 
 	e.statfs = errors.New("no such file or directory")
@@ -498,6 +750,46 @@ func TestPauseAllAndResumeAll(t *testing.T) {
 	}
 	if items := e.list(t); items[dune].State != StateDownloading || items[severance].State != StateStreaming {
 		t.Errorf("after resume all: dune %s, severance %s", items[dune].State, items[severance].State)
+	}
+}
+
+// Pause all stops the download queue too (#77): the torrents a download
+// still wants bytes of, queued or waiting, loaded or not. Otherwise the
+// paused ones give up their slots and the manager loads the next. One
+// whose downloads are done, or that nothing wants, isn't touched. Resume
+// all brings them all back.
+func TestPauseAll_StopsTheDownloadQueue(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv()
+	e.downloads.torrents[frieren] = downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateQueued}}
+	e.downloads.torrents[legacy] = downloads.TorrentShare{Wanted: downloads.TorrentWanted{Bytes: 900, State: downloads.StateWaitingForWindow}}
+
+	n, err := e.svc.PauseAll(ctx)
+	if err != nil || n != 4 {
+		t.Fatalf("PauseAll = %d, %v; want streaming, downloading, queued and waiting", n, err)
+	}
+	for _, h := range []string{severance, dune, frieren, legacy} {
+		if _, ok := e.store.paused[h]; !ok {
+			t.Errorf("%s: pause not stored", h[:1])
+		}
+		if _, ok := e.torrents.paused[h]; !ok {
+			t.Errorf("%s: not paused in the client", h[:1])
+		}
+	}
+	for _, h := range []string{done, inspect} {
+		if _, ok := e.torrents.paused[h]; ok {
+			t.Errorf("%s: paused, but no download wants bytes of it", h[:1])
+		}
+	}
+	if e.pauseChanges != 1 {
+		t.Errorf("wakes = %d, want 1", e.pauseChanges)
+	}
+
+	if n, err = e.svc.ResumeAll(ctx); err != nil || n != 5 {
+		t.Fatalf("ResumeAll = %d, %v; want the four and the one paused before", n, err)
+	}
+	if len(e.torrents.paused) != 0 || len(e.store.paused) != 0 {
+		t.Errorf("left paused: client %v, store %v", e.torrents.paused, e.store.paused)
 	}
 }
 
