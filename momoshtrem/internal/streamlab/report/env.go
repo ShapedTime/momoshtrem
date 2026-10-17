@@ -37,6 +37,9 @@ func CollectEnv() Env {
 			}
 		}
 	}
+	// The race build tag holds where the build settings may not (a test
+	// binary): compare (S8) refuses timing verdicts for race builds.
+	e.Race = e.Race || raceBuild
 	e.UTP = utpBuild(e.CGO, e.Tags)
 	return e
 }

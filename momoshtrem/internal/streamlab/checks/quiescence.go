@@ -149,12 +149,29 @@ const ownCode = "github.com/shapedtime/momoshtrem/"
 // anacrolixCode marks a function of anacrolix's.
 const anacrolixCode = "github.com/anacrolix/"
 
+// storageCode marks momoshtrem's piece storage (H5, #201): anacrolix calls
+// it on its own goroutines (a peer connection writing a chunk), so a frame
+// of it doesn't make an anacrolix goroutine a request's.
+const storageCode = ownCode + "internal/torrent/piececache."
+
+// runsOwnCode reports whether a debug=1 record has a momoshtrem frame
+// other than the piece storage's.
+func runsOwnCode(rec string) bool {
+	for _, line := range strings.Split(rec, "\n") {
+		if strings.Contains(line, ownCode) && !strings.Contains(line, storageCode) {
+			return true
+		}
+	}
+	return false
+}
+
 // labelledGoroutines reads the goroutine profile and returns the
 // goroutines labelled with key, split in two. Inherited ones (others, a
-// count) run no momoshtrem code and started in anacrolix code: anacrolix's
-// own goroutines, which a request's goroutine triggered and which live
-// with the torrent. A goroutine's stack starts at the function it was
-// started with, so those show no momoshtrem frame. Every other one is own:
+// count) run no momoshtrem code but the piece storage's (storageCode) and
+// started in anacrolix code: anacrolix's own goroutines, which a request's
+// goroutine triggered and which live with the torrent. A goroutine's stack
+// starts at the function it was started with, so those show no momoshtrem
+// frame, or only the storage anacrolix called. Every other one is own:
 // it runs momoshtrem code, or momoshtrem started it on a library function
 // (go io.Copy). Only labels mine accepts count: the requests of one stack.
 func labelledGoroutines(key string, mine func(string) bool) (own []LabelledGoroutines, others int) {
@@ -196,7 +213,7 @@ func parseLabelled(profile, key string, mine func(string) bool) (own []LabelledG
 			continue
 		}
 		n, _ := strconv.Atoi(m[1])
-		if strings.Contains(rec, ownCode) || !strings.HasPrefix(rootFunc(rec), anacrolixCode) {
+		if runsOwnCode(rec) || !strings.HasPrefix(rootFunc(rec), anacrolixCode) {
 			own = append(own, LabelledGoroutines{Request: req, Count: n, Stack: rec})
 		} else {
 			others += n

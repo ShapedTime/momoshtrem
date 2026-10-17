@@ -57,10 +57,18 @@ func TestParseLabelled(t *testing.T) {
 #	0x7	runtime.gopark+0x1	/go/src/runtime/proc.go:1
 #	0x8	time.Sleep+0x1	/go/src/runtime/time.go:1
 
+1 @ 0x9 0xa 0xb
+# labels: {"slreq":"s1.1"}
+#	0x9	github.com/shapedtime/momoshtrem/internal/torrent/piececache.(*Cache).OpenFile+0x97	/x/cache.go:188
+#	0xa	github.com/anacrolix/torrent.(*Peer).receiveChunk+0x4c7	/x/peer.go:421
+#	0xb	github.com/anacrolix/torrent.(*Client).outgoingConnection+0x258	/x/client.go:960
+
 `
 	own, others := parseLabelled(profile, "slreq", func(id string) bool { return strings.HasPrefix(id, "s1.") })
-	if others != 3 {
-		t.Errorf("others = %d, want 3 (the anacrolix connection)", others)
+	// The connection writing a chunk into momoshtrem's piece cache is
+	// still anacrolix's: inherited.
+	if others != 4 {
+		t.Errorf("others = %d, want 4 (the anacrolix connections, one in the piece cache)", others)
 	}
 	if len(own) != 2 || own[0].Request != "s1.7" || own[0].Count != 2 || !strings.Contains(own[0].Stack, "readContext") ||
 		own[1].Request != "s1.9" || own[1].Count != 1 {

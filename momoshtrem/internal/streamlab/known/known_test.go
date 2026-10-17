@@ -134,6 +134,26 @@ func TestTallyRun(t *testing.T) {
 	}
 }
 
+// A race is known only by its exact signature, and every known race is a
+// registered issue that explains the race check.
+func TestMatchRace(t *testing.T) {
+	for _, r := range known.Races {
+		got, ok := known.MatchRace(r.Signature)
+		if !ok || got.ID != r.ID {
+			t.Errorf("MatchRace(%s's signature) = %v, %v", r.ID, got.ID, ok)
+		}
+		if is, ok := known.Lookup(r.ID); !ok || len(is.Checks) != 1 || is.Checks[0] != known.RaceCheck {
+			t.Errorf("%s isn't registered for the race check: %+v", r.ID, is)
+		}
+		if _, ok := known.MatchRace(r.Signature + " "); ok {
+			t.Errorf("%s matched a signature that isn't its own", r.ID)
+		}
+	}
+	if _, ok := known.MatchRace("write a | write b"); ok {
+		t.Error("an unregistered race matched")
+	}
+}
+
 // Every entry explains checks, has a rate in (0, 1] and a doc; IDs are
 // unique.
 func TestRegistry(t *testing.T) {

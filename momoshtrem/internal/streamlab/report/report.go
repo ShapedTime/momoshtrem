@@ -122,6 +122,7 @@ type Report struct {
 	Verdict  Verdict           `json:"verdict"`
 	Metrics  map[string]Metric `json:"metrics"`
 	Checks   []Check           `json:"checks"`
+	Races    []Race            `json:"race_reports,omitempty"` // streamlab check's data races, by signature (race.go)
 	Reps     []Rep             `json:"reps"`
 	Findings []string          `json:"findings"`
 	// Artifacts are paths relative to the report's folder.
@@ -239,6 +240,7 @@ type Rep struct {
 	Seed      uint64             `json:"seed"`
 	Metrics   map[string]float64 `json:"metrics"`
 	Checks    []RepCheck         `json:"checks"`
+	Races     []Race             `json:"race_reports,omitempty"` // the process's data races (race.go)
 	Notes     []string           `json:"notes,omitempty"`
 	Sessions  []Session          `json:"sessions"`
 	Torrent   Torrent            `json:"torrent"`
