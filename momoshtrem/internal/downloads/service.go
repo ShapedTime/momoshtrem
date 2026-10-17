@@ -81,6 +81,9 @@ func (s *Service) Keep(ctx context.Context, body []byte) (Download, bool, error)
 	if err := s.writeReleases(ctx, p); err != nil {
 		return Download{}, false, err
 	}
+	// This plan isn't applied, and the next one won't see those releases:
+	// their watched files go first when the cache trims, from now.
+	s.demote(p.stage.released, true, p.refs)
 	existing, err := s.d.Store.ActiveDownloadFor(ctx, target.DownloadRecord)
 	if err != nil {
 		return Download{}, false, err

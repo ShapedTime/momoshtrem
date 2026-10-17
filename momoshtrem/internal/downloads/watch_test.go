@@ -92,6 +92,24 @@ func TestWatch_IndexReadThenSilence(t *testing.T) {
 	}
 }
 
+// The index at the end read in two chunks with a poll between them (a cold
+// torrent fetches the moov's pieces a few seconds apart), then nothing: the
+// second chunk moves the offset on, but the session has stopped reading.
+// Not a watch.
+func TestWatch_IndexReadInChunksThenSilence(t *testing.T) {
+	r := newWatchRig()
+	r.read(0, 128<<10)
+	r.read(filmSize-(2<<20), 1<<20) // the moov's first half
+	r.polls(7, func(i int) {
+		if i == 1 {
+			r.read(filmSize-(1<<20), 1<<20) // its second half, 5 s later
+		}
+	})
+	if n := r.store.count(); n != 0 {
+		t.Errorf("an index read in two chunks, then silence, recorded %d watches", n)
+	}
+}
+
 // A playback that reaches 92% and stops there isn't a watch either.
 func TestWatch_ReadsStopPastNinety(t *testing.T) {
 	r := newWatchRig()

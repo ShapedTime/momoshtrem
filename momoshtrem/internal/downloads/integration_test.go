@@ -662,6 +662,35 @@ func TestKeepAndUpdate_Releases(t *testing.T) {
 	}
 }
 
+// A Keep's own release of a watched download demotes its pieces: they go
+// before older ones when the cache trims.
+func TestKeep_DemotesWhatItReleases(t *testing.T) {
+	h := newHarness(t)
+	older := h.torrent("Older", true, 2*testPiece)
+	h.fill(older, 0, 1)
+	time.Sleep(10 * time.Millisecond)
+	movie := h.movie("Seen")
+	tt := h.torrent("Seen", true, 2*testPiece)
+	h.assign(library.ItemTypeMovie, movie, tt, 0)
+	h.fill(tt, 0, 1) // newer than Older's
+	h.keep(fmt.Sprintf(`{"scope":"movie","id":%d}`, movie))
+	h.clock.advance(time.Hour)
+	if err := h.repo.UpsertLocalWatch(h.ctx, library.ItemRef{Type: library.ItemTypeMovie, ID: movie}, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// Another Keep: its pre-pass releases the watched movie.
+	other := h.movie("Other")
+	h.keep(fmt.Sprintf(`{"scope":"movie","id":%d}`, other))
+	h.cache.SetCapacity(2 * testPiece)
+	h.cache.TrimToCapacity()
+	if have := h.have(tt, 0, 1); have[0] || have[1] {
+		t.Errorf("the released, watched movie's pieces survived the trim: %v", have)
+	}
+	if have := h.have(older, 0, 1); !have[0] || !have[1] {
+		t.Errorf("older pieces went first: %v", have)
+	}
+}
+
 // The estimate: what a show's Keep wants, a file another kept download has
 // counts nothing, HDRezka can't be kept.
 func TestEstimate(t *testing.T) {
@@ -715,6 +744,35 @@ func TestResync(t *testing.T) {
 	h.refresh()
 	if got := h.client.updated[tt.hash]; fmt.Sprint(got) != "[1]" {
 		t.Errorf("re-read again: %v", got)
+	}
+}
+
+// A Keep released and made again while its torrent stays loaded (torrents
+// don't unload until a DELETE or a restart): the pieces the cache lost while
+// nothing pinned them are re-read on the new Keep's first pass.
+func TestResync_ReKeep(t *testing.T) {
+	h := newHarness(t)
+	movie := h.movie("Again")
+	tt := h.torrent("Again", true, 3*testPiece)
+	h.assign(library.ItemTypeMovie, movie, tt, 0)
+	h.fill(tt, 0, 1, 2)
+	h.client.set(func(c *fakeClient) {
+		c.loaded[tt.hash] = 0
+		c.complete[tt.hash] = []bool{true, true, true}
+	})
+	d, _ := h.keep(fmt.Sprintf(`{"scope":"movie","id":%d}`, movie))
+	if err := h.svc.Delete(h.ctx, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Unpinned, the LRU evicts piece 1; the client still believes it complete.
+	if err := h.cache.Remove("completed/" + tt.pm.Ref(1).Hex); err != nil {
+		t.Fatal(err)
+	}
+	h.refresh()
+	h.keep(fmt.Sprintf(`{"scope":"movie","id":%d}`, movie))
+	h.refresh()
+	if got := h.client.updated[tt.hash]; fmt.Sprint(got) != "[1]" {
+		t.Errorf("after a Keep made again, re-read %v, want piece 1", got)
 	}
 }
 

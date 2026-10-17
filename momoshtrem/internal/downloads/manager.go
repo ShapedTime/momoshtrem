@@ -587,6 +587,8 @@ func (s *Service) apply(ctx context.Context, p *passPlan, loads bool) {
 		if _, ok := p.refs[hash]; !ok {
 			s.d.Cache.Unpin(pinOwnerPrefix + hash)
 			delete(s.pinned, hash)
+			// Unpinned, its pieces may go: a Keep made again re-syncs it all.
+			delete(s.resynced, hash)
 		}
 	}
 	if !s.restored {
@@ -927,11 +929,12 @@ func (s *Service) observeSessions(ctx context.Context, now time.Time) bool {
 
 // markWatch follows a session past WatchedAt and records its items as
 // watched here once it has played on through the end: watchConfirm after
-// it was first seen there, it has read past where it was then, after then.
-// A session's offset is where its last read ended, and it stays listed a
-// while after its last read, so a player that reads a file's index at the
-// end and then stops (a probe, or a playback abandoned at the start) sits
-// past WatchedAt without reading on: that isn't a watch.
+// it was first seen there, it has read past where it was then, after then,
+// and it's still reading (a read within two polls). A session's offset is
+// where its last read ended, and it stays listed a while after its last
+// read, so a player that reads a file's index at the end (in one chunk or
+// a few) and then stops (a probe, or a playback abandoned at the start)
+// sits past WatchedAt without reading on: that isn't a watch.
 func (s *Service) markWatch(ctx context.Context, sess sessions.Session, now time.Time) bool {
 	if sess.SizeBytes <= 0 || sess.OffsetBytes*100 < sess.SizeBytes*WatchedAt {
 		delete(s.marks, sess.ID)
@@ -942,7 +945,8 @@ func (s *Service) markWatch(ctx context.Context, sess sessions.Session, now time
 		s.marks[sess.ID] = &watchMark{since: now, offset: sess.OffsetBytes}
 		return false
 	}
-	if m.recorded || now.Sub(m.since) < watchConfirm || sess.OffsetBytes <= m.offset || !sess.LastReadAt.After(m.since) {
+	if m.recorded || now.Sub(m.since) < watchConfirm || sess.OffsetBytes <= m.offset || !sess.LastReadAt.After(m.since) ||
+		now.Sub(sess.LastReadAt) >= 2*PollInterval {
 		return false
 	}
 	items, err := s.sessionItems(ctx, sess)
