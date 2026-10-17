@@ -74,7 +74,7 @@ func (o *Observer) writeTimeline(f Facts, hist map[string]history, reqs []stack.
 			Pos: &pos, EndMS: o.ms(s.End)})
 	}
 	for _, ft := range o.faultList() {
-		evs = append(evs, timelineEvent{TMS: o.ms(ft.start), Kind: "fault", Name: ft.name, EndMS: o.ms(ft.end)})
+		evs = append(evs, timelineEvent{TMS: o.ms(ft.start), Kind: "fault", Name: ft.name, Torrent: ft.hash, EndMS: o.ms(ft.end)})
 	}
 	for _, t := range o.trips {
 		evs = append(evs, timelineEvent{TMS: o.ms(t.at), Kind: "trip", Known: t.known, Name: t.why})
@@ -197,6 +197,9 @@ func (o *Observer) plot(ti int, h history, f Facts, reqs []stack.Request) string
 		}
 	}
 	for _, ft := range o.faultList() {
+		if ft.hash != "" && ft.hash != t.Hash {
+			continue
+		}
 		fmt.Fprintf(&b, `<rect x="%.1f" y="%.0f" width="%.1f" height="%.0f" fill="#6b7280" fill-opacity="0.15"/>`+"\n",
 			x(ft.start), padT, math.Max(x(ft.end)-x(ft.start), 1), hgt)
 	}

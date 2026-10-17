@@ -16,11 +16,23 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/scenario"
 )
 
+// How the stall scenario pauses its seeder.
+type pauseMode int
+
+const (
+	// undeclared: Seeder.Pause, a stall nothing declared, which the
+	// watchdog must catch.
+	undeclared pauseMode = iota
+	// declared: Env.PauseSeeder, resumed after the pause.
+	declared
+	// forgotten: Env.PauseSeeder, never resumed: the script forgets its
+	// fault.
+	forgotten
+)
+
 // stallScenario plays a movie and pauses its seeder mid-play for pause:
-// the player's small buffer runs dry and it stalls. declared pauses it as
-// a fault (Env.PauseSeeder); otherwise the pause is a stall nothing
-// declared, which the watchdog must catch.
-func stallScenario(declared bool, pause time.Duration) *scenario.Scenario {
+// the player's small buffer runs dry and it stalls.
+func stallScenario(mode pauseMode, pause time.Duration) *scenario.Scenario {
 	return &scenario.Scenario{
 		Name: "stall-injected",
 		Tier: "test",
@@ -33,6 +45,7 @@ func stallScenario(declared bool, pause time.Duration) *scenario.Scenario {
 			{Name: "read_timeout", Kind: scenario.Duration, Default: "30s"},
 			{Name: "watchdog", Kind: scenario.Duration, Default: "3s"},
 			{Name: "settle", Kind: scenario.Duration, Default: "10s"},
+			{Name: "retries", Kind: scenario.Int, Default: "0"},
 		},
 		Script: func(e *scenario.Env) error {
 			t := e.Titles[0]
@@ -44,14 +57,20 @@ func stallScenario(declared bool, pause time.Duration) *scenario.Scenario {
 			if err := e.Live(p.Watch(3 * time.Second)); err != nil {
 				return err
 			}
-			resume := func() { t.Seeder.Resume() }
-			if declared {
-				resume = e.PauseSeeder(t)
-			} else {
+			switch mode {
+			case undeclared:
 				t.Seeder.Pause()
+				timer := time.AfterFunc(pause, t.Seeder.Resume)
+				defer timer.Stop()
+				defer t.Seeder.Resume()
+			case declared:
+				resume := e.PauseSeeder(t)
+				timer := time.AfterFunc(pause, resume)
+				defer timer.Stop()
+				defer resume() // a no-op once the timer resumed it
+			case forgotten:
+				e.PauseSeeder(t)
 			}
-			timer := time.AfterFunc(pause, resume)
-			defer timer.Stop()
 			err = e.Live(p.Watch(pause))
 			p.Stop()
 			return err
@@ -59,7 +78,7 @@ func stallScenario(declared bool, pause time.Duration) *scenario.Scenario {
 	}
 }
 
-func runStall(t *testing.T, declared bool) (*report.Rep, string) {
+func runStall(t *testing.T, sc *scenario.Scenario, sets map[string]string) (*report.Rep, string) {
 	t.Helper()
 	if os.Getenv("STREAMLAB") == "" {
 		t.Skip("set STREAMLAB=1 to run the injected stall")
@@ -81,10 +100,28 @@ func runStall(t *testing.T, declared bool) (*report.Rep, string) {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(logs))
 	defer slog.SetDefault(prev)
-	rep, err := scenario.Run(ctx, stallScenario(declared, 8*time.Second), scenario.RunOptions{Rep: 1, Dir: dir, Logs: logs})
+	rep, err := scenario.Run(ctx, sc, scenario.RunOptions{Rep: 1, Dir: dir, Logs: logs, Sets: sets})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	for _, c := range rep.Checks {
+		if c.Status != report.Pass {
+			t.Logf("check %s %s (%s): %.300s", c.ID, c.Status, c.Known, c.Evidence)
+		}
+	}
+	for _, f := range rep.Findings {
+		t.Logf("finding %s (%s): %s; %s", f.Rule, f.Known, f.Hint, f.Evidence)
+	}
+	if o := rep.Observe; o != nil {
+		t.Logf("observation cost %.3f%% of %.0f ms CPU", o.OverheadPct, o.ProcessCPUMS)
+	}
+	return rep, dir
+}
+
+// stalled fails the test unless the player stalled: the scenario must
+// produce what it tests.
+func stalled(t *testing.T, rep *report.Rep) {
+	t.Helper()
 	stalls := 0
 	for _, s := range rep.Sessions {
 		if s.Player != nil {
@@ -94,13 +131,6 @@ func runStall(t *testing.T, declared bool) (*report.Rep, string) {
 	if stalls == 0 {
 		t.Fatalf("the pause didn't stall the player: the scenario must be retuned (sessions %+v)", rep.Sessions)
 	}
-	for _, f := range rep.Findings {
-		t.Logf("finding %s (%s): %s; %s", f.Rule, f.Known, f.Hint, f.Evidence)
-	}
-	if o := rep.Observe; o != nil {
-		t.Logf("observation cost %.3f%% of %.0f ms CPU", o.OverheadPct, o.ProcessCPUMS)
-	}
-	return rep, dir
 }
 
 func check(rep *report.Rep, id string) report.RepCheck {
@@ -125,7 +155,8 @@ func rules(rep *report.Rep) []string {
 // artifacts, the timeline shows the stall, and the finding says the swarm
 // sent less than the bitrate, not that the prioritizer failed.
 func TestInjectedStall(t *testing.T) {
-	rep, dir := runStall(t, false)
+	rep, dir := runStall(t, stallScenario(undeclared, 8*time.Second), nil)
+	stalled(t, rep)
 	wd := check(rep, "watchdog")
 	if wd.Status != report.Fail || wd.Known != "" {
 		t.Errorf("watchdog = %+v, want a fail no known issue explains", wd)
@@ -162,17 +193,45 @@ func TestInjectedStall(t *testing.T) {
 	}
 }
 
-// The same pause, declared as a fault: the watchdog stays quiet, the
-// finding is the same.
+// The same pause, declared as a fault on the title's torrent: the
+// watchdog stays quiet, the finding is the same.
 func TestInjectedStallDeclared(t *testing.T) {
-	rep, _ := runStall(t, true)
+	rep, _ := runStall(t, stallScenario(declared, 8*time.Second), nil)
+	stalled(t, rep)
 	if wd := check(rep, "watchdog"); wd.Status != report.Pass {
 		t.Errorf("watchdog = %+v, want a pass during a declared fault", wd)
 	}
-	if o := rep.Observe; o == nil || len(o.Faults) != 1 || o.Faults[0].Name != "seeder-pause" {
-		t.Errorf("faults = %+v", rep.Observe)
+	if o := rep.Observe; o == nil || len(o.Faults) != 1 || o.Faults[0].Name != "seeder-pause" || o.Faults[0].Torrent == "" {
+		t.Errorf("faults = %+v, want the seeder's pause on its torrent", rep.Observe)
 	}
 	if got := rules(rep); !slices.Contains(got, "starved") || slices.Contains(got, "stall-below-now") {
 		t.Errorf("findings %v, want starved and not stall-below-now", got)
+	}
+}
+
+// A declared pause longer than the read timeout: the read times out and
+// the body breaks with the seeder connected and the piece wanted, but the
+// lab paused the seeder, so it isn't #195: play-ok is a plain fail.
+func TestPausedSeederIsNotKnown(t *testing.T) {
+	rep, _ := runStall(t, stallScenario(declared, 14*time.Second), map[string]string{"read_timeout": "6s"})
+	ok := check(rep, "play-ok")
+	if ok.Status != report.Fail || ok.Known != "" || !strings.Contains(ok.Evidence, "seeder paused") {
+		t.Errorf("play-ok = %+v, want a plain fail naming the paused seeder", ok)
+	}
+	if wd := check(rep, "watchdog"); wd.Status != report.Pass {
+		t.Errorf("watchdog = %+v, want a pass during a declared fault", wd)
+	}
+}
+
+// A pause the script never ends: the seeder is resumed for the teardown,
+// and the watchdog check fails, since the fault hid the stall from it.
+func TestForgottenFault(t *testing.T) {
+	rep, _ := runStall(t, stallScenario(forgotten, 6*time.Second), nil)
+	wd := check(rep, "watchdog")
+	if wd.Status != report.Fail || wd.Known != "" || !strings.Contains(wd.Evidence, `fault "seeder-pause" still open`) {
+		t.Errorf("watchdog = %+v, want a fail naming the open fault", wd)
+	}
+	if q := check(rep, "quiescence"); q.Status != report.Pass {
+		t.Errorf("quiescence = %+v: the seeder wasn't resumed for the teardown?", q)
 	}
 }

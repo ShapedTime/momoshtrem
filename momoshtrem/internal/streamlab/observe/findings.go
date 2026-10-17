@@ -393,11 +393,8 @@ func (o *Observer) storageLoss(logs []LogEvent) []report.Finding {
 		}
 		ih := r.Get("torrent.ih")
 		piece := "?"
-		for j := i - 1; j >= 0 && !logs[j].T.Before(r.T.Add(-proofWindow)); j-- {
-			if logs[j].Msg == MsgReadError && sameTorrent(logs[j], ih) {
-				piece = logs[j].Get("piece")
-				break
-			}
+		if e, ok := lastReadError(logs[:i], r); ok {
+			piece = e.Get("piece")
 		}
 		l := byTorrent[ih]
 		if l == nil {

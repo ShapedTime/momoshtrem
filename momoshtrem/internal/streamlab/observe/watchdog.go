@@ -43,10 +43,12 @@ type tripRecord struct {
 	artifacts []string
 }
 
-// watch trips the watchdog when requests are active, a read is blocked,
-// no fault runs, and nothing was read or downloaded for cfg.Watchdog.
-// Halfway there, in measure mode, it starts the flight recorder so a trip
-// has the stall's last seconds; when the stretch ends it stops it.
+// watch trips the watchdog when requests of the titles are active, a read
+// is blocked, faults don't cover every torrent those requests read, and
+// nothing was read or downloaded for cfg.Watchdog. Halfway there, in
+// measure mode, it starts the flight recorder so a trip has the stall's
+// last seconds; when the stretch ends it stops it, and a trip's duration
+// becomes the whole stretch's.
 func (o *Observer) watch(now time.Time) {
 	if len(o.metrics) == 0 {
 		return
@@ -57,9 +59,10 @@ func (o *Observer) watch(now time.Time) {
 		progress += float64(d)
 	}
 	w := &o.wd
-	active := len(o.cfg.Stack.Requests.Active()) > 0
-	if !active || m.blocked < 1 || o.faulting() || progress != w.progress || w.since.IsZero() {
-		w.since, w.progress, w.tripped = now, progress, false
+	active := o.activeTorrents()
+	if len(active) == 0 || m.blocked < 1 || o.coveredByFaults(active) || progress != w.progress || w.since.IsZero() {
+		o.endStretch(now)
+		w.since, w.progress = now, progress
 		o.stopRecorder(false)
 		return
 	}
@@ -71,6 +74,29 @@ func (o *Observer) watch(now time.Time) {
 		w.tripped = true
 		o.trip(now, stuck)
 	}
+}
+
+// endStretch ends the stretch without progress at now: a trip in it lasted
+// the whole stretch.
+func (o *Observer) endStretch(now time.Time) {
+	w := &o.wd
+	if w.tripped && len(o.trips) > 0 {
+		o.trips[len(o.trips)-1].stuck = now.Sub(w.since)
+	}
+	w.tripped = false
+}
+
+// activeTorrents are the torrents whose titles have a request running.
+func (o *Observer) activeTorrents() map[string]bool {
+	out := map[string]bool{}
+	for _, r := range o.cfg.Stack.Requests.Active() {
+		for _, t := range o.cfg.Titles {
+			if t.Path == r.Path {
+				out[t.Hash] = true
+			}
+		}
+	}
+	return out
 }
 
 // trip records a trip: the readers, whether it carries #195's signature,
@@ -141,6 +167,20 @@ func (o *Observer) diagnoseTrip() (readers []report.TripReader, known, why strin
 		return readers, "", fmt.Sprintf("not #195's signature: %d pieces stuck, more than the two one wedged connection holds", len(pieces))
 	}
 	return readers, "#195", "#195's signature: wanted, incomplete pieces with the seeder connected and downloads on, and nothing arriving"
+}
+
+// holdKnownStall keeps #195 only on the trips whose stall, the whole
+// stretch without progress, reached cfg.KnownStall: a shorter one carries
+// the signature's state but not its silence.
+func (o *Observer) holdKnownStall() {
+	for i := range o.trips {
+		t := &o.trips[i]
+		if t.known == "#195" && t.stuck < o.cfg.KnownStall {
+			t.known = ""
+			t.why = fmt.Sprintf("not #195's signature: it lasted %v, under its %v (half the read timeout), though %s",
+				t.stuck.Round(time.Millisecond), o.cfg.KnownStall, strings.TrimPrefix(t.why, "#195's signature: "))
+		}
+	}
 }
 
 // dump writes the trip's artifacts to the repetition's folder: the

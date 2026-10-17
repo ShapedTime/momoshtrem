@@ -101,6 +101,24 @@ func TestReadFailed(t *testing.T) {
 	if nilCapture.ReadFailed("aaaa", 7, now) {
 		t.Error("no capture proved something")
 	}
+
+	// The other order: piece 9's read recovers, then piece 7's gives up.
+	// Only the giving-up read's own last "error reading" proves its piece.
+	r, _ := newCapture(false)
+	failRead(leecher(r, "aaaa"), 9, false)
+	failRead(leecher(r, "aaaa"), 7, true)
+	if r.ReadFailed("aaaa", 9, time.Now()) {
+		t.Error("piece 9's recovered read was proved by piece 7's failure")
+	}
+	if !r.ReadFailed("aaaa", 7, time.Now()) {
+		t.Error("piece 7's failure isn't proved")
+	}
+	// A record without the torrent's hash proves nothing.
+	u, _ := newCapture(false)
+	failRead(slog.New(u).With("component", "streamlab-leecher"), 7, true)
+	if u.ReadFailed("aaaa", 7, time.Now()) {
+		t.Error("records without torrent.ih proved F11")
+	}
 	s := summarizeLogs(c.Events(time.Time{}), c)
 	if s.BenignStorageErrors != 1 || s.ReadFailures != 1 || s.Errors != 8 {
 		t.Errorf("summary = %+v, want 1 benign, 1 failure, 8 errors", s)

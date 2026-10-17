@@ -216,11 +216,17 @@ func (c *Capture) cost() (busy time.Duration, kept, dropped int) {
 const proofWindow = 3 * time.Second
 
 // ReadFailed reports whether the capture holds F11's log proof for a body
-// that broke at piece of the torrent ih (hex) at the time at: anacrolix
-// logged MsgReadError for that piece, then MsgResyncFailed, both within
-// proofWindow before the break. The read gave up on data anacrolix
-// believed it had (complete, or chunks it had written): the storage lost
-// it.
+// that broke at piece of the torrent ih (hex) at the time at: within
+// proofWindow before the break, anacrolix logged MsgResyncFailed for that
+// torrent, and the giving-up read's own last MsgReadError, the nearest
+// one of that torrent before it, names that piece. The read gave up on
+// data anacrolix believed it had (complete, or chunks it had written): the
+// storage lost it.
+//
+// anacrolix logs that MsgReadError (reader.go:298) and then
+// MsgResyncFailed (reader.go:339) on the reading goroutine, one right
+// after the other; another read's record in between makes the proof fail,
+// never pass for the wrong piece.
 func (c *Capture) ReadFailed(ih string, piece int, at time.Time) bool {
 	if c == nil {
 		return false
@@ -228,21 +234,36 @@ func (c *Capture) ReadFailed(ih string, piece int, at time.Time) bool {
 	evs := c.Events(at.Add(-proofWindow))
 	p := strconv.Itoa(piece)
 	for i, r := range evs {
-		if r.Msg != MsgResyncFailed || r.T.After(at.Add(time.Second)) || !sameTorrent(r, ih) {
+		if r.Msg != MsgResyncFailed || r.T.After(at.Add(time.Second)) || !ofTorrent(r, ih) {
 			continue
 		}
-		for _, e := range evs[:i] {
-			if e.Msg == MsgReadError && e.Get("piece") == p && sameTorrent(e, ih) && !e.T.Before(r.T.Add(-proofWindow)) {
-				return true
-			}
+		if e, ok := lastReadError(evs[:i], r); ok && e.Get("piece") == p {
+			return true
 		}
 	}
 	return false
 }
 
-// sameTorrent reports whether an anacrolix record is of the torrent ih:
-// its "torrent.ih" attribute, when it has one.
-func sameTorrent(e LogEvent, ih string) bool {
+// lastReadError is the MsgReadError of r's torrent nearest before r,
+// within proofWindow: the read r gave up on.
+func lastReadError(before []LogEvent, r LogEvent) (LogEvent, bool) {
+	ih := r.Get("torrent.ih")
+	for j := len(before) - 1; j >= 0; j-- {
+		e := before[j]
+		if e.T.Before(r.T.Add(-proofWindow)) {
+			break
+		}
+		if e.Msg == MsgReadError && ofTorrent(e, ih) {
+			return e, true
+		}
+	}
+	return LogEvent{}, false
+}
+
+// ofTorrent reports whether an anacrolix record is of the torrent ih: its
+// "torrent.ih" attribute, which anacrolix's torrent logger always sets. A
+// record without one proves nothing.
+func ofTorrent(e LogEvent, ih string) bool {
 	got := e.Get("torrent.ih")
-	return got == "" || ih == "" || strings.EqualFold(got, ih)
+	return got != "" && strings.EqualFold(got, ih)
 }

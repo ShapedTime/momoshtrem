@@ -10,19 +10,22 @@ import (
 // completions remembers every piece anacrolix reported complete, per
 // torrent, from the moment the torrent loads: F11's signature needs a
 // piece that was complete before its read broke (anacrolix resyncs the
-// piece's completion when the read fails). A piece that was only partial
-// doesn't count: it's never in cache/completed/, so nothing would prove
-// its dirty chunks were evicted rather than never written.
+// piece's completion when the read fails). It also remembers the pieces
+// anacrolix reported partial: their chunks were written to the cache's
+// incompleted/ (anacrolix publishes Partial after the write), so a chunk
+// missing there later was evicted, not never written (F11's forward-play
+// signature).
 type completions struct {
-	mu   sync.Mutex
-	done map[string]map[int]bool
-	stop chan struct{}
-	wg   sync.WaitGroup
+	mu      sync.Mutex
+	done    map[string]map[int]bool
+	partial map[string]map[int]bool
+	stop    chan struct{}
+	wg      sync.WaitGroup
 }
 
 // watchCompletions follows the titles' torrents until stopCompletions.
 func (e *Env) watchCompletions() {
-	c := &completions{done: map[string]map[int]bool{}, stop: make(chan struct{})}
+	c := &completions{done: map[string]map[int]bool{}, partial: map[string]map[int]bool{}, stop: make(chan struct{})}
 	e.completions = c
 	seen := map[string]bool{}
 	for _, t := range e.Titles {
@@ -31,6 +34,7 @@ func (e *Env) watchCompletions() {
 		}
 		seen[t.Hash] = true
 		c.done[t.Hash] = map[int]bool{}
+		c.partial[t.Hash] = map[int]bool{}
 		c.wg.Add(1)
 		go func(hash string) {
 			defer c.wg.Done()
@@ -62,6 +66,9 @@ func (c *completions) follow(e *Env, hash string) {
 			if r.Complete {
 				c.mark(hash, i)
 			}
+			if r.Partial {
+				c.markPartial(hash, i)
+			}
 			i++
 		}
 	}
@@ -76,8 +83,27 @@ func (c *completions) follow(e *Env, hash string) {
 			if v.Complete {
 				c.mark(hash, v.Index)
 			}
+			if v.Partial {
+				c.markPartial(hash, v.Index)
+			}
 		}
 	}
+}
+
+func (c *completions) markPartial(hash string, i int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.partial[hash][i] = true
+}
+
+// wasPartial reports whether piece i of the torrent was ever partial.
+func (c *completions) wasPartial(hash string, i int) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.partial[hash][i]
 }
 
 func (c *completions) mark(hash string, i int) {

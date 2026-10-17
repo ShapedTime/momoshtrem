@@ -80,7 +80,8 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 			checks:     map[string]report.RepCheck{},
 			artifacts:  map[string]string{},
 		},
-		dir: opts.Dir,
+		dir:  opts.Dir,
+		logs: opts.Logs,
 	}
 
 	m := MovieMedia(p)
@@ -146,6 +147,7 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	scriptStart := time.Now()
 	scriptErr := runScript(sc, e)
 	wall := time.Since(scriptStart)
+	e.endFaults() // a fault the script left running fails the watchdog check
 
 	// End every playback (an open request is an abort to the server) and
 	// drop every connection: the last close.

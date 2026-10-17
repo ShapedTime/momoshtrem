@@ -59,6 +59,10 @@ type Config struct {
 	// Watchdog is how long without progress trips the watchdog; 0
 	// disables it.
 	Watchdog time.Duration
+	// KnownStall is #195's threshold: a trip carries #195's signature only
+	// when nothing progressed this long (half the read timeout, as a
+	// broken body's signature in play-ok), whatever the Watchdog.
+	KnownStall time.Duration
 	// Bitrate is the players' bitrate, bytes per second: a stall while
 	// the swarm sent less is expected.
 	Bitrate int64
@@ -111,8 +115,7 @@ type Observer struct {
 	recLazy bool
 
 	faultMu sync.Mutex
-	faults  []fault
-	open    int
+	faults  []fault // faults.go
 
 	// The series, written by the sampling goroutine, read after Stop.
 	metrics    []metricsSample
@@ -133,11 +136,6 @@ type Observer struct {
 	cpu     time.Duration
 	cpuOK   bool
 	cont    contention
-}
-
-type fault struct {
-	name       string
-	start, end time.Time
 }
 
 // sampler is one source sampled every few ticks, timing its own work.
@@ -218,44 +216,6 @@ func (o *Observer) loop() {
 	}
 }
 
-// Fault declares a fault starting now, which the returned func ends: the
-// watchdog doesn't trip while one runs, and its no-progress time starts
-// over when it ends.
-func (o *Observer) Fault(name string) (end func()) {
-	if o == nil {
-		return func() {}
-	}
-	o.faultMu.Lock()
-	defer o.faultMu.Unlock()
-	o.faults = append(o.faults, fault{name: name, start: time.Now()})
-	i := len(o.faults) - 1
-	o.open++
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			o.faultMu.Lock()
-			defer o.faultMu.Unlock()
-			o.faults[i].end = time.Now()
-			o.open--
-		})
-	}
-}
-
-func (o *Observer) faulting() bool {
-	o.faultMu.Lock()
-	defer o.faultMu.Unlock()
-	return o.open > 0
-}
-
-// ReadFailed reports whether the log capture proves F11 for a body that
-// broke at piece of the torrent hash at the time at (Capture.ReadFailed).
-func (o *Observer) ReadFailed(hash string, piece int, at time.Time) bool {
-	if o == nil {
-		return false
-	}
-	return o.cfg.Logs.ReadFailed(hash, piece, at)
-}
-
 // Stop stops sampling and the profiles; the measurements are done. It's
 // safe to call more than once.
 func (o *Observer) Stop() {
@@ -267,6 +227,7 @@ func (o *Observer) Stop() {
 		<-o.done
 		o.watchWG.Wait()
 		o.stopped = time.Now()
+		o.endStretch(o.stopped)
 		if cpu, ok := processCPU(); ok {
 			o.cpu, o.cpuOK = cpu-o.cpu0, true
 		}

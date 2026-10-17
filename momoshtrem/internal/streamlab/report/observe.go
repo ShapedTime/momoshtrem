@@ -129,7 +129,9 @@ type TripReader struct {
 // Fault is a fault a scenario declared: the watchdog doesn't trip during
 // one.
 type Fault struct {
-	Name    string  `json:"name"`
+	Name string `json:"name"`
+	// Torrent is the torrent it starves; "" is every torrent.
+	Torrent string  `json:"torrent,omitempty"`
 	StartMS float64 `json:"start_ms"`
 	EndMS   float64 `json:"end_ms"`
 }
@@ -200,7 +202,9 @@ func observationMarkdown(rep *Rep) string {
 		mode = "--diagnose: DEBUG logs and the flight recorder on, timings not faithful"
 	}
 	fmt.Fprintf(&b, "\n## Observation (rep %d, %s)\n\n", rep.Rep, mode)
-	fmt.Fprintf(&b, "**Cost:** the samplers took %.2f%% of the process's CPU time (%s ms of %s ms; budget 2%%).\n\n",
+	fmt.Fprintf(&b, "**Cost:** the samplers took %.2f%% of the process's CPU time (%s ms of %s ms; budget 2%%). "+
+		"That's their own busy time: the mutex and block profiles' cost inside the runtime isn't in it, and only an A/B against "+
+		"`--set observe=false` measures it.\n\n",
 		o.OverheadPct, Num(sumBusy(o.Samplers)), Num(o.ProcessCPUMS))
 	b.WriteString("| Sampler | Every ms | Samples | Busy ms | Max ms | CPU % | Client lock |\n|---|---|---|---|---|---|---|\n")
 	for _, s := range o.Samplers {

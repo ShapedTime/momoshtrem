@@ -87,8 +87,11 @@ type Env struct {
 	// quietKnown names the known issues a quiescence failure carries
 	// beyond #225's: a stress script's (stress_deadlock.go). Optional.
 	quietKnown func(checks.QuiescenceResult) string
-	// obs observes the repetition (observe.go); nil when it's off.
-	obs *observe.Observer
+	// obs observes the repetition (observe.go); nil when it's off. logs
+	// is the process's log capture (RunOptions.Logs), observed or not.
+	obs    *observe.Observer
+	logs   *observe.Capture
+	faults envFaults
 }
 
 // recorder keeps what a repetition did.
@@ -154,23 +157,31 @@ type failure struct {
 	// data anacrolix believed it had (F11's log proof,
 	// observe.Capture.ReadFailed).
 	resyncFailed bool
+	// chunkGone: the piece was partial before (its chunks written to the
+	// cache's incompleted/) and the chunk at the break is gone from it
+	// now: the cache evicted dirty data (F11 in forward play).
+	chunkGone bool
+	// seederPaused: the lab paused the torrent's seeder (a fault, not
+	// #195).
+	seederPaused bool
 }
 
 // known is the known issue whose signature the failure carries: #195's
 // stall (a body silent through a read timeout, at an incomplete piece
-// with the seeder connected and downloads on), or F11's quick break at a
-// piece the cache lost: one anacrolix had complete and the cache no
-// longer holds, or (forward play, the readahead window outgrowing the
-// cache) any piece whose read anacrolix logged failing after the
-// completion resync. Without that log proof, a quick break at a piece
-// that was never complete is no known issue's.
+// with a seeder connected that the lab didn't pause, downloads on), or
+// F11's quick break at a piece the cache lost: one anacrolix had complete
+// and the cache no longer holds, or (forward play, the readahead window
+// outgrowing the cache) a partial piece whose chunk at the break the
+// cache evicted, and whose read anacrolix logged failing after the
+// completion resync. Without both, a quick break at a piece that was
+// never complete is no known issue's.
 func (f failure) known() string {
 	switch {
 	case f.timedOut && f.stalled:
 		return "#195"
 	case f.silence < quickBreak && f.broke && f.evicted && f.wasComplete:
 		return "F11"
-	case f.silence < quickBreak && f.broke && f.resyncFailed:
+	case f.silence < quickBreak && f.broke && f.resyncFailed && f.chunkGone:
 		return "F11"
 	}
 	return ""
@@ -192,7 +203,7 @@ func (f failure) diagnosis() string {
 			}
 			return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds%s", silent, f.piece, proof)
 		}
-		return fmt.Sprintf("F11: broke at once (%s) at piece %d, whose read anacrolix logged failing after the completion resync: the cache lost its data", silent, f.piece)
+		return fmt.Sprintf("F11: broke at once (%s) at piece %d, partial, whose chunk there the cache evicted and whose read anacrolix logged failing after the completion resync", silent, f.piece)
 	}
 	var why []string
 	if f.timedOut {
@@ -200,6 +211,12 @@ func (f failure) diagnosis() string {
 	}
 	if f.stalled {
 		why = append(why, "piece incomplete, seeder connected, downloads on")
+	}
+	if f.seederPaused {
+		why = append(why, "the seeder paused (the lab's fault)")
+	}
+	if f.chunkGone {
+		why = append(why, "its written chunk gone from the cache")
 	}
 	if f.evicted {
 		why = append(why, "piece not in the cache")
@@ -297,12 +314,17 @@ func (e *Env) Player(d client.Device, t *Title) *player.Session {
 func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, err error) {
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
 		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
-	if tor, ok := e.Stack.Torrent(t.Hash); ok {
-		f.stalled = e.stuck(tor, t.Hash, f.piece)
-		f.evicted = !e.cached(tor, f.piece)
-	}
+	f.seederPaused = t.Seeder != nil && t.Seeder.Paused()
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
-	f.resyncFailed = e.obs.ReadFailed(t.Hash, f.piece, f.at)
+	f.resyncFailed = e.logs.ReadFailed(t.Hash, f.piece, f.at)
+	if tor, ok := e.Stack.Torrent(t.Hash); ok {
+		f.stalled = e.stuck(tor, t.Hash, f.piece) && !f.seederPaused
+		f.evicted = !e.cached(tor, f.piece)
+		// anacrolix reads only data it holds, so a read that failed after
+		// the resync had the chunk at the break written: missing now, it
+		// was evicted.
+		f.chunkGone = f.resyncFailed && e.completions.wasPartial(t.Hash, f.piece) && !e.chunkCached(tor, t.Offset+off)
+	}
 	e.rec.mu.Lock()
 	f.expected = e.rec.expected(f)
 	e.rec.failures = append(e.rec.failures, f)

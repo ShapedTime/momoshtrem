@@ -50,22 +50,73 @@ type fileSpan struct {
 	offset, size int64
 }
 
-// follow waits for the torrent to load, then mirrors it until stop.
+// recheck is how often the mirror checks that the stack still has the
+// torrent it subscribed to.
+const recheck = time.Second
+
+// follow mirrors the torrent until stop: whenever the stack has it loaded,
+// and again from a fresh snapshot after it's dropped and loaded anew (an
+// idle unload, a remove), as a new *Torrent with a subscription of its own.
 func (w *pieceWatch) follow(s *stack.Stack, stop <-chan struct{}) {
-	var tor *atorrent.Torrent
+	for {
+		tor := w.await(s, stop)
+		if tor == nil || !w.mirror(s, tor, stop) {
+			return
+		}
+	}
+}
+
+// await waits for the stack to have the torrent with its info; nil once
+// stopped.
+func (w *pieceWatch) await(s *stack.Stack, stop <-chan struct{}) *atorrent.Torrent {
 	for {
 		if t, ok := s.Torrent(w.hash); ok && t.Info() != nil {
-			tor = t
-			break
+			return t
 		}
 		select {
 		case <-stop:
-			return
+			return nil
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+}
+
+// mirror follows tor's piece state changes. It returns false once stopped,
+// true when the stack no longer has tor: the caller waits for the next.
+func (w *pieceWatch) mirror(s *stack.Stack, tor *atorrent.Torrent, stop <-chan struct{}) bool {
 	sub := tor.SubscribePieceStateChanges()
 	defer sub.Close()
+	w.snapshot(tor)
+	check := time.NewTicker(recheck)
+	defer check.Stop()
+	for {
+		select {
+		case <-stop:
+			return false
+		case <-check.C:
+			if t, ok := s.Torrent(w.hash); !ok || t != tor {
+				return true
+			}
+		case v, ok := <-sub.Values:
+			if !ok {
+				return true // the torrent closed
+			}
+			start := time.Now()
+			w.mu.Lock()
+			if v.Index >= 0 && v.Index < len(w.cur) {
+				w.cur[v.Index] = v.PieceState
+				w.events = append(w.events, pieceEvent{t: start, index: v.Index, state: v.PieceState})
+			}
+			w.busy += time.Since(start)
+			w.mu.Unlock()
+		}
+	}
+}
+
+// snapshot reads tor's pieces (PieceStateRuns, under the client lock): the
+// mirror's start, or, after a reload, the pieces that changed meanwhile as
+// events.
+func (w *pieceWatch) snapshot(tor *atorrent.Torrent) {
 	runs := tor.PieceStateRuns()
 	at := time.Now()
 	states := make([]atorrent.PieceState, 0, tor.NumPieces())
@@ -79,25 +130,16 @@ func (w *pieceWatch) follow(s *stack.Stack, stop <-chan struct{}) {
 		files = append(files, fileSpan{path: f.Path(), offset: f.Offset(), size: f.Length()})
 	}
 	w.mu.Lock()
-	w.loaded, w.pieceLen, w.initialAt, w.files = true, tor.Info().PieceLength, at, files
-	w.initial, w.cur = states, slices.Clone(states)
-	w.mu.Unlock()
-	for {
-		select {
-		case <-stop:
-			return
-		case v, ok := <-sub.Values:
-			if !ok {
-				return
-			}
-			start := time.Now()
-			w.mu.Lock()
-			if v.Index >= 0 && v.Index < len(w.cur) {
-				w.cur[v.Index] = v.PieceState
-				w.events = append(w.events, pieceEvent{t: start, index: v.Index, state: v.PieceState})
-			}
-			w.busy += time.Since(start)
-			w.mu.Unlock()
+	defer w.mu.Unlock()
+	if !w.loaded {
+		w.loaded, w.pieceLen, w.initialAt, w.files = true, tor.Info().PieceLength, at, files
+		w.initial, w.cur = states, slices.Clone(states)
+		return
+	}
+	for i, st := range states {
+		if i < len(w.cur) && w.cur[i] != st {
+			w.cur[i] = st
+			w.events = append(w.events, pieceEvent{t: at, index: i, state: st})
 		}
 	}
 }
