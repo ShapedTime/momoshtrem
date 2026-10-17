@@ -15,6 +15,7 @@ import {
   downloadsUsage,
   findMockDownload,
   liveDownload,
+  mockActiveDownloadRecords,
   type MockDownload,
   type MockDownloadTorrent,
   mockDownloadList,
@@ -116,9 +117,19 @@ function stateOf(files: number, torrents: readonly TorrentListItem[]): DownloadS
 
 const episodeBytes = (e: Pick<EpisodeSummary, 'runtime'>) => (e.runtime ?? 45) * EPISODE_BYTES_PER_MINUTE;
 
-/** A show's or season's Keep over the episodes the library has files for. */
-function episodesPlan(scope: 'show' | 'season', item: DownloadItem, episodes: EpisodeSummary[], torrents: readonly TorrentListItem[]): Plan {
-  const withFile = episodes.filter((e) => e.webdav_path !== null);
+/**
+ * A show's or season's Keep over the episodes the library has files for. A file several episodes share (a grouped
+ * "S01E01-E02", named by `fileOf`) counts once.
+ */
+function episodesPlan(
+  scope: 'show' | 'season',
+  item: DownloadItem,
+  episodes: EpisodeSummary[],
+  torrents: readonly TorrentListItem[],
+  fileOf: (e: EpisodeSummary) => string
+): Plan {
+  const once = (list: EpisodeSummary[]) => [...new Map(list.map((e) => [fileOf(e), e])).values()];
+  const withFile = once(episodes.filter((e) => e.webdav_path !== null));
   const fromTorrent = withFile.filter((e) => e.source !== 'hdrezka');
   const state = stateOf(withFile.length, torrents);
   const parts = torrents.map((t) => share(t, t.size_bytes ?? 0));
@@ -176,14 +187,19 @@ function plan(body: Record<string, unknown>): Plan | Response {
   const show = found && (buildTitle('tv', found.entry.tmdb_id, library) as ShowTitle | undefined);
   if (!found || !show) return notFound('No such show in the library');
   const tmdbId = found.entry.tmdb_id;
+  // A job's file is its torrent's "hash/path" (shared by a grouped file's episodes); a seeded one is the episode's own
+  const fileOf = (e: EpisodeSummary) => {
+    const filed = found.row.filed.get(e.id);
+    return filed ? `${filed.info_hash}/${filed.file_path}` : (e.webdav_path ?? String(e.id));
+  };
   if (body.scope === 'season') {
     const seasonNumber = body.season_number as number;
     const season = buildSeason(tmdbId, seasonNumber, library);
     if (!season) return notFound('No such season');
-    return episodesPlan('season', showItem(tmdbId, id, found.entry.title, seasonNumber), season.episodes, showTorrents(tmdbId, seasonNumber));
+    return episodesPlan('season', showItem(tmdbId, id, found.entry.title, seasonNumber), season.episodes, showTorrents(tmdbId, seasonNumber), fileOf);
   }
   const episodes = show.seasons.flatMap((s) => buildSeason(tmdbId, s.season_number, library)?.episodes ?? []);
-  return episodesPlan('show', showItem(tmdbId, id, found.entry.title), episodes, showTorrents(tmdbId));
+  return episodesPlan('show', showItem(tmdbId, id, found.entry.title), episodes, showTorrents(tmdbId), fileOf);
 }
 
 const sameTarget = (a: DownloadItem, scope: DownloadScope, b: Download) =>
@@ -232,6 +248,12 @@ function room(records: readonly MockDownload[], existing: MockDownload | undefin
   return { needed, available: Math.max(0, storageCaps(mockStorageDocument()).kept - committed) };
 }
 
+/** A route's download id, as the backend parses ids: a positive whole number, else null (400). */
+function downloadId(param: string | readonly string[] | undefined): number | null {
+  const id = typeof param === 'string' && /^\d+$/.test(param) ? Number(param) : NaN;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 /** POST's target from GET /downloads/estimate's query. */
 function targetFrom(search: URLSearchParams): Record<string, unknown> {
   const target: Record<string, unknown> = { scope: search.get('scope'), id: Number(search.get('id')) };
@@ -261,7 +283,7 @@ export const downloadsHandlers = [
     const planned = plan(target);
     if (planned instanceof Response) return planned;
     const records = mockDownloadRecords();
-    const existing = records.find((d) => sameTarget(planned.item, planned.scope, d.download));
+    const existing = mockActiveDownloadRecords().find((d) => sameTarget(planned.item, planned.scope, d.download));
     const fresh = keptFrom(planned, existing, target, Date.now());
     const { needed, available } = room(records, existing, { download: { ...fresh, id: 0 }, torrents: existing?.torrents ?? planned.torrents, over_cap: [] });
     return HttpResponse.json<DownloadEstimate>({
@@ -282,7 +304,8 @@ export const downloadsHandlers = [
     if (planned.state === 'unavailable') return apiError(422, 'not_downloadable', 'This plays from HDRezka, so it can’t be kept on disk.');
 
     const records = mockDownloadRecords();
-    const existing = records.find((d) => sameTarget(planned.item, planned.scope, d.download));
+    // A smart pick hidden while smart downloads are off is still the target's row: a Keep turns it kept
+    const existing = mockActiveDownloadRecords().find((d) => sameTarget(planned.item, planned.scope, d.download));
     if (existing?.download.reason === 'kept') return HttpResponse.json(liveDownload(existing), { status: 200 });
 
     const fresh = keptFrom(planned, existing, body, Date.now());
@@ -305,7 +328,9 @@ export const downloadsHandlers = [
   }),
   http.patch('*/api/downloads/:id', async ({ params, request }) => {
     await latency();
-    const record = findMockDownload(Number(params.id));
+    const id = downloadId(params.id);
+    if (id === null) return apiError(400, 'bad_request', 'Invalid ID format');
+    const record = findMockDownload(id);
     if (!record) return notFound('No such download');
     const body = await jsonBody(request);
     if (!isRecord(body)) return apiError(400, 'bad_request', 'Send the duration as a JSON object.');
@@ -318,6 +343,8 @@ export const downloadsHandlers = [
   }),
   http.delete('*/api/downloads/:id', async ({ params }) => {
     await latency();
-    return releaseMockDownload(Number(params.id)) ? noContent() : notFound('No such download');
+    const id = downloadId(params.id);
+    if (id === null) return apiError(400, 'bad_request', 'Invalid ID format');
+    return releaseMockDownload(id) ? noContent() : notFound('No such download');
   }),
 ];

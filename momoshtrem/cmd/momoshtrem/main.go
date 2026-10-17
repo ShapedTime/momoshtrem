@@ -225,6 +225,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer pieceCompletion.Close()
+	// Kept and smart downloads' pieces are pinned (#77): nothing is trimmed
+	// until their pins are back, below (startDownloads).
+	pieceCache.DeferTrim()
 	storageGovernor.Start(context.Background(), storageCache(pieceCache))
 	apiOpts.Storage = storageGovernor
 	slog.Info("Torrent storage initialized",
@@ -351,6 +354,20 @@ func main() {
 	sessionRegistry := sessions.NewRegistry(sessions.WithItems(library.NewCatalogRepository(db)))
 	libraryFS.SetSessions(sessionRegistry)
 
+	// Download & keep (#77): the manager and /downloads. It starts once the
+	// stored pauses are restored (startDownloads, below). Assignment writes
+	// go through assignmentTree, so a show's Keep takes new episodes at once.
+	downloadsService := wireDownloads(downloadsDeps{
+		db:       db,
+		governor: storageGovernor,
+		cache:    pieceCache,
+		metainfo: metainfoStore,
+		torrents: torrentService,
+		activity: activityManager,
+		sessions: sessionRegistry,
+	}, &apiOpts)
+	assignmentTree := wakingTree{tree: libraryFS, wake: downloadsService.Wake}
+
 	// Initialize Prometheus metrics (optional)
 	var metricsServer *metrics.Server
 	var streamingMetrics *metrics.Metrics
@@ -435,7 +452,7 @@ func main() {
 			Movies:      movieRepo,
 			Shows:       showRepo,
 			Assignments: assignmentRepo,
-			Tree:        libraryFS,
+			Tree:        assignmentTree,
 			Subtitles:   subtitleService,
 		})
 		apiOpts.HDRezka = hdrezkaService
@@ -561,7 +578,7 @@ func main() {
 		Assignments: assignmentRepo,
 		Settings:    settingsRepo,
 		Torrents:    torrentService,
-		Tree:        libraryFS,
+		Tree:        assignmentTree,
 		Subtitles:   subtitleService,
 		Metadata:    syncer,
 		TMDB:        cachedTMDB,
@@ -584,6 +601,7 @@ func main() {
 		Subtitles:   subtitleService,
 		Tree:        libraryFS,
 		Pauses:      settingsRepo,
+		Downloads:   downloadsService,
 	})
 
 	// Activity: the torrents the library knows merged with the client's,
@@ -599,11 +617,18 @@ func main() {
 		Speeds:   speeds,
 		Cache:    pieceCache,
 		DiskPath: cfg.Torrent.MetadataFolder,
+		// A pause stops a torrent's downloads at once (#77).
+		OnPauseChange: downloadsService.Wake,
 	})
 	if err := activityService.RestorePauses(context.Background()); err != nil {
 		slog.Error("Failed to restore torrent pauses; paused torrents run until paused again", "error", err)
 	}
 	apiOpts.Activity = activityService
+
+	// The downloads' pins come back before anything loads a torrent; then
+	// the cache trims again (Ready, and the governor steps the excess
+	// down), and the manager starts fetching.
+	startDownloads(downloadsService)
 
 	// /me (B5): Up next, new episodes, the watchlist and the history, from
 	// what the Trakt sync imported, with the title pages' library state and
@@ -750,7 +775,9 @@ func main() {
 	traktSync.Stop()
 	traktAuth.Close()
 
-	// Stop the storage governor; a trim stops between two steps
+	// Stop the download manager (loads in flight end with the client), then
+	// the storage governor; a trim stops between two steps
+	downloadsService.Close()
 	storageGovernor.Close()
 
 	// Close torrent service

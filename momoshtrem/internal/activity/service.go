@@ -112,6 +112,10 @@ type Deps struct {
 	// DiskPath is the folder whose file system the summary reports: the
 	// torrent metadata folder, which holds the cache.
 	DiskPath string
+	// OnPauseChange runs after every pause and resume: the download
+	// manager's Wake (#77), so a paused torrent's downloads stop at once.
+	// Optional.
+	OnPauseChange func()
 	// Now and Statfs are swapped in tests.
 	Now    func() time.Time
 	Statfs func(path string) (total, free int64, err error)
@@ -127,6 +131,7 @@ type Service struct {
 	speeds   Speeds
 	cache    Cache
 	diskPath string
+	onPause  func()
 	now      func() time.Time
 	statfs   func(path string) (total, free int64, err error)
 	log      *slog.Logger
@@ -155,6 +160,7 @@ func New(d Deps) *Service {
 		speeds:   d.Speeds,
 		cache:    d.Cache,
 		diskPath: d.DiskPath,
+		onPause:  d.OnPauseChange,
 		now:      d.Now,
 		statfs:   d.Statfs,
 		log:      slog.With("component", "activity"),
@@ -358,6 +364,7 @@ func (s *Service) setPaused(ctx context.Context, infoHash string, pause bool) (*
 	} else {
 		s.log.Info("Torrent resumed", "info_hash", hash)
 	}
+	s.pauseChanged()
 
 	known, st, err := s.lookup(ctx, hash)
 	if err != nil {
@@ -413,7 +420,15 @@ func (s *Service) PauseAll(ctx context.Context) (int, error) {
 		}
 	}
 	s.log.Info("Torrents paused", "count", len(targets))
+	s.pauseChanged()
 	return len(targets), nil
+}
+
+// pauseChanged tells the download manager (OnPauseChange).
+func (s *Service) pauseChanged() {
+	if s.onPause != nil {
+		s.onPause()
+	}
 }
 
 // ResumeAll resumes every paused torrent and returns how many it resumed.
@@ -431,6 +446,7 @@ func (s *Service) ResumeAll(ctx context.Context) (int, error) {
 		}
 	}
 	s.log.Info("Torrents resumed", "count", len(hashes))
+	s.pauseChanged()
 	return len(hashes), nil
 }
 

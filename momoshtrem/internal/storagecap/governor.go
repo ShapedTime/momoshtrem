@@ -28,27 +28,37 @@ type CacheInfo struct {
 	Pinned int64
 }
 
-// Cache is the piece cache the Governor caps: missinggo's filecache, or
-// #201's piececache. main adapts it with CacheFuncs, so swapping the type
-// is a one-line change there.
+// Cache is the piece cache the Governor caps: #201's piececache. main
+// adapts it with CacheFuncs.
 type Cache interface {
 	Info() CacheInfo
 	// SetCapacity sets the cap without trimming.
 	SetCapacity(bytes int64)
-	// TrimToCapacity evicts until the fill is under the cap.
+	// SetReserve sets the unpinned bytes a trim never goes below (the
+	// streaming reserve), without trimming.
+	SetReserve(bytes int64)
+	// TrimToCapacity evicts until the fill is under the cap, or only
+	// pinned bytes and the reserve are left.
 	TrimToCapacity()
 }
 
-// CacheFuncs adapts a cache's methods to Cache.
+// CacheFuncs adapts a cache's methods to Cache. SetReserveFunc is optional:
+// nil keeps no reserve.
 type CacheFuncs struct {
 	InfoFunc           func() CacheInfo
 	SetCapacityFunc    func(bytes int64)
+	SetReserveFunc     func(bytes int64)
 	TrimToCapacityFunc func()
 }
 
 func (c CacheFuncs) Info() CacheInfo         { return c.InfoFunc() }
 func (c CacheFuncs) SetCapacity(bytes int64) { c.SetCapacityFunc(bytes) }
 func (c CacheFuncs) TrimToCapacity()         { c.TrimToCapacityFunc() }
+func (c CacheFuncs) SetReserve(bytes int64) {
+	if c.SetReserveFunc != nil {
+		c.SetReserveFunc(bytes)
+	}
+}
 
 var _ Cache = CacheFuncs{}
 
@@ -76,10 +86,17 @@ type DownloadUsage struct {
 	CommittedKeptBytes int64
 }
 
-// Downloads reports the downloads' usage (#77 P4). Until it lands,
-// NoDownloads: nothing is kept.
+// Downloads reports the downloads' usage (#77 P4, internal/downloads).
+// Without it, NoDownloads: nothing is kept.
 type Downloads interface {
 	DownloadUsage(ctx context.Context) (DownloadUsage, error)
+}
+
+// CommitGuard is a Downloads that serialises a PUT with new Keeps: the PUT
+// holds it from reading the usage until its settings are stored, so no
+// Keep commits more meanwhile (*downloads.Service).
+type CommitGuard interface {
+	LockCommits() (unlock func())
 }
 
 // NoDownloads is Downloads before there are any.
@@ -303,7 +320,12 @@ func (g *Governor) pass(ctx context.Context) {
 	info := cache.Info()
 	l := Resolve(Inputs{Settings: settings, ConfigBytes: g.d.ConfigBytes, Disk: disk, FilledBytes: info.Filled})
 	g.logChange(l, disk)
-	g.apply(ctx, cache, l.EffectiveBytes)
+	// The streaming reserve: pins never squeeze the streaming cache below
+	// it (#77). It's never more than the cap, so without pins the trims are
+	// filecache's.
+	reserve := min(l.ReserveBytes, l.EffectiveBytes)
+	cache.SetReserve(reserve)
+	g.apply(ctx, cache, l.EffectiveBytes, reserve)
 }
 
 // apply moves the cache's cap to target. While the fill is under target
@@ -311,33 +333,35 @@ func (g *Governor) pass(ctx context.Context) {
 // TrimStepBytes at a time, trimming after each step, so no one trim holds
 // the cache's lock for long: also when the cap is already at target but
 // the cache holds more (opened below its fill, which filecache would trim
-// in one go on its next write). Once a step can't evict its share (the
-// rest is pinned, #201), it goes straight to target.
-func (g *Governor) apply(ctx context.Context, cache Cache, target int64) {
+// in one go on its next write). The steps go only as far as a trim can
+// evict: pinned bytes and the reserve stay (#201), so while they hold the
+// fill above target the cap simply stays at target, minute after minute.
+// Once a step can't evict its share, it goes straight to target.
+func (g *Governor) apply(ctx context.Context, cache Cache, target, reserve int64) {
 	info := cache.Info()
-	if info.Filled <= target {
+	lowest := max(target, min(info.Filled, info.Pinned+reserve))
+	if info.Filled <= lowest {
 		if info.Capacity != target {
 			cache.SetCapacity(target)
 		}
 		return
 	}
-	for c := info.Filled; c > target; {
-		c = max(target, c-TrimStepBytes)
+	for c := info.Filled; c > lowest; {
+		c = max(lowest, c-TrimStepBytes)
 		cache.SetCapacity(c)
 		cache.TrimToCapacity()
-		if c == target {
-			return
-		}
-		if cache.Info().Filled > c { // nothing more to evict
-			cache.SetCapacity(target)
-			cache.TrimToCapacity()
-			return
+		if c == lowest || cache.Info().Filled > c { // there, or nothing more to evict
+			break
 		}
 		select {
 		case <-ctx.Done(): // the next start's first pass goes on from here
 			return
 		case <-time.After(g.d.StepPause):
 		}
+	}
+	if cache.Info().Capacity != target {
+		cache.SetCapacity(target)
+		cache.TrimToCapacity()
 	}
 }
 
@@ -449,7 +473,12 @@ func (g *Governor) UpdateStorage(ctx context.Context, patch library.StorageSetti
 	if err := checkLimits(patch, in.Settings, after); err != nil {
 		return nil, err
 	}
-	usage, err := g.currentDownloads().DownloadUsage(ctx)
+	downloads := g.currentDownloads()
+	if guard, ok := downloads.(CommitGuard); ok {
+		unlock := guard.LockCommits()
+		defer unlock()
+	}
+	usage, err := downloads.DownloadUsage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the downloads' usage: %w", err)
 	}

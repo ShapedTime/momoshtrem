@@ -111,6 +111,9 @@ type Options struct {
 	// and the download caps (#77; wire_storage.go). Nil makes those routes
 	// return 503.
 	Storage Storage
+	// Downloads serves /downloads: Keeps, smart picks and the estimate
+	// (#77 P4; wire_downloads.go). Nil makes those routes return 503.
+	Downloads Downloads
 }
 
 // NewServer creates a new API server
@@ -226,6 +229,7 @@ func (s *Server) setupRoutes() {
 	s.registerHDRezkaRoutes(api)    // HDRezka search, titles, streams and assigns
 	s.registerQualityRoutes(api)    // GET and PUT /settings/quality-profile
 	s.registerStorageRoutes(api)    // GET and PUT /settings/storage (#77)
+	s.registerDownloadRoutes(api)   // Keeps, smart picks and the estimate (#77)
 	s.registerInspectRoutes(api)    // Inspect: dry runs of a search result or magnet
 	s.registerSearchRoutes(api)     // Torrent search and resolve
 	s.registerTraktRoutes(api)      // Trakt connect, disconnect, settings and sync

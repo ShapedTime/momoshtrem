@@ -55,11 +55,14 @@ func scanAssignment(s scanner) (*TorrentAssignment, error) {
 
 // assignmentUpsert reactivates the row an item already has for the same
 // file (UNIQUE(item_type, item_id, info_hash, file_path)) instead of
-// failing. A re-assignment is a new assignment, so it's stamped now.
+// failing. A re-assignment is a new assignment, so it's stamped now; a
+// row that was active already (the same torrent applied again) keeps its
+// time, so a download's admission order doesn't change (#77).
 const assignmentUpsert = `ON CONFLICT (item_type, item_id, info_hash, file_path) DO UPDATE SET
 		is_active = TRUE, magnet_uri = EXCLUDED.magnet_uri, file_size = EXCLUDED.file_size,
 		resolution = EXCLUDED.resolution, source = EXCLUDED.source,
-		confidence = EXCLUDED.confidence, match_source = EXCLUDED.match_source, created_at = NOW()`
+		confidence = EXCLUDED.confidence, match_source = EXCLUDED.match_source,
+		created_at = CASE WHEN torrent_assignments.is_active THEN torrent_assignments.created_at ELSE NOW() END`
 
 // WriteStream makes HDRezka streams the items' files (w.Rows: ItemID,
 // Stream, FileSize and Resolution), in its own transaction, through the

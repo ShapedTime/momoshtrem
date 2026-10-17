@@ -49,8 +49,14 @@ type PauseClearer interface {
 
 var _ PauseClearer = (*library.SettingsRepository)(nil)
 
+// DownloadsWaker wakes the download manager (*downloads.Service), so a
+// removal's downloads drop their pins at once.
+type DownloadsWaker interface {
+	Wake()
+}
+
 // RemovalDeps are a RemovalService's dependencies. Torrents, Subtitles,
-// Tree and Pauses are optional.
+// Tree, Pauses and Downloads are optional.
 type RemovalDeps struct {
 	Jobs        *library.AssignmentJobRepository
 	Movies      *library.MovieRepository
@@ -62,6 +68,9 @@ type RemovalDeps struct {
 	// Pauses clears a released torrent's stored pause; nil keeps it (it's
 	// pruned at the next startup).
 	Pauses PauseClearer
+	// Downloads is woken after each removal; nil wakes nothing (its next
+	// tick catches up).
+	Downloads DownloadsWaker
 }
 
 // RemovalService deletes torrents and titles and unassigns files, and
@@ -80,6 +89,7 @@ type RemovalService struct {
 	subtitles   SubtitleCleaner
 	tree        RemovalTree
 	pauses      PauseClearer
+	downloads   DownloadsWaker
 	log         *slog.Logger
 
 	// background counts best-effort data deletes still running.
@@ -97,6 +107,7 @@ func NewRemovalService(d RemovalDeps) *RemovalService {
 		subtitles:   d.Subtitles,
 		tree:        d.Tree,
 		pauses:      d.Pauses,
+		downloads:   d.Downloads,
 		log:         slog.With("component", "removals"),
 	}
 }
@@ -355,8 +366,14 @@ func (s *RemovalService) loaded(hash string) bool {
 	return err == nil
 }
 
+// invalidateTree rebuilds the WebDAV tree after a removal, and wakes the
+// download manager: a title's downloads cascaded away, or a torrent's
+// files left, so their pins go (#77).
 func (s *RemovalService) invalidateTree() {
 	if s.tree != nil {
 		s.tree.InvalidateTree()
+	}
+	if s.downloads != nil {
+		s.downloads.Wake()
 	}
 }

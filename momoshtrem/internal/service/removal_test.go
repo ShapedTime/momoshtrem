@@ -122,18 +122,37 @@ func (r *recordingTree) count() int {
 	return r.rebuilds
 }
 
+// countingWaker counts the download manager's wakes.
+type countingWaker struct {
+	mu    sync.Mutex
+	wakes int
+}
+
+func (w *countingWaker) Wake() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.wakes++
+}
+
+func (w *countingWaker) count() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.wakes
+}
+
 type removalEnv struct {
 	*jobEnv
-	svc    *RemovalService
-	client *fakeClient
-	tree   *recordingTree
-	dir    string // the subtitles' download path
+	svc       *RemovalService
+	client    *fakeClient
+	tree      *recordingTree
+	downloads *countingWaker
+	dir       string // the subtitles' download path
 }
 
 func newRemovalEnv(t *testing.T) *removalEnv {
 	t.Helper()
 	je := newJobEnv(t)
-	e := &removalEnv{jobEnv: je, client: newFakeClient(), tree: &recordingTree{}, dir: t.TempDir()}
+	e := &removalEnv{jobEnv: je, client: newFakeClient(), tree: &recordingTree{}, downloads: &countingWaker{}, dir: t.TempDir()}
 	e.svc = NewRemovalService(RemovalDeps{
 		Jobs:        je.jobs,
 		Movies:      library.NewMovieRepository(je.db),
@@ -143,6 +162,7 @@ func newRemovalEnv(t *testing.T) *removalEnv {
 		Subtitles:   subtitle.NewService(nil, subtitle.NewRepository(je.db.DB), e.dir),
 		Tree:        e.tree,
 		Pauses:      library.NewSettingsRepository(je.db),
+		Downloads:   e.downloads,
 	})
 	return e
 }
@@ -470,6 +490,10 @@ func TestDeleteMovie(t *testing.T) {
 	}
 	if e.tree.count() != 1 {
 		t.Errorf("tree rebuilds = %d, want 1", e.tree.count())
+	}
+	// Its downloads cascaded away: the manager drops their pins at once.
+	if e.downloads.count() != 1 {
+		t.Errorf("download manager wakes = %d, want 1", e.downloads.count())
 	}
 
 	if err := e.svc.DeleteMovie(e.ctx, dune, false); !errors.Is(err, library.ErrMovieNotFound) {

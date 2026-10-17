@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -13,12 +14,13 @@ import (
 )
 
 // fakeCache is a piece cache: a trim evicts down to the cap, but never
-// what's pinned.
+// what's pinned, nor the unpinned bytes below the reserve.
 type fakeCache struct {
 	mu       sync.Mutex
 	capacity int64
 	filled   int64
 	pinned   int64
+	reserve  int64
 	sets     []int64 // every SetCapacity
 	trims    []int64 // what each TrimToCapacity evicted
 }
@@ -36,12 +38,18 @@ func (c *fakeCache) SetCapacity(n int64) {
 	c.sets = append(c.sets, n)
 }
 
+func (c *fakeCache) SetReserve(n int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reserve = n
+}
+
 func (c *fakeCache) TrimToCapacity() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	before := c.filled
 	if c.capacity >= 0 && c.filled > c.capacity {
-		c.filled = max(c.capacity, c.pinned)
+		c.filled = min(c.filled, max(c.capacity, c.pinned+c.reserve))
 	}
 	c.trims = append(c.trims, before-c.filled)
 }
@@ -169,6 +177,22 @@ func (c *fakeClock) waiting() int {
 type fakeDownloads struct{ usage DownloadUsage }
 
 func (f fakeDownloads) DownloadUsage(context.Context) (DownloadUsage, error) { return f.usage, nil }
+
+// guardedDownloads is a CommitGuard that records when it's held.
+type guardedDownloads struct {
+	settings *fakeSettings
+	events   []string
+}
+
+func (g *guardedDownloads) DownloadUsage(context.Context) (DownloadUsage, error) {
+	g.events = append(g.events, "usage")
+	return DownloadUsage{}, nil
+}
+
+func (g *guardedDownloads) LockCommits() func() {
+	g.events = append(g.events, "lock")
+	return func() { g.events = append(g.events, fmt.Sprintf("unlock after %d update", g.settings.updates)) }
+}
 
 type harness struct {
 	g        *Governor
@@ -397,15 +421,28 @@ func TestGovernor_SteppedTrims(t *testing.T) {
 	}
 }
 
-// Pinned pieces can't be evicted (#201): the steps still end at the target.
+// Pinned pieces can't be evicted (#201), nor the streaming reserve below
+// them: the steps end where the trims can't go further, and the cap at the
+// target. Minute after minute the cap then stays there: no steps over bytes
+// nothing can evict (#202).
 func TestGovernor_TrimsAroundPins(t *testing.T) {
 	h := newHarness(t, nil)
 	h.cache.filled, h.cache.pinned = gib(40), gib(30)
 	h.settings.settings = withLimit(ptr(gib(10)))
 	h.start(t)
 	h.wantCap(t, gib(10))
-	if _, filled, _, _ := h.cache.state(); filled != gib(30) {
-		t.Errorf("filled = %d, want the pinned 30 GiB", filled)
+	// The reserve is 25% of the 10 GiB limit.
+	_, filled, sets, trims := h.cache.state()
+	if filled != gib(32.5) {
+		t.Errorf("filled = %d, want the pinned 30 GiB and the 2.5 GiB reserve", filled)
+	}
+	assertSteps(t, sets[1:len(sets)-1], trims[:len(trims)-1], gib(40))
+
+	h.cache.reset()
+	h.tick(t)
+	h.wantCap(t, gib(10))
+	if _, _, sets, trims := h.cache.state(); len(sets) != 0 || len(trims) != 0 {
+		t.Errorf("a minute later: sets %v, trims %v; want none", sets, trims)
 	}
 }
 
@@ -498,6 +535,18 @@ func TestGovernor_UpdateStorage(t *testing.T) {
 			if time.Now().After(deadline) {
 				t.Fatal("the new limit was never applied")
 			}
+		}
+	})
+
+	t.Run("holds the downloads' commit guard from the usage to the store", func(t *testing.T) {
+		h := newHarness(t, nil)
+		g := &guardedDownloads{settings: h.settings}
+		h.g.SetDownloads(g)
+		if _, err := h.g.UpdateStorage(ctx, library.StorageSettingsPatch{Kept: library.KeptSettingsPatch{SetMaxBytes: true, MaxBytes: ptr(gib(50))}}); err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"lock", "usage", "unlock after 1 update"}; !reflect.DeepEqual(g.events, want) {
+			t.Errorf("events = %v, want %v", g.events, want)
 		}
 	})
 
