@@ -43,7 +43,10 @@ test.describe('movie page', () => {
     await expectAccessibleAndContained(page);
   });
 
-  test('Find a torrent opens the search sheet, and adding one starts the download', async ({ page }) => {
+  test('Find a torrent opens the search sheet, and adding one makes it ready in Infuse', async ({ page }) => {
+    // Nothing keeps it (a fresh install), so its file streams on demand: ready once it's assigned (#77).
+    // A kept movie downloads its new file instead (keep.spec.ts).
+    await page.addInitScript(() => window.localStorage.setItem('msw:scenario', 'downloads-empty'));
     await signIn(page, '/movie/1054867');
     await expect(panel(page, 'In your library · no torrent yet')).toBeVisible();
     await expectAccessibleAndContained(page);
@@ -59,7 +62,7 @@ test.describe('movie page', () => {
     await page.keyboard.press('Escape');
     await expect(search).toBeHidden();
     await expect(page).toHaveURL(/\/movie\/1054867$/);
-    await expect(panel(page, 'Downloading')).toContainText('Step 3 of 4');
+    await expect(panel(page, 'Ready in Infuse')).toContainText('Step 4 of 4');
   });
 
   test('downloading: progress, and it streams now', async ({ page }) => {

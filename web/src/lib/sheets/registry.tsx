@@ -4,9 +4,11 @@ import { AskHistory } from '@/components/ask/AskHistory';
 import { HDRezkaSheet } from '@/components/hdrezka/HDRezkaSheet';
 import { TorrentSearchSheet } from '@/components/search/TorrentSearchSheet';
 import { InfuseSetupSheet } from '@/components/shell/InfuseSetupSheet';
+import { KeepSheet } from '@/components/title/KeepSheet';
 import { EpisodeSheet } from '@/components/title/show/EpisodeSheet';
 import { ShowSettingsSheet } from '@/components/title/show/ShowSettingsSheet';
 import { SOURCE_PARAMS } from '@/lib/source/context';
+import { KEEP_PARAMS } from '@/lib/title/keep-sheet';
 
 interface SheetBase {
   /** Other URL params this sheet owns; removed when it closes from a deep link. */
@@ -62,6 +64,8 @@ export const SHEETS: Record<string, SheetDefinition> = {
   hdrezka: { params: SOURCE_PARAMS, Component: HDRezkaSheet },
   // Find a source, Torrents tab (#92), on the same params
   torrent: { params: SOURCE_PARAMS, Component: TorrentSearchSheet },
+  // Download & keep (#206): `movie`, or `show` (the show), with `scope=season&season` (a season) or `se` (an episode)
+  keep: { params: KEEP_PARAMS, Component: KeepSheet },
   // Ask momoshtrem's past conversations on phone (#156; the desktop rail shows them)
   'ask-history': { title: 'Conversations', size: 'narrow', render: () => <AskHistory /> },
 };

@@ -15,7 +15,9 @@ import {
   resolveJump,
   seasonLabel,
 } from '@/lib/title/episodes';
-import { BulkFind } from './BulkFind';
+import { keepOf } from '@/lib/title/keep';
+import { downloadsAvailable } from '@/lib/title/keep-sheet';
+import { BulkFind, type SeasonKeep } from './BulkFind';
 import { EarlierWatchedRow } from './EarlierWatchedRow';
 import { EpisodeList, type EpisodeListHandle, type ScrollToEpisodeOptions } from './EpisodeList';
 import { JumpToEpisode } from './JumpToEpisode';
@@ -43,6 +45,8 @@ interface EpisodesSectionProps {
   onFindSeason: (seasonNumber: number) => void;
   /** Opens HDRezka on a season; left out while HDRezka is off. */
   onStreamSeason?: (seasonNumber: number) => void;
+  /** Opens the Keep sheet (#206) on a season, or on the show when its own download holds every season. */
+  onKeep: (scope: { season?: number }) => void;
   onFindEpisode: (episode: EpisodeSummary) => void;
   onOpenEpisode: (episode: EpisodeSummary) => void;
   view: EpisodeView;
@@ -73,7 +77,7 @@ interface SeasonBodyProps extends Omit<EpisodesSectionProps, 'season' | 'seasonN
  * so its state (expanded, pressed chip) starts over on another tab.
  */
 function SeasonBody(props: SeasonBodyProps) {
-  const { show, season, summary, view, onViewChange, onJumpToSeason, initialTarget, onFindSeason, onStreamSeason, onFindEpisode, onOpenEpisode, ref } = props;
+  const { show, season, summary, view, onViewChange, onJumpToSeason, initialTarget, onFindSeason, onStreamSeason, onKeep, onFindEpisode, onOpenEpisode, ref } = props;
   const { episodes, ranges, season_number: number } = season;
   const list = useRef<EpisodeListHandle>(null);
   // Trakt's next episode, else the frontier's first; the watched run never folds it away
@@ -115,6 +119,14 @@ function SeasonBody(props: SeasonBodyProps) {
   const firstMissing = episodes.find((episode) => episode.state === 'missing');
   const reviewJob = show.library.review_job_id;
   const long = episodes.length > LONG_SEASON || show.episode_ordering === 'absolute';
+  // The season's own keep; else a show keep holds it; else Download & keep makes a season one.
+  // A backend without downloads (no `keep` on the season) offers none.
+  const ownKeep = keepOf(season.keep);
+  const showKeep = keepOf(show.library.keep);
+  const keepScope = !ownKeep && showKeep?.reason === 'kept' ? 'show' : 'season';
+  const seasonKeep: SeasonKeep | undefined = downloadsAvailable(season)
+    ? { keep: keepScope === 'show' ? showKeep : ownKeep, scope: keepScope, onKeep: () => onKeep(keepScope === 'show' ? {} : { season: number }) }
+    : undefined;
 
   return (
     <>
@@ -136,6 +148,7 @@ function SeasonBody(props: SeasonBodyProps) {
         onFindSeason={() => onFindSeason(number)}
         onFindMissing={() => (firstMissing ? onFindEpisode(firstMissing) : onFindSeason(number))}
         onStreamSeason={onStreamSeason && (() => onStreamSeason(number))}
+        keep={seasonKeep}
       />
       {episodes.length === 0 ? (
         <p className="t-small text-fg-3">TMDB lists no episodes for this season yet.</p>

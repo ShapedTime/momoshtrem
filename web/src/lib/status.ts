@@ -1,23 +1,29 @@
 import {
   ArrowDown,
+  Ban,
   Calendar,
   Check,
   CircleDashed,
   CircleAlert,
   Clock,
   EyeOff,
+  HardDrive,
+  Hourglass,
   Layers,
   type LucideIcon,
   Minus,
   Pause,
+  Pin,
   Play,
   Plus,
   Search,
   Sparkle,
+  Sparkles,
   TriangleAlert,
   Tv,
   WifiOff,
 } from 'lucide-react';
+import type { DownloadState } from '@/lib/api/contract';
 
 /**
  * The one status vocabulary. Every surface (cards, rows, detail panels,
@@ -84,6 +90,18 @@ export const STATUS = {
   special: { tone: 'upcoming', label: 'Special', icon: Sparkle },
   unmatched: { tone: 'warning', label: 'Unmatched', icon: CircleAlert },
   ignored: { tone: 'missing', label: 'Ignored', icon: EyeOff },
+  // Downloads (#77): a download's reason and state (PLAN §6 "Storage and downloads: UI copy"); `downloading` and `paused` above
+  kept: { tone: 'watched', label: 'Kept', icon: Pin },
+  smart: { tone: 'upcoming', label: 'Smart', icon: Sparkles },
+  queued: { tone: 'neutral', label: 'Queued', icon: Hourglass },
+  waiting_for_stream: { tone: 'neutral', label: 'Waits for the stream to end', icon: Tv },
+  waiting_for_window: { tone: 'neutral', label: 'Waits for its window', icon: Clock },
+  stalled: { tone: 'warning', label: 'No peers · retrying', icon: TriangleAlert },
+  disk_full: { tone: 'error', label: 'Disk full', icon: HardDrive },
+  storage_full: { tone: 'warning', label: 'Kept space is full', icon: HardDrive },
+  on_disk: { tone: 'ready', label: 'On disk', icon: HardDrive },
+  no_file: { tone: 'missing', label: 'No file yet', icon: CircleDashed },
+  not_keepable: { tone: 'neutral', label: 'Can’t keep this file', icon: Ban },
 } as const satisfies Record<string, StatusDefinition>;
 
 export type StatusKey = keyof typeof STATUS;
@@ -95,3 +113,18 @@ export function getStatus(key: StatusKey): StatusDefinition {
 export function isStatusKey(value: string): value is StatusKey {
   return Object.prototype.hasOwnProperty.call(STATUS, value);
 }
+
+/** A download's state (PLAN §6 "Downloads (#77)") as a pill. `waiting_for_window` reads "Waits until 01:00" with `resumes_at` (lib/title/keep.ts `keepStateLabel`). */
+export const DOWNLOAD_STATE_STATUS = {
+  queued: 'queued',
+  downloading: 'downloading',
+  waiting_for_stream: 'waiting_for_stream',
+  waiting_for_window: 'waiting_for_window',
+  paused: 'paused',
+  stalled: 'stalled',
+  disk_full: 'disk_full',
+  storage_full: 'storage_full',
+  done: 'on_disk',
+  no_file: 'no_file',
+  unavailable: 'not_keepable',
+} as const satisfies Record<DownloadState, StatusKey>;

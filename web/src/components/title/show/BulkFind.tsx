@@ -1,5 +1,16 @@
-import { Check, Layers, MonitorPlay, Search } from 'lucide-react';
+import { Check, HardDriveDownload, Layers, MonitorPlay, Pin, Search } from 'lucide-react';
 import { Button } from '@/components/ui';
+import type { Keep } from '@/lib/api/contract';
+import { keepExpiryLabel } from '@/lib/title/keep';
+
+/** The season's keep (#206): its own download, or the show's, which holds every season. */
+export interface SeasonKeep {
+  keep: Keep | null;
+  /** Whose download `keep` is; a new Keep is the season's. */
+  scope: 'season' | 'show';
+  /** Opens the Keep sheet on that scope. */
+  onKeep: () => void;
+}
 
 interface BulkFindProps {
   /** Aired episodes without a file in this season. */
@@ -10,16 +21,44 @@ interface BulkFindProps {
   onFindMissing: () => void;
   /** Opens HDRezka on this season; left out while HDRezka is off. */
   onStreamSeason?: () => void;
+  /** Download & keep the season, or change its keep; left out while the show isn't in the library. */
+  keep?: SeasonKeep;
 }
 
-/** Season-wide finds above the list (torrents, and HDRezka when it's set up), or the reassurance that nothing is missing. */
-export function BulkFind({ missing, upcoming, onFindSeason, onFindMissing, onStreamSeason }: BulkFindProps) {
+/** "Download & keep season", or what keeps it: "Season kept until watched · by Nov 16" ("Show kept …" for the show's). */
+function KeepSeasonButton({ keep, scope, onKeep }: SeasonKeep) {
+  if (!keep) {
+    return (
+      <Button size="sm" onClick={onKeep} aria-haspopup="dialog">
+        <HardDriveDownload size={15} aria-hidden="true" /> Download &amp; keep season
+      </Button>
+    );
+  }
+  const whose = scope === 'show' ? 'Show' : 'Season';
+  return (
+    <Button size="sm" onClick={onKeep} aria-haspopup="dialog">
+      <Pin size={15} aria-hidden="true" /> {keepExpiryLabel(keep).replace(/^Kept/, `${whose} kept`)}
+      {/* Read after a space (the sr-only span is a block), so it starts a new phrase */}
+      <span className="sr-only">{scope === 'show' ? '– change or stop keeping the show' : '– change or stop keeping this season'}</span>
+    </Button>
+  );
+}
+
+/**
+ * Season-wide actions above the list: finds (torrents, and HDRezka when it's
+ * set up) or the reassurance that nothing is missing, and Download & keep (#206).
+ */
+export function BulkFind({ missing, upcoming, onFindSeason, onFindMissing, onStreamSeason, keep }: BulkFindProps) {
+  const keepButton = keep && <KeepSeasonButton {...keep} />;
   if (missing === 0) {
     return (
-      <p className="t-small flex items-center gap-2 text-fg-3">
-        <Check size={15} aria-hidden="true" />
-        {upcoming > 0 ? 'Every aired episode this season is ready or watched' : 'Every episode this season is ready or watched'}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="t-small flex items-center gap-2 text-fg-3">
+          <Check size={15} aria-hidden="true" />
+          {upcoming > 0 ? 'Every aired episode this season is ready or watched' : 'Every episode this season is ready or watched'}
+        </p>
+        {keepButton}
+      </div>
     );
   }
   return (
@@ -35,6 +74,7 @@ export function BulkFind({ missing, upcoming, onFindSeason, onFindMissing, onStr
           <MonitorPlay size={15} aria-hidden="true" /> Stream season from HDRezka
         </Button>
       )}
+      {keepButton}
     </div>
   );
 }

@@ -174,7 +174,7 @@ test.describe('show page', () => {
       const row = list.locator(`#ep-${n}`);
       await expect(row).toHaveClass(/is-watched/);
       await expect(row).toContainText('Watched');
-      await expect(row.getByRole('button', { name: `S03E0${n} options: how to play, subtitles, replace, remove` })).toBeVisible();
+      await expect(row.getByRole('button', { name: `S03E0${n} options: how to play, subtitles, keep, replace, remove` })).toBeVisible();
     }
     const next = list.locator('.eprow.is-next');
     await expect(next).toHaveCount(1);

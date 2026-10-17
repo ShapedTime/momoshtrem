@@ -360,6 +360,30 @@ describe('what other mocks change', () => {
     expect(await downloadsApi.create({ scope: 'movie', id: 2 })).toMatchObject({ id: 8, state: 'waiting_for_stream' });
     expect((await downloadsApi.list()).paused_reason).toBe('streaming');
   });
+
+  it('a movie assigned this session is ready unless a download wants it (#206)', async () => {
+    const assign = async () => {
+      const { job_id } = await assignmentApi.assignMovie(3, { magnet_uri: 'magnet:?xt=urn:btih:oba2&dn=One.Battle.After.Another.2025.2160p.WEB-DL' });
+      for (let i = 0; i < 3; i++) await assignmentApi.job(job_id);
+      return (await titlesApi.get('movie', 1054867)).library;
+    };
+    // Nothing keeps it: its file streams on demand, so it's ready as soon as it's assigned
+    setMockScenario('downloads-empty');
+    expect(await assign()).toMatchObject({ availability_stage: 'ready', download: null, keep: null });
+    // Kept, it downloads: the Keep wants the new file (it waits for Severance's stream to end)
+    await downloadsApi.create({ scope: 'movie', id: 3 });
+    expect((await titlesApi.get('movie', 1054867)).library).toMatchObject({
+      availability_stage: 'downloading',
+      download: { pct: 0, seeders: 12 },
+      keep: { reason: 'kept', state: 'waiting_for_stream' },
+    });
+  });
+
+  it('a kept movie with nothing assigned downloads its first file', async () => {
+    const { job_id } = await assignmentApi.assignMovie(3, { magnet_uri: 'magnet:?xt=urn:btih:oba2&dn=One.Battle.After.Another.2025.2160p.WEB-DL' });
+    for (let i = 0; i < 3; i++) await assignmentApi.job(job_id);
+    expect((await titlesApi.get('movie', 1054867)).library).toMatchObject({ availability_stage: 'downloading', keep: { download_id: 4, state: 'queued' } });
+  });
 });
 
 describe('GET/PUT /settings/storage', () => {

@@ -1,4 +1,4 @@
-import type { MovieTitle, ShowTitle, Title } from '@/lib/api/contract';
+import type { Keep, MovieTitle, ShowTitle, Title } from '@/lib/api/contract';
 import { primaryActionFor, STAGE_STEPS } from '@/lib/title/stage-copy';
 import { addToLibrary, assignMovieStream, buildTitle, episodeId, libraryKey, type MockLibrary, seedLibrary } from '@/mocks/fixtures/titles';
 import { findTitle } from '@/mocks/fixtures/catalog';
@@ -69,9 +69,40 @@ describe('primaryActionFor: movies', () => {
       facts: ['2160p', '18.4 GB', 'Dolby Vision', 'Atmos'],
       path: { display: dune.library.webdav_path, copy: dune.library.webdav_url },
       primary: { intent: 'how_to_play', variant: 'primary' },
-      secondary: null,
+      secondary: { label: 'Download & keep', intent: 'keep', icon: 'keep', variant: 'secondary' },
       dock: { button: { label: 'Play in Infuse', intent: 'how_to_play' }, copyPath: true },
     });
+  });
+});
+
+describe('primaryActionFor: Download & keep (#206)', () => {
+  const kept = (base: MovieTitle, keep: Partial<Keep> = {}): MovieTitle => ({
+    ...base,
+    library: { ...base.library, keep: { download_id: 9, reason: 'kept', scope: 'movie', state: 'done', pct: 100, until_watched: true, expires_at: null, ...keep } },
+  });
+
+  it('offers it as a ready movie’s second action, and Change duration once it’s kept', () => {
+    const dune = movie(693134);
+    expect(primaryActionFor(dune).secondary).toMatchObject({ label: 'Download & keep', intent: 'keep' });
+    expect(primaryActionFor(kept(dune)).secondary).toEqual({ label: 'Change duration', icon: 'kept', intent: 'keep', variant: 'secondary' });
+    // The phone dock keeps its one button; the ⋯ menu has Download & keep there
+    expect(primaryActionFor(kept(dune)).dock.button.label).toBe('Play in Infuse');
+  });
+
+  it('offers none on a backend without downloads (no `keep` field, before #202 and #204): its POST would 404', () => {
+    const dune = movie(693134);
+    const before: MovieTitle = { ...dune, library: { ...dune.library, keep: undefined as unknown as null } };
+    expect(primaryActionFor(before).secondary).toBeNull();
+  });
+
+  it('leaves it off streams, shows and the other stages', () => {
+    const library = seedLibrary();
+    const row = library.get(libraryKey('movie', 1054867));
+    if (!row) throw new Error('No One Battle After Another');
+    assignMovieStream(row, { title: 'Битва за битвой', url: 'https://rezka.ag/films/action/78655-bitva-za-bitvoy-2025.html', translator: 'Оригинал (+субтитры)', quality: '1080p', size_bytes: 4_320_000_000 });
+    expect(primaryActionFor(title('movie', 1054867, library)).secondary).toBeNull();
+    expect(primaryActionFor(show(82728)).secondary).toBeNull();
+    expect(primaryActionFor(movie(157336)).secondary).toMatchObject({ intent: 'how_to_play' });
   });
 });
 
@@ -93,7 +124,7 @@ describe('primaryActionFor: a second source (HDRezka, #63)', () => {
   });
 
   it('offers it to shows too, and leaves it off other stages', () => {
-    expect(primaryActionFor(movie(693134), { hdrezka: true })).toMatchObject({ secondary: null, dock: { icon: null } });
+    expect(primaryActionFor(movie(693134), { hdrezka: true })).toMatchObject({ secondary: { intent: 'keep' }, dock: { icon: null } });
     expect(primaryActionFor(show(209867), { hdrezka: true })).toMatchObject({
       stage: 'needs_torrent',
       primary: { label: 'Find episodes 29–38' },

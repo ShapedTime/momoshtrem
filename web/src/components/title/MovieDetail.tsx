@@ -6,12 +6,16 @@ import { useOverArt } from '@/components/shell/ShellContext';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
 import { useItemSubtitles } from '@/hooks/useItemSubtitles';
+import { useKeep } from '@/hooks/useKeep';
 import { useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { MovieTitle } from '@/lib/api/contract';
 import { useSheet } from '@/lib/sheets/useSheet';
 import { titleFacts } from '@/lib/title/facts';
+import { keepOf } from '@/lib/title/keep';
+import { keepSheetParams } from '@/lib/title/keep-sheet';
 import { primaryActionFor, type StageIntent } from '@/lib/title/stage-copy';
 import { ActionDock } from './ActionDock';
+import { KeepStatus } from './KeepStatus';
 import { CastRow } from './CastRow';
 import { CurrentStreamPanel } from './CurrentStreamPanel';
 import { CurrentTorrentPanel } from './CurrentTorrentPanel';
@@ -42,19 +46,26 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
   const sourceParams = { movie: String(movie.tmdb_id) };
   const findTorrent = () => sheets.open('torrent', sourceParams);
   const streamFromHDRezka = () => sheets.open('hdrezka', sourceParams);
+  // Download & keep (#206): `?sheet=keep&movie=<tmdb>`, a new Keep or a change
+  const openKeep = () => sheets.open('keep', keepSheetParams({ kind: 'movie', tmdbId: movie.tmdb_id }));
   const onAction = (intent: StageIntent) => {
     if (intent === 'add') actions.add();
     else if (intent === 'find') findTorrent();
     else if (intent === 'hdrezka') streamFromHDRezka();
+    else if (intent === 'keep') openKeep();
     else if (intent === 'how_to_play') sheets.open('infuse-setup', infuseSetupParams({ path: library.webdav_path, url: library.webdav_url }));
   };
   const busy = actions.adding ? 'add' : null;
+  const keeping = useKeep();
+  const kept = keepOf(library.keep);
+  // While it downloads, the panel's own bar shows the progress
+  const keepStatus = kept && <KeepStatus keep={kept} name={movie.title} progress={library.availability_stage !== 'downloading'} />;
 
   return (
     <>
       <TitleHero
         title={movie}
-        panel={<PrimaryPanel copy={copy} onAction={onAction} busy={busy} titleName={movie.title} />}
+        panel={<PrimaryPanel copy={copy} onAction={onAction} busy={busy} titleName={movie.title} keep={keepStatus} />}
         renderMore={(placement) => (
           <TitleMoreMenu
             title={movie}
@@ -62,6 +73,8 @@ function MovieDetailView({ movie }: { movie: MovieTitle }) {
             onRefresh={actions.refresh}
             onRemove={actions.remove}
             onStreamFromHDRezka={hdrezka ? streamFromHDRezka : undefined}
+            onKeep={openKeep}
+            onStopKeeping={kept ? () => void keeping.stop(kept, movie.title) : undefined}
           />
         )}
       />

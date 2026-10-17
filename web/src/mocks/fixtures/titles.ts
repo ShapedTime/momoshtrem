@@ -62,8 +62,7 @@ import { traktImported } from './trakt';
  * account has imported so far (fixtures/trakt.ts): nothing while it's off.
  * Keeps and what's downloading come from the page's downloads
  * (fixtures/downloads.ts, #77): a file is downloading only while a download
- * wants it. (A movie assigned this session still starts out downloading, as
- * before #77, until the title pages follow the new rule.)
+ * wants it, so a file nothing keeps is ready as soon as it's assigned.
  */
 
 /** The mock WEBDAV_PUBLIC_URL. */
@@ -87,7 +86,7 @@ export interface MockLibraryEntry {
   filed: Map<number, EpisodeFile>;
   /** What the open mapping jobs say about this title (kept in sync by handlers/assignment.ts). */
   review: MockReview;
-  /** Movies: a torrent assigned this session (an applied mapping job); it starts downloading. */
+  /** Movies: a torrent assigned this session (an applied mapping job); ready, unless a Keep wants it (then it downloads). */
   assigned?: TitleTorrent;
   /** Movies: an HDRezka stream assigned this session (#63); it replaces any torrent. */
   stream?: TitleStream;
@@ -417,22 +416,19 @@ function showLibrary(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry 
 
 const keepFor = (hold: LiveHold | undefined) => (hold ? keepOf(hold.download) : null);
 
-/** A torrent assigned this session: loaded, nothing fetched yet. */
-const JUST_ADDED: DownloadProgress = { pct: 0, speed_bps: 0, eta_seconds: null, seeders: 12 };
-
 function movieLibrary(entry: CatalogEntry, movie: MovieSeed, row: MockLibraryEntry | undefined): TitleLibraryState {
   if (!row) return notInLibrary();
   // A stream replaces the torrent, and is never downloading: it plays from the CDN
   const stream = row.stream ?? null;
   const torrent = stream ? null : (row.assigned ?? (row.files ? (movie.torrent ?? null) : null));
-  // #77: downloading only while a download wants the file (a torrent assigned this session still starts out downloading)
+  // #77: downloading only while a download wants the file; a file nothing keeps streams on demand, so it's ready
+  // as soon as it's assigned (one assigned this session too). The seed's progress is its own torrent's.
   const hold = scopeHold('movie', entry.tmdb_id);
   const wanted = torrent !== null && wantsBytes(hold?.admitted);
-  const download = row.assigned
-    ? JUST_ADDED
-    : wanted
-      ? (movie.download ?? { pct: keepFor(hold)?.pct ?? 0, speed_bps: 0, eta_seconds: null, seeders: torrent.seeders ?? 0 })
-      : null;
+  const seeded: DownloadProgress | undefined = row.assigned ? undefined : movie.download;
+  const download: DownloadProgress | null = wanted
+    ? (seeded ?? { pct: keepFor(hold)?.pct ?? 0, speed_bps: 0, eta_seconds: null, seeders: torrent.seeders ?? 0 })
+    : null;
   const path = stream ? moviePath(entry, 'stream.mp4') : torrent ? moviePath(entry, torrent.file_name) : null;
   return {
     ...notInLibrary(),

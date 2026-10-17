@@ -8,6 +8,7 @@ import { useOverArt } from '@/components/shell/ShellContext';
 import { NotFoundView } from '@/components/system/NotFoundView';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useHDRezkaEnabled } from '@/hooks/useHDRezka';
+import { useKeep } from '@/hooks/useKeep';
 import { DOWNLOAD_POLL_MS, useTitle, useTitleActions } from '@/hooks/useTitle';
 import type { EpisodeSummary, ShowTitle } from '@/lib/api/contract';
 import { seasonQuery, titleKeys } from '@/lib/api/endpoints';
@@ -15,8 +16,11 @@ import { useSheet } from '@/lib/sheets/useSheet';
 import { showSourceParams } from '@/lib/source/context';
 import { type JumpDestination, selectedSeason } from '@/lib/title/episodes';
 import { titleFacts } from '@/lib/title/facts';
+import { keepOf } from '@/lib/title/keep';
+import { keepSheetParams } from '@/lib/title/keep-sheet';
 import { primaryActionFor, type StageIntent } from '@/lib/title/stage-copy';
 import { ActionDock } from './ActionDock';
+import { KeepStatus } from './KeepStatus';
 import { CastRow } from './CastRow';
 import { DetailsAside } from './DetailsAside';
 import { MoreLikeThis } from './MoreLikeThis';
@@ -113,6 +117,11 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
   const findTorrent = (scope: { season?: number; episode?: number }) => sheets.open('torrent', showSourceParams(show.tmdb_id, scope));
   const findEpisode = (episode: EpisodeSummary) => findTorrent({ season: episode.season_number, episode: episode.episode_number });
   const streamFromHDRezka = (scope: { season?: number; episode?: number }) => sheets.open('hdrezka', showSourceParams(show.tmdb_id, scope));
+  // Download & keep (#206): the show, or a season
+  const openKeep = (scope: { season?: number }) =>
+    sheets.open('keep', keepSheetParams(scope.season === undefined ? { kind: 'show', tmdbId: show.tmdb_id } : { kind: 'season', tmdbId: show.tmdb_id, season: scope.season }));
+  const keeping = useKeep();
+  const kept = keepOf(library.keep);
   const onAction = (intent: StageIntent) => {
     // One missing episode: that episode; a run: its season; nothing yet: the show
     const { missing } = library;
@@ -127,7 +136,15 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
     <>
       <TitleHero
         title={show}
-        panel={<PrimaryPanel copy={copy} onAction={onAction} busy={actions.adding ? 'add' : null} titleName={show.title} />}
+        panel={
+          <PrimaryPanel
+            copy={copy}
+            onAction={onAction}
+            busy={actions.adding ? 'add' : null}
+            titleName={show.title}
+            keep={kept && <KeepStatus keep={kept} name={show.title} progress={library.availability_stage !== 'downloading'} />}
+          />
+        }
         renderMore={(placement) => (
           <TitleMoreMenu
             title={show}
@@ -135,6 +152,8 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
             onRefresh={actions.refresh}
             onRemove={actions.remove}
             onStreamFromHDRezka={hdrezka ? () => streamFromHDRezka(seasonNumber === null ? {} : { season: seasonNumber }) : undefined}
+            onKeep={() => openKeep({})}
+            onStopKeeping={kept ? () => void keeping.stop(kept, show.title) : undefined}
           />
         )}
       />
@@ -148,6 +167,7 @@ function ShowDetailView({ show }: { show: ShowTitle }) {
             onOpenSettings={() => sheets.open('show-settings', { tmdb: String(show.tmdb_id) })}
             onFindSeason={(number) => findTorrent({ season: number })}
             onStreamSeason={hdrezka ? (number) => streamFromHDRezka({ season: number }) : undefined}
+            onKeep={openKeep}
             onFindEpisode={findEpisode}
             onOpenEpisode={(episode) => sheets.open('episode', episodeSheetParams(show, episode))}
             view={view}
