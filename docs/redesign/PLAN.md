@@ -369,7 +369,7 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
   ```
   `download` describes the files a download wants (#77) that aren't all on disk.
   - `pct` is what's on disk of them, from the piece cache.
-  - `eta_seconds` is set while they download with a speed, and null otherwise.
+  - `eta_seconds` is set while they download with a speed, and null otherwise: every torrent they're in is `downloading` (`TorrentWanted.state`, in a slot) with a speed. It's the slowest torrent's, their bytes left there at its speed (torrents download side by side), rounded up.
   - `speed_bps` is the torrent's smoothed download speed (B6, #98). For a show, it's the speeds of the torrents its downloading episodes are in, each torrent once.
   - A paused torrent is never downloading.
 - `GET /titles/tv/{tmdb_id}/seasons/{n}`: one season at a time, so 1,000-episode shows stay light. `404 not_in_library` for a show that isn't in the library; `404 not_found` for an unknown season (or season 0 while specials are off).
@@ -1060,6 +1060,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
   TorrentHold { download_id, reason: kept|smart, scope: movie|show|season|episode,
                 title }                // the movie's or the show's title
   ```
+  - **`wanted` and `holds`** are the download manager's last pass (`downloads.Snapshot`: every 30 s and on every change), so a poll never reads the piece cache; `wanted.eta_seconds` is its bytes left at the torrent's speed now, rounded up. A torrent's own `pause` and `resume` run a pass before they answer, so their `wanted.state` is the new one.
   - **Order:** by state (streaming, downloading, paused, idle), then `last_active_at` newest first (nulls last), then `added_at` newest first.
   - **`name`:** the info dict's name when loaded, else the newest job's `torrent_name` (preferring a job that has seen the file list), else the stored metainfo's name (#99), else the magnet's `dn`, else the hash.
   - **`size_bytes`:** the info dict's total when loaded, else that job's `size_bytes`, else the sum of its stored proposals, else the stored metainfo's total (#99), else null. The stored metainfo is read only for a torrent that isn't loaded and lacks a job's name or size, and cached by hash (an info dict never changes).
