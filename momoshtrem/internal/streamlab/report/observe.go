@@ -202,10 +202,14 @@ func observationMarkdown(rep *Rep) string {
 		mode = "--diagnose: DEBUG logs and the flight recorder on, timings not faithful"
 	}
 	fmt.Fprintf(&b, "\n## Observation (rep %d, %s)\n\n", rep.Rep, mode)
-	fmt.Fprintf(&b, "**Cost:** the samplers took %.2f%% of the process's CPU time (%s ms of %s ms; budget 2%%). "+
-		"That's their own busy time: the mutex and block profiles' cost inside the runtime isn't in it, and only an A/B against "+
-		"`--set observe=false` measures it.\n\n",
-		o.OverheadPct, Num(sumBusy(o.Samplers)), Num(o.ProcessCPUMS))
+	core := 0.0
+	if o.WallMS > 0 {
+		core = 100 * sumBusy(o.Samplers) / o.WallMS
+	}
+	fmt.Fprintf(&b, "**Cost:** the samplers took %.2f%% of the process's CPU time (%s ms of %s ms; budget 2%%), %.2f%% of one core over the run. "+
+		"That's their own busy time, wall-clock inside each sample, so a GC pause or preemption during one counts too; "+
+		"the mutex and block profiles' cost inside the runtime isn't in it, and only an A/B against `--set observe=false` measures it.\n\n",
+		o.OverheadPct, Num(sumBusy(o.Samplers)), Num(o.ProcessCPUMS), core)
 	b.WriteString("| Sampler | Every ms | Samples | Busy ms | Max ms | CPU % | Client lock |\n|---|---|---|---|---|---|---|\n")
 	for _, s := range o.Samplers {
 		every := Num(s.EveryMS)
