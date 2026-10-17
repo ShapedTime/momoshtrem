@@ -47,6 +47,22 @@ func startProxy(t *testing.T, target string, cfg ProxyConfig) *Proxy {
 	return p
 }
 
+// WaitStats polls p's stats until ok holds or timeout passes, and returns
+// the last. The proxy counts bytes after it has written them, and a
+// refused connection after it has closed it, so a client can be done
+// before the counters catch up. It's exported (in a test file) for the
+// swarm_test package's tests.
+func WaitStats(t *testing.T, p *Proxy, ok func(ProxyStats) bool, timeout time.Duration) ProxyStats {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	st := p.Stats()
+	for !ok(st) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+		st = p.Stats()
+	}
+	return st
+}
+
 // roundTrip sends n bytes through c and reads them back, checking them.
 func roundTrip(t *testing.T, c net.Conn, n int) error {
 	t.Helper()
@@ -83,7 +99,8 @@ func TestProxy_Forwards(t *testing.T) {
 	if err := roundTrip(t, c, 1<<20); err != nil {
 		t.Fatal(err)
 	}
-	if st := p.Stats(); st.Accepted != 1 || st.Up != 1<<20 || st.Down != 1<<20 {
+	want := func(st ProxyStats) bool { return st.Accepted == 1 && st.Up == 1<<20 && st.Down == 1<<20 }
+	if st := WaitStats(t, p, want, 2*time.Second); !want(st) {
 		t.Errorf("stats = %+v", st)
 	}
 }
@@ -176,7 +193,8 @@ func TestProxy_DropAndVanish(t *testing.T) {
 	if err := roundTrip(t, f, 1000); err != nil {
 		t.Fatalf("after the target came back: %v", err)
 	}
-	if st := p.Stats(); st.Dropped != 2 || st.Refused != 1 || st.Accepted != 3 {
+	want := func(st ProxyStats) bool { return st.Dropped == 2 && st.Refused == 1 && st.Accepted == 3 }
+	if st := WaitStats(t, p, want, 2*time.Second); !want(st) {
 		t.Errorf("stats = %+v, want 2 dropped, 1 refused, 3 accepted", st)
 	}
 }
