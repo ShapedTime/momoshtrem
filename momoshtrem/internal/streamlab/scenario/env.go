@@ -23,6 +23,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/swarm"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // Prometheus names the env reads.
@@ -121,7 +122,9 @@ type failure struct {
 	// timedOut: silent for half the read timeout or more, as a server read
 	// that timed out leaves a body (the server then ends it early).
 	timedOut bool
-	stalled  bool // swarm.Stalled: the piece wanted and incomplete, a seeder connected
+	// stalled: the piece incomplete, a seeder connected, downloads on
+	// (the torrent neither idle nor paused).
+	stalled bool
 	// evicted: the piece cache doesn't hold the piece complete, and
 	// hadData: anacrolix had reported it complete or partial before (F11).
 	evicted bool
@@ -130,8 +133,8 @@ type failure struct {
 }
 
 // known is the known issue whose signature the failure carries: #195's
-// stall (a body silent through a read timeout, at a wanted, incomplete
-// piece with the seeder connected), or F11's quick break at a piece
+// stall (a body silent through a read timeout, at an incomplete piece
+// with the seeder connected and downloads on), or F11's quick break at a piece
 // anacrolix had downloaded (complete or partial) and the cache no longer
 // holds.
 func (f failure) known() string {
@@ -148,7 +151,7 @@ func (f failure) diagnosis() string {
 	silent := fmt.Sprintf("silent %v", f.silence.Round(time.Millisecond))
 	switch f.known() {
 	case "#195":
-		return fmt.Sprintf("known stall (#195): %s, piece %d wanted and incomplete, seeder connected", silent, f.piece)
+		return fmt.Sprintf("known stall (#195): %s, piece %d incomplete, seeder connected, downloads on", silent, f.piece)
 	case "F11":
 		return fmt.Sprintf("F11: broke at once (%s) at piece %d, downloaded before, which the piece cache no longer holds", silent, f.piece)
 	}
@@ -157,7 +160,7 @@ func (f failure) diagnosis() string {
 		why = append(why, "timed out")
 	}
 	if f.stalled {
-		why = append(why, "piece wanted and incomplete, seeder connected")
+		why = append(why, "piece incomplete, seeder connected, downloads on")
 	}
 	if f.evicted {
 		why = append(why, "piece not in the cache")
@@ -250,7 +253,7 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
 		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
 	if tor, ok := e.Stack.Torrent(t.Hash); ok {
-		f.stalled = swarm.Stalled(tor, f.piece)
+		f.stalled = e.stuck(tor, t.Hash, f.piece)
 		f.evicted = !e.cached(tor, f.piece)
 	}
 	f.hadData = e.completions.was(t.Hash, f.piece)
@@ -261,6 +264,23 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	if f.timedOut {
 		e.dumpStatus(fmt.Sprintf("failure-%d.txt", n), f, t)
 	}
+}
+
+// stuck reports whether piece i is #195's stall: incomplete, with a seeder
+// connected and downloads on. swarm.Stalled also wants the piece above
+// None, but it's measured when the client sees the break, after the
+// timed-out handler closed its reader; a reader open 30 s or more resets
+// the file's priorities to None on close (F6), so the piece the read was
+// waiting for reads unwanted then. What the clause is for, that an idle or
+// paused torrent's reads aren't the stall, is checked directly.
+func (e *Env) stuck(tor *atorrent.Torrent, hash string, i int) bool {
+	if swarm.Stalled(tor, i) {
+		return true
+	}
+	if tor.Info() == nil || i < 0 || i >= tor.NumPieces() || tor.Stats().ConnectedSeeders < 1 || tor.PieceState(i).Complete {
+		return false
+	}
+	return e.Stack.Activity == nil || e.Stack.Activity.GetState(hash) == torrent.StateActive
 }
 
 // dumpStatus writes both clients' status to the repetition's folder, for

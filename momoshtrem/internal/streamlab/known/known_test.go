@@ -142,7 +142,7 @@ func TestRegistry(t *testing.T) {
 			t.Errorf("%s: rate %v", is.ID, r)
 		}
 	}
-	for _, id := range []string{"F1", "F2", "F3", "F6", "F11", "F12", "F13", "#195"} {
+	for _, id := range []string{"F1", "F2", "F3", "F6", "F11", "F12", "F13", "#195", "#225"} {
 		if !seen[id] {
 			t.Errorf("%s isn't registered", id)
 		}

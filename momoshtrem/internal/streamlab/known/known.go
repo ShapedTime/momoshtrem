@@ -240,9 +240,20 @@ var Issues = []Issue{
 		Checks: []string{"play-ok"},
 		Doc: "anacrolix v1.60.0's connection writer can miss a wakeup; with one useful peer a read then waits until the " +
 			"keep-alive (60 s), past the lab's read timeout. Its signature: every broken body of the repetition was silent " +
-			"for half the read timeout or more and broke at a wanted, incomplete piece with the seeder connected " +
-			"(swarm.Stalled), on at most two pieces. It hits about 1-4% of reads: one firing is confirmed with more " +
+			"for half the read timeout or more and broke at an incomplete piece with the seeder connected and downloads on " +
+			"(the torrent neither idle nor paused), on at most two pieces. It hits about 1-4% of reads: one firing is confirmed with more " +
 			"repetitions, and firing on every repetition, or on two or more and over 25% of them, is a fail.",
+	},
+	{
+		ID:     "#225",
+		Title:  "A timed-out read's goroutine outlives its closed TorrentFile",
+		Ref:    "#225",
+		Checks: []string{"quiescence"},
+		Doc: "TorrentFile.readContext reads in a goroutine; after a read timeout the file is closed, but anacrolix's " +
+			"reader.Close doesn't wake a waitAvailable blocked on the piece, so the goroutine lives until the piece " +
+			"arrives. It needs a read to time out (a #195 stall, a slow swarm). Its signature: quiescence left nothing " +
+			"but goroutines in anacrolix's waitAvailable under TorrentFile.readContext, after a read timed out in the " +
+			"repetition.",
 	},
 }
 

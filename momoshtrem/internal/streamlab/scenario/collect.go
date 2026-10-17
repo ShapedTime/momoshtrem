@@ -369,7 +369,7 @@ func (c *collector) checks() {
 	add(c.playOK())
 
 	if err := c.quiet.Err(); err != nil {
-		add("quiescence", report.Fail, "", err.Error())
+		add("quiescence", report.Fail, orphanedReads(c.quiet, c.rep.Metrics["read_timeouts"]), err.Error())
 	} else {
 		add("quiescence", report.Pass, "", fmt.Sprintf("quiet after %v (%d labelled anacrolix goroutines inherited)",
 			c.quiet.Waited.Round(time.Millisecond), c.quiet.Inherited))
@@ -388,6 +388,25 @@ func (c *collector) checks() {
 			add(id, report.NA, "", "the script didn't reach it")
 		}
 	}
+}
+
+// orphanedReads is #225's signature on a quiescence failure: nothing left
+// but goroutines blocked in anacrolix's waitAvailable under
+// TorrentFile.readContext, after a read timed out in the repetition: the
+// read goroutine a timed-out read leaves outlives its closed file. ""
+// otherwise.
+func orphanedReads(q checks.QuiescenceResult, timeouts float64) string {
+	if timeouts == 0 || len(q.Leaked) == 0 || q.Requests != 0 || q.Readers != 0 || q.OpenFiles != 0 ||
+		q.BlockedReads != 0 || q.InFlight != 0 || q.Sessions != 0 {
+		return ""
+	}
+	for _, g := range q.Leaked {
+		if !strings.Contains(g.Stack, "github.com/anacrolix/torrent.(*reader).waitAvailable") ||
+			!strings.Contains(g.Stack, "internal/vfs.(*TorrentFile).readContext") {
+			return ""
+		}
+	}
+	return "#225"
 }
 
 // playOK judges the broken bodies: none passes. When all of them carry
