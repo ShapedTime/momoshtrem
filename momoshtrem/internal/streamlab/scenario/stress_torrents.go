@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"strings"
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/known"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
+	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
 
@@ -19,7 +21,9 @@ import (
 var removePauseIdle = &Scenario{
 	Name: "remove-pause-idle",
 	Tier: Stress,
-	Doc: `Readers stream one movie while its torrent is removed, paused and idled under them, at random. WebDAV GETs at random offsets and a VFS file read directly run against a chaos loop. Every moment or two it removes the torrent (svc.RemoveTorrent), pauses it and resumes it a moment later (the activity manager's sticky pause), or leaves it to the activity manager. The idle timeout (1 s, checked every 100 ms) idles it under any read blocked that long.
+	Doc: `Readers stream one movie while its torrent is removed, paused and idled under them, at random. WebDAV GETs at random offsets and a VFS file read directly run against a chaos loop. Every moment or two it removes the torrent (svc.RemoveTorrent), pauses it and resumes it a moment later (the activity manager's sticky pause), or idles it under the reads.
+
+To idle it, the loop holds the seeder, so every read blocks. A blocked read isn't activity, so once no read has started for the idle timeout (1 s, checked every 100 ms), the activity manager idles the torrent under the blocked reads. Their next reads wake it. The loop releases the seeder once it has seen the torrent idle with a read blocked, or after the read timeout plus the idle timeout. The read timeout is 6 s here, so reads start seldom enough for an idle to come.
 
 A removed torrent's open reads fail (its torrent closed), and the next open adds it again, its metadata from the seeder. Reads may fail here. What mustn't happen is a race, a deadlock, a leak, a wrong byte, or the service and the client disagreeing about what's loaded (torrent-consistent). It guards the serialised torrent lifecycle (bf328c5) and the idle wake (ffda214).
 
@@ -27,6 +31,7 @@ The removes keep the data: one that deletes it while a piece hashes deadlocks (#
 	Guards:  []string{"bf328c5", "ffda214"},
 	Timeout: stressTimeout,
 	Params: stressParams(
+		Param{Name: "read_timeout", Kind: Duration, Default: "6s"},
 		Param{Name: "file_size", Kind: Bytes, Default: "96MiB"},
 		Param{Name: "duration", Kind: Duration, Default: "40s", Doc: "How long the chaos runs."},
 		Param{Name: "readers", Kind: Int, Default: "3", Doc: "WebDAV readers; one more reads directly."},
@@ -48,20 +53,22 @@ The removes keep the data: one that deletes it while a piece hashes deadlocks (#
 		}
 		ctx, stop := context.WithTimeout(s.Ctx, s.P.Duration("duration"))
 		defer stop()
-		read := func(w int) error {
+		read := func(w int, r *rand.Rand) error {
 			if w == 0 {
-				return s.directReads(ctx, t)
+				return s.directReads(ctx, t, r)
 			}
 			conn := s.Conn(s.Device(fmt.Sprintf("stress-%d", w)))
 			for ctx.Err() == nil {
-				s.get(ctx, conn, t, s.Rand(t.Size)&^(64<<10-1), (1+s.Rand(32))<<16)
+				off := intn(r, t.Size) &^ (64<<10 - 1)
+				s.get(ctx, conn, t, off, (1+intn(r, 32))<<16)
 			}
 			return nil
 		}
 		chaos := func() error {
+			r := strand(s.base, strandChaos)
 			every := s.P.Duration("chaos_every")
-			for sleepCtx(ctx, every/2+time.Duration(s.Rand(int64(every)))) {
-				s.chaos(ctx, t)
+			for sleepCtx(ctx, every/2+time.Duration(intn(r, int64(every)))) {
+				s.chaos(ctx, t, r)
 			}
 			return nil
 		}
@@ -79,22 +86,67 @@ The removes keep the data: one that deletes it while a piece hashes deadlocks (#
 	}),
 }
 
-// chaos makes one random move on t's torrent.
-func (s *stressRun) chaos(ctx context.Context, t *Title) {
+// chaos makes one random move on t's torrent, its choices from r.
+func (s *stressRun) chaos(ctx context.Context, t *Title, r *rand.Rand) {
 	svc := s.Stack.Service
-	switch s.Rand(4) {
+	switch intn(r, 4) {
 	case 0, 1:
-		s.remove(t, s.P.Bool("delete_data") && s.Rand(2) == 0)
+		s.remove(t, s.P.Bool("delete_data") && intn(r, 2) == 0)
 	case 2:
+		pause := time.Duration(200+intn(r, 1300)) * time.Millisecond
 		svc.Pause(t.Hash)
 		s.count("paused")
-		sleepCtx(ctx, time.Duration(200+s.Rand(1300))*time.Millisecond)
+		sleepCtx(ctx, pause)
 		svc.Resume(t.Hash)
 	case 3:
-		// Leave it to the activity manager: a read blocked over the idle
-		// timeout idles the torrent under it.
-		s.event("left to idle")
+		s.idleUnderReads(ctx, t)
 	}
+}
+
+// idleUnderReads holds t's seeder so the readers' reads block, and waits
+// for the activity manager to idle the torrent under them (a blocked read
+// isn't activity): up to a read timeout, since each read starting marks
+// the torrent active, plus the idle timeout and three checks. It counts an
+// idle seen with a read blocked as "idled under a read", then releases
+// the seeder: the readers' next reads wake the torrent. A seeder can only
+// be held while the leecher is connected to it (a held one refuses new
+// connections): after a remove, it waits up to a read timeout for the
+// readers' next open to add the torrent back and connect, then gives up.
+func (s *stressRun) idleUnderReads(ctx context.Context, t *Title) {
+	am := s.Stack.Activity
+	if am == nil {
+		return
+	}
+	connected := func() bool {
+		tor, ok := s.Torrent(t)
+		return ok && tor.Info() != nil && tor.Stats().ActivePeers > 0
+	}
+	for wait := time.Now().Add(s.Stack.ReadTimeout); !connected(); {
+		if time.Now().After(wait) || !sleepCtx(ctx, 50*time.Millisecond) {
+			s.event("not idled: no connected seeder to hold")
+			return
+		}
+	}
+	t.Seeder.HoldUploads()
+	defer t.Seeder.ReleaseUploads()
+	// The idle lasts until the next read starts, a few milliseconds once
+	// the blocked reads fail ("torrent data downloading disabled"): look
+	// every millisecond.
+	deadline := time.Now().Add(s.Stack.ReadTimeout + s.P.Duration("idle_timeout") + 3*s.P.Duration("idle_check"))
+	for time.Now().Before(deadline) {
+		if am.GetState(t.Hash) == torrent.StateIdle {
+			if s.Counter("momoshtrem_streaming_blocked_reads") > 0 {
+				s.count("idled under a read")
+			} else {
+				s.count("idled between reads")
+			}
+			return
+		}
+		if !sleepCtx(ctx, time.Millisecond) {
+			return
+		}
+	}
+	s.event("not idled: reads kept it active")
 }
 
 // remove removes t's torrent as a direct call, its data deleted with del;
@@ -111,8 +163,8 @@ func (s *stressRun) remove(t *Title, del bool) bool {
 }
 
 // directReads reads t through VFS files opened directly until ctx ends:
-// a file kept for a few reads, then closed.
-func (s *stressRun) directReads(ctx context.Context, t *Title) error {
+// a file kept for a few reads, then closed. Its choices come from r.
+func (s *stressRun) directReads(ctx context.Context, t *Title, r *rand.Rand) error {
 	for ctx.Err() == nil {
 		var f vfs.File
 		var err error
@@ -125,8 +177,9 @@ func (s *stressRun) directReads(ctx context.Context, t *Title) error {
 			sleepCtx(ctx, 100*time.Millisecond)
 			continue
 		}
-		for range 1 + s.Rand(4) {
-			s.readAt(f, t, make([]byte, (1+s.Rand(8))<<15), s.Rand(t.Size)&^(64<<10-1))
+		for range 1 + intn(r, 4) {
+			p := make([]byte, (1+intn(r, 8))<<15)
+			s.readAt(f, t, p, intn(r, t.Size)&^(64<<10-1))
 		}
 		s.call("Close", 2*s.Stack.ReadTimeout, func() { f.Close() })
 	}
@@ -156,13 +209,15 @@ deletePieces marks each piece not complete under the piece's lock, and anacrolix
 			if err := s.Ctx.Err(); err != nil {
 				return err
 			}
+			off := intn(s.rng, t.Size) &^ (64<<10 - 1)
+			after := time.Duration(intn(s.rng, int64(s.P.Duration("remove_within"))+1))
 			ctx, cancel := context.WithCancel(s.Ctx)
 			got := make(chan struct{})
 			go func() {
 				defer close(got)
-				s.get(ctx, conn, t, s.Rand(t.Size)&^(64<<10-1), 4<<20)
+				s.get(ctx, conn, t, off, 4<<20)
 			}()
-			s.Sleep(time.Duration(s.Rand(int64(s.P.Duration("remove_within")) + 1)))
+			s.Sleep(after)
 			ok := s.remove(t, true)
 			cancel()
 			<-got
@@ -218,10 +273,11 @@ Adds of one hash share one attempt and its result, and adds, waits, drops and re
 						return nil
 					})
 				case 1:
-					t := s.Titles[s.Rand(int64(len(s.Titles)))]
+					t := s.Titles[intn(s.rng, int64(len(s.Titles)))]
+					off := intn(s.rng, t.Size) &^ (64<<10 - 1)
 					conn := s.Conn(s.Device(fmt.Sprintf("adder-%d", c)))
 					fns = append(fns, func() error {
-						s.get(s.Ctx, conn, t, s.Rand(t.Size)&^(64<<10-1), 256<<10)
+						s.get(s.Ctx, conn, t, off, 256<<10)
 						return nil
 					})
 				case 2:
@@ -236,9 +292,11 @@ Adds of one hash share one attempt and its result, and adds, waits, drops and re
 					})
 				}
 			}
-			if s.Rand(3) == 0 {
+			racing := intn(s.rng, 3) == 0
+			after := time.Duration(intn(s.rng, 300)) * time.Millisecond
+			if racing {
 				fns = append(fns, func() error {
-					sleepCtx(s.Ctx, time.Duration(s.Rand(300))*time.Millisecond)
+					sleepCtx(s.Ctx, after)
 					if svc.RemoveTorrent(hash, false) == nil {
 						s.count("removed while adding")
 					}

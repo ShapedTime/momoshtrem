@@ -181,27 +181,47 @@ func parseBlock(lines []string) (report.Race, bool) {
 		}
 		a := report.RaceAccess{Op: strings.ToLower(m[2]), Goroutine: g, Frames: s.frames, Created: created[g]}
 		rc.Accesses = append(rc.Accesses, a)
-		sigs = append(sigs, accessSignature(a.Op, s.funcs))
+		sigs = append(sigs, accessSignature(a.Op, s.frames, s.funcs))
 	}
 	if len(rc.Accesses) == 0 {
-		return report.Race{}, false
+		// A report cut off before its first access (a repetition killed
+		// mid-report): still a race, and one no known signature matches.
+		rc.Signature = Unparsed + firstLine(lines[1:])
+		return rc, true
 	}
 	slices.Sort(sigs)
 	rc.Signature = strings.Join(sigs, " | ")
 	return rc, true
 }
 
+// Unparsed starts the signature of a report with no access in it: it
+// matches no known race, so it fails.
+const Unparsed = "unparsed report: "
+
+// firstLine is the first non-empty line, or "(empty)".
+func firstLine(lines []string) string {
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return "(empty)"
+}
+
 // accessSignature is an access's part of a signature: its kind, its top
-// frame, then its top momoshtrem frames below that, the lab's left out
-// (the top frames overall when it ran no momoshtrem code), momoshtrem's
-// prefix dropped: "write anacrolix/torrent.(*reader).clearStorageReader <
+// frame with its file and line, then its top momoshtrem frames below that
+// by function name, the lab's left out (the top frames overall when it ran
+// no momoshtrem code), momoshtrem's prefix dropped:
+// "write anacrolix/torrent.(*reader).clearStorageReader (torrent@v1.60.0/reader.go:452) <
 // internal/streaming.(*PriorityReader).Close < internal/vfs.(*TorrentFile).Close".
-// Function names only: a line that moves doesn't make a known race new.
-func accessSignature(op string, funcs []string) string {
+// The top frame's line tells two races in one function apart: it fails
+// safe, as a line that moves makes a known race new again. frames are the
+// access's "func (file:line)", funcs the same functions bare.
+func accessSignature(op string, frames, funcs []string) string {
 	if len(funcs) == 0 {
 		return op + " ?"
 	}
-	keep := []string{funcs[0]}
+	keep := []string{frames[0]}
 	var own []string
 	for _, f := range funcs[1:] {
 		if strings.HasPrefix(f, Own) && !isLab(f) {

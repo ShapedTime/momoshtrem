@@ -158,12 +158,15 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 - close during a blocked read (`close-blocked-read`)
 - seek during a pending read (`seek-pending-read`)
 - remove, pause or idle during a read (`remove-pause-idle`)
+- remove with its data during a piece hash (#230, `remove-while-hashing`)
 - concurrent adds of one hash (`concurrent-adds`)
 - many readers of one file (`many-readers`)
 - a client abort during a blocked read (F12, `abort-blocked-read`)
 - `InvalidateTree` during opens (after H4: F4, F5; S12 adds it to the tier)
 
 The stress scenarios run production's concurrent readers of streaming state beside their scripts: the reader tracker, the service's lists and details, the activity manager, the sessions, the tree and a metrics scrape. They hold the seeder with `Seeder.HoldUploads`, so reads block, and release it at random moments. They use a 2 s read timeout, an unlimited seeder and smaller streaming windows (the `window` param: 4 MiB readahead, a quarter of that urgent). The code paths are production's; only the sizes differ.
+
+Each strand of a script's choices draws from its own generator, derived from the seed, the scenario and the strand: the pollers, the chaos loop, the script itself, and each worker in each round. So `--set seed=N` replays the offsets, sizes and release moments. Only the goroutines' schedule varies.
 
 **Realism tier:** Sintel or Big Buck Bunny in-process with real DHT and trackers. Its reports use the same schema and never feed the gate.
 
@@ -191,7 +194,7 @@ The stress scenarios run production's concurrent readers of streaming state besi
 
 **`check`** (S7) builds `go build -race -tags disable_libutp` of `cmd/streamlab` into `.streamlab/bin/streamlab-race` and runs the stress tier with it.
 - **Race logs.** Each repetition gets `GORACE="log_path=<rep dir>/race halt_on_error=0 exitcode=0"`. The `WARNING: DATA RACE` blocks become `race_reports` on the repetition and on the report.
-- **Deduplication.** Races are deduplicated by their signature: each access's kind, its top frame and its top momoshtrem frames, by function name.
+- **Deduplication.** Races are deduplicated by their signature. It holds each access's kind, its top frame with file and line, and its top two production momoshtrem frames by function name, the lab's own left out. A report cut off before its first access is kept as an unparsed race, so it fails.
 - **The race check.** check adds a `race` check to every scenario it runs. Any race fails it. A known race explains a failure only by its exact signature (`known.Races`).
 - **Then `go test -race`** over the lab and the streaming path's packages.
 - **The summary.** It writes `check.json` (`streamlab.check/v1`) and `check.md` beside the run's index: the build, the verdicts, every race with its scenarios, every hung repetition with its goroutine dump, and `go test`'s packages.

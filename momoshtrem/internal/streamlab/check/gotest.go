@@ -70,8 +70,8 @@ type testEvent struct {
 }
 
 // GoTestRace runs go test -race -tags Tags -json over pkgs in moduleDir,
-// writing its output as text to dir/TestOutput. STREAMLAB isn't set: the
-// lab's heavy tests skip.
+// writing its output as text to dir/TestOutput. STREAMLAB isn't set, so
+// the lab's heavy tests skip, and neither is GORACE.
 func GoTestRace(ctx context.Context, moduleDir, dir string, pkgs []string) (t Tests) {
 	t = Tests{Command: append([]string{"go", "test", "-race", "-tags", Tags, "-count=1", "-timeout", testTimeout, "-json"}, pkgs...),
 		Verdict: report.VerdictPass, Output: TestOutput}
@@ -86,7 +86,9 @@ func GoTestRace(ctx context.Context, moduleDir, dir string, pkgs []string) (t Te
 
 	cmd := exec.CommandContext(ctx, t.Command[0], t.Command[1:]...)
 	cmd.Dir = moduleDir
-	cmd.Env = append(withoutEnv(os.Environ(), "STREAMLAB"), "CGO_ENABLED=1")
+	// The tests run with the race detector's defaults: an inherited GORACE
+	// (a log_path, say) would hide their reports from this output.
+	cmd.Env = append(withoutEnv(withoutEnv(os.Environ(), "STREAMLAB"), "GORACE"), "CGO_ENABLED=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Verdict, t.Error = report.VerdictError, err.Error()

@@ -3,6 +3,7 @@ package scenario
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
@@ -40,13 +41,16 @@ Each worker's move is one of two. Over WebDAV, a bounded GET whose read times ou
 		for w := range conns {
 			conns[w] = s.Conn(s.Device(fmt.Sprintf("stress-%d", w)))
 		}
-		return s.rounds(t, s.P.Int("rounds"), s.P.Duration("release_within"), func(_, w int) error {
-			off := s.incomplete(t)
-			if s.Rand(2) == 0 {
-				s.get(s.Ctx, conns[w], t, off, (1+s.Rand(16))<<16)
+		return s.rounds(t, s.P.Int("rounds"), s.P.Duration("release_within"), func(_, w int, r *rand.Rand) error {
+			off := s.incomplete(t, r)
+			over := intn(r, 2) == 0
+			size := (1 + intn(r, 16)) << 16
+			pause := time.Duration(intn(r, 300)) * time.Millisecond
+			if over {
+				s.get(s.Ctx, conns[w], t, off, size)
 				return nil
 			}
-			s.readThenClose(t, off, time.Duration(s.Rand(300))*time.Millisecond)
+			s.readThenClose(t, off, size, pause)
 			return nil
 		})
 	}),
@@ -92,13 +96,15 @@ Each round releases the seeder at a random moment, so the drain ends both ways: 
 		go func() {
 			defer close(played)
 			conn := s.Conn(s.Device("stress-play"))
+			r := strand(s.base, strandPlay)
 			for ctx.Err() == nil {
-				s.get(ctx, conn, t, s.incomplete(t), 4<<20)
+				s.get(ctx, conn, t, s.incomplete(t, r), 4<<20)
 			}
 		}()
-		err := s.rounds(t, s.P.Int("rounds"), s.P.Duration("release_within"), func(_, w int) error {
+		err := s.rounds(t, s.P.Int("rounds"), s.P.Duration("release_within"), func(_, w int, r *rand.Rand) error {
 			for range 2 {
-				s.readAt(files[w], t, make([]byte, (1+s.Rand(8))<<15), s.incomplete(t))
+				p := make([]byte, (1+intn(r, 8))<<15)
+				s.readAt(files[w], t, p, s.incomplete(t, r))
 			}
 			return nil
 		})
@@ -134,7 +140,9 @@ The read runs under context.Background() plus read_timeout, not the request's co
 		for i := range s.P.Int("iterations") {
 			t.Seeder.HoldUploads()
 			conn := s.Conn(dev)
-			off := s.incomplete(t)
+			off := s.incomplete(t, s.rng)
+			dropAfter := time.Duration(50+intn(s.rng, 350)) * time.Millisecond
+			releaseAfter := time.Duration(intn(s.rng, int64(timeout+time.Second)))
 			rng := rangeOf(off, 0)
 			ctx, cancel := context.WithCancel(s.Ctx)
 			got := make(chan struct{})
@@ -144,7 +152,7 @@ The read runs under context.Background() plus read_timeout, not the request's co
 			}()
 			// Drop it once the server's read is blocked.
 			blocked := s.waitBlocked(dev.UserAgent, rng, 2*time.Second)
-			if err := s.Sleep(time.Duration(50+s.Rand(350)) * time.Millisecond); err != nil {
+			if err := s.Sleep(dropAfter); err != nil {
 				cancel()
 				return err
 			}
@@ -155,7 +163,7 @@ The read runs under context.Background() plus read_timeout, not the request's co
 				s.event("dropped before its read blocked")
 			}
 			if i > 0 {
-				if err := s.Sleep(time.Duration(s.Rand(int64(timeout + time.Second)))); err != nil {
+				if err := s.Sleep(releaseAfter); err != nil {
 					return err
 				}
 				t.Seeder.ReleaseUploads()
@@ -190,11 +198,11 @@ Every connection gets a PriorityReader of its own (efd4c62), so the tracker, the
 	Script: stressScript(func(s *stressRun) error {
 		t := s.Titles[0]
 		maxRange := max(s.P.Bytes("range_max")>>16, 1)
-		return s.workers(func(w int) error {
+		return s.workers(func(w int, r *rand.Rand) error {
 			conn := s.Conn(s.Device(fmt.Sprintf("reader-%d", w)))
 			for range s.P.Int("rounds") {
-				n := (1 + s.Rand(maxRange)) << 16
-				off := min(s.Rand(t.Size)&^(64<<10-1), t.Size-n)
+				n := (1 + intn(r, maxRange)) << 16
+				off := min(intn(r, t.Size)&^(64<<10-1), t.Size-n)
 				if err := s.Probe(conn, t, max(off, 0), min(n, t.Size)); err != nil {
 					return err
 				}
@@ -219,10 +227,17 @@ func (s *stressRun) connect(t *Title) error {
 	return nil
 }
 
-// workers runs fn(0..n-1) at once, n the workers param unless given, and
-// waits for them.
-func (s *stressRun) workers(fn func(w int) error, n ...int64) error {
-	count := int64(1)
+// workers runs fn(w, r) for w in 0..n-1 at once, n the workers param
+// unless given, each with its own strand r, and waits for them.
+func (s *stressRun) workers(fn func(w int, r *rand.Rand) error, n ...int64) error {
+	return s.inRound(0, fn, n...)
+}
+
+// inRound runs the workers of round (1 and up; 0 outside rounds): worker
+// w's strand is (round, w), so its choices are the same whatever the
+// others' timing.
+func (s *stressRun) inRound(round int, fn func(w int, r *rand.Rand) error, n ...int64) error {
+	var count int64
 	if len(n) > 0 {
 		count = n[0]
 	} else {
@@ -230,15 +245,16 @@ func (s *stressRun) workers(fn func(w int) error, n ...int64) error {
 	}
 	fns := make([]func() error, count)
 	for w := range fns {
-		fns[w] = func() error { return fn(w) }
+		r := strand(s.base, strandWorker, uint64(round), uint64(w))
+		fns[w] = func() error { return fn(w, r) }
 	}
 	return s.Go(fns...)
 }
 
-// readThenClose opens t's file directly, reads it at off (a read that
-// may time out, its goroutine left pending), waits pause, then closes the
-// file: the pending read, if any, outlives its file and wakes later.
-func (s *stressRun) readThenClose(t *Title, off int64, pause time.Duration) {
+// readThenClose opens t's file directly, reads size bytes at off (a read
+// that may time out, its goroutine left pending), waits pause, then closes
+// the file: the pending read, if any, outlives its file and wakes later.
+func (s *stressRun) readThenClose(t *Title, off, size int64, pause time.Duration) {
 	var f vfs.File
 	var err error
 	if !s.call("Open", s.Stack.ReadTimeout, func() { f, err = s.Stack.FS.Open(t.Path) }) {
@@ -248,7 +264,7 @@ func (s *stressRun) readThenClose(t *Title, off int64, pause time.Duration) {
 		s.countShort("open failed: " + errClass(err))
 		return
 	}
-	s.readAt(f, t, make([]byte, (1+s.Rand(8))<<15), off)
+	s.readAt(f, t, make([]byte, size), off)
 	s.Sleep(pause)
 	// The read returned: nothing holds the file, so a Close has no reason
 	// to wait for the seeder. One that does (46e3423's deadlock) outlives

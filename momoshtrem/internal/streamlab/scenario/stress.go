@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -65,7 +66,8 @@ func init() {
 	catalog = append(catalog, stressTier...)
 	Checks = append(Checks,
 		CheckDef{ID: known.RaceCheck, Doc: "The repetition's process reported no data race (streamlab check's -race build: the GORACE log of each repetition). " +
-			"A known race explains a failure only when every race of the repetition carries its exact signature: both accesses' kinds, top frames and top momoshtrem frames."},
+			"A known race explains a failure only when every race of the repetition carries its exact signature: both accesses' kinds, their top frames with file and line, " +
+			"and their top momoshtrem frames. A report cut off before its first access is an unparsed race: a fail."},
 		CheckDef{ID: checkOpsBounded, Doc: "Every call the script made directly returned within its bound, plus 5 s of slack. " +
 			"A ReadAt has twice the read timeout: a drain of the pending read, then the read. A Close after its read has one read timeout, since nothing should hold the file. " +
 			"An Open or a RemoveTorrent has the add timeout plus the read timeout, for an add in flight. A call past its bound is stuck: a deadlock the hard timeout would only show " +
@@ -151,6 +153,11 @@ const opSlack = 5 * time.Second
 type stressRun struct {
 	*Env
 
+	// base derives the script's strands (stress_rand.go); rng is the
+	// script's own, for its sequential code only.
+	base uint64
+	rng  *rand.Rand
+
 	ids atomic.Int64
 
 	mu       sync.Mutex
@@ -169,7 +176,10 @@ type stressRun struct {
 // reported.
 func stressScript(script func(*stressRun) error) func(*Env) error {
 	return func(e *Env) error {
-		s := &stressRun{Env: e, outcomes: map[string]int{}}
+		// Env.RNG is seeded with the seed and the scenario: its first draw
+		// derives every strand.
+		base := e.RNG.Uint64()
+		s := &stressRun{Env: e, base: base, rng: strand(base, strandScript), outcomes: map[string]int{}}
 		e.quietKnown = func(q checks.QuiescenceResult) string {
 			s.mu.Lock()
 			cycle := s.cycle
@@ -405,18 +415,14 @@ func (s *stressRun) get(ctx context.Context, conn *client.Conn, t *Title, off, n
 }
 
 // incomplete is a random offset of t, 64 KiB aligned, whose piece the
-// leecher lacks: any offset before the torrent loads, and the last one
-// tried when every try found a complete piece.
-func (s *stressRun) incomplete(t *Title) int64 {
-	var off int64
-	for range 32 {
-		off = s.Rand(t.Size) &^ (64<<10 - 1)
+// leecher lacks, from r (one draw: pickOffset): any offset before the
+// torrent loads, and the last one tried when every try found a complete
+// piece.
+func (s *stressRun) incomplete(t *Title, r *rand.Rand) int64 {
+	return pickOffset(r, t.Size, func(off int64) bool {
 		tor, ok := s.Torrent(t)
-		if !ok || tor.Info() == nil || !tor.PieceState(t.Piece(off)).Complete {
-			return off
-		}
-	}
-	return off
+		return ok && tor.Info() != nil && tor.PieceState(t.Piece(off)).Complete
+	})
 }
 
 // rounds runs fn rounds times over t's held seeder: each round holds it,
@@ -424,23 +430,25 @@ func (s *stressRun) incomplete(t *Title) int64 {
 // releases it (if fn ended first) and gives the reads woken a moment. A
 // release after a read timed out and its file closed wakes that read's
 // orphaned goroutine against a closed reader; one before lets the read
-// through. Workers of one round run fn(round, w) at once.
-func (s *stressRun) rounds(t *Title, rounds int64, release time.Duration, fn func(round int, w int) error) error {
-	for r := range int(rounds) {
+// through. Workers of one round run fn(round, w, r) at once, each with its
+// own strand r; the script's strand picks the release moments.
+func (s *stressRun) rounds(t *Title, rounds int64, release time.Duration, fn func(round, w int, r *rand.Rand) error) error {
+	for round := range int(rounds) {
 		if err := s.Ctx.Err(); err != nil {
 			return err
 		}
 		t.Seeder.HoldUploads()
-		at := time.Duration(s.Rand(int64(release) + 1))
+		at := time.Duration(intn(s.rng, int64(release)+1))
+		pause := time.Duration(100+intn(s.rng, 400)) * time.Millisecond
 		timer := time.AfterFunc(at, func() { t.Seeder.ReleaseUploads() })
-		err := s.workers(func(w int) error { return fn(r, w) })
+		err := s.inRound(round+1, func(w int, r *rand.Rand) error { return fn(round, w, r) })
 		timer.Stop()
 		t.Seeder.ReleaseUploads()
 		s.event("round")
 		if err != nil {
 			return err
 		}
-		if err := s.Sleep(time.Duration(100+s.Rand(400)) * time.Millisecond); err != nil {
+		if err := s.Sleep(pause); err != nil {
 			return err
 		}
 	}
@@ -465,12 +473,13 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // play. wait returns once it stopped.
 func (s *stressRun) poll(ctx context.Context) (wait func()) {
 	done := make(chan struct{})
+	r := strand(s.base, strandPoll)
 	go func() {
 		defer close(done)
-		for sleepCtx(ctx, time.Duration(5+s.Rand(35))*time.Millisecond) {
-			t := s.Titles[s.Rand(int64(len(s.Titles)))]
+		for sleepCtx(ctx, time.Duration(5+intn(r, 35))*time.Millisecond) {
+			t := s.Titles[intn(r, int64(len(s.Titles)))]
 			svc := s.Stack.Service
-			switch s.Rand(12) {
+			switch intn(r, 12) {
 			case 0:
 				s.Stack.Readers.GetReaders(t.Hash)
 				s.Stack.Readers.Count()

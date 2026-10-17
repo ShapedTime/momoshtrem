@@ -52,7 +52,7 @@ const closeRaceSwapped = `==================
 WARNING: DATA RACE
 Read at 0x00c000b2d0f8 by goroutine 77:
   github.com/anacrolix/torrent.(*reader).clearStorageReader()
-      /Users/x/go/pkg/mod/github.com/anacrolix/torrent@v1.60.0/reader.go:446 +0x7c
+      /Users/x/go/pkg/mod/github.com/anacrolix/torrent@v1.60.0/reader.go:452 +0x7c
   github.com/anacrolix/torrent.(*reader).Close()
       /Users/x/go/pkg/mod/github.com/anacrolix/torrent@v1.60.0/reader.go:388 +0xd8
   github.com/shapedtime/momoshtrem/internal/streaming.(*PriorityReader).Close()
@@ -120,10 +120,10 @@ func TestParse(t *testing.T) {
 		t.Fatalf("got %d races, want 2: the swapped report is the same race", len(races))
 	}
 	r := races[0]
-	const want = "write anacrolix/torrent.(*reader).clearStorageReader < internal/streaming.(*PriorityReader).Close < " +
-		"internal/vfs.(*TorrentFile).Close | " +
-		"write anacrolix/torrent.(*reader).initStorageReader < internal/streaming.(*PriorityReader).Read < " +
-		"internal/vfs.(*TorrentFile).readContext.func1"
+	const want = "write anacrolix/torrent.(*reader).clearStorageReader (torrent@v1.60.0/reader.go:452) < " +
+		"internal/streaming.(*PriorityReader).Close < internal/vfs.(*TorrentFile).Close | " +
+		"write anacrolix/torrent.(*reader).initStorageReader (torrent@v1.60.0/reader.go:441) < " +
+		"internal/streaming.(*PriorityReader).Read < internal/vfs.(*TorrentFile).readContext.func1"
 	if r.Signature != want || r.Count != 3 {
 		t.Errorf("signature = %q, count %d; want %q, 3", r.Signature, r.Count, want)
 	}
@@ -140,7 +140,8 @@ func TestParse(t *testing.T) {
 		t.Errorf("text %q…, where %v", r.Text[:60], r.Where)
 	}
 	m := races[1]
-	if m.Signature != "write runtime.mapaccess2_fast64 < main.main | write runtime.mapaccess2_fast64 < main.main.func4" {
+	if m.Signature != "write runtime.mapaccess2_fast64 (maps/runtime_fast64.go:85) < main.main | "+
+		"write runtime.mapaccess2_fast64 (maps/runtime_fast64.go:85) < main.main.func4" {
 		t.Errorf("map race signature = %q", m.Signature)
 	}
 	if m.Accesses[1].Goroutine != "main" {
@@ -188,10 +189,44 @@ Previous write at 0x00c0001a6020 by goroutine 8:
 	}
 	poller, _ := race.Parse(strings.NewReader(report("  github.com/shapedtime/momoshtrem/internal/streamlab/scenario.(*stressRun).poll.func1()\n      /src/x.go:1 +0x1\n")), "")
 	scenario, _ := race.Parse(strings.NewReader(report("  github.com/shapedtime/momoshtrem/internal/streamlab/scenario.(*Env).ServerPositions()\n      /src/x.go:2 +0x1\n")), "")
-	const want = "read internal/streaming.(*PriorityReader).Snapshot < internal/streaming.(*ReaderTracker).GetReaders | " +
-		"write internal/streaming.(*PriorityReader).Read < internal/vfs.(*TorrentFile).readContext.func1"
+	const want = "read internal/streaming.(*PriorityReader).Snapshot (streaming/reader.go:62) < internal/streaming.(*ReaderTracker).GetReaders | " +
+		"write internal/streaming.(*PriorityReader).Read (streaming/reader.go:143) < internal/vfs.(*TorrentFile).readContext.func1"
 	if len(poller) != 1 || len(scenario) != 1 || poller[0].Signature != want || scenario[0].Signature != want {
 		t.Errorf("signatures:\n%v\n%v\nwant %q", poller, scenario, want)
+	}
+}
+
+// Two races in one function with the same callers, on different lines
+// (two fields), are two races: a known one can't hide a new one beside
+// it. A line that moves below the top frame changes nothing.
+func TestSignatureKeepsTheTopLine(t *testing.T) {
+	other := strings.Replace(closeRace, "reader.go:452 +0x7c", "reader.go:447 +0x5c", 1)
+	a, _ := race.Parse(strings.NewReader(closeRace), "")
+	b, _ := race.Parse(strings.NewReader(other), "")
+	if a[0].Signature == b[0].Signature {
+		t.Errorf("two lines of clearStorageReader share a signature: %q", a[0].Signature)
+	}
+	if !strings.Contains(b[0].Signature, "clearStorageReader (torrent@v1.60.0/reader.go:447)") {
+		t.Errorf("signature = %q", b[0].Signature)
+	}
+	lower := strings.Replace(closeRace, "streaming/reader.go:210 +0x2a0", "streaming/reader.go:215 +0x2a0", 1)
+	c, _ := race.Parse(strings.NewReader(lower), "")
+	if c[0].Signature != a[0].Signature {
+		t.Errorf("a caller's line changed the signature:\n%q\n%q", c[0].Signature, a[0].Signature)
+	}
+}
+
+// A report cut off before its first access (a process killed mid-report)
+// is kept, unparsed, so it fails rather than vanishes.
+func TestParseTruncated(t *testing.T) {
+	races, err := race.Parse(strings.NewReader("==================\nWARNING: DATA RACE\n"), "rep-1/race.7")
+	if err != nil || len(races) != 1 || !strings.HasPrefix(races[0].Signature, race.Unparsed) || races[0].Where[0] != "rep-1/race.7" {
+		t.Fatalf("races = %+v, %v", races, err)
+	}
+	cut := closeRace[:strings.Index(closeRace, "Write at")] + "Wri"
+	races, _ = race.Parse(strings.NewReader(cut), "")
+	if len(races) != 1 || races[0].Signature != race.Unparsed+"Wri" {
+		t.Errorf("a report cut mid-header = %+v", races)
 	}
 }
 
