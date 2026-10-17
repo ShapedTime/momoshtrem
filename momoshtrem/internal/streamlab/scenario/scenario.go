@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/config"
+	lib "github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/swarm"
 )
 
 // Tier groups scenarios by purpose and cost.
@@ -113,11 +115,22 @@ func (sc *Scenario) Resolve(sets map[string]string) (Params, error) {
 }
 
 // Media is a scenario's content: torrents and the library entries that
-// play their files.
+// play their files, and HDRezka movies (Remote).
 type Media struct {
 	Torrents []media.Spec
 	Movies   []MovieRef
 	Episodes []EpisodeRef
+	// Remote are HDRezka movies, which the fake CDN serves.
+	Remote []RemoteRef
+}
+
+// RemoteRef is an HDRezka movie: Stream, in its quality, whose bytes are
+// the first file of Spec, served by the fake CDN.
+type RemoteRef struct {
+	Title  string
+	Year   int
+	Spec   media.Spec
+	Stream lib.StreamRef
 }
 
 // MovieRef is a movie playing file File of torrent Torrent.
@@ -135,11 +148,33 @@ type EpisodeRef struct {
 	Torrent, File         int
 }
 
-// Swarm is a scenario's seeders: one per torrent.
+// Swarm is a scenario's seeders: one per torrent, or Seeders.
 type Swarm struct {
 	// SeederRate caps each seeder's upload, in bytes per second; 0 is
 	// unlimited.
 	SeederRate int64
+	// Seeders, when set, are each torrent's seeders, in place of the one
+	// at SeederRate.
+	Seeders []SeederSpec
+}
+
+// SeederSpec is one seeder of a torrent, and how the leecher reaches it.
+type SeederSpec struct {
+	// Rate caps its upload, in bytes per second; 0 is unlimited.
+	Rate int64
+	// Proxy puts it behind a TCP proxy shaped so (latency, jitter,
+	// bandwidth), whose address is the one the leecher dials; nil: the
+	// leecher dials the seeder.
+	Proxy *swarm.ProxyConfig
+	// Alias has the leecher dial it by its alias (swarm.Alias), so
+	// anacrolix sees an IP of its own: banning it drops it alone.
+	Alias bool
+	// Corrupt, CorruptServes, CorruptHold and Missing are its
+	// swarm.SeederConfig's.
+	Corrupt       []int
+	CorruptServes int
+	CorruptHold   time.Duration
+	Missing       []int
 }
 
 // Stack is a scenario's stack config beyond the common params.
@@ -149,6 +184,9 @@ type Stack struct {
 	// IdleCheckInterval is the activity manager's (SetCheckInterval); 0
 	// keeps production's 30 s.
 	IdleCheckInterval time.Duration
+	// HDRezkaReadTimeout bounds a remote file's opens and silent reads;
+	// production's 30 s when 0 (stack.HDRezkaReadTimeout).
+	HDRezkaReadTimeout time.Duration
 }
 
 // CommonParams are every scenario's params. A scenario redeclares one to
@@ -169,6 +207,7 @@ var CommonParams = []Param{
 	{Name: "settle", Kind: Duration, Default: "15s", Doc: "How long the quiescence check waits for the stack to be quiet after the last request."},
 	{Name: "residual_window", Kind: Duration, Default: "3s", Doc: "How long after quiescence the residual download keeps being measured."},
 	{Name: "probe_bytes", Kind: Bytes, Default: "64KiB", Doc: "A header or footer probe's size."},
+	{Name: "discovery", Kind: Duration, Default: "0s", Doc: "How long the leecher takes to find the seeders: the magnet carries no x.pe, and the lab adds them as a tracker would (Torrent.AddPeers, untrusted) this long after the torrent loads. 0: x.pe, at once."},
 }
 
 // CheckDef describes a check.
@@ -185,12 +224,12 @@ var Checks = []CheckDef{
 	{ID: "script", Doc: "The scenario ran its steps to the end: no request it needed failed outright."},
 	{ID: "integrity", Doc: "Every byte received matched the media: zero mismatched bytes."},
 	{ID: "http", Doc: "Every Range GET answered 206 with the right Content-Range and Content-Length, every HEAD 200 with the size and Accept-Ranges, and no handler panicked."},
-	{ID: "play-ok", Doc: "Every playback and probe got its bytes: no body broke before its end and no request failed. Known signatures, when every failure of the repetition carries the same one: #195, a body silent for half the read timeout or more that broke at an incomplete piece with the seeder connected and downloads on, on at most two pieces; F11, a body that broke within 3 s of its last byte at a piece anacrolix had complete and the cache no longer holds."},
-	{ID: "quiescence", Doc: "Within the settle time after the last request: no request, reader, open file, blocked read or in-flight request left, no goroutine a request leaked, and no session left once the sessions clock is skewed 31 s. #225 explains a failure where nothing is left but goroutines in anacrolix's waitAvailable under TorrentFile.readContext, after a read timed out."},
+	{ID: "play-ok", Doc: "Every playback and probe got its bytes: no body broke before its end and no request failed. Known signatures, when every failure of the repetition carries the same one: #195, a body silent for half the read timeout or more that broke at an incomplete piece with the seeder connected and downloads on, on at most two pieces; F11, a body that broke within 3 s of its last byte at a piece anacrolix had complete and the cache no longer holds. A script's Env.Expect excuses the bodies a fault it injects is meant to break, before their first byte at the offset it names, and no others."},
+	{ID: "quiescence", Doc: "Within the settle time after the last request: no request, reader, open file, blocked read or in-flight request left, no goroutine a request leaked, and no session left once the sessions clock is skewed 31 s; with HDRezka, no CDN body open and all 8 streamer slots free. #225 explains a failure where nothing is left but goroutines in anacrolix's waitAvailable under TorrentFile.readContext, after a read timed out."},
 	{ID: "propfind-no-load", Doc: "A Depth 1 PROPFIND of a folder loads none of its torrents (F3). n/a when one was loaded before (F3Result.Conclusive)."},
 	{ID: "no-sniff-reads", Doc: "PROPFINDs and HEADs create no reader: nothing sniffs content at offset 0 (F1). Where the MIME table resolves .mkv it passes trivially."},
 	{ID: "etag-stable", Doc: "HEADs and PROPFINDs of one file give one ETag, and a Range GET with that ETag as If-Range answers 206 (F2). F2's signature: several ETags, and the If-Range GET answered 200."},
-	{ID: "abort-lag", Doc: "Every handler ends within abort_lag_max of its client dropping the request (F12). F12's signature: it ended within the read timeout plus a second."},
+	{ID: "abort-lag", Doc: "Every handler ends within abort_lag_max of its client dropping the request (F12). F12's signature: it ended within the read timeout plus a second. An HDRezka file's handler carries #232's: it ended within the remote read timeout plus a second."},
 	{ID: "close-keeps-windows", Doc: "Closing a reader lowers no incomplete piece of another open reader's window (F6; its signature: every lowered piece went to None). n/a when that window had no incomplete wanted piece, or the closing handler didn't return."},
 	{ID: "open-keeps-windows", Doc: "Opening a reader lowers no incomplete piece of another open reader's window (F13; its signature: every lowered piece is in the file's header or footer). n/a when that window had no incomplete piece above High where the new reader prioritizes."},
 	{ID: "cache-holds-complete", Doc: "No piece anacrolix calls complete was evicted from the piece cache (F11). n/a when everything complete fits in the cache."},

@@ -20,6 +20,18 @@ type Integrity struct {
 	checked    int64
 	mismatched int64
 	first      *BadByte
+	explain    func(BadByte) string
+	explained  map[string]int64
+}
+
+// Explain sets how mismatches are explained: fn names the known issue
+// whose signature a mismatched byte carries, "" for none. Explained
+// mismatches still count (IntegrityResult.Mismatched); IntegrityResult.
+// Explained counts them by issue. Set it before the first Check.
+func (c *Integrity) Explain(fn func(BadByte) string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.explain = fn
 }
 
 // BadByte is a byte that didn't match the media.
@@ -67,13 +79,24 @@ func (c *Integrity) Check(file int, off int64, got []byte) {
 			continue
 		}
 		c.mismatched++
+		if c.first != nil && c.explain == nil {
+			continue
+		}
+		abs := f.Offset + off + int64(i)
+		bad := BadByte{File: f.Path, Offset: off + int64(i), Torrent: abs, Piece: int(abs / c.layout.PieceLength()), Got: b}
+		if i < inFile {
+			bad.Want = want[i]
+		}
 		if c.first == nil {
-			abs := f.Offset + off + int64(i)
-			bad := BadByte{File: f.Path, Offset: off + int64(i), Torrent: abs, Piece: int(abs / c.layout.PieceLength()), Got: b}
-			if i < inFile {
-				bad.Want = want[i]
-			}
 			c.first = &bad
+		}
+		if c.explain != nil {
+			if id := c.explain(bad); id != "" {
+				if c.explained == nil {
+					c.explained = map[string]int64{}
+				}
+				c.explained[id]++
+			}
 		}
 	}
 	c.checked += int64(len(got))
@@ -85,6 +108,18 @@ type IntegrityResult struct {
 	Mismatched int64
 	// First is the first mismatch seen; nil without one.
 	First *BadByte
+	// Explained counts the mismatches a known issue explains, by issue
+	// (Explain); the rest are unexplained.
+	Explained map[string]int64
+}
+
+// Unexplained is how many mismatches no known issue explains.
+func (r IntegrityResult) Unexplained() int64 {
+	n := r.Mismatched
+	for _, k := range r.Explained {
+		n -= k
+	}
+	return n
 }
 
 // Result returns what was found so far.
@@ -95,6 +130,12 @@ func (c *Integrity) Result() IntegrityResult {
 	if c.first != nil {
 		first := *c.first
 		r.First = &first
+	}
+	if len(c.explained) > 0 {
+		r.Explained = make(map[string]int64, len(c.explained))
+		for id, n := range c.explained {
+			r.Explained[id] = n
+		}
 	}
 	return r
 }

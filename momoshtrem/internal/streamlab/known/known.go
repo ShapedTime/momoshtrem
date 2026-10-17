@@ -257,6 +257,30 @@ var Issues = []Issue{
 			"repetitions, and firing on every repetition, or on two or more and over 25% of them, is a fail.",
 	},
 	{
+		ID:      "#231",
+		Title:   "The responsive reader serves a chunk before its piece's hash check",
+		Ref:     "#231",
+		Checks:  []string{"integrity"},
+		MaxRate: Always,
+		Doc: "PriorityReader sets anacrolix's reader responsive, so a read returns a chunk as soon as it arrives, before " +
+			"its piece is verified: a bad peer's bytes reach the player, and the hash failure only fixes later reads. Its " +
+			"signature: every mismatched byte is one a lab seeder flipped on purpose (corrupt-piece's: the first byte of " +
+			"each chunk of the corrupt piece, the media's byte inverted). Any other mismatch is a plain fail.",
+	},
+	{
+		ID:      "#232",
+		Title:   "A dropped HDRezka request's handler holds its streamer slot until its read gives up",
+		Ref:     "#232",
+		Checks:  []string{"abort-lag"},
+		MaxRate: Always,
+		Doc: "RemoteFile opens and reads under context.Background and its idle watchdog, not the request's context: a " +
+			"handler blocked on a stalled CDN body outlives its client's drop, holding one of the streamer's 8 slots, so " +
+			"a scrub during a CDN stall can take them all (F12's HDRezka counterpart). Its signature: every handler over " +
+			"abort_lag_max served an HDRezka file and ended within the remote read timeout (its watchdog) plus a second. " +
+			"In general a handler can linger up to 3× that (the reopen's open and read too), but the lab's stall ends " +
+			"with the watchdog, so a longer lag is a regression.",
+	},
+	{
 		ID:     "#225",
 		Title:  "A timed-out read's goroutine outlives its closed TorrentFile",
 		Ref:    "#225",

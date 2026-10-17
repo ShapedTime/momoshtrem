@@ -133,6 +133,11 @@ type checker struct {
 	got, want []byte
 	checked   int64
 	status    func() string // describes both clients when a read fails
+	// known, when set, names the mismatches a known issue explains (by
+	// torrent offset and the bytes): they're counted in bad, and only the
+	// others fail the test.
+	known func(abs int64, got, want byte) bool
+	bad   int
 }
 
 // read reads n bytes at the file offset off (fewer at the end of the file)
@@ -159,6 +164,10 @@ func (c *checker) read(off int64, n int) {
 		c.t.Fatal(err)
 	}
 	for i := range got {
+		if got[i] != want[i] && c.known != nil && c.known(c.f.Offset+off+int64(i), got[i], want[i]) {
+			c.bad++
+			continue
+		}
 		if got[i] != want[i] {
 			abs := c.f.Offset + off + int64(i)
 			c.t.Fatalf("byte %d of %s (torrent offset %d, piece %d) = %#02x, want %#02x",

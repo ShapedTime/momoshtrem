@@ -1,6 +1,8 @@
 // Package swarm runs streamlab's synthetic peers (docs/streamlab/PLAN.md
-// §5): anacrolix seeders whose pieces are generated from a media.Layout, on
-// loopback, found through the magnet's x.pe peer address.
+// §5): anacrolix seeders whose pieces are generated from a media.Layout
+// (paced, partial, or serving a corrupt piece), on loopback, found through
+// the magnet's x.pe peer address, directly or through a Proxy that shapes
+// the link (latency, jitter, bandwidth) and cuts it (Drop, Vanish).
 package swarm
 
 import (

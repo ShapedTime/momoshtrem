@@ -11,15 +11,12 @@ import (
 	"runtime/metrics"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
-
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/client"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
-	"github.com/shapedtime/momoshtrem/internal/streamlab/swarm"
 )
 
 // RunOptions are a repetition's options.
@@ -94,39 +91,22 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	if cache == nil {
 		cache = media.DefaultCache()
 	}
-	var (
-		layouts []*media.Layout
-		infos   []*metainfo.MetaInfo
-		seeders []*swarm.Seeder
-	)
-	defer func() {
-		for _, s := range seeders {
-			s.Close()
-		}
-	}()
-	for i, spec := range m.Torrents {
-		l, err := media.New(spec)
-		if err != nil {
-			return nil, toolErr("torrent %d: %w", i, err)
-		}
-		mi, _, err := cache.Metainfo(l)
-		if err != nil {
-			return nil, toolErr("torrent %d's metainfo: %w", i, err)
-		}
-		s, err := swarm.StartSeeder(swarm.SeederConfig{Layout: l, Metainfo: mi, UploadRate: sw.SeederRate,
-			Name: fmt.Sprintf("streamlab-seeder-%d", i)})
-		if err != nil {
-			return nil, toolErr("seeder %d: %w", i, err)
-		}
-		layouts, infos, seeders = append(layouts, l), append(infos, mi), append(seeders, s)
+	ss, err := startSwarm(m, sw, p.Duration("discovery"), seed, cache)
+	if err != nil {
+		return nil, err
 	}
+	defer ss.close()
+	e.swarm = ss
 
-	so, titles, err := library(m, layouts, seeders)
+	so, titles, err := library(m, ss)
 	if err != nil {
 		return nil, toolErr("%w", err)
 	}
 	so.ConfigPath = opts.ConfigPath
 	so.IdleCheckInterval = st.IdleCheckInterval
+	if ss.links != nil {
+		so.HDRezka, so.HDRezkaReadTimeout = ss.links, st.HDRezkaReadTimeout
+	}
 	so.Tune = func(c *config.Config) {
 		c.Torrent.ReadTimeout = int(math.Ceil(p.Duration("read_timeout").Seconds()))
 		c.Torrent.StartPaused = p.Bool("start_paused")
@@ -135,7 +115,7 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 		}
 	}
 	if p.Bool("stored") {
-		so.Stored = infos
+		so.Stored = ss.infos()
 	}
 	s, err := stack.Start(so)
 	if err != nil {
@@ -143,6 +123,11 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	}
 	defer s.Close()
 	e.Stack, e.Titles = s, titles
+	if d := p.Duration("discovery"); d > 0 {
+		stopDiscovery := make(chan struct{})
+		defer close(stopDiscovery)
+		ss.discover(s, d, stopDiscovery)
+	}
 
 	samples := startSampler(s)
 	e.watchCompletions()
@@ -158,6 +143,7 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	downloadedAtClose := e.Downloaded()
 
 	q := checks.Quiescence(context.WithoutCancel(ctx), s, p.Duration("settle"))
+	rq := e.remoteQuiescence(p.Duration("settle") - q.Waited)
 	residualWindow := p.Duration("residual_window")
 	time.Sleep(residualWindow)
 	downloadedAfter := e.Downloaded()
@@ -173,7 +159,7 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 		Seed:    seed,
 		Metrics: map[string]float64{},
 	}
-	c := collector{e: e, sc: sc, rep: rep, players: players, quiet: q, scriptErr: scriptErr}
+	c := collector{e: e, sc: sc, rep: rep, players: players, quiet: q, remote: rq, scriptErr: scriptErr}
 	c.metrics(wall, downloadedAtClose, downloadedAfter, residualWindow)
 	c.sessions()
 	c.checks()
@@ -207,24 +193,28 @@ func runScript(sc *Scenario, e *Env) (err error) {
 }
 
 // library builds the stack's library from the media: each title's paths,
-// its seeder's magnet and its integrity check (one per torrent).
-func library(m Media, layouts []*media.Layout, seeders []*swarm.Seeder) (stack.Options, []*Title, error) {
+// its torrent's magnet and seeders and its integrity check (one per
+// torrent), then the HDRezka movies.
+func library(m Media, ss *swarmSet) (stack.Options, []*Title, error) {
 	var so stack.Options
 	var titles []*Title
-	integrity := make([]*checks.Integrity, len(layouts))
-	for i, l := range layouts {
-		integrity[i] = checks.NewIntegrity(l)
+	integrity := make([]*checks.Integrity, len(ss.torrents))
+	for i, ts := range ss.torrents {
+		integrity[i] = newIntegrity(ts.layout)
+		explainUnverified(ts, integrity[i])
 	}
 	source := func(torrent, file int) (stack.Source, error) {
-		if torrent < 0 || torrent >= len(layouts) || file < 0 || file >= len(layouts[torrent].Files()) {
+		if torrent < 0 || torrent >= len(ss.torrents) || file < 0 || file >= len(ss.torrents[torrent].layout.Files()) {
 			return stack.Source{}, fmt.Errorf("no file %d in torrent %d", file, torrent)
 		}
-		return stack.Source{Magnet: seeders[torrent].Magnet(), Layout: layouts[torrent], File: file}, nil
+		ts := ss.torrents[torrent]
+		return stack.Source{Magnet: ts.magnet, Layout: ts.layout, File: file}, nil
 	}
 	title := func(name, path, dir string, src stack.Source, torrent int) *Title {
 		f := src.Layout.Files()[src.File]
-		return &Title{Name: name, Path: path, Dir: dir, Hash: seeders[torrent].InfoHash(), Layout: src.Layout,
-			File: src.File, Offset: f.Offset, Size: f.Size, Integrity: integrity[torrent], Seeder: seeders[torrent]}
+		ts := ss.torrents[torrent]
+		return &Title{Name: name, Path: path, Dir: dir, Hash: ts.hash, Layout: src.Layout, File: src.File,
+			Offset: f.Offset, Size: f.Size, Integrity: integrity[torrent], Seeder: ts.peers[0].Seeder, Peers: ts.peers}
 	}
 	for _, ref := range m.Movies {
 		src, err := source(ref.Torrent, ref.File)
@@ -244,6 +234,7 @@ func library(m Media, layouts []*media.Layout, seeders []*swarm.Seeder) (stack.O
 		so.Episodes = append(so.Episodes, ep)
 		titles = append(titles, title(fmt.Sprintf("%s S%02dE%02d", ref.Show, ref.Season, ref.Episode), ep.Path(), ep.Dir(), src, ref.Torrent))
 	}
+	titles = append(titles, ss.remoteLibrary(m, &so)...)
 	return so, titles, nil
 }
 
