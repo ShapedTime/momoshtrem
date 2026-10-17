@@ -249,7 +249,7 @@ var Issues = []Issue{
 		ID:     "#195",
 		Title:  "anacrolix loses a writer wakeup: a read waits up to the 1-minute keep-alive",
 		Ref:    "#195",
-		Checks: []string{"play-ok"},
+		Checks: []string{"play-ok", "idle-resume"},
 		Doc: "anacrolix v1.60.0's connection writer can miss a wakeup; with one useful peer a read then waits until the " +
 			"keep-alive (60 s), past the lab's read timeout. Its signature: every broken body of the repetition was silent " +
 			"for half the read timeout or more and broke at an incomplete piece with the seeder connected and downloads on " +

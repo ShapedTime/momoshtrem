@@ -265,6 +265,27 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	}
 }
 
+// knownSince is "#195" when the bodies that broke since t all carry
+// #195's signature (at least one did), "" otherwise.
+func (e *Env) knownSince(t time.Time) string {
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	n := 0
+	for _, f := range e.rec.failures {
+		if f.at.Before(t) {
+			continue
+		}
+		if f.known() != "#195" {
+			return ""
+		}
+		n++
+	}
+	if n == 0 {
+		return ""
+	}
+	return "#195"
+}
+
 // stuck reports whether piece i is #195's stall: incomplete, with a seeder
 // connected and downloads on. swarm.Stalled also wants the piece above
 // None, but it's measured when the client sees the break, after the

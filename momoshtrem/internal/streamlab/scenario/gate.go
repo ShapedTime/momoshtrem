@@ -543,6 +543,12 @@ The idle timeout stays above the read timeout, as production's (300 s against 12
 		if err := e.Live(p.Watch(watch)); err != nil {
 			return err
 		}
+		if p.Err() != nil {
+			// Nothing to pause: play-ok judges the broken playback.
+			e.Check("idle-resume", report.NA, "", "the playback broke before the pause: "+p.Err().Error())
+			p.Stop()
+			return nil
+		}
 		p.Pause()
 		// Hold the pause until the torrent idles (after the server has
 		// filled the connection's buffers and the idle timeout has passed),
@@ -563,6 +569,7 @@ The idle timeout stays above the read timeout, as production's (300 s against 12
 		}
 		e.Note("paused %v", time.Since(paused).Round(100*time.Millisecond))
 		received := p.Model().Received()
+		resumed := time.Now()
 		if err := e.Live(p.Watch(watch)); err != nil {
 			return err
 		}
@@ -572,10 +579,13 @@ The idle timeout stays above the read timeout, as production's (300 s against 12
 			state = string(e.Stack.Activity.GetState(t.Hash))
 		}
 		ev := fmt.Sprintf("idle during the pause: %v; %s received after it; state after: %s", idled, report.Bytes(more), state)
-		if idled && more > 0 && state == "active" {
+		switch {
+		case idled && more > 0 && state == "active":
 			e.Check("idle-resume", report.Pass, "", ev)
-		} else {
-			e.Check("idle-resume", report.Fail, "", ev)
+		default:
+			// A resumed read that stalled with #195's signature (its
+			// signature C, a wake right after AllowDataDownload) carries it.
+			e.Check("idle-resume", report.Fail, e.knownSince(resumed), ev)
 		}
 		p.Stop()
 		return nil

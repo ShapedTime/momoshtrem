@@ -194,7 +194,7 @@ var Checks = []CheckDef{
 	{ID: "close-keeps-windows", Doc: "Closing a reader lowers no incomplete piece of another open reader's window (F6; its signature: every lowered piece went to None). n/a when that window had no incomplete wanted piece, or the closing handler didn't return."},
 	{ID: "open-keeps-windows", Doc: "Opening a reader lowers no incomplete piece of another open reader's window (F13; its signature: every lowered piece is in the file's header or footer). n/a when that window had no incomplete piece above High where the new reader prioritizes."},
 	{ID: "cache-holds-complete", Doc: "No piece anacrolix calls complete was evicted from the piece cache (F11). n/a when everything complete fits in the cache."},
-	{ID: "idle-resume", Doc: "A pause past the idle timeout idles the torrent, and playback resumes after it."},
+	{ID: "idle-resume", Doc: "A pause past the idle timeout idles the torrent, and playback resumes after it. n/a when the playback broke before the pause. #195 explains a failure when every body that broke after the resume carries its signature."},
 	{ID: "next-prefetch", Doc: "Opening an episode prefetches the next one's header at Normal: some of it is complete when the next episode opens (3907536)."},
 }
 
