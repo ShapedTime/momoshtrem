@@ -21,9 +21,9 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/shapedtime/momoshtrem/internal/artwork"
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
-	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
 
 // queryCounter counts the queries pgx runs.
@@ -100,20 +100,27 @@ func imageServer(t *testing.T) *httptest.Server {
 // integration is a catalog over the real repository, TMDB cache and colour
 // extractor, with seeded rows that are removed afterwards.
 type integration struct {
-	t        *testing.T
-	db       *library.DB
-	counter  *queryCounter
-	svc      *Service
-	torrents *fakeTorrents
-	tag      string // unique per run: titles, TMDB IDs and backdrops
-	baseID   int
+	t         *testing.T
+	db        *library.DB
+	counter   *queryCounter
+	svc       *Service
+	torrents  *fakeTorrents
+	downloads *fakeDownloads
+	tag       string // unique per run: titles, TMDB IDs and backdrops
+	baseID    int
 }
+
+// A file a download wants, on disk, and one it's still fetching.
+var (
+	onDisk   = downloads.FileStatus{Bytes: 10, DoneBytes: 10, Complete: true, State: downloads.StateDone}
+	fetching = downloads.FileStatus{Bytes: 10, DoneBytes: 3, State: downloads.StateDownloading}
+)
 
 func newIntegration(t *testing.T) *integration {
 	db, counter := openTracedDB(t)
 	nanos := time.Now().UnixNano()
 	return &integration{t: t, db: db, counter: counter, torrents: &fakeTorrents{loaded: map[string]fakeTorrent{}},
-		tag: fmt.Sprintf("It%d", nanos), baseID: 1_500_000_000 + int(nanos/1000%400_000_000)}
+		downloads: newFakeDownloads(), tag: fmt.Sprintf("It%d", nanos), baseID: 1_500_000_000 + int(nanos/1000%400_000_000)}
 }
 
 func (it *integration) id(n int) int { return it.baseID + n }
@@ -431,8 +438,10 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 	type variant struct {
 		name  string
 		build func(*library.Show)
-		// The files of the show's loaded, active torrent (hash+activeHash).
-		active     map[string]torrent.FileProgress
+		// The files of the show's torrent (hash+activeHash) a download
+		// wants: those not all on disk, in a state that wants bytes, are
+		// downloading.
+		active     map[string]downloads.FileStatus
 		activeHash string
 		size       int64  // the library's size_bytes: each file once
 		want       string // "stage ready/total", when set
@@ -458,7 +467,13 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			ids := it.season(s, 1, 2, "2020-01-03")
 			it.assign(library.ItemTypeEpisode, ids[1], hash+"-d", "E01.mkv")
 			it.assign(library.ItemTypeEpisode, ids[2], hash+"-d", "E02.mkv")
-		}, map[string]torrent.FileProgress{"E02.mkv": {Length: 10, BytesCompleted: 3}}, "-d", 2000, ""},
+		}, map[string]downloads.FileStatus{"E01.mkv": onDisk, "E02.mkv": fetching}, "-d", 2000, ""},
+		// A paused download wants nothing now: the show is ready.
+		{"download paused", func(s *library.Show) {
+			ids := it.season(s, 1, 2, "2020-01-03")
+			it.assign(library.ItemTypeEpisode, ids[1], hash+"-p", "E01.mkv")
+			it.assign(library.ItemTypeEpisode, ids[2], hash+"-p", "E02.mkv")
+		}, map[string]downloads.FileStatus{"E02.mkv": {Bytes: 10, DoneBytes: 3, State: downloads.StatePaused}}, "-p", 2000, "ready 2/2"},
 		{"specials hidden", func(s *library.Show) {
 			it.exec(`UPDATE shows SET include_specials = FALSE WHERE id = $1`, s.ID)
 			it.season(s, 1, 2, "2099-01-01")
@@ -486,7 +501,7 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 			ids := it.season(s, 1, 2, "2020-01-03")
 			it.stream(library.ItemTypeEpisode, s.ID, ids[1], 1)
 			it.assign(library.ItemTypeEpisode, ids[2], hash+"-md", "E02.mkv")
-		}, map[string]torrent.FileProgress{"E02.mkv": {Length: 10, BytesCompleted: 3}}, "-md", streamSize + 1000, "downloading 2/2"},
+		}, map[string]downloads.FileStatus{"E02.mkv": fetching}, "-md", streamSize + 1000, "downloading 2/2"},
 		// Plays cover episodes like files (B5): the frontier starts after
 		// the last episode with either.
 		{"watched, no files", func(s *library.Show) {
@@ -523,8 +538,9 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 		v.build(show)
 		byTitle[show.Title] = v
 		routes[fmt.Sprintf("/tv/%d", show.TMDBID)] = tmdb.ShowDetails{ID: show.TMDBID, Name: show.Title}
-		if v.active != nil {
-			it.torrents.loaded[hash+v.activeHash] = fakeTorrent{active: true, files: v.active}
+		for path, f := range v.active {
+			it.torrents.loaded[hash+v.activeHash] = fakeTorrent{active: true}
+			it.downloads.files[downloads.FileKey{Hash: hash + v.activeHash, Path: path}] = f
 		}
 	}
 	// And a movie that plays from HDRezka.
@@ -539,9 +555,10 @@ func TestIntegration_LibraryStagesMatchTitles(t *testing.T) {
 		_, _ = it.db.Exec(`DELETE FROM tmdb_cache WHERE key LIKE $1`, fmt.Sprintf("%%/movie/%d", movie.TMDBID))
 	})
 	it.svc = New(Deps{
-		Store:    library.NewCatalogRepository(it.db),
-		TMDB:     tmdb.NewCached(tmdb.NewClient("k", tmdb.WithBaseURL(srv.URL), tmdb.WithRetries(1, 0)), library.NewTMDBCacheRepository(it.db)),
-		Torrents: it.torrents,
+		Store:     library.NewCatalogRepository(it.db),
+		TMDB:      tmdb.NewCached(tmdb.NewClient("k", tmdb.WithBaseURL(srv.URL), tmdb.WithRetries(1, 0)), library.NewTMDBCacheRepository(it.db)),
+		Torrents:  it.torrents,
+		Downloads: func() DownloadsSnapshot { return it.downloads },
 	})
 
 	page, err := it.svc.Library(ctx, LibraryParams{MediaType: "tv", Query: "Variant " + it.tag, Sort: "title"})

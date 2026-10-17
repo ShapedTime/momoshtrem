@@ -114,8 +114,9 @@ type EpisodeCard struct {
 
 // cards builds episode cards for one request.
 type cards struct {
-	// progress reports whether an assigned file is being fetched, and how
-	// far along it is (catalog.Downloads.Progress).
+	// progress reports whether an assigned file is downloading (a download
+	// wants it and it isn't all on disk, #77), and what's on disk of it
+	// (catalog.Downloads.Progress, the title pages' rule).
 	progress  func(a *library.TorrentAssignment) (downloading bool, pct int)
 	publicURL string
 }
@@ -125,7 +126,8 @@ func (s *Service) cards() cards {
 }
 
 // card is what an episode card offers (PLAN §6 "Trakt (B5)"), first match:
-// the episode has a file (ready, or downloading while it's fetched); a
+// the episode has a file (ready, or downloading while a download fetches
+// it; a file nothing keeps streams on demand, so it's ready); a
 // mapping job wants it (needs_review); it hasn't aired (airs_on); the show
 // is in the library (needs_torrent, an episode the library doesn't list
 // yet too); else not_in_library. It reads files and reviews, never plays.

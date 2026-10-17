@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
@@ -59,17 +60,32 @@ type TMDB interface {
 
 var _ TMDB = (*tmdb.Cached)(nil)
 
-// Torrents is the live torrent client. torrent.Service implements it.
+// Torrents is the live torrent client: a movie torrent's state, and the
+// speed and seeders of what's downloading. torrent.Service implements it.
 type Torrents interface {
-	ListTorrents() ([]torrent.TorrentStatus, error)
 	GetStatus(infoHash string) (*torrent.TorrentStatus, error)
-	FilesProgress(infoHash string) (map[string]torrent.FileProgress, error)
 	IsActive(infoHash string) bool
 	// PausedAt reports whether the user paused the torrent, loaded or not.
 	PausedAt(infoHash string) (time.Time, bool)
 }
 
 var _ Torrents = (torrent.Service)(nil)
+
+// DownloadsSnapshot is the downloads as the download manager's last pass
+// planned them (#77): what holds each title, season and episode, and which
+// torrent files a download wants. A request reads one snapshot throughout,
+// so its parts agree. *downloads.Snapshot implements it; a nil one answers
+// nothing.
+type DownloadsSnapshot interface {
+	Movie(movieID int64) (downloads.Keep, bool)
+	Show(showID int64) (downloads.Keep, bool)
+	Season(showID int64, season int) (downloads.Keep, bool)
+	Episode(episodeID int64) (downloads.Keep, bool)
+	File(infoHash, path string) (downloads.FileStatus, bool)
+	DownloadingFiles() []downloads.FileKey
+}
+
+var _ DownloadsSnapshot = (*downloads.Snapshot)(nil)
 
 // Colors computes a backdrop's hero colour, nil while it's being computed.
 // *artwork.Extractor implements it.
@@ -99,15 +115,19 @@ type Reasons interface {
 	RecommendationReason(ctx context.Context, mediaType string, tmdbID int) (*string, error)
 }
 
-// Deps are the Service's dependencies. Torrents, Sessions, Colors and
-// Settings are optional.
+// Deps are the Service's dependencies. Torrents, Downloads, Sessions,
+// Colors and Settings are optional.
 type Deps struct {
 	Store    Store
 	TMDB     TMDB
-	Torrents Torrents        // nil: nothing is ever loaded
-	Sessions Sessions        // nil: nothing is ever streaming
-	Colors   Colors          // nil: colours are always null
-	Settings SettingsApplier // nil: PatchShow fails with ErrSettingsUnavailable
+	Torrents Torrents // nil: nothing is ever loaded
+	// Downloads is the latest DownloadsSnapshot ((*downloads.Service).
+	// Snapshot), read once per request. nil: there are no downloads, so
+	// every keep is null and nothing is downloading.
+	Downloads func() DownloadsSnapshot
+	Sessions  Sessions        // nil: nothing is ever streaming
+	Colors    Colors          // nil: colours are always null
+	Settings  SettingsApplier // nil: PatchShow fails with ErrSettingsUnavailable
 	// WebDAVPublicURL is the address Infuse reaches WebDAV at
 	// (WEBDAV_PUBLIC_URL); webdav_url is it plus the escaped path.
 	WebDAVPublicURL string
@@ -122,6 +142,7 @@ type Service struct {
 	store      Store
 	tmdb       TMDB
 	torrents   Torrents
+	downloads  func() DownloadsSnapshot
 	sessions   Sessions
 	colors     Colors
 	settings   SettingsApplier
@@ -146,6 +167,7 @@ func New(d Deps) *Service {
 		store:      d.Store,
 		tmdb:       d.TMDB,
 		torrents:   d.Torrents,
+		downloads:  d.Downloads,
 		sessions:   d.Sessions,
 		colors:     d.Colors,
 		settings:   d.Settings,

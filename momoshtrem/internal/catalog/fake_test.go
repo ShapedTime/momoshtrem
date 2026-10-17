@@ -3,9 +3,12 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -264,18 +267,9 @@ type fakeTorrent struct {
 	active   bool
 	seeders  int
 	speedBps int64
-	files    map[string]torrent.FileProgress
 }
 
 var _ Torrents = (*fakeTorrents)(nil)
-
-func (f *fakeTorrents) ListTorrents() ([]torrent.TorrentStatus, error) {
-	var out []torrent.TorrentStatus
-	for hash, t := range f.loaded {
-		out = append(out, torrent.TorrentStatus{InfoHash: hash, Seeders: t.seeders})
-	}
-	return out, nil
-}
 
 func (f *fakeTorrents) GetStatus(hash string) (*torrent.TorrentStatus, error) {
 	t, ok := f.loaded[hash]
@@ -292,17 +286,66 @@ func (f *fakeTorrents) PausedAt(hash string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (f *fakeTorrents) FilesProgress(hash string) (map[string]torrent.FileProgress, error) {
-	t, ok := f.loaded[hash]
-	if !ok {
-		return nil, torrent.ErrTorrentNotFound
-	}
-	return t.files, nil
-}
-
 func (f *fakeTorrents) IsActive(hash string) bool {
 	t, ok := f.loaded[hash]
 	return ok && t.active
+}
+
+// fakeDownloads is a snapshot of the downloads (#77): the torrent files
+// they want, and what holds each title, season and episode.
+type fakeDownloads struct {
+	files    map[downloads.FileKey]downloads.FileStatus
+	movies   map[int64]downloads.Keep
+	shows    map[int64]downloads.Keep
+	seasons  map[[2]int64]downloads.Keep // by show id and season number
+	episodes map[int64]downloads.Keep
+}
+
+func newFakeDownloads() *fakeDownloads {
+	return &fakeDownloads{
+		files:  map[downloads.FileKey]downloads.FileStatus{},
+		movies: map[int64]downloads.Keep{}, shows: map[int64]downloads.Keep{},
+		seasons: map[[2]int64]downloads.Keep{}, episodes: map[int64]downloads.Keep{},
+	}
+}
+
+var _ DownloadsSnapshot = (*fakeDownloads)(nil)
+
+func (f *fakeDownloads) Movie(id int64) (downloads.Keep, bool) { k, ok := f.movies[id]; return k, ok }
+func (f *fakeDownloads) Show(id int64) (downloads.Keep, bool)  { k, ok := f.shows[id]; return k, ok }
+func (f *fakeDownloads) Season(show int64, n int) (downloads.Keep, bool) {
+	k, ok := f.seasons[[2]int64{show, int64(n)}]
+	return k, ok
+}
+func (f *fakeDownloads) Episode(id int64) (downloads.Keep, bool) {
+	k, ok := f.episodes[id]
+	return k, ok
+}
+
+func (f *fakeDownloads) File(hash, path string) (downloads.FileStatus, bool) {
+	s, ok := f.files[downloads.FileKey{Hash: hash, Path: path}]
+	return s, ok
+}
+
+func (f *fakeDownloads) DownloadingFiles() []downloads.FileKey {
+	var out []downloads.FileKey
+	for k, s := range f.files {
+		if s.Downloading() {
+			out = append(out, k)
+		}
+	}
+	slices.SortFunc(out, func(a, b downloads.FileKey) int { return strings.Compare(a.Hash+"/"+a.Path, b.Hash+"/"+b.Path) })
+	return out
+}
+
+// want marks a torrent file wanted by a download: bytes on disk of size,
+// in the torrent's state (done once it's all there).
+func (f *fakeDownloads) want(hash, path string, size, done int64, state downloads.State) {
+	s := downloads.FileStatus{Bytes: size, DoneBytes: done, Complete: done >= size, State: state}
+	if s.Complete {
+		s.State = downloads.StateDone
+	}
+	f.files[downloads.FileKey{Hash: hash, Path: path}] = s
 }
 
 // fakeColors answers a fixed colour per backdrop.
@@ -353,12 +396,16 @@ const (
 )
 
 type fixture struct {
-	store    *fakeStore
-	tmdb     *fakeTMDB
-	torrents *fakeTorrents
-	settings *fakeSettings
-	svc      *Service
+	store     *fakeStore
+	tmdb      *fakeTMDB
+	torrents  *fakeTorrents
+	downloads *fakeDownloads
+	settings  *fakeSettings
+	svc       *Service
 }
+
+// keepExpires is when Frieren's season keep ends.
+var keepExpires = time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 
 func newFixture() *fixture {
 	store := newFakeStore()
@@ -425,23 +472,37 @@ func newFixture() *fixture {
 		{MediaType: "movie", ID: 8, TMDBID: 157336, Title: "Interstellar", Stage: "downloading"},
 	}
 
-	// Frieren's E28 is still being fetched; Dune's torrent is loaded but idle.
-	torrents.loaded[frierenHash] = fakeTorrent{active: true, seeders: 41, files: map[string]torrent.FileProgress{
-		"Frieren S01/Frieren.S01E27.mkv": {Length: 1_000, BytesCompleted: 1_000},
-		"Frieren S01/Frieren.S01E28.mkv": {Length: 1_000, BytesCompleted: 420},
-	}}
-	torrents.loaded[duneHash] = fakeTorrent{active: false, seeders: 12, files: map[string]torrent.FileProgress{
-		"Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX.mkv": {Length: 18_400_000_000, BytesCompleted: 9_000_000_000},
-	}}
+	// Frieren is kept (the show, and season 1 on its own): E27 is on disk,
+	// E28 still downloading. Dune's torrent is loaded but idle, and nothing
+	// keeps it: it streams on demand.
+	torrents.loaded[frierenHash] = fakeTorrent{active: true, seeders: 41}
+	torrents.loaded[duneHash] = fakeTorrent{active: false, seeders: 12}
+	dl := newFakeDownloads()
+	dl.want(frierenHash, "Frieren S01/Frieren.S01E27.mkv", 1_000, 1_000, downloads.StateDownloading)
+	dl.want(frierenHash, "Frieren S01/Frieren.S01E28.mkv", 1_000, 420, downloads.StateDownloading)
+	dl.shows[frieren.ID] = downloads.Keep{DownloadID: 4, Reason: library.DownloadKept, Scope: library.DownloadScopeShow,
+		State: downloads.StateDownloading, Pct: 71, UntilWatched: true}
+	season := downloads.Keep{DownloadID: 5, Reason: library.DownloadKept, Scope: library.DownloadScopeSeason,
+		State: downloads.StateDownloading, Pct: 71, ExpiresAt: &keepExpires}
+	dl.seasons[[2]int64{frieren.ID, 1}] = season
+	for n, file := range map[int64]struct {
+		state downloads.State
+		pct   int
+	}{31027: {downloads.StateDone, 100}, 31028: {downloads.StateDownloading, 42}} {
+		k := season
+		k.State, k.Pct = file.state, file.pct
+		dl.episodes[n] = k
+	}
 
 	settings := &fakeSettings{store: store}
 	svc := New(Deps{
 		Store: store, TMDB: tm, Torrents: torrents, Settings: settings,
+		Downloads:       func() DownloadsSnapshot { return dl },
 		Colors:          fakeColors{"/dune-backdrop.jpg": "#7a4a22", "/frieren-backdrop.jpg": "#2d5a4f"},
 		WebDAVPublicURL: "https://momoshtrem.local:36911/",
 		Now:             func() time.Time { return fixedNow },
 	})
-	return &fixture{store: store, tmdb: tm, torrents: torrents, settings: settings, svc: svc}
+	return &fixture{store: store, tmdb: tm, torrents: torrents, downloads: dl, settings: settings, svc: svc}
 }
 
 // frierenSeasons is Frieren's specials and a first season of n weekly

@@ -41,7 +41,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 	paths := EpisodePaths(view.ShowTitle, view.ShowYear, seasonNumber, view.Season.Episodes)
 	episodes := make([]EpisodeSummary, 0, len(view.Season.Episodes))
 	for _, ep := range view.Season.Episodes {
-		downloading, done, length, _ := tv.fileProgress(ep.Assignment)
+		f, downloading := tv.fileDownload(ep.Assignment)
 		summary := EpisodeSummary{
 			ID:             ep.ID,
 			SeasonNumber:   seasonNumber,
@@ -54,9 +54,10 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 			Runtime:        positive(ep.Runtime),
 			EpisodeType:    episodeType(ep.EpisodeType),
 			State:          EpisodeStateOf(ep.Watched, ep.Assignment != nil, downloading, rev.underReview(ep.ID), ep.AirDate, today),
+			Keep:           keepOf(tv.downloads.Episode(ep.ID)),
 		}
 		if downloading {
-			summary.Pct = intPtr(pct(done, length))
+			summary.Pct = intPtr(f.Pct())
 		}
 		if ep.Assignment != nil {
 			summary.WebDAVPath = strPtr(paths[ep.ID])
@@ -74,6 +75,7 @@ func (s *Service) Season(ctx context.Context, tmdbID, seasonNumber int) (*Season
 		Name:         SeasonName(seasonNumber, view.Season.Name),
 		Episodes:     episodes,
 		Ranges:       Ranges(seasonNumber, episodes, arcs),
+		Keep:         keepOf(tv.downloads.Season(view.ShowID, seasonNumber)),
 	}, nil
 }
 

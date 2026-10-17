@@ -75,7 +75,8 @@
       "state": "idle",
       "seeders": 12
     },
-    "stream": null
+    "stream": null,
+    "keep": null
   },
   "recommendation_reason": null,
   "watch_state": null,
