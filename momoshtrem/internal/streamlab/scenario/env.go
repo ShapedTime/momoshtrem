@@ -162,8 +162,9 @@ type failure struct {
 	// now: the cache evicted dirty data (F11 in forward play).
 	chunkGone bool
 	// seederHeld: the lab held the torrent's seeder's uploads (a fault,
-	// not #195); faulted: a fault the script declared on the title ran
-	// while the body was silent (faultlog.go).
+	// not #195); faulted: faults the script declared on the title explain
+	// the silence, which didn't outlast them by #195's threshold
+	// (faultlog.go).
 	seederHeld bool
 	faulted    bool
 }
@@ -218,7 +219,7 @@ func (f failure) diagnosis() string {
 		why = append(why, "the seeder held (the lab's fault)")
 	}
 	if f.faulted {
-		why = append(why, "during a fault the script declared")
+		why = append(why, "silent through a fault the script declared")
 	}
 	if f.chunkGone {
 		why = append(why, "its written chunk gone from the cache")
@@ -320,7 +321,7 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
 		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
 	f.seederHeld = t.Seeder != nil && t.Seeder.Held()
-	f.faulted = e.faultedDuring(t, f.at.Add(-silence), f.at)
+	f.faulted = e.faultExplains(t, f.at.Add(-silence), f.at, e.knownStall())
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
 	f.resyncFailed = e.logs.ReadFailed(t.Hash, f.piece, f.at)
 	if tor, ok := e.Stack.Torrent(t.Hash); ok {

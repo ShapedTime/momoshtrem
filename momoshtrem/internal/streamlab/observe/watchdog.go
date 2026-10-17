@@ -151,7 +151,7 @@ func (o *Observer) diagnoseTrip() (readers []report.TripReader, known, why strin
 			case tor.Stats().ConnectedSeeders < 1:
 				reasons = append(reasons, "no seeder is connected")
 			case t.Seeder != nil && t.Seeder.Held():
-				reasons = append(reasons, "the seeder's uploads are held (the lab's fault, undeclared)")
+				reasons = append(reasons, "the seeder's uploads are held (the lab's), by no fault declared for this torrent")
 			case o.activity(h) != string(torrent.StateActive):
 				reasons = append(reasons, "downloads are off (the torrent is "+o.activity(h)+")")
 			}

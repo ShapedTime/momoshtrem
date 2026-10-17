@@ -71,10 +71,8 @@ No read may break meanwhile: the slow seeder keeps every read under the read tim
 			return err
 		}
 		outage := e.P.Duration("outage")
-		// The fast seeder is gone until the lab adds it again: a declared
-		// fault, so the watchdog doesn't trip on it (faultlog.go).
-		endVanish := e.Fault("seeder-vanish", t)
-		defer endVanish()
+		// No declared fault (faultlog.go): the slow seeder must keep the
+		// playback going, so the watchdog watches this window too.
 		cut := fast.Proxy.Vanish(outage)
 		gone := time.Now()
 		if err := e.Live(p.Watch(outage)); err != nil {
@@ -88,7 +86,6 @@ No read may break meanwhile: the slow seeder keeps every read under the read tim
 		if err != nil {
 			return err
 		}
-		endVanish()
 		if err := e.Live(p.Watch(2 * watch)); err != nil {
 			return err
 		}

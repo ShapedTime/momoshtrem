@@ -82,18 +82,35 @@ func (e *Env) HoldSeeder(t *Title, name string) (release func()) {
 	return release
 }
 
-// faultedDuring reports whether a fault declared on t (or on every title)
-// ran at some point of [a, b].
-func (e *Env) faultedDuring(t *Title, a, b time.Time) bool {
+// faultExplains reports whether faults declared on t (or on every title)
+// explain a body silent from since to at: one overlapped the silence, and
+// what's left of it after the last of them ended (nothing, if one still
+// ran at at) is shorter than knownStall, #195's threshold. A longer
+// silence after the release is a stall of its own: the release is itself
+// a writer wakeup #195 can lose.
+func (e *Env) faultExplains(t *Title, since, at time.Time, knownStall time.Duration) bool {
 	key := faultKey(t)
 	e.faults.mu.Lock()
 	defer e.faults.mu.Unlock()
+	var last time.Time
+	overlap := false
 	for _, f := range e.faults.list {
-		if (f.key == "" || f.key == key) && !f.start.After(b) && (f.end.IsZero() || !f.end.Before(a)) {
-			return true
+		if (f.key != "" && f.key != key) || f.start.After(at) {
+			continue
+		}
+		end := f.end
+		if end.IsZero() || end.After(at) {
+			end = at
+		}
+		if end.Before(since) {
+			continue
+		}
+		overlap = true
+		if end.After(last) {
+			last = end
 		}
 	}
-	return false
+	return overlap && at.Sub(last) < knownStall
 }
 
 // endFaults, once the script has ended, notes the faults it left running,

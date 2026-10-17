@@ -61,6 +61,47 @@ func TestHeldSeederIsNotKnown(t *testing.T) {
 	}
 }
 
+// A declared fault explains a body's silence only up to #195's threshold
+// after it ends: the release is itself a writer wakeup #195 can lose, so a
+// silence that outlasts the fault by that much is #195's again.
+func TestFaultExplains(t *testing.T) {
+	t0 := time.Now()
+	title, other := &Title{Hash: "aa"}, &Title{Hash: "bb"}
+	const knownStall = 5 * time.Second
+	e := &Env{}
+	e.faults.list = []envFault{{name: "seeder-pause", key: "aa", start: t0, end: t0.Add(8 * time.Second)}}
+	tests := []struct {
+		name     string
+		t        *Title
+		from, to time.Duration // the silence, from t0
+		want     bool
+	}{
+		{"silent through the hold, broke soon after", title, time.Second, 10 * time.Second, true},
+		{"silent on, past the threshold after the release", title, time.Second, 14 * time.Second, false},
+		{"silent only before the hold", title, -10 * time.Second, -time.Second, false},
+		{"silent only after it, briefly", title, 9 * time.Second, 11 * time.Second, false},
+		{"another torrent", other, time.Second, 10 * time.Second, false},
+	}
+	for _, tt := range tests {
+		if got := e.faultExplains(tt.t, t0.Add(tt.from), t0.Add(tt.to), knownStall); got != tt.want {
+			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+		}
+	}
+	// A fault still running at the break explains it.
+	e.faults.list = append(e.faults.list, envFault{name: "hold", key: "aa", start: t0.Add(20 * time.Second)})
+	if !e.faultExplains(title, t0.Add(19*time.Second), t0.Add(40*time.Second), knownStall) {
+		t.Error("a fault still running didn't explain the silence")
+	}
+	// The 8 s hold, then a silence past the threshold after the release:
+	// not explained, so a timed-out read at a stuck piece is #195 again.
+	f := failure{title: title, piece: 3, silence: 13 * time.Second, timedOut: true, broke: true,
+		faulted: e.faultExplains(title, t0.Add(time.Second), t0.Add(14*time.Second), knownStall)}
+	f.stalled = !f.faulted // stuck, the seeder connected and not held, downloads on
+	if got := f.known(); got != "#195" {
+		t.Errorf("a silence past the threshold after the release: known %q, want #195", got)
+	}
+}
+
 // The watchdog's check: #195 only when every trip carries its signature
 // and lasted #195's threshold, on at most two pieces between them; a
 // fault left open fails it.
