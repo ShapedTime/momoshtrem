@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { ArrowDown, ArrowUp, ChevronRight, HardDrive, Layers, Tv } from 'lucide-react';
 import type { StreamingSession, TorrentListItem, TorrentsSummary, TorrentState } from '@/lib/api/contract';
+import { diskBar } from '@/lib/activity/disk';
 import { nowTile, splitBytes, splitSpeed } from '@/lib/activity/format';
-import { formatBytes, formatNumber, plural } from '@/lib/title/format';
+import { formatNumber, plural } from '@/lib/title/format';
 import { cx } from '@/lib/utils/cx';
 import { Sparkline } from './Sparkline';
 
@@ -79,8 +80,7 @@ export function SummaryStrip({ summary, items, now, stale }: SummaryStripProps) 
   const up = summary?.upload_bps ?? 0;
   const history = summary?.history.download_bps ?? [];
   const disk = summary?.disk ?? null;
-  const other = disk ? Math.max(0, disk.total_bytes - disk.free_bytes - disk.torrents_bytes) : 0;
-  const share = (bytes: number) => (disk && disk.total_bytes > 0 ? `${((bytes / disk.total_bytes) * 100).toFixed(1)}%` : '0%');
+  const bar = disk ? diskBar(disk) : null;
   const free = disk ? splitBytes(disk.free_bytes) : null;
 
   return (
@@ -117,19 +117,30 @@ export function SummaryStrip({ summary, items, now, stale }: SummaryStripProps) 
           <HardDrive size={15} aria-hidden="true" />
           Disk
         </span>
-        {disk && free ? (
+        {disk && free && bar ? (
           <>
             <Value value={free.value} unit={`${free.unit} free`} />
-            <span
-              className="act-disk"
-              role="img"
-              aria-label={`Disk: ${formatBytes(disk.torrents_bytes)} in torrents, ${formatBytes(other)} other, ${formatBytes(disk.free_bytes)} free of ${formatBytes(disk.total_bytes)}`}
-            >
-              <i style={{ width: share(disk.torrents_bytes) }} />
-              <i style={{ width: share(other) }} />
+            <span className="act-disk" role="img" aria-label={bar.label}>
+              <span className="bar">
+                {bar.segments.map((segment) => (
+                  <i key={segment.kind} className={`is-${segment.kind}`} style={{ width: segment.width }} />
+                ))}
+              </span>
+              <b className="limit" style={{ left: bar.limitAt }} />
             </span>
-            <span className="sub">
-              {formatBytes(disk.torrents_bytes)} torrents · {formatBytes(disk.total_bytes)} disk
+            <span className="sub act-disk-key">
+              <span>
+                <i className="limit-key" aria-hidden="true" />
+                {bar.limitLine}
+              </span>
+            </span>
+            <span className="sub act-disk-key">
+              {bar.legend.map((item) => (
+                <span key={item.kind}>
+                  <i className={`is-${item.kind}`} aria-hidden="true" />
+                  {item.text}
+                </span>
+              ))}
             </span>
           </>
         ) : (

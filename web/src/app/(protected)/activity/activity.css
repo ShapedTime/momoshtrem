@@ -53,9 +53,22 @@
   .act-spark .hover-dot { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--st-downloading); box-shadow: 0 0 0 2px var(--surface-1); pointer-events: none; }
   .act-spark .hover-tip { position: absolute; top: -34px; width: 120px; padding: 4px 8px; border-radius: var(--r-xs); background: var(--text-1); color: var(--ink-1); font-size: 11.5px; font-weight: var(--w-medium); text-align: center; white-space: nowrap; pointer-events: none; z-index: 2; font-variant-numeric: tabular-nums; }
 
-  .act-disk { display: flex; gap: 2px; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin: 6px 0 2px; }
-  .act-disk i { display: block; height: 100%; background: var(--text-2); }
-  .act-disk i + i { background: var(--text-4); }
+  /* Disk: kept, smart and streaming cache (the piece cache's fill), the rest in use, free (the track); a
+     marker at the cache limit (#77). Settings › Storage's colours (#205): what you keep and what's picked
+     for you in the one accent, the streaming cache cool, other files grey; the 2 px gaps and the legend
+     carry which is which */
+  .act-disk { position: relative; display: block; height: 6px; margin: 6px 0 2px; }
+  .act-disk .bar { display: flex; gap: 2px; height: 100%; border-radius: 3px; background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-3); overflow: hidden; }
+  .act-disk .bar i { display: block; height: 100%; flex-shrink: 0; }
+  .act-disk .limit { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-1); box-shadow: 0 0 0 2px var(--surface-1); }
+  .act-tile .is-kept { background: var(--accent); }
+  .act-tile .is-smart { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .act-tile .is-cache { background: var(--st-info); }
+  .act-tile .is-other { background: var(--text-3); }
+  .act-disk-key { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  .act-disk-key > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+  .act-disk-key i { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+  .act-disk-key i.limit-key { width: 2px; height: 10px; border-radius: 1px; background: var(--text-1); }
 
   /* ---- Sections ------------------------------------------------------------------ */
   .act-groups { display: flex; flex-direction: column; gap: var(--sp-8); }
@@ -64,11 +77,13 @@
   .act-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
   .act-col-main, .act-col-side { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
   /* Tablet: the idle cards two by two (the busy ones stay full width) */
-  @media (min-width: 640px) and (max-width: 1023px) { .act-col-side .act-list, .act-groups.is-wide .act-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (min-width: 640px) and (max-width: 1023px) {
+    .act-col-side .act-list, .act-groups.is-wide .act-list, .act-col-side .act-dl-list, .act-groups.is-wide .act-dl-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   @media (min-width: 1024px) {
     .act-groups.has-side { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--sp-8); align-items: start; }
     .act-col-side .tcard { grid-template-columns: 44px minmax(0, 1fr); padding: var(--sp-3) var(--sp-4); }
-    .act-groups.is-wide .act-list { grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: var(--col-gap); }
+    .act-groups.is-wide .act-list, .act-groups.is-wide .act-dl-list { grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: var(--col-gap); }
   }
   @media (min-width: 1440px) {
     .act-groups.has-side { grid-template-columns: minmax(0, 1fr) 420px; gap: var(--sp-10); }
@@ -88,8 +103,35 @@
   .tcard .actions { display: flex; align-items: center; gap: var(--sp-2); }
   .tcard .actions .end { margin-left: auto; }
   .tcard .session { padding: 10px 12px; }
-  .act-group--paused .progress > span, .td-prog.is-paused .progress > span { background: var(--text-3); }
+  /* The state pill drops under the label when they don't fit side by side ("Waits for the stream to end") */
+  .tcard .top { flex-wrap: wrap; }
+  .tcard-id { display: flex; flex-direction: column; min-width: 0; flex: 1 1 10rem; }
+  .hold-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tcard-wanted { display: flex; flex-direction: column; gap: 6px; }
+  .tcard-wanted > span { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .act-group--paused .progress > span, .td-prog.is-paused .progress > span, .dlrow.is-paused .progress > span, .tcard-wanted.is-paused .progress > span { background: var(--text-3); }
   .act-group .section-head { min-height: 0; }
+
+  /* ---- Kept & smart (#77, GET /downloads) ------------------------------------------ */
+  .act-dl-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+  .dlrow { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: var(--sp-3); min-width: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: var(--surface-1); border: 1px solid var(--line-1); }
+  .dlrow .poster-link { align-self: start; border-radius: var(--r-xs); }
+  .dlrow .media--poster { border-radius: var(--r-xs); }
+  .dlrow .dl-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .dlrow .top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px var(--sp-2); }
+  .dlrow .dl-id { display: flex; flex-direction: column; min-width: 0; flex: 1 1 9rem; }
+  .dlrow .label { font-weight: var(--w-semibold); color: var(--text-1); overflow-wrap: anywhere; border-radius: var(--r-xs); }
+  .dlrow .scope { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+  .dlrow .meta { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .dlrow .foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+  .dlrow .expiry { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .dlrow .expiry svg { flex-shrink: 0; }
+  .dlrow .expiry.is-kept svg { color: var(--st-watched); }
+  .dlrow .expiry.is-smart svg { color: var(--st-upcoming); }
+  .dlrow .foot .btn { flex-shrink: 0; margin-right: calc(var(--sp-2) * -1); }
+  .act-dl-stale { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--sp-2); font-size: var(--t-small); color: var(--text-3); }
+  /* The detail page links here; clear the top bar when it scrolls into view */
+  #act-dl-h { scroll-margin-top: calc(var(--topbar-h, 64px) + var(--sp-4)); }
 
   /* ---- Offline: last-known data, greyed and inert --------------------------------- */
   .is-stale { opacity: 0.5; filter: grayscale(0.7); }
@@ -134,7 +176,16 @@
   .td-health p { color: var(--text-2); }
   .td-health-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--st-ready-bg); color: var(--st-ready); flex-shrink: 0; }
   .td-health--slow .td-health-ic { background: var(--st-warning-bg); color: var(--st-warning); }
-  .td-health--paused .td-health-ic, .td-health--idle .td-health-ic { background: var(--surface-3); color: var(--text-2); }
+  .td-health--paused .td-health-ic, .td-health--idle .td-health-ic, .td-health--waiting .td-health-ic { background: var(--surface-3); color: var(--text-2); }
+
+  /* The downloads that keep it (#77) */
+  .td-holds { display: flex; flex-direction: column; gap: var(--sp-3); }
+  .td-holds ul { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .td-holds li { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+  .td-holds li .grow { display: flex; flex-direction: column; min-width: 0; }
+  .td-holds li strong { font-weight: var(--w-medium); overflow-wrap: anywhere; }
+  .td-holds li .grow span { font-size: 12px; color: var(--text-3); }
+  .td-holds-link { align-self: flex-start; margin-left: calc(var(--sp-3) * -1); }
 
   .td-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
   .td-actions .btn { width: 100%; padding: 0 var(--sp-3); }

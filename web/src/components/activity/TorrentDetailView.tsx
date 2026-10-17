@@ -3,26 +3,28 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, CheckCheck, ChevronLeft, Clock, HardDrive, Pause, TriangleAlert, Tv, Users, type LucideIcon } from 'lucide-react';
+import { ArrowDown, ArrowUp, CheckCheck, ChevronLeft, Clock, HardDrive, Hourglass, Pause, TriangleAlert, Tv, Users, type LucideIcon } from 'lucide-react';
 import { Banner, Button, ButtonLink, EmptyState, LoadingRegion, Media, Progress, ReleaseName, Skeleton, StatusPill } from '@/components/ui';
 import { buildImageUrl } from '@/config/tmdb';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { isApiError } from '@/lib/api/client';
 import type { TorrentDetail } from '@/lib/api/contract';
 import { torrentDetailQuery } from '@/lib/api/endpoints';
+import { holdScopeLabel, wantedProgress } from '@/lib/activity/downloads';
 import { formatRate, formatTimeOfDay, sessionBanner, torrentLabel } from '@/lib/activity/format';
 import { readersByPath } from '@/lib/activity/files';
 import { type HealthKind, healthFor, isWeak } from '@/lib/activity/health';
 import { isActive } from '@/lib/activity/sections';
 import { formatBytes, plural } from '@/lib/title/format';
+import { keepReasonPill } from '@/lib/title/keep';
 import { cx } from '@/lib/utils/cx';
 import { AdvancedPanel } from './AdvancedPanel';
 import { DetailActions } from './DetailActions';
 import { FilesPanel } from './FilesPanel';
-import { TorrentStatePill } from './TorrentCard';
+import { HoldPills, TorrentStatePill } from './TorrentCard';
 import { useTorrentActions } from './useTorrentActions';
 
-const HEALTH_ICON: Record<HealthKind, LucideIcon> = { healthy: CheckCheck, complete: CheckCheck, slow: TriangleAlert, paused: Pause, idle: Clock };
+const HEALTH_ICON: Record<HealthKind, LucideIcon> = { healthy: CheckCheck, complete: CheckCheck, slow: TriangleAlert, paused: Pause, waiting: Hourglass, idle: Clock };
 
 const BackLink = () => (
   <ButtonLink href="/activity" variant="ghost" size="sm" className="td-back">
@@ -34,8 +36,10 @@ function DetailHeader({ detail }: { detail: TorrentDetail }) {
   const label = torrentLabel(detail);
   const title = detail.titles[0];
   const active = isActive(detail);
-  const pct = detail.progress !== null ? detail.progress * 100 : null;
-  const sized = detail.size_bytes !== null && detail.bytes_completed !== null && pct !== null && pct < 100;
+  // What its downloads want counts (#77); without downloads, anacrolix's progress for the whole torrent
+  const wanted = wantedProgress(detail);
+  const pct = detail.wanted === null && detail.progress !== null ? detail.progress * 100 : null;
+  const sized = detail.size_bytes !== null && detail.bytes_completed !== null && detail.progress !== null && detail.progress < 1;
   const stats: [LucideIcon, string, string][] = [];
   if (active) {
     stats.push([ArrowDown, 'Down', formatRate(detail.download_bps)], [ArrowUp, 'Up', formatRate(detail.upload_bps)]);
@@ -62,6 +66,7 @@ function DetailHeader({ detail }: { detail: TorrentDetail }) {
       <div className="flex min-w-0 flex-col gap-3">
         <div className="flex flex-wrap gap-2">
           <TorrentStatePill torrent={detail} size="lg" />
+          <HoldPills holds={detail.holds} size="lg" className="contents" />
           {isWeak(detail) && <StatusPill status="few_peers" size="lg" />}
         </div>
         <h1>
@@ -74,6 +79,14 @@ function DetailHeader({ detail }: { detail: TorrentDetail }) {
           )}
         </h1>
         <ReleaseName name={detail.name} className="td-release" />
+        {wanted && (
+          <div className={cx('td-prog', (detail.state === 'paused' || detail.wanted?.state === 'paused') && 'is-paused')}>
+            <Progress value={wanted.pct} size="lg" tone={detail.state === 'streaming' ? 'accent' : 'downloading'} label={`${label.text} progress`} />
+            <span className="t-small text-fg-2 tabular-nums">
+              {wanted.pct}% · {wanted.detail}
+            </span>
+          </div>
+        )}
         {pct !== null && pct < 100 && (
           <div className={cx('td-prog', detail.state === 'paused' && 'is-paused')}>
             <Progress value={pct} size="lg" tone={detail.state === 'streaming' ? 'accent' : 'downloading'} label={`${label.text} progress`} />
@@ -97,6 +110,35 @@ function DetailHeader({ detail }: { detail: TorrentDetail }) {
         )}
       </div>
     </header>
+  );
+}
+
+/** The downloads that keep it on disk (#77): Kept or Smart, and what each is on. */
+function HoldsPanel({ detail }: { detail: TorrentDetail }) {
+  if (detail.holds.length === 0) return null;
+  return (
+    <section className="panel panel-pad td-holds" aria-labelledby="td-holds-h">
+      <h2 className="t-title-3" id="td-holds-h">
+        Kept &amp; smart
+      </h2>
+      <ul>
+        {detail.holds.map((hold) => {
+          const pill = keepReasonPill(hold.reason);
+          return (
+            <li key={hold.download_id}>
+              <StatusPill status={pill.status} label={pill.label} />
+              <span className="grow">
+                <strong>{hold.title}</strong>
+                <span>{holdScopeLabel(hold.scope)}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <ButtonLink href="/activity#act-dl-h" variant="ghost" size="sm" className="td-holds-link">
+        See your kept downloads
+      </ButtonLink>
+    </section>
   );
 }
 
@@ -180,6 +222,7 @@ function DetailBody({ detail, advanced, stale }: { detail: TorrentDetail; advanc
               </div>
             </section>
           )}
+          <HoldsPanel detail={detail} />
           <DetailActions
             detail={detail}
             busy={actions.busy(detail)}

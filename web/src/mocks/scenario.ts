@@ -41,13 +41,17 @@
  * - `title-search-loading`: /api/title-search never answers (the loading state).
  * - `torrents-offline`: /torrents and /torrents/summary answer 502 `backend_unreachable`, as the proxy does
  *   when momoshtrem is gone (Activity keeps what it had and says so).
- * - `torrents-quiet`: /torrents lists only the idle torrents and the summary has nothing streaming (Activity's empty state).
+ * - `torrents-quiet`: /torrents lists only the idle torrents and the summary has nothing streaming (Activity's empty state);
+ *   the downloads are only the seeds already on disk (Bluey's season 3, Frieren's smart picks), so nothing downloads.
  * - `downloads-empty`: a fresh install (#77): no downloads, so no title has a `keep`, no torrent `wanted` or `holds`,
  *   and nothing is downloading (Interstellar and The Studio S01E10 are ready: their files stream on demand); the
  *   storage settings are the defaults (smart downloads off, pause while streaming on). Keeping works.
  * - `downloads-full`: the kept cap (`kept.max_bytes`) leaves 1.2 GB beside what's kept, so a Keep that needs more
  *   (a movie, a season, a show) answers 409 `storage_full` with `needed_bytes` and `available_bytes`; one inside a
  *   kept season (a Bluey S3 episode) still fits.
+ * - `downloads-absent`: a backend before #77's P4 and P6: every /downloads route answers 404, torrents have no
+ *   `wanted` or `holds`, and the summary's disk no `kept_bytes` or `smart_bytes` (Activity shows no "Kept & smart").
+ * - `downloads-error`: GET /downloads answers 500 (Activity's "Couldn’t load" banner, or its stale note once it had a list).
  * - `storage-config`: config.yaml sets `global_cache_size: 53760` (MiB: 56.4 GB) and no PUT has sent a limit, so
  *   /settings/storage answers `source: config`, `limit_bytes: null` and `config_bytes`. The cache's 62.4 GB fill
  *   is over that limit on purpose: it's being trimmed down to it (`effective_bytes`, not `floored`). Its kept cap
@@ -132,6 +136,8 @@ export type MockScenario =
   | 'torrents-quiet'
   | 'downloads-empty'
   | 'downloads-full'
+  | 'downloads-absent'
+  | 'downloads-error'
   | 'storage-config'
   | 'trakt-off'
   | 'trakt-unconfigured'

@@ -9,7 +9,8 @@ import { apiError, latency, noContent, notFound } from './util';
  * Activity (PLAN §6 "Torrents and activity (B6)"). Pauses, resumes and deletes
  * last for the page (resetMockTorrents in tests). Scenarios: `torrents-offline`,
  * the list and the summary answer as the proxy does when the backend is gone;
- * `torrents-quiet`, only the idle torrents and nothing streaming. `wanted` and
+ * `torrents-quiet`, only the idle torrents and nothing streaming; `downloads-absent`,
+ * a backend before downloads (#77), without `wanted`, `holds` or pinned bytes. `wanted` and
  * `holds` are the page's downloads (#77, fixtures/downloads.ts), and pausing,
  * resuming or removing a torrent reaches them.
  */
@@ -31,10 +32,30 @@ export const mockTorrents = (): readonly TorrentListItem[] => torrents;
  * with nothing wanting them; one whose downloads wait or are done fetches nothing.
  */
 function answer(t: TorrentListItem): TorrentListItem {
+  if (scenario() === 'downloads-absent') return withoutDownloads(t);
   const share = mockTorrentShare(t);
   if (!t.loaded || !share.wanted || t.state === 'paused' || t.state === 'streaming') return { ...t, ...share };
   const fetching = share.wanted.state === 'downloading';
   return { ...t, ...share, download_bps: fetching ? t.download_bps : 0, state: fetching ? 'downloading' : 'idle' };
+}
+
+/**
+ * `downloads-absent`: a backend before #77's P4 and P6 sends no `wanted` or `holds`
+ * (the web app reads them as null and []), and no pinned bytes on the disk.
+ */
+function withoutDownloads<T extends TorrentListItem>(t: T): T {
+  const old: Partial<T> = { ...t };
+  delete old.wanted;
+  delete old.holds;
+  return old as T;
+}
+
+function withoutPinned(summary: TorrentsSummary): TorrentsSummary {
+  if (scenario() !== 'downloads-absent' || !summary.disk) return summary;
+  const disk: Partial<NonNullable<TorrentsSummary['disk']>> = { ...summary.disk };
+  delete disk.kept_bytes;
+  delete disk.smart_bytes;
+  return { ...summary, disk: disk as NonNullable<TorrentsSummary['disk']> };
 }
 
 const hex = /^[0-9a-f]{40}$/i;
@@ -73,7 +94,7 @@ export const torrentsHandlers = [
   // The static routes go before the :hash ones.
   http.get('*/api/torrents/summary', () => {
     if (scenario() === 'torrents-offline') return unreachable();
-    const summary = torrentsSummary(listed());
+    const summary = withoutPinned(torrentsSummary(listed()));
     if (scenario() !== 'torrents-quiet') return HttpResponse.json(summary);
     const still = summary.history.download_bps.map(() => 0);
     return HttpResponse.json<TorrentsSummary>({ ...summary, streaming: [], upload_bps: 0, history: { ...summary.history, download_bps: still, upload_bps: still } });

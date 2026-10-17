@@ -91,6 +91,18 @@ describe('useUndoableRemoval', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Movie not found · It’s back where it was.');
   });
 
+  it('says what happens in its own words when it isn’t a removal (Stop keeping)', async () => {
+    const { result } = setup();
+    const r = removal('download:5');
+    const copy = { title: 'Stopped keeping Dune', body: 'What’s downloaded stays as cache.', failed: 'Couldn’t stop keeping Dune' };
+    act(() => result.current.remove({ ...r.removal, copy }));
+    expect(screen.getByRole('status')).toHaveTextContent('Stopped keeping Dune');
+    expect(screen.getByRole('status')).toHaveTextContent('What’s downloaded stays as cache. Undo within 10 seconds.');
+    act(() => jest.advanceTimersByTime(UNDO_MS));
+    await act(async () => r.settle().reject(new Error('Server error')));
+    expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t stop keeping Dune');
+  });
+
   it('keeps the item hidden when the failure may still succeed (a 504), then lets go after a while', async () => {
     const { result } = setup();
     const r = removal('torrent:abc');

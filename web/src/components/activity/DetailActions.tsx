@@ -6,6 +6,7 @@ import { ListChecks, Magnet, Pause, Play, Trash2 } from 'lucide-react';
 import { ActionMenu, Button, copyText, useToast } from '@/components/ui';
 import type { TorrentDetail, TorrentTitle } from '@/lib/api/contract';
 import { assignmentApi } from '@/lib/api/endpoints';
+import { waitsOnItsOwn } from '@/lib/activity/downloads';
 import { isActive } from '@/lib/activity/sections';
 
 interface DetailActionsProps {
@@ -17,7 +18,8 @@ interface DetailActionsProps {
 }
 
 /**
- * The detail page's actions (activity.js `td-actions`): Pause or Resume,
+ * The detail page's actions (activity.js `td-actions`): Pause (also while its
+ * downloads wait, #77) or Resume,
  * Re-run mapping for shows, Copy magnet, and a quiet Remove. On phone a
  * 2-column grid with Remove on its own row; one column in the desktop aside.
  */
@@ -51,7 +53,7 @@ export function DetailActions({ detail, onPause, onResume, onRemove, busy }: Det
         <Button variant="primary" onClick={onResume} loading={busy}>
           <Play size={17} aria-hidden="true" /> Resume
         </Button>
-      ) : isActive(detail) ? (
+      ) : isActive(detail) || waitsOnItsOwn(detail) ? (
         <Button onClick={onPause} loading={busy}>
           <Pause size={17} aria-hidden="true" /> Pause
         </Button>

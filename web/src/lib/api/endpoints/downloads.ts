@@ -28,7 +28,8 @@ export const downloadKeys = {
     ['downloads', 'estimate', target.scope, target.id, target.scope === 'season' ? target.season_number : null] as const,
 };
 
-const downloadPath = (id: number) => `/api/downloads/${id}`;
+/** DELETE /downloads/{id}, also for a keepalive request while the page unloads (Stop keeping with Undo). */
+export const downloadPath = (id: number) => `/api/downloads/${id}`;
 
 export const downloadsApi = {
   list: () => apiJson<DownloadList>('/api/downloads'),

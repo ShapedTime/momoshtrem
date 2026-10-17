@@ -7,13 +7,13 @@ import { useConfirm, useToast } from '@/components/ui';
 import { useUndoableRemoval } from '@/hooks/useUndoableRemoval';
 import { apiKeepalive, isApiError } from '@/lib/api/client';
 import type { TorrentDetail, TorrentListItem } from '@/lib/api/contract';
-import { libraryKeys, removeTorrentUrl, titleKeys, torrentKeys, torrentsApi } from '@/lib/api/endpoints';
+import { downloadKeys, libraryKeys, removeTorrentUrl, titleKeys, torrentKeys, torrentsApi } from '@/lib/api/endpoints';
 import { torrentLabel } from '@/lib/activity/format';
 import { removeTorrentCopy, torrentRemovalKey } from '@/lib/activity/remove';
 import { plural } from '@/lib/title/format';
 
-/** What a torrent action changes: the torrents, and the library and title pages that show its state. */
-const AFFECTED = [torrentKeys.all, libraryKeys.all, titleKeys.all] as const;
+/** What a torrent action changes: the torrents, the library and title pages that show its state, and its downloads (#77). */
+const AFFECTED = [torrentKeys.all, libraryKeys.all, titleKeys.all, downloadKeys.all] as const;
 
 /** The proxy gave up after 30 s; the delete may still finish (it waits for an add in flight, up to 60 s). */
 const mayStillBeRemoving = (error: unknown) => isApiError(error) && (error.status === 504 || error.code === 'timeout');
