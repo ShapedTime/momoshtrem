@@ -100,7 +100,7 @@ func GoTestRace(ctx context.Context, moduleDir, dir string, pkgs []string) (t Te
 	}
 	pkgs2, races, perr := parseTestJSON(stdout, out)
 	waitErr := cmd.Wait()
-	t.Packages, t.Races = pkgs2, races
+	t.Packages, t.Races = pkgs2, append([]report.Race{}, races...) // [] in JSON, not null
 	for _, p := range t.Packages {
 		if p.Status == "fail" {
 			t.Verdict = report.VerdictFail
