@@ -511,6 +511,26 @@ func TestBuildRace(t *testing.T) {
 	}
 }
 
+// go test -race over one small package: its result, its time and its
+// output (STREAMLAB=1: it compiles with -race).
+func TestGoTestRace(t *testing.T) {
+	if os.Getenv("STREAMLAB") == "" {
+		t.Skip("set STREAMLAB=1 to run go test -race")
+	}
+	root, err := ModuleDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	got := GoTestRace(t.Context(), root, dir, []string{"./internal/streamlab/race"})
+	if got.Verdict != report.VerdictPass || len(got.Packages) != 1 || got.Packages[0].Status != "pass" || got.TookS <= 0 {
+		t.Errorf("GoTestRace = %+v", got)
+	}
+	if out, err := os.ReadFile(filepath.Join(dir, TestOutput)); err != nil || !strings.Contains(string(out), "TestParse") {
+		t.Errorf("%s: %v\n%.500s", TestOutput, err, out)
+	}
+}
+
 // signatureOf parses one report's signature.
 func signatureOf(t *testing.T, text string) string {
 	t.Helper()

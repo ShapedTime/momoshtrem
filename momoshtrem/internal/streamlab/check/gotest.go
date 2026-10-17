@@ -72,8 +72,8 @@ type testEvent struct {
 // GoTestRace runs go test -race -tags Tags -json over pkgs in moduleDir,
 // writing its output as text to dir/TestOutput. STREAMLAB isn't set: the
 // lab's heavy tests skip.
-func GoTestRace(ctx context.Context, moduleDir, dir string, pkgs []string) Tests {
-	t := Tests{Command: append([]string{"go", "test", "-race", "-tags", Tags, "-count=1", "-timeout", testTimeout, "-json"}, pkgs...),
+func GoTestRace(ctx context.Context, moduleDir, dir string, pkgs []string) (t Tests) {
+	t = Tests{Command: append([]string{"go", "test", "-race", "-tags", Tags, "-count=1", "-timeout", testTimeout, "-json"}, pkgs...),
 		Verdict: report.VerdictPass, Output: TestOutput}
 	start := time.Now()
 	defer func() { t.TookS = time.Since(start).Seconds() }()
