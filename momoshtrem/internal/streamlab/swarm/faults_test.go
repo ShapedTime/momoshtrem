@@ -153,7 +153,9 @@ func TestFaults_Proxy(t *testing.T) {
 	defer p.Close()
 	c := r.checker(t, r.seeder.MagnetVia(p.Addr()))
 	c.sequential(0, c.f.Size, 32<<10)
-	if st := p.Stats(); st.Down < c.f.Size || st.Accepted != 1 {
+	// The proxy counts what it forwarded after writing it: wait for it.
+	want := func(st swarm.ProxyStats) bool { return st.Down >= c.f.Size && st.Accepted == 1 }
+	if st := swarm.WaitStats(t, p, want, 2*time.Second); !want(st) {
 		t.Errorf("proxy stats %+v: the %d bytes didn't all pass through it", st, c.f.Size)
 	}
 }
@@ -199,7 +201,8 @@ func TestFaults_SeederLoss(t *testing.T) {
 		c.torrent.AddPeers([]atorrent.PeerInfo{{Addr: atorrent.StringAddr(p.Addr()), Source: atorrent.PeerSourceTracker}})
 	}()
 	c.sequential(2<<20, c.f.Size, 32<<10)
-	if st := p.Stats(); st.Accepted != 2 || st.Dropped != 1 {
+	want := func(st swarm.ProxyStats) bool { return st.Accepted == 2 && st.Dropped == 1 }
+	if st := swarm.WaitStats(t, p, want, 2*time.Second); !want(st) {
 		t.Errorf("proxy stats %+v: want the first connection dropped and a second one", st)
 	}
 }

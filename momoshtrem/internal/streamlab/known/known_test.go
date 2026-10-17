@@ -1,10 +1,12 @@
 package known_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/shapedtime/momoshtrem/internal/streamlab/known"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/race"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 )
 
@@ -131,6 +133,34 @@ func TestTallyRun(t *testing.T) {
 	}
 	if _, ok := known.TallyRun(run)["F12"]; ok {
 		t.Error("a deterministic issue was tallied")
+	}
+}
+
+// A race is known only by its exact signature, and every known race is a
+// registered issue that explains the race check.
+func TestMatchRace(t *testing.T) {
+	for _, r := range known.Races {
+		got, ok := known.MatchRace(r.Signature)
+		if !ok || got.ID != r.ID {
+			t.Errorf("MatchRace(%s's signature) = %v, %v", r.ID, got.ID, ok)
+		}
+		if is, ok := known.Lookup(r.ID); !ok || len(is.Checks) != 1 || is.Checks[0] != known.RaceCheck {
+			t.Errorf("%s isn't registered for the race check: %+v", r.ID, is)
+		}
+		if _, ok := known.MatchRace(r.Signature + " "); ok {
+			t.Errorf("%s matched a signature that isn't its own", r.ID)
+		}
+	}
+	if _, ok := known.MatchRace("write a | write b"); ok {
+		t.Error("an unregistered race matched")
+	}
+	// Even registered, an unparsed report's signature never matches.
+	races := known.Races
+	t.Cleanup(func() { known.Races = races })
+	unparsed := race.Unparsed + "Write at 0x1"
+	known.Races = append(slices.Clone(races), known.RaceIssue{Issue: known.Issue{ID: "#9002"}, Signature: unparsed})
+	if _, ok := known.MatchRace(unparsed); ok {
+		t.Error("an unparsed report matched a known race")
 	}
 }
 

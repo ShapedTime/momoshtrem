@@ -6,6 +6,8 @@
 //	streamlab run [--tier gate] [--scenario a,b] [--reps N] [--warmup N]
 //	              [--config prod.yaml] [--set k=v]... [--out dir]
 //	              [--gomaxprocs N] [--timeout d]
+//	streamlab check [--scenario a,b] [--reps N] [--warmup N] [--set k=v]...
+//	                [--out dir] [--timeout d] [--exe race-binary] [--tests=false]
 //	streamlab list
 //	streamlab explain <scenario|metric|check|known issue>
 //
@@ -57,10 +59,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return listCmd(stdout)
 	case "explain":
 		return explainCmd(args[1:], stdout, stderr)
+	case "check":
+		return checkCmd(args[1:], stdout, stderr)
 	case runner.ChildCommand:
 		return runner.RunChild(args[1:], stderr)
-	case "compare", "ab", "gate", "calibrate", "baseline", "affected", "check":
-		fmt.Fprintf(stderr, "streamlab %s comes later (S7 #178, S8 #179)\n", args[0])
+	case "compare", "ab", "gate", "calibrate", "baseline", "affected":
+		fmt.Fprintf(stderr, "streamlab %s comes later (S8 #179)\n", args[0])
 		return exitTool
 	case "help", "-h", "--help":
 		usage(stdout)
@@ -76,10 +80,12 @@ func usage(w io.Writer) {
 
 Commands:
   run      run scenarios and write report.json and report.md for each
+  check    build with -race, run the stress tier, report races, hangs and go test -race
   list     list the scenarios
   explain  explain a scenario, a metric, a check or a known issue
 
 Run from momoshtrem/: go run -tags disable_libutp ./cmd/streamlab run --tier gate
+                      go run -tags disable_libutp ./cmd/streamlab check
 Exit codes: 0 pass, 1 fail, 3 tool or environment error.
 `)
 }

@@ -52,7 +52,7 @@ func fakeChild(mode string, args []string) int {
 	r := report.Rep{
 		Rep: *rep, Status: report.RepOK, Config: report.Config{Fingerprint: "fp"},
 		Env:     &report.Env{GOMAXPROCS: runtime.GOMAXPROCS(0)},
-		Notes:   []string{"tmpdir=" + os.Getenv("TMPDIR"), "pipe=" + os.Getenv(runner.ParentPipeEnv)},
+		Notes:   []string{"tmpdir=" + os.Getenv("TMPDIR"), "pipe=" + os.Getenv(runner.ParentPipeEnv), "hook=" + os.Getenv("STREAMLAB_TEST_HOOK")},
 		Metrics: map[string]float64{"etag_changes": float64(*rep)},
 		Checks: []report.RepCheck{
 			{ID: "script", Status: report.Pass},
@@ -159,6 +159,42 @@ func TestRunReports(t *testing.T) {
 	var ix report.Index
 	if err := json.Unmarshal(b, &ix); err != nil || len(ix.Scenarios) != 1 || ix.Scenarios[0].Checks[0] != "etag-stable=xfail:F2" {
 		t.Errorf("index = %+v, %v", ix, err)
+	}
+}
+
+// RepEnv reaches each repetition's process, given its folder, and
+// AfterRep sees each repetition, a timed-out one included, before the
+// scenario is judged: streamlab check's GORACE and race logs (S7).
+func TestRunHooks(t *testing.T) {
+	var after []string
+	opts := runner.Options{
+		Reps: 2, Warmup: 1,
+		RepEnv: func(repDir string) []string { return []string{"STREAMLAB_TEST_HOOK=" + repDir} },
+		AfterRep: func(repDir string, rep *report.Rep) {
+			after = append(after, filepath.Base(repDir))
+			if _, err := os.Stat(repDir); err != nil {
+				t.Errorf("AfterRep got %s: %v", repDir, err)
+			}
+			rep.Races = []report.Race{{Signature: "write a | write b", Count: 1, Where: []string{filepath.Base(repDir)}}}
+		},
+	}
+	res := run(t, "ok", opts)
+	if strings.Join(after, " ") != "warmup-1 rep-1 rep-2" {
+		t.Errorf("AfterRep saw %v", after)
+	}
+	r := res.Reports[0]
+	if note := r.Reps[1].Notes[2]; note != "hook="+filepath.Join(res.Dir, "etag-stability", "rep-1") {
+		t.Errorf("rep 1's env: %q", note)
+	}
+	// The report folds every repetition's races, the warm-up's too.
+	if len(r.Races) != 1 || r.Races[0].Count != 3 || len(r.Races[0].Where) != 3 {
+		t.Errorf("report races = %+v", r.Races)
+	}
+
+	after = nil
+	run(t, "hang", runner.Options{Timeout: 2 * time.Second, AfterRep: opts.AfterRep})
+	if strings.Join(after, " ") != "rep-1" {
+		t.Errorf("AfterRep after a hang saw %v", after)
 	}
 }
 

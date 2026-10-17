@@ -74,6 +74,10 @@ func TestToolErrors(t *testing.T) {
 		{"run", "--scenario", "scrub", "--warmup", "-1"},
 		{"run", "--scenario", "scrub", "--timeout", "-1s"},
 		{"run", "extra"},
+		{"check", "--scenario", "nope"},
+		{"check", "extra"},
+		{"check", "--reps", "0", "--exe", "/nonexistent/streamlab-race"},
+		{"check", "--exe", "/nonexistent/streamlab-race"},
 		{"compare"},
 		{"ab"},
 	} {

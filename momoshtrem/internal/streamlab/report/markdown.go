@@ -30,6 +30,7 @@ func (r *Report) Markdown() string {
 	for _, c := range r.Checks {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n", c.ID, c.Status, orDash(c.Known), strings.Join(c.Reps, " "), cell(c.Evidence))
 	}
+	b.WriteString(RacesMarkdown(r.Races))
 
 	b.WriteString("\n## Metrics\n\n| Metric | Kind | Median | p95 | Values | Unit | Better |\n|---|---|---|---|---|---|---|\n")
 	names := make([]string, 0, len(r.Metrics))

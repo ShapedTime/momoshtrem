@@ -68,6 +68,13 @@ type Options struct {
 	// Exe is the streamlab binary to run repetitions with;
 	// os.Executable() when empty.
 	Exe string
+	// RepEnv adds to each repetition's environment, given its folder:
+	// streamlab check's GORACE log_path (S7). Optional.
+	RepEnv func(repDir string) []string
+	// AfterRep is called with each repetition's folder and result once its
+	// process ended, whatever its status, before the scenario is judged:
+	// streamlab check reads the race logs there into it (S7). Optional.
+	AfterRep func(repDir string, rep *report.Rep)
 	// Command is the command line, for the report.
 	Command []string
 	// Progress gets a line per repetition; nil for none.
@@ -174,6 +181,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			rep := runRep(ctx, exe, sc, n, warmup, sets, opts, scDir, timeout)
 			if err := ctx.Err(); err != nil {
 				return err // interrupted: the repetition was killed
+			}
+			if opts.AfterRep != nil {
+				opts.AfterRep(filepath.Join(scDir, repName(n, warmup)), &rep)
 			}
 			rep.Confirm = confirm
 			sr.reps = append(sr.reps, rep)
@@ -307,13 +317,19 @@ func setsFor(sc *scenario.Scenario, sets map[string]string) map[string]string {
 	return out
 }
 
+// repName is repetition i's folder: rep-<i>, or warmup-<n> for the
+// warm-ups (i 0 and below).
+func repName(i int, warmup bool) string {
+	if warmup {
+		return "warmup-" + strconv.Itoa(1-i)
+	}
+	return "rep-" + strconv.Itoa(i)
+}
+
 // runRep runs repetition i of sc in a child process and reads its result.
 func runRep(ctx context.Context, exe string, sc *scenario.Scenario, i int, warmup bool, sets map[string]string,
 	opts Options, scDir string, timeout time.Duration) report.Rep {
-	name := "rep-" + strconv.Itoa(i)
-	if warmup {
-		name = "warmup-" + strconv.Itoa(1-i)
-	}
+	name := repName(i, warmup)
 	repDir := filepath.Join(scDir, name)
 	failed := func(status report.RepStatus, format string, args ...any) report.Rep {
 		return report.Rep{Rep: i, Warmup: warmup, Status: status, Error: fmt.Sprintf(format, args...),
@@ -354,6 +370,9 @@ func runRep(ctx context.Context, exe string, sc *scenario.Scenario, i int, warmu
 	cmd.Env = append(os.Environ(), "GOTRACEBACK=all", "TMPDIR="+tmp, ParentPipeEnv+"=1")
 	if opts.GOMAXPROCS > 0 {
 		cmd.Env = append(cmd.Env, "GOMAXPROCS="+strconv.Itoa(opts.GOMAXPROCS))
+	}
+	if opts.RepEnv != nil {
+		cmd.Env = append(cmd.Env, opts.RepEnv(repDir)...)
 	}
 	// The child's stdin stays open as long as this process lives: when it
 	// dies, the child sees EOF and quits with a goroutine dump.
@@ -512,6 +531,8 @@ func build(sr scenarioRun, tool report.Tool, env report.Env, kenv known.Env, con
 		for _, a := range rep.Artifacts {
 			r.Artifacts = append(r.Artifacts, a)
 		}
+		// Every race counts, a warm-up's too: races are correctness.
+		r.Races = report.MergeRaces(r.Races, rep.Races)
 		if rep.Warmup {
 			// A warm-up's numbers are dropped, its correctness isn't: one
 			// that hung or crashed fails the scenario.
