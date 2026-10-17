@@ -1,10 +1,12 @@
 package known_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/shapedtime/momoshtrem/internal/streamlab/known"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/race"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 )
 
@@ -151,6 +153,14 @@ func TestMatchRace(t *testing.T) {
 	}
 	if _, ok := known.MatchRace("write a | write b"); ok {
 		t.Error("an unregistered race matched")
+	}
+	// Even registered, an unparsed report's signature never matches.
+	races := known.Races
+	t.Cleanup(func() { known.Races = races })
+	unparsed := race.Unparsed + "Write at 0x1"
+	known.Races = append(slices.Clone(races), known.RaceIssue{Issue: known.Issue{ID: "#9002"}, Signature: unparsed})
+	if _, ok := known.MatchRace(unparsed); ok {
+		t.Error("an unparsed report matched a known race")
 	}
 }
 

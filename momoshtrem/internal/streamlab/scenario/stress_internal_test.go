@@ -176,8 +176,11 @@ func TestQuietKnown(t *testing.T) {
 		"github.com/shapedtime/momoshtrem/internal/torrent.(*service).RemoveTorrent")
 	open := leak("internal/sync.runtime_SemacquireMutex", "sync.(*Mutex).Lock", hashLock,
 		"github.com/shapedtime/momoshtrem/internal/torrent.(*service).add", sharedAdd)
-	waiter := leak("sync.runtime_SemacquireWaitGroup", "sync.(*WaitGroup).Wait", sharedAdd,
-		"github.com/shapedtime/momoshtrem/internal/torrent.(*service).AddTorrent")
+	waiter := leak("sync.runtime_SemacquireWaitGroup", "sync.(*WaitGroup).Wait", sharedAdd, addTorrent)
+	// Another package's singleflight wait isn't an add queued behind the
+	// remove.
+	elsewhere := leak("sync.runtime_SemacquireWaitGroup", "sync.(*WaitGroup).Wait", sharedAdd,
+		"github.com/shapedtime/momoshtrem/internal/search.(*Service).run")
 	orphan := leak("runtime.gopark", "github.com/anacrolix/torrent.(*reader).waitAvailable",
 		"github.com/shapedtime/momoshtrem/internal/vfs.(*TorrentFile).readContext.func1")
 	other := leak("github.com/shapedtime/momoshtrem/internal/streaming.(*PriorityReader).detectFormat")
@@ -201,6 +204,7 @@ func TestQuietKnown(t *testing.T) {
 		{"an orphan without a timed-out read", q(remove, orphan), 0, true, ""},
 		{"something else left", q(remove, other), 0, true, ""},
 		{"an add blocked elsewhere, the hash lock on its stack", q(remove, adding), 0, true, ""},
+		{"another package's singleflight wait", q(remove, elsewhere), 0, true, ""},
 		{"nothing of the deadlock", q(orphan), 1, true, ""},
 		{"a reader left open", checks.QuiescenceResult{Readers: 1, Leaked: []checks.LabelledGoroutines{remove}}, 0, true, ""},
 	} {

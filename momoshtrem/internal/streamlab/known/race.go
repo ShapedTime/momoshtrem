@@ -1,6 +1,11 @@
 package known
 
-import "slices"
+import (
+	"slices"
+	"strings"
+
+	"github.com/shapedtime/momoshtrem/internal/streamlab/race"
+)
 
 // RaceCheck is the check streamlab check adds to every scenario it runs:
 // the repetition's process reported no data race (PLAN §6: any race is a
@@ -32,8 +37,12 @@ func init() {
 	}
 }
 
-// MatchRace returns the known race registered with exactly signature.
+// MatchRace returns the known race registered with exactly signature. An
+// unparsed report (race.Unparsed) never matches: nothing says what raced.
 func MatchRace(signature string) (RaceIssue, bool) {
+	if strings.HasPrefix(signature, race.Unparsed) {
+		return RaceIssue{}, false
+	}
 	i := slices.IndexFunc(Races, func(r RaceIssue) bool { return r.Signature == signature })
 	if i < 0 {
 		return RaceIssue{}, false

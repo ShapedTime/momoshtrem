@@ -22,6 +22,7 @@ const (
 	writeTo         = "github.com/anacrolix/torrent/storage.piecePerResourcePiece.WriteTo"
 	hashLock        = "github.com/shapedtime/momoshtrem/internal/torrent.(*keyedMutex).Lock"
 	sharedAdd       = "golang.org/x/sync/singleflight.(*Group).Do"
+	addTorrent      = "github.com/shapedtime/momoshtrem/internal/torrent.(*service).AddTorrent"
 )
 
 // call is a frame of a goroutine dump: the function and, in a debug=2
@@ -166,7 +167,11 @@ func deadlocked(rec string) bool {
 	switch {
 	case len(below) >= 2 && below[0].fn == markNotComplete && below[1].fn == deletePieces:
 		return true
-	case len(below) >= 1 && (below[0].fn == hashLock || below[0].fn == sharedAdd):
+	case len(below) >= 1 && below[0].fn == hashLock:
+		return true
+	case len(below) >= 2 && below[0].fn == sharedAdd && below[1].fn == addTorrent:
+		// The torrent service's shared add, not another package's
+		// singleflight wait.
 		return true
 	}
 	return false

@@ -3,6 +3,7 @@ package swarm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -15,10 +16,17 @@ import (
 // #195, can delay the release to the 1-minute keep-alive; the deadline
 // allows for it.) The leecher connects first: a complete seeder that may
 // not upload wants no connection, so one held from the start refuses the
-// leecher's dial.
+// leecher's dial. A seeder paced by its storage reads (UploadRate) holds
+// the same way: the hold is anacrolix's choke, not the storage's.
 func TestSeeder_HoldUploads(t *testing.T) {
+	for _, rate := range []int64{0, 1 << 20} {
+		t.Run(fmt.Sprintf("rate %d", rate), func(t *testing.T) { testHoldUploads(t, rate) })
+	}
+}
+
+func testHoldUploads(t *testing.T, rate int64) {
 	l, mi, _ := buildPack(t)
-	s, err := StartSeeder(SeederConfig{Layout: l, Metainfo: mi})
+	s, err := StartSeeder(SeederConfig{Layout: l, Metainfo: mi, UploadRate: rate})
 	if err != nil {
 		t.Fatal(err)
 	}
