@@ -13,11 +13,11 @@ func TestObservationReport(t *testing.T) {
 	rep := func(n int, fs ...Finding) Rep {
 		return Rep{Rep: n, Status: RepOK, Findings: fs, Observe: &Observation{
 			OverheadPct: 0.4, ProcessCPUMS: 3000,
-			Samplers:    []SamplerStat{{Name: "readers", EveryMS: 250, Samples: 100, BusyMS: 1.5, CPUPct: 0.05, ClientLock: true}},
-			Timeline:    []TitleTimeline{{Title: "Film (2020)", Pieces: 192, Completed: 150, Plot: "timeline-film-2020.svg"}},
-			Mutex:       []ContentionSite{{Site: "x.(*Cache).Remove", Count: 10, DelayMS: 9}},
-			Logs:        LogSummary{Errors: 4, BenignStorageErrors: 2},
-			Trips:       []Trip{{AtMS: 5000, ForMS: 3000, Why: "not #195's signature: the seeder is paused", Artifacts: []string{"watchdog-1-goroutines.txt"}}},
+			Samplers: []SamplerStat{{Name: "readers", EveryMS: 250, Samples: 100, BusyMS: 1.5, CPUPct: 0.05, ClientLock: true}},
+			Timeline: []TitleTimeline{{Title: "Film (2020)", Pieces: 192, Completed: 150, Plot: "timeline-film-2020.svg"}},
+			Mutex:    []ContentionSite{{Site: "x.(*Cache).Remove", Count: 10, DelayMS: 9}},
+			Logs:     LogSummary{Errors: 4, BenignStorageErrors: 2},
+			Trips:    []Trip{{AtMS: 5000, ForMS: 3000, Why: "not #195's signature: the seeder is paused", Artifacts: []string{"watchdog-1-goroutines.txt"}}},
 		}}
 	}
 	reps := []Rep{rep(1, f), rep(2, f, Finding{Rule: "handler-lag", Known: "F12", Hint: "a handler outlived its client's drop"})}

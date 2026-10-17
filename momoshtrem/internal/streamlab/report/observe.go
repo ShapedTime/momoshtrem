@@ -84,7 +84,7 @@ type ContentionSite struct {
 type LogSummary struct {
 	Errors   int `json:"errors"`
 	Warnings int `json:"warnings"`
-	Debug    int `json:"debug,omitempty"`
+	Debug    int `json:"debug,omitempty"` // below WARN: --diagnose's records
 	Dropped  int `json:"dropped,omitempty"`
 	// BenignStorageErrors are anacrolix reads that logged at ERROR and
 	// then succeeded on a retry (#219); ReadFailures those that gave up
@@ -204,7 +204,11 @@ func observationMarkdown(rep *Rep) string {
 		o.OverheadPct, Num(sumBusy(o.Samplers)), Num(o.ProcessCPUMS))
 	b.WriteString("| Sampler | Every ms | Samples | Busy ms | Max ms | CPU % | Client lock |\n|---|---|---|---|---|---|---|\n")
 	for _, s := range o.Samplers {
-		fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %.3f | %v |\n", s.Name, Num(s.EveryMS), s.Samples, Num(s.BusyMS), Num(s.MaxMS), s.CPUPct, s.ClientLock)
+		every := Num(s.EveryMS)
+		if s.EveryMS == 0 {
+			every = "events" // the piece mirror and the log capture
+		}
+		fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %.3f | %v |\n", s.Name, every, s.Samples, Num(s.BusyMS), Num(s.MaxMS), s.CPUPct, s.ClientLock)
 	}
 
 	if len(o.Timeline) > 0 {
@@ -236,7 +240,7 @@ func observationMarkdown(rep *Rep) string {
 	l := o.Logs
 	fmt.Fprintf(&b, "\n### Logs\n\n%d errors, %d warnings captured", l.Errors, l.Warnings)
 	if l.Debug > 0 {
-		fmt.Fprintf(&b, ", %d debug records", l.Debug)
+		fmt.Fprintf(&b, ", %d DEBUG/INFO records (--diagnose)", l.Debug)
 	}
 	if l.Dropped > 0 {
 		fmt.Fprintf(&b, ", %d dropped past the cap", l.Dropped)

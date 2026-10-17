@@ -64,6 +64,10 @@ func (o *Observer) findings(f Facts, reqs []stack.Request, logs []LogEvent) []re
 // a reader between a seek and its read, which holds no piece at Now.
 const minBelowNow = 2
 
+// minStall is the shortest stall the rules explain: a shorter one is a
+// hiccup no sample can tell anything about.
+const minStall = 250 * time.Millisecond
+
 // stallFindings explains a stall:
 //   - stall-below-now: the readers' samples during the stall found the
 //     reader's piece incomplete and below Now, downloads on: the
@@ -74,17 +78,29 @@ const minBelowNow = 2
 func (o *Observer) stallFindings(s Stall) []report.Finding {
 	t := o.cfg.Titles[s.Title]
 	dur := s.End.Sub(s.Start)
+	if dur < minStall {
+		return nil
+	}
 	at := o.ms(s.Start)
 	plot := []string{"timeline.ndjson", "timeline-" + slug(t.Name) + ".svg"}
 	what := fmt.Sprintf("%s stalled %v at %d (piece %d) of %s", s.Device, dur.Round(time.Millisecond), s.Position,
 		t.piece(s.Position), t.Name)
 	var out []report.Finding
 
-	samples, below := 0, 0
+	// The reader at the stall's piece (or nearest it, a reader of the
+	// title), and how many readers of the title were open at once.
+	samples, below, open := 0, 0, 0
+	perTick := map[time.Time]int{}
 	var seen []string
+	p := t.piece(s.Position)
 	for _, r := range o.readers {
 		if r.title != s.Title || r.t.Before(s.Start) || r.t.After(s.End) {
 			continue
+		}
+		perTick[r.t]++
+		open = max(open, perTick[r.t])
+		if r.piece < p-1 || r.piece > p+1 {
+			continue // another reader of the file
 		}
 		samples++
 		if !r.state.Complete && r.state.Priority < types.PiecePriorityNow {
@@ -94,7 +110,7 @@ func (o *Observer) stallFindings(s Stall) []report.Finding {
 			seen = append(seen, fmt.Sprintf("+%s ms piece %d %s", report.Num(o.ms(r.t)-at), r.piece, stateName(r.state)))
 		}
 	}
-	readers := fmt.Sprintf("the reader over the stall: %s", orDash(strings.Join(seen, ", ")))
+	readers := fmt.Sprintf("the reader over the stall: %s; up to %d readers of the file open", orDash(strings.Join(seen, ", ")), open)
 	if below >= minBelowNow && o.activeDuring(t.Hash, s.Start, s.End) {
 		out = append(out, report.Finding{Rule: "stall-below-now", AtMS: at, Refs: plot,
 			Hint:     "the reader's piece was below Now while the player stalled, downloads on: the prioritizer's window didn't cover the playhead",
@@ -116,8 +132,11 @@ func (o *Observer) stallFindings(s Stall) []report.Finding {
 		}
 		out = append(out, report.Finding{Rule: "starved", AtMS: at, Refs: plot, Hint: hint, Evidence: what + "; " + rates})
 	case len(out) == 0:
-		out = append(out, report.Finding{Rule: "stall-unexplained", AtMS: at, Refs: plot,
-			Hint:     "the swarm sent more than the bitrate and the reader's piece was at Now: the delay is on our side (requests, the read path); see the timeline",
+		hint := "the swarm sent more than the bitrate and the reader's piece was at Now: the delay is on our side (requests, the read path); see the timeline"
+		if open > 1 {
+			hint = fmt.Sprintf("the swarm sent more than the bitrate, but %d readers of the file shared it: their windows competed for it", open)
+		}
+		out = append(out, report.Finding{Rule: "stall-unexplained", AtMS: at, Refs: plot, Hint: hint,
 			Evidence: what + "; " + rates + "; " + readers})
 	}
 	return out

@@ -8,9 +8,9 @@ import (
 	atorrent "github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/types"
 
+	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
-	"github.com/shapedtime/momoshtrem/internal/streaming"
 )
 
 const mib = 1 << 20
@@ -98,6 +98,23 @@ func TestStallFindings(t *testing.T) {
 	o.reading(t0, 10250*time.Millisecond, 13*time.Second, 20*mib, types.PiecePriorityNow)
 	if got := rulesOf(o.stallFindings(stall(t0))); got != "stall-unexplained" {
 		t.Errorf("one sample below Now: rules = %q", got)
+	}
+	// Another reader of the file, far away and below Now, isn't the
+	// stalled reader; it shares the swarm.
+	o, t0 = fixture()
+	o.seeding(t0, 3*mib)
+	o.reading(t0, 10*time.Second, 13*time.Second, 20*mib, types.PiecePriorityNow)
+	o.reading(t0, 10*time.Second, 13*time.Second, 80*mib, types.PiecePriorityNormal)
+	sortReaders(o)
+	fs := o.stallFindings(stall(t0))
+	if rulesOf(fs) != "stall-unexplained" || !strings.Contains(fs[0].Hint, "2 readers of the file shared it") {
+		t.Errorf("a far reader: %+v", fs)
+	}
+	// A hiccup is too short to explain.
+	short := stall(t0)
+	short.End = short.Start.Add(80 * time.Millisecond)
+	if fs := o.stallFindings(short); len(fs) != 0 {
+		t.Errorf("an 80 ms stall: %+v", fs)
 	}
 }
 
