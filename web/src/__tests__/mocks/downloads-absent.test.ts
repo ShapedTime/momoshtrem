@@ -2,13 +2,14 @@
 import { server } from '@/mocks/node';
 import { resetMockState } from '@/mocks/handlers';
 import { isApiError } from '@/lib/api/client';
-import { downloadsApi, torrentsApi } from '@/lib/api/endpoints';
+import { downloadsApi, titlesApi, torrentsApi } from '@/lib/api/endpoints';
 import { setMockScenario } from '@/mocks/scenario';
 
 /**
  * `downloads-absent`: a backend before #77's P4 and P6, so Activity degrades
- * cleanly (#207): /downloads answers 404, and the torrents' `wanted`, `holds`
- * and pinned bytes are missing, which the endpoints read as nothing.
+ * cleanly (#207) and title pages offer no Keep (#206): /downloads answers 404,
+ * the torrents' `wanted`, `holds` and pinned bytes are missing, which the
+ * endpoints read as nothing, and titles, seasons and episodes have no `keep`.
  */
 
 let mswFetch: typeof fetch;
@@ -48,5 +49,22 @@ describe('a backend without downloads', () => {
   it('reports no pinned bytes on the disk', async () => {
     const { disk } = await torrentsApi.summary();
     expect(disk).toMatchObject({ kept_bytes: 0, smart_bytes: 0 });
+  });
+
+  it('sends titles, seasons and episodes without keep, and no download ETA', async () => {
+    // Interstellar is kept and downloading; Bluey season 3 is kept; Frieren S01E27 is a smart pick
+    const movie = await titlesApi.get('movie', 157336);
+    expect(movie.library).not.toHaveProperty('keep');
+    expect(movie.library.download).toMatchObject({ eta_seconds: null });
+    expect((await titlesApi.get('tv', 82728)).library).not.toHaveProperty('keep');
+    for (const [tmdbId, number] of [
+      [82728, 3],
+      [209867, 1],
+    ]) {
+      const season = await titlesApi.season(tmdbId, number);
+      expect(season).not.toHaveProperty('keep');
+      expect(season.episodes.length).toBeGreaterThan(0);
+      for (const episode of season.episodes) expect(episode).not.toHaveProperty('keep');
+    }
   });
 });
