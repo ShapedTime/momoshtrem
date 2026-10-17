@@ -13,8 +13,6 @@ import {
   keepSubject,
   keepTargetName,
   keptToast,
-  stopKeepingConfirm,
-  stoppedToast,
 } from '@/lib/title/keep-sheet';
 import { buildSeason, buildTitle, seedLibrary } from '@/mocks/fixtures/titles';
 
@@ -170,14 +168,4 @@ describe('the sheet’s mode and copy', () => {
     });
   });
 
-  it('confirms Stop keeping with what goes and what stays; a smart pick is dismissed', () => {
-    expect(stopKeepingConfirm({ reason: 'kept' }, 'Interstellar')).toEqual({
-      title: 'Stop keeping Interstellar?',
-      description: 'It’s no longer held on disk. What’s downloaded stays as cache and plays until it’s cleared to make room.',
-      confirmLabel: 'Stop keeping',
-    });
-    expect(stopKeepingConfirm({ reason: 'smart' }, 'Frieren · S01E27')).toMatchObject({ title: 'Dismiss the smart pick for Frieren · S01E27?', confirmLabel: 'Dismiss' });
-    expect(stoppedToast({ reason: 'kept' }, 'Interstellar').title).toBe('Stopped keeping Interstellar');
-    expect(stoppedToast({ reason: 'smart' }, 'Frieren · S01E27').title).toBe('Dismissed the smart pick for Frieren · S01E27');
-  });
 });

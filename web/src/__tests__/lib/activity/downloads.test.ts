@@ -10,7 +10,6 @@ import {
   formatEta,
   holdReasons,
   pausedBanner,
-  stopKeepingCopy,
   torrentPill,
   wantedPct,
   wantedProgress,
@@ -216,18 +215,10 @@ describe('the “Kept & smart” list', () => {
     expect(downloadExpiry({ ...frieren, smart_source: 'streaming' })).toMatch(/· after what’s streaming$/);
   });
 
-  it('names a download for Stop keeping, in the title pages’ words; a smart pick is dismissed', () => {
+  it('names a download for Stop keeping', () => {
     expect(downloadName(find('Bluey'))).toBe('Bluey · Season 3');
     expect(downloadName(find('One Piece'))).toBe('One Piece · S22E15');
-    expect(stopKeepingCopy(find('Interstellar'))).toEqual({
-      action: 'Stop keeping',
-      title: 'Stopped keeping Interstellar',
-      body: 'What’s downloaded stays as cache until it’s cleared to make room.',
-      failed: 'Couldn’t stop keeping Interstellar',
-    });
-    const smart = stopKeepingCopy(list().items.find((d) => d.reason === 'smart')!);
-    expect(smart).toMatchObject({ action: 'Dismiss', title: 'Dismissed the smart pick for Frieren: Beyond Journey’s End · S01E27' });
-    expect(smart.body).toMatch(/^It won’t be downloaded ahead again\./);
+    expect(downloadName(list().items.find((d) => d.reason === 'smart')!)).toBe('Frieren: Beyond Journey’s End · S01E27');
   });
 
   it('sums up what’s on disk against the caps', () => {
