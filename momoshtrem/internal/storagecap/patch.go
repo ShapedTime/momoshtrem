@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 
@@ -33,7 +34,7 @@ type CommittedError struct {
 
 func (e *CommittedError) Error() string {
 	return fmt.Sprintf("Kept downloads need %s, but this leaves them %s. Free some kept downloads first.",
-		formatGB(e.CommittedKeptBytes), formatGB(e.KeptMaxBytes))
+		formatBytes(e.CommittedKeptBytes), formatBytes(e.KeptMaxBytes))
 }
 
 // ParsePatch reads a PUT /settings/storage body: only the fields sent
@@ -184,7 +185,7 @@ func checkLimits(p library.StorageSettingsPatch, merged library.StorageSettings,
 	if p.SetLimit && p.LimitBytes != nil {
 		if v := *p.LimitBytes; v < MinBytes || (next.MaxBytes > 0 && v > next.MaxBytes) {
 			return &FieldError{Field: "limit_bytes", Message: fmt.Sprintf(
-				"limit_bytes must be from %s to %s (90%% of the disk), or null for auto", formatGB(MinBytes), formatGB(next.MaxBytes))}
+				"limit_bytes must be from %s to %s (90%% of the disk), or null for auto", formatBytes(MinBytes), formatBytes(next.MaxBytes))}
 		}
 	}
 	sentLimit, sentKept, sentSmart := p.SetLimit, p.Kept.SetMaxBytes, p.Smart.SetMaxBytes
@@ -196,10 +197,10 @@ func checkLimits(p library.StorageSettingsPatch, merged library.StorageSettings,
 		switch {
 		case sentKept:
 			return &FieldError{Field: "kept.max_bytes", Message: fmt.Sprintf(
-				"kept.max_bytes can be at most %s: the limit less the streaming reserve", formatGB(room))}
+				"kept.max_bytes can be at most %s: the limit less the streaming reserve", formatBytes(room))}
 		case sentLimit:
 			return &FieldError{Field: "limit_bytes", Message: fmt.Sprintf(
-				"This limit leaves kept downloads %s, below their cap of %s: lower kept.max_bytes too", formatGB(room), formatGB(*kept))}
+				"This limit leaves kept downloads %s, below their cap of %s: lower kept.max_bytes too", formatBytes(room), formatBytes(*kept))}
 		}
 		// Only smart sent: kept leaves it nothing, checked below.
 	}
@@ -208,13 +209,13 @@ func checkLimits(p library.StorageSettingsPatch, merged library.StorageSettings,
 		switch {
 		case sentSmart:
 			return &FieldError{Field: "smart.max_bytes", Message: fmt.Sprintf(
-				"smart.max_bytes can be at most %s: what kept downloads and the streaming reserve leave of the limit", formatGB(left))}
+				"smart.max_bytes can be at most %s: what kept downloads and the streaming reserve leave of the limit", formatBytes(left))}
 		case sentKept:
 			return &FieldError{Field: "kept.max_bytes", Message: fmt.Sprintf(
-				"This kept cap leaves smart downloads %s, below their cap of %s: lower smart.max_bytes too, or set it to null", formatGB(left), formatGB(*smart))}
+				"This kept cap leaves smart downloads %s, below their cap of %s: lower smart.max_bytes too, or set it to null", formatBytes(left), formatBytes(*smart))}
 		default:
 			return &FieldError{Field: "limit_bytes", Message: fmt.Sprintf(
-				"This limit leaves smart downloads %s, below their cap of %s: lower smart.max_bytes too", formatGB(left), formatGB(*smart))}
+				"This limit leaves smart downloads %s, below their cap of %s: lower smart.max_bytes too", formatBytes(left), formatBytes(*smart))}
 		}
 	}
 	return nil
@@ -262,11 +263,31 @@ func boolField(name string, raw json.RawMessage) (*bool, *FieldError) {
 	return &v, nil
 }
 
-// formatGB writes bytes as the UI does: GB of 2^30 bytes, whole from 10 GB.
-func formatGB(n int64) string {
-	gb := float64(n) / float64(GiB)
-	if n%GiB == 0 || gb >= 10 {
-		return strconv.FormatFloat(gb, 'f', 0, 64) + " GB"
+// formatBytes writes a size as the web's formatBytes does
+// (web/src/lib/title/format.ts), so a message reads like the screen that
+// shows it: decimal units, one decimal below 100, none from 100 or in
+// bytes. 4 GiB is "4.3 GB".
+func formatBytes(n int64) string {
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	v, unit := float64(max(n, 0)), 0
+	for v >= 1000 && unit < len(units)-1 {
+		v /= 1000
+		unit++
 	}
-	return strconv.FormatFloat(gb, 'f', 1, 64) + " GB"
+	digits := 1
+	if unit == 0 || v >= 100 {
+		digits = 0
+	}
+	return toFixed(v, digits) + " " + units[unit]
+}
+
+// toFixed is JavaScript's Number.prototype.toFixed: the nearest, and on an
+// exact tie the larger, where strconv takes the even one (2.25 is "2.3").
+func toFixed(v float64, digits int) string {
+	scale := math.Pow10(digits)
+	scaled := v * scale
+	if _, frac := math.Modf(scaled); frac == 0.5 && math.FMA(v, scale, -scaled) == 0 {
+		return strconv.FormatFloat(math.Ceil(scaled)/scale, 'f', digits, 64)
+	}
+	return strconv.FormatFloat(v, 'f', digits, 64)
 }

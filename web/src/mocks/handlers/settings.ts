@@ -11,6 +11,7 @@ import type {
   RecSchedule,
 } from '@/lib/api/contract';
 import { type QualityFieldError, validateQualityProfile } from '@/lib/settings/quality';
+import { formatBytes } from '@/lib/title/format';
 import { downloadsUsage } from '../fixtures/downloads';
 import { aiUsage } from '../fixtures/recommendations';
 import {
@@ -88,7 +89,6 @@ interface StoragePatch {
 
 const KEEP_DAYS: readonly KeepDays[] = [7, 30, 90];
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 const isBytes = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 0);
 
 /** At most 4 windows of two different HH:MM times; null is refused. */
@@ -205,20 +205,20 @@ function mergeStorage(current: StorageDocument, patch: StoragePatch): StorageDoc
 function checkLimits(patch: StoragePatch, merged: StorageDocument): FieldError | null {
   const next = storageCaps(merged);
   if (patch.limit !== undefined && patch.limit !== null && (patch.limit < STORAGE_MIN_BYTES || patch.limit > next.max)) {
-    return { field: 'limit_bytes', message: `limit_bytes must be from ${gb(STORAGE_MIN_BYTES)} to ${gb(next.max)} (90% of the disk), or null for auto` };
+    return { field: 'limit_bytes', message: `limit_bytes must be from ${formatBytes(STORAGE_MIN_BYTES)} to ${formatBytes(next.max)} (90% of the disk), or null for auto` };
   }
   const [sentLimit, sentKept, sentSmart] = [patch.limit !== undefined, patch.kept.max !== undefined, patch.smart.max !== undefined];
   if (!sentLimit && !sentKept && !sentSmart) return null;
   const kept = merged.kept.max_bytes;
   if (kept !== null && kept > next.room) {
-    if (sentKept) return { field: 'kept.max_bytes', message: `kept.max_bytes can be at most ${gb(next.room)}: the limit less the streaming reserve` };
-    if (sentLimit) return { field: 'limit_bytes', message: `This limit leaves kept downloads ${gb(next.room)}, below their cap of ${gb(kept)}: lower kept.max_bytes too` };
+    if (sentKept) return { field: 'kept.max_bytes', message: `kept.max_bytes can be at most ${formatBytes(next.room)}: the limit less the streaming reserve` };
+    if (sentLimit) return { field: 'limit_bytes', message: `This limit leaves kept downloads ${formatBytes(next.room)}, below their cap of ${formatBytes(kept)}: lower kept.max_bytes too` };
   }
   const left = next.room - next.kept;
   const smart = merged.smart.max_bytes;
   if (smart !== null && smart > left) {
     const field = sentSmart ? 'smart.max_bytes' : sentKept ? 'kept.max_bytes' : 'limit_bytes';
-    return { field, message: `smart.max_bytes can be at most ${gb(left)}: what kept downloads and the streaming reserve leave of the limit` };
+    return { field, message: `smart.max_bytes can be at most ${formatBytes(left)}: what kept downloads and the streaming reserve leave of the limit` };
   }
   return null;
 }
@@ -245,7 +245,7 @@ export const settingsHandlers = [
       return apiError(
         409,
         'limit_below_committed',
-        `Kept downloads need ${gb(committed_kept_bytes)}, but this leaves them ${gb(after)}. Free some kept downloads first.`,
+        `Kept downloads need ${formatBytes(committed_kept_bytes)}, but this leaves them ${formatBytes(after)}. Free some kept downloads first.`,
         { committed_kept_bytes }
       );
     }
