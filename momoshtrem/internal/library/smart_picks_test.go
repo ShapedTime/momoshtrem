@@ -78,12 +78,12 @@ func TestDownloadsRepository_SmartReads(t *testing.T) {
 	ptr := func(t time.Time) *time.Time { return &t }
 	want := []SmartPick{
 		{ID: p11, EpisodeID: e11, ShowID: f.show.ID, SeasonNumber: 1, EpisodeNumber: 1, Source: SmartUpNext, CreatedAt: at, HasFile: true,
-			File: NextEpisodeFile{e11, 1, 1, "bb", "S1/E01.mkv", 100}},
+			File: NextEpisodeFile{e11, 1, 1, "bb", "S1/E01.mkv", 100, ""}},
 		{ID: p12, EpisodeID: e12, ShowID: f.show.ID, SeasonNumber: 1, EpisodeNumber: 2, Source: SmartStreaming, CreatedAt: at,
-			WatchedAt: ptr(watched), HasFile: true, File: NextEpisodeFile{e12, 1, 2, "bb", "S1/E02.mkv", 200}},
+			WatchedAt: ptr(watched), HasFile: true, File: NextEpisodeFile{e12, 1, 2, "bb", "S1/E02.mkv", 200, ""}},
 		{ID: p21, EpisodeID: e21, ShowID: f.show.ID, SeasonNumber: 2, EpisodeNumber: 1, Source: SmartUpNext, CreatedAt: at},
 		{ID: p22, EpisodeID: e22, ShowID: f.show.ID, SeasonNumber: 2, EpisodeNumber: 2, Source: SmartUpNext, CreatedAt: at,
-			WatchedAt: ptr(local), HasFile: true, File: NextEpisodeFile{e22, 2, 2, "dd", "S2/E02.mkv", 400}},
+			WatchedAt: ptr(local), HasFile: true, File: NextEpisodeFile{e22, 2, 2, "dd", "S2/E02.mkv", 400, ""}},
 	}
 	for i := range picks { // compare times as instants
 		picks[i].CreatedAt = picks[i].CreatedAt.UTC()
@@ -110,9 +110,9 @@ func TestDownloadsRepository_SmartReads(t *testing.T) {
 		t.Errorf("active picks after = %+v", picks)
 	}
 
-	// The re-pick rules count: S1E1, released early, is a candidate again;
-	// once a pick of it runs its lifetime, it isn't (until a play), nor is
-	// a dismissed episode, so the window goes on past them.
+	// The re-pick rules: S1E1, released early, is a candidate again; once a
+	// pick of it runs its lifetime, it's held back (until a play) but keeps
+	// its place in the window; a dismissed episode is passed over.
 	var e23 int64
 	if err := f.db.QueryRow(`INSERT INTO episodes (season_id, episode_number, name, air_date)
 		VALUES ($1, 3, 'Episode', '2025-01-01') RETURNING id`, f.seasons[2]).Scan(&e23); err != nil {
@@ -129,8 +129,9 @@ func TestDownloadsRepository_SmartReads(t *testing.T) {
 	if _, err := f.repo.ReleaseSmartPicks(ctx, []DownloadRelease{{ID: lifetime, Reason: ReleaseExpired}}, at); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := next(1, 1, 1), []int64{e23}; !reflect.DeepEqual(got, want) {
-		t.Errorf("after a lifetime expiry = %v, want %v", got, want)
+	if eps, _ := f.repo.NextEpisodesWithFiles(ctx, f.show.ID, 1, 1, 2); len(eps) != 2 ||
+		eps[0].EpisodeID != e11 || eps[0].Blocked != "expired" || eps[1].EpisodeID != e23 || eps[1].Blocked != "" {
+		t.Errorf("after a lifetime expiry = %+v, want S1E1 held back, then S2E3", eps)
 	}
 	dismissed, _, err := f.repo.UpsertSmartDownload(ctx, e23, SmartUpNext, at, at.Add(time.Hour))
 	if err != nil {
@@ -139,7 +140,7 @@ func TestDownloadsRepository_SmartReads(t *testing.T) {
 	if _, err := f.repo.ReleaseSmartPicks(ctx, []DownloadRelease{{ID: dismissed, Reason: ReleaseDeleted}}, at); err != nil {
 		t.Fatal(err)
 	}
-	if got := next(1, 1, 5); got != nil {
-		t.Errorf("after a dismissal = %v", got)
+	if got, want := next(1, 1, 5), []int64{e11}; !reflect.DeepEqual(got, want) {
+		t.Errorf("after a dismissal = %v, want %v (S1E1, held back)", got, want)
 	}
 }

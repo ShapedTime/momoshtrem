@@ -80,6 +80,7 @@ func TestPlanSmart(t *testing.T) {
 	upNext := func(s, e int) smartAnchor { return smartAnchor{1, episodeNumber{s, e}, library.SmartUpNext} }
 	streamFrom := func(s, e int) smartAnchor { return smartAnchor{1, episodeNumber{s, e}, library.SmartStreaming} }
 	win := func(eps ...library.NextEpisodeFile) []library.NextEpisodeFile { return eps }
+	heldBack := func(ep library.NextEpisodeFile) library.NextEpisodeFile { ep.Blocked = "expired"; return ep }
 	watched := func(p library.SmartPick, at time.Time) library.SmartPick { p.WatchedAt = &at; return p }
 	noFile := func(p library.SmartPick) library.SmartPick { p.HasFile = false; return p }
 	type create struct {
@@ -96,6 +97,19 @@ func TestPlanSmart(t *testing.T) {
 		creates   []create
 		releases  []library.DownloadRelease
 	}{
+		{
+			// Day 14: Up next's E3 and E4 ran their lifetime, and nobody
+			// played the show since: their slots stay theirs.
+			name: "an episode held back after its lifetime takes its slot, unpicked",
+			k:    2, anchors: []smartAnchor{upNext(1, 3)},
+			windows: [][]library.NextEpisodeFile{win(heldBack(nextEp(1, 3)), heldBack(nextEp(1, 4)))},
+		},
+		{
+			name: "the slots after a held-back one are picked",
+			k:    2, anchors: []smartAnchor{upNext(1, 3)},
+			windows: [][]library.NextEpisodeFile{win(heldBack(nextEp(1, 3)), nextEp(1, 4))},
+			creates: []create{{104, library.SmartUpNext}},
+		},
 		{
 			name: "Up next's window, at most k",
 			k:    2, anchors: []smartAnchor{upNext(1, 3)}, windows: [][]library.NextEpisodeFile{win(nextEp(1, 3), nextEp(1, 4), nextEp(1, 5))},
@@ -335,5 +349,41 @@ func TestVictimsFor(t *testing.T) {
 				t.Errorf("victims = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// The victims: Up next's picks of shows not streaming, whose file smart
+// pays for and no other pick wants, so releasing one frees its bytes.
+func TestVictimPool(t *testing.T) {
+	file := func(p library.SmartPick, path string) library.SmartPick {
+		p.File = library.NextEpisodeFile{EpisodeID: p.EpisodeID, InfoHash: "aa", FilePath: path, FileSize: 100}
+		return p
+	}
+	ofShow := func(p library.SmartPick, show int64) library.SmartPick { p.ShowID = show; return p }
+	noFile := func(p library.SmartPick) library.SmartPick { p.HasFile = false; return p }
+	watched := t0.Add(-48 * time.Hour)
+	snap := &Snapshot{
+		smartFiles: map[FileKey]bool{{"aa", "a"}: true, {"aa", "pair"}: true, {"aa", "done"}: true, {"aa", "s"}: true},
+		files:      map[FileKey]FileStatus{{"aa", "done"}: {Bytes: 100, DoneBytes: 100, Complete: true}},
+	}
+	picks := []library.SmartPick{
+		file(pick(1, 1, 1, library.SmartUpNext), "a"),
+		file(pick(2, 1, 2, library.SmartUpNext), "kept"), // a Keep has its file: smart doesn't pay for it
+		file(pick(3, 1, 3, library.SmartUpNext), "pair"), // another pick wants its file
+		file(pick(4, 1, 4, library.SmartStreaming), "pair"),
+		file(pick(5, 1, 5, library.SmartUpNext), "done"),
+		file(ofShow(pick(6, 1, 6, library.SmartUpNext), 2), "s"), // its show streams
+		file(pick(7, 1, 7, library.SmartUpNext), "released"),     // released this pass
+		noFile(pick(8, 1, 8, library.SmartUpNext)),
+		file(pick(9, 1, 9, library.SmartStreaming), "stream"), // a stream's own pick
+	}
+	pool := victimPool(picks, map[int64]bool{7: true}, []UpNextShow{{ShowID: 1, LastWatchedAt: &watched}},
+		map[int64][]episodeNumber{2: {{1, 1}}}, snap)
+	want := []smartVictim{{id: 1, show: 1, bytes: 100, watched: &watched}, {id: 5, show: 1, bytes: 100, done: true, watched: &watched}}
+	if !reflect.DeepEqual(pool, want) {
+		t.Errorf("pool = %+v\nwant   %+v", pool, want)
+	}
+	if victimPool(picks, nil, nil, nil, nil) != nil {
+		t.Error("a pool before the first pass")
 	}
 }

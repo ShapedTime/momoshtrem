@@ -340,3 +340,63 @@ func TestSmart_StreamTakesUpNextRoom(t *testing.T) {
 		t.Errorf("a pass later = %s\nwant          %s", got, want)
 	}
 }
+
+// Day 14: Up next's picks run their lifetime while the show is still in
+// Up next's 21 days. Nobody played it since, so they're held back and keep
+// their slots: nothing new is picked for the show until a play.
+func TestSmart_LifetimeHoldsTheWindow(t *testing.T) {
+	h := newHarness(t)
+	h.storage(`{"smart":{"enabled":true,"episodes_ahead":2}}`)
+	show, _ := h.smartShowNamed("Alpha", 5)
+	watched := h.clock.Now().Add(-24 * time.Hour)
+	picker := NewSmartPicker(h.svc, SmartDeps{Store: h.repo, UpNext: fixedUpNext{
+		{ShowID: show, SeasonNumber: 1, EpisodeNumber: 1, LastWatchedAt: &watched},
+	}})
+	h.runSmart(picker)
+	if got, want := h.picksByShow(), "Alpha E1 up_next, Alpha E2 up_next"; got != want {
+		t.Fatalf("picks = %s, want %s", got, want)
+	}
+
+	h.clock.advance(SmartLifetime)
+	h.refresh() // the manager releases them: their lifetime ran out
+	h.runSmart(picker)
+	expired := "Alpha E1 up_next expired, Alpha E2 up_next expired"
+	if got := h.picksByShow(); got != expired {
+		t.Errorf("day 14 = %s, want %s (nothing new)", got, expired)
+	}
+
+	// A play of the show after (E1 watched here): E1 isn't a candidate, E2
+	// can be picked again, and E3 joins.
+	h.clock.advance(time.Minute)
+	h.exec(`INSERT INTO local_watches (episode_id, watched_at)
+		SELECT e.id, $2 FROM episodes e JOIN seasons sn ON sn.id = e.season_id WHERE sn.show_id = $1 AND e.episode_number = 1`,
+		show, h.clock.Now())
+	h.runSmart(picker)
+	if got, want := h.picksByShow(), expired+", Alpha E2 up_next, Alpha E3 up_next"; got != want {
+		t.Errorf("after a play = %s\nwant          %s", got, want)
+	}
+}
+
+// A storage change makes the last pass's room stale: the next smart pass
+// refreshes first, so the picks fit the new cap.
+func TestSmart_StorageChangeRefreshesTheRoom(t *testing.T) {
+	h := newHarness(t)
+	h.storage(`{"smart":{"enabled":true,"episodes_ahead":2}}`)
+	show, tt := h.smartShow(3)
+	picker := NewSmartPicker(h.svc, SmartDeps{Store: h.repo})
+	h.refresh() // the room as the old cap leaves it
+
+	h.storage(fmt.Sprintf(`{"smart":{"max_bytes":%d}}`, testPiece))
+	h.svc.StorageChanged()
+	if !nudged(picker) {
+		t.Error("a storage change didn't nudge the smart picks")
+	}
+	h.sessions.set(streamEpisode("s1", tt, show, 1))
+	h.svc.poll(h.ctx) // reads the sessions; no pass
+	if err := picker.Run(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := h.picksByShow(), "Show E2 streaming"; got != want {
+		t.Errorf("picks = %s, want %s (the new cap fits one)", got, want)
+	}
+}

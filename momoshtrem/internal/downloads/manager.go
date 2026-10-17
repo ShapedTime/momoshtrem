@@ -177,6 +177,9 @@ type Service struct {
 	// smart picks' (smart.go).
 	onStreams atomic.Pointer[func(map[int64][]episodeNumber)]
 	onStorage atomic.Pointer[func()]
+	// storageGen counts the storage changes; a snapshot built before the
+	// last one has the old caps' room.
+	storageGen atomic.Int64
 
 	loadMu     sync.Mutex
 	loading    map[string]bool
@@ -375,6 +378,7 @@ func (s *Service) passLocked(ctx context.Context, loads bool) (*passPlan, error)
 func (s *Service) plan(ctx context.Context) (*passPlan, error) {
 	now := s.clock.Now()
 	clear(s.misses)
+	gen := s.storageGen.Load()
 	settings, limits, err := s.d.Limits.Limits(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the storage limits: %w", err)
@@ -430,7 +434,7 @@ func (s *Service) plan(ctx context.Context) (*passPlan, error) {
 	}
 	reason, resumes := pausedReason(h, s.streams.resumes(now))
 	p.snapshot = buildSnapshot(snapshotInput{at: now, stage: p.stage, torrents: p.torrents, facts: p.facts,
-		views: views, usage: usage, reason: reason, resumes: resumes, smart: settings.Smart.Enabled})
+		views: views, usage: usage, reason: reason, resumes: resumes, smart: settings.Smart.Enabled, gen: gen})
 	return p, nil
 }
 

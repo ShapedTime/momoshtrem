@@ -21,28 +21,33 @@ type NextEpisodeFile struct {
 	InfoHash      string
 	FilePath      string
 	FileSize      int64
+	// Blocked is "expired" for an episode held back after a pick of it ran
+	// its whole lifetime (NextEpisodesWithFiles): it takes its place among
+	// the k, but isn't picked. "" otherwise.
+	Blocked string
 }
 
 // NextEpisodesWithFiles returns the show's first k episodes from season
-// and episode on (that one included) that smart downloads may pick: in
-// regular seasons, whose active assignment is a torrent file, and that the
-// re-pick rules allow (smartBlockSQL: never watched, not dismissed, not
-// held back by a lifetime expiry), so an episode they rule out isn't
-// counted. In episode order. One query.
+// and episode on (that one included) for the smart picks: in regular
+// seasons and whose active assignment is a torrent file. The re-pick rules
+// (smartBlockSQL) pass over watched and dismissed episodes, which aren't
+// counted; one held back after a lifetime is counted, with Blocked set. In
+// episode order. One query.
 func (r *DownloadsRepository) NextEpisodesWithFiles(ctx context.Context, showID int64, season, episode, k int) ([]NextEpisodeFile, error) {
 	if k <= 0 {
 		return nil, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT e.id, sn.season_number, e.episode_number, ta.info_hash, ta.file_path, ta.file_size
+		SELECT e.id, sn.season_number, e.episode_number, ta.info_hash, ta.file_path, ta.file_size, COALESCE(b.reason, '')
 		FROM seasons sn
 		JOIN shows s ON s.id = sn.show_id
 		JOIN episodes e ON e.season_id = sn.id
 		`+activeAssignmentLateral("episode", "e.id")+`
+		CROSS JOIN LATERAL (SELECT `+smartBlockSQL(`w.show_tmdb_id = (SELECT tmdb_id FROM shows WHERE id = $1)`)+` AS reason) b
 		WHERE sn.show_id = $1 AND sn.season_number > 0
 		  AND (sn.season_number, e.episode_number) >= ($2, $3)
 		  AND ta.kind = 'torrent'
-		  AND (`+smartBlockSQL(`w.show_tmdb_id = (SELECT tmdb_id FROM shows WHERE id = $1)`)+`) IS NULL
+		  AND COALESCE(b.reason, '') NOT IN ('watched', 'dismissed')
 		ORDER BY sn.season_number, e.episode_number
 		LIMIT $4
 	`, showID, season, episode, k)
@@ -53,7 +58,7 @@ func (r *DownloadsRepository) NextEpisodesWithFiles(ctx context.Context, showID 
 	var out []NextEpisodeFile
 	for rows.Next() {
 		var f NextEpisodeFile
-		if err := rows.Scan(&f.EpisodeID, &f.SeasonNumber, &f.EpisodeNumber, &f.InfoHash, &f.FilePath, &f.FileSize); err != nil {
+		if err := rows.Scan(&f.EpisodeID, &f.SeasonNumber, &f.EpisodeNumber, &f.InfoHash, &f.FilePath, &f.FileSize, &f.Blocked); err != nil {
 			return nil, fmt.Errorf("failed to scan a next episode: %w", err)
 		}
 		out = append(out, f)
