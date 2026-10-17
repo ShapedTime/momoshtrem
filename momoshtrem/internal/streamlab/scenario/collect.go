@@ -384,6 +384,9 @@ func (c *collector) checks() {
 		known := ""
 		if c.remote.Err() == nil {
 			known = orphanedReads(c.quiet, c.rep.Metrics["read_timeouts"])
+			if known == "" && e.quietKnown != nil {
+				known = e.quietKnown(c.quiet) // a stress script's own signatures
+			}
 		}
 		add("quiescence", report.Fail, known, joinErrs(err, c.remote.Err()))
 	case c.remote.Err() != nil:

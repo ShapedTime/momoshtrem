@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/config"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/known"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 )
@@ -18,9 +19,11 @@ import (
 var removePauseIdle = &Scenario{
 	Name: "remove-pause-idle",
 	Tier: Stress,
-	Doc: `Readers stream one movie while its torrent is removed, paused and idled under them, at random: WebDAV GETs at random offsets and a VFS file read directly, against a chaos loop that, every moment or two, removes the torrent (svc.RemoveTorrent, its data deleted or kept), pauses it and resumes it a moment later (the activity manager's sticky pause), or leaves it to the activity manager, whose idle timeout (1 s, checked every 100 ms) idles it under any read blocked that long.
+	Doc: `Readers stream one movie while its torrent is removed, paused and idled under them, at random. WebDAV GETs at random offsets and a VFS file read directly run against a chaos loop. Every moment or two it removes the torrent (svc.RemoveTorrent), pauses it and resumes it a moment later (the activity manager's sticky pause), or leaves it to the activity manager. The idle timeout (1 s, checked every 100 ms) idles it under any read blocked that long.
 
-A removed torrent's open reads fail (its torrent closed), and the next open adds it again, its metadata from the seeder. Reads may fail here; what mustn't happen is a race, a deadlock, a leak, a wrong byte, or the service and the client disagreeing about what's loaded (torrent-consistent). It guards the serialised torrent lifecycle (bf328c5) and the idle wake (ffda214).`,
+A removed torrent's open reads fail (its torrent closed), and the next open adds it again, its metadata from the seeder. Reads may fail here. What mustn't happen is a race, a deadlock, a leak, a wrong byte, or the service and the client disagreeing about what's loaded (torrent-consistent). It guards the serialised torrent lifecycle (bf328c5) and the idle wake (ffda214).
+
+The removes keep the data: one that deletes it while a piece hashes deadlocks (#230), which remove-while-hashing guards. --set delete_data=true deletes it on half of them.`,
 	Guards:  []string{"bf328c5", "ffda214"},
 	Timeout: stressTimeout,
 	Params: stressParams(
@@ -30,6 +33,7 @@ A removed torrent's open reads fail (its torrent closed), and the next open adds
 		Param{Name: "chaos_every", Kind: Duration, Default: "1500ms", Doc: "A chaos move about this often (jittered ±50%)."},
 		Param{Name: "idle_timeout", Kind: Duration, Default: "1s", Doc: "torrent.idle_timeout (whole seconds)."},
 		Param{Name: "idle_check", Kind: Duration, Default: "100ms", Doc: "The activity manager's check interval (SetCheckInterval)."},
+		Param{Name: "delete_data", Kind: Bool, Default: "false", Doc: "Delete the data on half of the removes (#230 then fails ops-bounded here)."},
 	),
 	Stack: stressStack(func(p Params, c *config.Config) {
 		c.Torrent.IdleEnabled = true
@@ -80,14 +84,7 @@ func (s *stressRun) chaos(ctx context.Context, t *Title) {
 	svc := s.Stack.Service
 	switch s.Rand(4) {
 	case 0, 1:
-		del := s.Rand(2) == 0
-		s.call("RemoveTorrent", s.Stack.ReadTimeout+time.Duration(s.Stack.Config.Torrent.AddTimeout)*time.Second, func() {
-			if err := svc.RemoveTorrent(t.Hash, del); err != nil {
-				s.count("remove: " + errClass(err))
-				return
-			}
-			s.count(fmt.Sprintf("removed (delete data %v)", del))
-		})
+		s.remove(t, s.P.Bool("delete_data") && s.Rand(2) == 0)
 	case 2:
 		svc.Pause(t.Hash)
 		s.count("paused")
@@ -98,6 +95,19 @@ func (s *stressRun) chaos(ctx context.Context, t *Title) {
 		// timeout idles the torrent under it.
 		s.event("left to idle")
 	}
+}
+
+// remove removes t's torrent as a direct call, its data deleted with del;
+// false when the call got stuck. It may wait for an add in flight: up to
+// the add timeout.
+func (s *stressRun) remove(t *Title, del bool) bool {
+	return s.call("RemoveTorrent", s.Stack.ReadTimeout+time.Duration(s.Stack.Config.Torrent.AddTimeout)*time.Second, func() {
+		if err := s.Stack.Service.RemoveTorrent(t.Hash, del); err != nil {
+			s.count("remove: " + errClass(err))
+			return
+		}
+		s.count(fmt.Sprintf("removed (delete data %v)", del))
+	})
 }
 
 // directReads reads t through VFS files opened directly until ctx ends:
@@ -123,12 +133,55 @@ func (s *stressRun) directReads(ctx context.Context, t *Title) error {
 	return nil
 }
 
+var removeWhileHashing = &Scenario{
+	Name: "remove-while-hashing",
+	Tier: Stress,
+	Doc: `A player downloads a movie, and the torrent is removed with its data a random moment into it, again and again: each GET adds the torrent back, its pieces download and hash, and RemoveTorrent(hash, true) deletes them.
+
+deletePieces marks each piece not complete under the piece's lock, and anacrolix's piece hasher takes that lock for reading twice: a remove mid-hash deadlocks for good, holding the torrent's hash lock, and every open of the torrent waits behind it (#230). The script stops at the first stuck remove. ops-bounded and quiescence carry #230's signature then: the cycle on one mutex in the goroutine dump, and nothing left but the remove and what waits behind its hash lock.`,
+	Guards:  []string{known.DeleteDataDeadlock, "bf328c5"},
+	Timeout: stressTimeout,
+	Stack:   stressStack(nil, ""),
+	Params: stressParams(
+		Param{Name: "file_size", Kind: Bytes, Default: "96MiB"},
+		Param{Name: "attempts", Kind: Int, Default: "40", Doc: "Removes with data, each a random moment into a download."},
+		Param{Name: "remove_within", Kind: Duration, Default: "400ms", Doc: "Each remove comes this long after its GET at most."},
+	),
+	Checks: []string{checkOpsBounded, checkTorrentConsistent},
+	Key:    []string{"stress_ops", "stress_short_reads"},
+	Script: stressScript(func(s *stressRun) error {
+		t := s.Titles[0]
+		conn := s.Conn(s.Device("stress-hash"))
+		for range s.P.Int("attempts") {
+			if err := s.Ctx.Err(); err != nil {
+				return err
+			}
+			ctx, cancel := context.WithCancel(s.Ctx)
+			got := make(chan struct{})
+			go func() {
+				defer close(got)
+				s.get(ctx, conn, t, s.Rand(t.Size)&^(64<<10-1), 4<<20)
+			}()
+			s.Sleep(time.Duration(s.Rand(int64(s.P.Duration("remove_within")) + 1)))
+			ok := s.remove(t, true)
+			cancel()
+			<-got
+			if !ok {
+				s.event("a remove stuck")
+				break
+			}
+		}
+		s.consistent()
+		return nil
+	}),
+}
+
 var concurrentAdds = &Scenario{
 	Name: "concurrent-adds",
 	Tier: Stress,
 	Doc: `Over and over, a season pack's torrent is removed, then added by many callers at once: torrent service adds, WebDAV GETs of its episodes (each open runs GetOrAddTorrent), a Depth 1 PROPFIND of the season (which opens every episode it lists: F3), and now and then a remove racing them all.
 
-Adds of one hash share one attempt and its result, and adds, waits, drops and removes of one hash are serialised (bf328c5). Every GET must get right bytes or fail cleanly, and once each round settles the service and the client must agree on what's loaded (torrent-consistent). The stored metainfo goes with each remove, so every add fetches the info dict from the seeder.`,
+Adds of one hash share one attempt and its result, and adds, waits, drops and removes of one hash are serialised (bf328c5). Every GET must get right bytes or fail cleanly, and once each round settles the service and the client must agree on what's loaded (torrent-consistent). The stored metainfo goes with each remove, so every add fetches the info dict from the seeder. The removes keep the data (deleting it mid-hash is #230's, which remove-while-hashing guards).`,
 	Guards:  []string{"bf328c5"},
 	Timeout: stressTimeout,
 	Stack:   stressStack(nil, ""),
@@ -148,7 +201,7 @@ Adds of one hash share one attempt and its result, and adds, waits, drops and re
 			if err := s.Ctx.Err(); err != nil {
 				return err
 			}
-			if err := svc.RemoveTorrent(hash, s.Rand(3) == 0); err == nil {
+			if err := svc.RemoveTorrent(hash, false); err == nil {
 				s.count("removed")
 			}
 			callers := s.P.Int("callers")

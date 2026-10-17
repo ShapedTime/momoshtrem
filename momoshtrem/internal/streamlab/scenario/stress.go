@@ -49,6 +49,7 @@ var stressTier = []*Scenario{
 	seekPendingRead,
 	abortBlockedRead,
 	removePauseIdle,
+	removeWhileHashing,
 	concurrentAdds,
 	manyReaders,
 }
@@ -108,12 +109,18 @@ func stressParams(own ...Param) []Param {
 	return out
 }
 
+// stressAddTimeout is the stress tier's torrent.add_timeout (production's
+// is 60 s): it bounds how long a remove may wait for an add in flight.
+const stressAddTimeout = 10 * time.Second
+
 // stressStack is the stress tier's stack: the window param's streaming
-// windows, then tune (the scenario's own, optional), and the activity
-// manager's check interval (0: production's).
+// windows and stressAddTimeout, then tune (the scenario's own, optional),
+// and the activity manager's check interval (idleCheck names its param;
+// "" keeps production's).
 func stressStack(tune func(Params, *config.Config), idleCheck string) func(Params) Stack {
 	return func(p Params) Stack {
 		st := Stack{Tune: func(c *config.Config) {
+			c.Torrent.AddTimeout = int(stressAddTimeout.Seconds())
 			w := p.Bytes("window")
 			c.Streaming.ReadaheadBytes = w
 			c.Streaming.UrgentBufferBytes = max(w/4, 1)
@@ -149,7 +156,9 @@ type stressRun struct {
 	ops      int // operations ended (count, countShort)
 	calls    int // direct VFS calls (call)
 	slowest  time.Duration
-	stuck    []string // calls past their bound
+	stuck    []string    // calls past their bound, for the evidence
+	stuckOn  []stuckCall // the same calls, for their known signature
+	cycle    bool        // a stuck call's dump showed #230's cycle
 	outcomes map[string]int
 	short    int
 }
@@ -160,6 +169,12 @@ type stressRun struct {
 func stressScript(script func(*stressRun) error) func(*Env) error {
 	return func(e *Env) error {
 		s := &stressRun{Env: e, outcomes: map[string]int{}}
+		e.quietKnown = func(q checks.QuiescenceResult) string {
+			s.mu.Lock()
+			cycle := s.cycle
+			s.mu.Unlock()
+			return quietKnown(q, e.Counter(metricReadTimeouts), cycle)
+		}
 		ctx, stop := context.WithCancel(e.Ctx)
 		polled := s.poll(ctx)
 		err := script(s)
@@ -200,7 +215,8 @@ func (s *stressRun) report() {
 	case s.calls == 0:
 		s.Check(checkOpsBounded, report.NA, "", "the script made no direct VFS call")
 	case len(s.stuck) > 0:
-		s.Check(checkOpsBounded, report.Fail, "", fmt.Sprintf("%d of %d calls past their bound: %s", len(s.stuck), s.calls, quote(first3(s.stuck))))
+		s.Check(checkOpsBounded, report.Fail, stuckKnown(s.stuckOn),
+			fmt.Sprintf("%d of %d calls past their bound: %s", len(s.stuck), s.calls, quote(first3(s.stuck))))
 	default:
 		s.Check(checkOpsBounded, report.Pass, "", fmt.Sprintf("%d direct calls, the slowest %v", s.calls, s.slowest.Round(time.Millisecond)))
 	}
@@ -240,27 +256,33 @@ func (s *stressRun) call(name string, bound time.Duration, fn func()) bool {
 		n := len(s.stuck) + 1
 		s.stuck = append(s.stuck, fmt.Sprintf("%s (%s) still running after %v", name, id, bound+opSlack))
 		s.mu.Unlock()
-		s.dumpStuck(n, name, id)
+		cycle := deleteDeadlock(s.dumpStuck(n, name, id))
+		s.mu.Lock()
+		s.stuckOn = append(s.stuckOn, stuckCall{name: name, cycle: cycle})
+		s.cycle = s.cycle || cycle
+		s.mu.Unlock()
 		return false
 	}
 }
 
-// dumpStuck writes every goroutine's stack to the repetition's folder
-// (stuck-<n>.txt) when a direct call is stuck: what holds what it waits
-// for. The runner's SIGQUIT dump comes only with a hard timeout.
-func (s *stressRun) dumpStuck(n int, name, id string) {
-	if s.dir == "" {
-		return
-	}
+// dumpStuck returns every goroutine's stack (debug=2) when a direct call
+// is stuck, and writes it to the repetition's folder (stuck-<n>.txt): what
+// holds what it waits for. The runner's SIGQUIT dump comes only with a
+// hard timeout.
+func (s *stressRun) dumpStuck(n int, name, id string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (request label %s) was still running %v past its bound. Every goroutine:\n\n", name, id, opSlack)
 	pprof.Lookup("goroutine").WriteTo(&b, 2)
+	if s.dir == "" {
+		return b.String()
+	}
 	file := fmt.Sprintf("stuck-%d.txt", n)
 	if os.WriteFile(filepath.Join(s.dir, file), []byte(b.String()), 0o644) == nil {
 		s.rec.mu.Lock()
 		s.rec.artifacts[strings.TrimSuffix(file, ".txt")] = file
 		s.rec.mu.Unlock()
 	}
+	return b.String()
 }
 
 // readAt reads len(p) bytes of t's file f at off as a direct call, checks

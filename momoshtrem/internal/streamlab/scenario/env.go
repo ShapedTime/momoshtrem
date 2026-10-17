@@ -83,6 +83,9 @@ type Env struct {
 	dir string
 	// swarm is the seeders, proxies and fake CDN (Remote).
 	swarm *swarmSet
+	// quietKnown names the known issues a quiescence failure carries
+	// beyond #225's: a stress script's (stress_deadlock.go). Optional.
+	quietKnown func(checks.QuiescenceResult) string
 }
 
 // recorder keeps what a repetition did.

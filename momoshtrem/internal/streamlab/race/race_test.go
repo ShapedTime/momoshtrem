@@ -121,7 +121,7 @@ func TestParse(t *testing.T) {
 	}
 	r := races[0]
 	const want = "write anacrolix/torrent.(*reader).clearStorageReader < internal/streaming.(*PriorityReader).Close < " +
-		"internal/vfs.(*TorrentFile).Close < internal/vfs.(*sessionFile).Close | " +
+		"internal/vfs.(*TorrentFile).Close | " +
 		"write anacrolix/torrent.(*reader).initStorageReader < internal/streaming.(*PriorityReader).Read < " +
 		"internal/vfs.(*TorrentFile).readContext.func1"
 	if r.Signature != want || r.Count != 3 {
@@ -164,6 +164,34 @@ func TestSignatureIsOrderFree(t *testing.T) {
 	c, _ := race.Parse(strings.NewReader(swappedWrite), "")
 	if c[0].Signature != a[0].Signature {
 		t.Errorf("swapped accesses:\n%q\n%q", c[0].Signature, a[0].Signature)
+	}
+}
+
+// The lab drives the code: a poller and a scenario reaching one racy
+// access are one race, whatever lab frames sit under it.
+func TestSignatureSkipsTheLab(t *testing.T) {
+	report := func(caller string) string {
+		return `WARNING: DATA RACE
+Read at 0x00c0001a6020 by goroutine 9:
+  github.com/shapedtime/momoshtrem/internal/streaming.(*PriorityReader).Snapshot()
+      /src/internal/streaming/reader.go:62 +0x30
+  github.com/shapedtime/momoshtrem/internal/streaming.(*ReaderTracker).GetReaders()
+      /src/internal/streaming/tracker.go:62 +0x30
+` + caller + `
+Previous write at 0x00c0001a6020 by goroutine 8:
+  github.com/shapedtime/momoshtrem/internal/streaming.(*PriorityReader).Read()
+      /src/internal/streaming/reader.go:143 +0x80
+  github.com/shapedtime/momoshtrem/internal/vfs.(*TorrentFile).readContext.func1()
+      /src/internal/vfs/torrent_file.go:471 +0x6c
+==================
+`
+	}
+	poller, _ := race.Parse(strings.NewReader(report("  github.com/shapedtime/momoshtrem/internal/streamlab/scenario.(*stressRun).poll.func1()\n      /src/x.go:1 +0x1\n")), "")
+	scenario, _ := race.Parse(strings.NewReader(report("  github.com/shapedtime/momoshtrem/internal/streamlab/scenario.(*Env).ServerPositions()\n      /src/x.go:2 +0x1\n")), "")
+	const want = "read internal/streaming.(*PriorityReader).Snapshot < internal/streaming.(*ReaderTracker).GetReaders | " +
+		"write internal/streaming.(*PriorityReader).Read < internal/vfs.(*TorrentFile).readContext.func1"
+	if len(poller) != 1 || len(scenario) != 1 || poller[0].Signature != want || scenario[0].Signature != want {
+		t.Errorf("signatures:\n%v\n%v\nwant %q", poller, scenario, want)
 	}
 }
 

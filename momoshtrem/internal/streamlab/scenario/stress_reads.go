@@ -26,7 +26,8 @@ Each worker's move is one of two. Over WebDAV, a bounded GET whose read times ou
 	Params: stressParams(
 		Param{Name: "workers", Kind: Int, Default: "3", Doc: "Concurrent workers."},
 		Param{Name: "rounds", Kind: Int, Default: "10", Doc: "Rounds: a move per worker each."},
-		Param{Name: "release_within", Kind: Duration, Default: "5s", Doc: "Each round releases the seeder at a random moment this long after it starts: often after the reads timed out and their files closed."},
+		Param{Name: "release_within", Kind: Duration, Default: "12s", Doc: "Each round releases the seeder at a random moment this long after it starts: often after the reads timed out and their files closed, " +
+			"and now and then past a Close's bound, which a Close waiting on its timed-out read (46e3423's deadlock) would then outlive."},
 	),
 	Checks: []string{checkOpsBounded},
 	Key:    []string{"stress_ops", "read_timeouts", "leaked_goroutines"},
@@ -249,7 +250,10 @@ func (s *stressRun) readThenClose(t *Title, off int64, pause time.Duration) {
 	}
 	s.readAt(f, t, make([]byte, (1+s.Rand(8))<<15), off)
 	s.Sleep(pause)
-	s.call("Close", 2*s.Stack.ReadTimeout, func() { f.Close() })
+	// The read returned: nothing holds the file, so a Close has no reason
+	// to wait for the seeder. One that does (46e3423's deadlock) outlives
+	// this bound when the release comes late.
+	s.call("Close", s.Stack.ReadTimeout, func() { f.Close() })
 }
 
 // waitBlocked waits up to limit until the stack has a read blocked and

@@ -24,9 +24,14 @@ import (
 // Own is the prefix of momoshtrem's functions in a stack.
 const Own = "github.com/shapedtime/momoshtrem/"
 
+// lab marks the lab's own functions: they drive the code under test, so
+// they don't tell races apart (a poller and a scenario reaching one racy
+// access are one race).
+var lab = []string{Own + "internal/streamlab/", Own + "cmd/streamlab"}
+
 // ownFrames is how many momoshtrem frames of an access the signature
-// keeps, below the access's own top frame.
-const ownFrames = 3
+// keeps, below the access's own top frame: the racy function's callers.
+const ownFrames = 2
 
 // LogPrefix is the log_path check gives GORACE in each repetition's
 // folder: the race detector appends ".<pid>".
@@ -187,9 +192,9 @@ func parseBlock(lines []string) (report.Race, bool) {
 }
 
 // accessSignature is an access's part of a signature: its kind, its top
-// frame, then its top momoshtrem frames below that (the top frames
-// overall when it ran no momoshtrem code), momoshtrem's prefix dropped:
-// "write anacrolix/torrent.(*reader).clearStorageReader <
+// frame, then its top momoshtrem frames below that, the lab's left out
+// (the top frames overall when it ran no momoshtrem code), momoshtrem's
+// prefix dropped: "write anacrolix/torrent.(*reader).clearStorageReader <
 // internal/streaming.(*PriorityReader).Close < internal/vfs.(*TorrentFile).Close".
 // Function names only: a line that moves doesn't make a known race new.
 func accessSignature(op string, funcs []string) string {
@@ -199,7 +204,7 @@ func accessSignature(op string, funcs []string) string {
 	keep := []string{funcs[0]}
 	var own []string
 	for _, f := range funcs[1:] {
-		if strings.HasPrefix(f, Own) {
+		if strings.HasPrefix(f, Own) && !isLab(f) {
 			own = append(own, f)
 			if len(own) == ownFrames {
 				break
@@ -214,6 +219,10 @@ func accessSignature(op string, funcs []string) string {
 		keep[i] = short(f)
 	}
 	return op + " " + strings.Join(keep, " < ")
+}
+
+func isLab(fn string) bool {
+	return slices.ContainsFunc(lab, func(p string) bool { return strings.HasPrefix(fn, p) })
 }
 
 // short drops momoshtrem's and GitHub's prefixes from a function name.
