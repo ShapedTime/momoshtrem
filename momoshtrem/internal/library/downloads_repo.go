@@ -321,6 +321,12 @@ type DownloadRelease struct {
 // answers the ids it released (an id released already is skipped). The
 // rows stay, with released_at and the reason.
 func (r *DownloadsRepository) ReleaseDownloads(ctx context.Context, releases []DownloadRelease, at time.Time) ([]int64, error) {
+	return r.release(ctx, releases, at, false)
+}
+
+// release releases the active downloads given (with smartOnly, only
+// those that are still smart picks) and answers the ids it released.
+func (r *DownloadsRepository) release(ctx context.Context, releases []DownloadRelease, at time.Time, smartOnly bool) ([]int64, error) {
 	if len(releases) == 0 {
 		return nil, nil
 	}
@@ -332,8 +338,8 @@ func (r *DownloadsRepository) ReleaseDownloads(ctx context.Context, releases []D
 	rows, err := r.db.QueryContext(ctx, `
 		UPDATE downloads d SET released_at = $3, release_reason = m.reason, updated_at = $3
 		FROM unnest($1::bigint[], $2::text[]) AS m(id, reason)
-		WHERE d.id = m.id AND d.released_at IS NULL
-		RETURNING d.id`, ids, reasons, at)
+		WHERE d.id = m.id AND d.released_at IS NULL AND (NOT $4 OR d.reason = 'smart')
+		RETURNING d.id`, ids, reasons, at, smartOnly)
 	if err != nil {
 		return nil, fmt.Errorf("failed to release downloads: %w", err)
 	}
@@ -529,19 +535,21 @@ func titles(ctx context.Context, q queryer, byID map[int64]*ResolvedDownload, ta
 	return nil
 }
 
-// episodeItemSQL selects the episodes joined as e (with sn and s) as
-// covered items of download t.id, each with its latest watch: Trakt's by
-// the matching rule (its two halves as two lookups, as episodeWatchedSQL
-// does), or local.
-var episodeItemSQL = `
-	SELECT t.id AS download_id, 'episode' AS item_type, e.id AS item_id, sn.season_number, e.episode_number,
-	       e.air_date, e.episode_type,
-	       GREATEST(
+// episodeWatchedAtSQL is the latest watch of the library episode e (with
+// sn and s): Trakt's by the matching rule (its two halves as two lookups,
+// as episodeWatchedSQL does), or local; NULL without one.
+var episodeWatchedAtSQL = `GREATEST(
 	         (SELECT max(w.last_watched_at) FROM trakt_watched_episodes w
 	          WHERE w.show_tmdb_id = s.tmdb_id AND ` + sameEpisodeByID(traktEpisode("w"), libraryEpisode) + `),
 	         (SELECT max(w.last_watched_at) FROM trakt_watched_episodes w
 	          WHERE w.show_tmdb_id = s.tmdb_id AND ` + sameEpisodeByNumber(traktEpisode("w"), libraryEpisode) + `),
-	         (SELECT lw.watched_at FROM local_watches lw WHERE lw.episode_id = e.id)) AS watched_at`
+	         (SELECT lw.watched_at FROM local_watches lw WHERE lw.episode_id = e.id))`
+
+// episodeItemSQL selects the episodes joined as e (with sn and s) as
+// covered items of download t.id, each with its latest watch.
+var episodeItemSQL = `
+	SELECT t.id AS download_id, 'episode' AS item_type, e.id AS item_id, sn.season_number, e.episode_number,
+	       e.air_date, e.episode_type, ` + episodeWatchedAtSQL + ` AS watched_at`
 
 func items(ctx context.Context, q queryer, byID map[int64]*ResolvedDownload, targets string, args []any) error {
 	rows, err := q.QueryContext(ctx, `
@@ -633,39 +641,48 @@ func (r *DownloadsRepository) UpsertSmartDownload(ctx context.Context, episodeID
 	return id, true, nil
 }
 
-// pickEpisode is SmartPickBlocked's episode (ep) for the matching rule.
-var pickEpisode = episodeCols{"ep.tmdb_episode_id", "ep.season_number", "ep.episode_number"}
+// smartBlockSQL is the re-pick rule (PLAN §6 "Re-picks") for the library
+// episode e, joined to its season sn and show s, as an SQL CASE: why it
+// can't be a smart pick, else NULL. plays is episodeWatchedSQL's condition
+// on the plays.
+//   - watched: a Trakt play (the matching rule) or a local watch, ever;
+//   - dismissed: a smart pick of it was released deleted;
+//   - expired: a smart pick of it ran its whole lifetime (released expired
+//     at its expires_at or after), and nothing of the show was played
+//     after the last one. A pick released early, as it stopped being a
+//     candidate, blocks nothing.
+func smartBlockSQL(plays string) string {
+	return `CASE
+		WHEN EXISTS (SELECT 1 FROM local_watches lw WHERE lw.episode_id = e.id)
+		  OR ` + episodeWatchedSQL("s.tmdb_id", libraryEpisode, plays) + `
+		  THEN 'watched'
+		WHEN EXISTS (SELECT 1 FROM downloads d WHERE d.episode_id = e.id AND d.reason = 'smart' AND d.release_reason = 'deleted')
+		  THEN 'dismissed'
+		WHEN EXISTS (
+			SELECT 1 FROM (SELECT max(d.released_at) AS at FROM downloads d
+			               WHERE d.episode_id = e.id AND d.reason = 'smart' AND d.release_reason = 'expired'
+			                 AND d.released_at >= d.expires_at) lifetime
+			WHERE lifetime.at IS NOT NULL
+			  AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes w
+			                  WHERE w.show_tmdb_id = s.tmdb_id AND w.last_watched_at > lifetime.at)
+			  AND NOT EXISTS (SELECT 1 FROM local_watches lw JOIN episodes e2 ON e2.id = lw.episode_id
+			                  JOIN seasons s2 ON s2.id = e2.season_id
+			                  WHERE s2.show_id = s.id AND lw.watched_at > lifetime.at))
+		  THEN 'expired'
+	END`
+}
 
 // SmartPickBlocked says why an episode can't be a smart pick (PLAN §6
 // "Re-picks"), "" when it can: watched (a Trakt play or a local watch,
 // ever), dismissed (a smart pick of it was released deleted), or expired
-// (its last smart pick expired, and nothing of the show was played after).
+// (a smart pick of it ran its whole lifetime, and nothing of the show was
+// played after). smartBlockSQL is the rule.
 func (r *DownloadsRepository) SmartPickBlocked(ctx context.Context, episodeID int64) (string, error) {
 	var reason sql.NullString
 	err := r.db.QueryRowContext(ctx, `
-		WITH ep AS (
-			SELECT e.id, e.tmdb_episode_id, e.episode_number, sn.season_number, s.id AS show_id, s.tmdb_id AS show_tmdb_id
-			FROM episodes e JOIN seasons sn ON sn.id = e.season_id JOIN shows s ON s.id = sn.show_id
-			WHERE e.id = $1
-		), last_expired AS (
-			SELECT max(d.released_at) AS at FROM downloads d
-			WHERE d.episode_id = $1 AND d.reason = 'smart' AND d.release_reason = 'expired'
-		)
-		SELECT CASE
-			WHEN EXISTS (SELECT 1 FROM local_watches lw WHERE lw.episode_id = ep.id)
-			  OR `+episodeWatchedSQL("ep.show_tmdb_id", pickEpisode, "TRUE")+`
-			  THEN 'watched'
-			WHEN EXISTS (SELECT 1 FROM downloads d WHERE d.episode_id = $1 AND d.reason = 'smart' AND d.release_reason = 'deleted')
-			  THEN 'dismissed'
-			WHEN (SELECT at FROM last_expired) IS NOT NULL
-			 AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes w
-			                 WHERE w.show_tmdb_id = ep.show_tmdb_id AND w.last_watched_at > (SELECT at FROM last_expired))
-			 AND NOT EXISTS (SELECT 1 FROM local_watches lw JOIN episodes e2 ON e2.id = lw.episode_id
-			                 JOIN seasons s2 ON s2.id = e2.season_id
-			                 WHERE s2.show_id = ep.show_id AND lw.watched_at > (SELECT at FROM last_expired))
-			  THEN 'expired'
-			END
-		FROM ep`, episodeID).Scan(&reason)
+		SELECT `+smartBlockSQL("TRUE")+`
+		FROM episodes e JOIN seasons sn ON sn.id = e.season_id JOIN shows s ON s.id = sn.show_id
+		WHERE e.id = $1`, episodeID).Scan(&reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrEpisodeNotFound
 	}

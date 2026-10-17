@@ -652,7 +652,6 @@ func main() {
 	smartPicker := wireSmart(smartDeps{
 		db:        db,
 		downloads: downloadsService,
-		governor:  storageGovernor,
 		me:        meService,
 		traktSync: traktSync,
 	})

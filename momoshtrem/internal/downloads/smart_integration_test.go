@@ -1,8 +1,10 @@
 package downloads
 
 import (
+	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,14 +62,17 @@ func streamEpisode(id string, tt testTorrent, show int64, e int) sessions.Sessio
 	return s
 }
 
-// smartShow is a show of n episodes, each a file of one torrent.
-func (h *harness) smartShow(n int) (int64, testTorrent) {
-	show, eps := h.show("Show", n)
+// smartShow is a show of n episodes, each a file (a piece) of one
+// torrent.
+func (h *harness) smartShow(n int) (int64, testTorrent) { return h.smartShowNamed("Show", n) }
+
+func (h *harness) smartShowNamed(title string, n int) (int64, testTorrent) {
+	show, eps := h.show(title, n)
 	sizes := make([]int64, n)
 	for i := range sizes {
 		sizes[i] = testPiece
 	}
-	tt := h.torrent("Show", true, sizes...)
+	tt := h.torrent(title, true, sizes...)
 	for e := 1; e <= n; e++ {
 		h.assign(library.ItemTypeEpisode, eps[[2]int{1, e}], tt, e-1)
 	}
@@ -148,31 +153,34 @@ func TestSmart_StreamingWithoutTrakt(t *testing.T) {
 		smartRow{2, library.SmartStreaming, library.ReleaseWatched}, smartRow{3, library.SmartStreaming, library.ReleaseWatched},
 		smartRow{4, library.SmartStreaming, ""}, smartRow{5, library.SmartStreaming, ""}, smartRow{6, library.SmartStreaming, ""})
 
-	// Fewer episodes ahead: once the stream ends, the show keeps one held
-	// pick (E4 is watched here meanwhile, so the planner releases it).
+	// E4 paused (its session ends), with one episode ahead now: the show
+	// keeps the paused episode and the one after it, and E6 goes.
 	h.storage(`{"smart":{"episodes_ahead":1}}`)
-	h.exec(`INSERT INTO local_watches (episode_id, watched_at)
-		SELECT e.id, $2 FROM episodes e JOIN seasons sn ON sn.id = e.season_id WHERE sn.show_id = $1 AND e.episode_number = 4`,
-		show, h.clock.Now().Add(time.Second))
 	h.clock.advance(time.Minute)
 	h.sessions.set()
 	h.svc.poll(h.ctx)
 	h.refresh()
 	h.runSmart(picker)
-	h.wantSmartRows("one ahead",
-		smartRow{2, library.SmartStreaming, library.ReleaseWatched}, smartRow{3, library.SmartStreaming, library.ReleaseWatched},
-		smartRow{4, library.SmartStreaming, library.ReleaseWatched}, smartRow{5, library.SmartStreaming, ""},
-		smartRow{6, library.SmartStreaming, library.ReleaseExpired})
+	paused := []smartRow{
+		{2, library.SmartStreaming, library.ReleaseWatched}, {3, library.SmartStreaming, library.ReleaseWatched},
+		{4, library.SmartStreaming, ""}, {5, library.SmartStreaming, ""}, {6, library.SmartStreaming, library.ReleaseExpired},
+	}
+	h.wantSmartRows("E4 paused, one ahead", paused...)
 
-	// Smart downloads off: a stream picks nothing, and nothing's released.
-	h.storage(`{"smart":{"enabled":false}}`)
-	h.sessions.set(streamEpisode("s4", tt, show, 5))
+	// Resumed, E4 finds E5 picked still.
+	h.sessions.set(streamEpisode("s4", tt, show, 4))
 	h.svc.poll(h.ctx)
 	h.runSmart(picker)
-	h.wantSmartRows("smart downloads off",
-		smartRow{2, library.SmartStreaming, library.ReleaseWatched}, smartRow{3, library.SmartStreaming, library.ReleaseWatched},
-		smartRow{4, library.SmartStreaming, library.ReleaseWatched}, smartRow{5, library.SmartStreaming, ""},
-		smartRow{6, library.SmartStreaming, library.ReleaseExpired})
+	h.wantSmartRows("E4 resumed", paused...)
+
+	// Smart downloads off: nothing's picked (E6, released early, could be
+	// picked again with two ahead), and nothing's released.
+	h.storage(`{"smart":{"enabled":false,"episodes_ahead":2}}`)
+	h.runSmart(picker)
+	h.wantSmartRows("smart downloads off", paused...)
+	h.storage(`{"smart":{"enabled":true}}`)
+	h.runSmart(picker)
+	h.wantSmartRows("on again", append(paused, smartRow{6, library.SmartStreaming, ""})...)
 }
 
 // A pick the smart cap can't fit isn't made; one a Keep holds isn't
@@ -262,5 +270,73 @@ func TestSmart_LatePlayReleasedWatched(t *testing.T) {
 	h.cache.TrimToCapacity()
 	if have, others := h.have(tt, 1), h.have(other, 0, 1); have[0] || !others[0] || !others[1] {
 		t.Errorf("after the trim E2 %v, the other torrent %v; want E2's piece evicted first", have, others)
+	}
+}
+
+// fixedUpNext is an Up next that doesn't change.
+type fixedUpNext []UpNextShow
+
+func (f fixedUpNext) UpNextShows(context.Context) ([]UpNextShow, error) { return f, nil }
+
+// picksByShow are the smart picks' rows as "Show E1 source[ release]", by
+// show and episode.
+func (h *harness) picksByShow() string {
+	h.t.Helper()
+	rows, err := h.db.Query(`
+		SELECT s.title, e.episode_number, d.smart_source, COALESCE(d.release_reason, '')
+		FROM downloads d JOIN episodes e ON e.id = d.episode_id JOIN seasons sn ON sn.id = e.season_id
+		JOIN shows s ON s.id = sn.show_id
+		WHERE d.reason = 'smart' ORDER BY s.title, e.episode_number, d.id`)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var title, source, release string
+		var episode int
+		if err := rows.Scan(&title, &episode, &source, &release); err != nil {
+			h.t.Fatal(err)
+		}
+		out = append(out, strings.TrimSpace(fmt.Sprintf("%s E%d %s %s", title, episode, source, release)))
+	}
+	return strings.Join(out, ", ")
+}
+
+// A stream's pick that doesn't fit the smart cap takes the room of Up
+// next's picks of other shows, the least recently watched first, but never
+// one all on disk of a show watched within 7 days. Up next's released
+// picks then wait (they don't fit) while the stream's hold the room.
+func TestSmart_StreamTakesUpNextRoom(t *testing.T) {
+	h := newHarness(t)
+	h.storage(fmt.Sprintf(`{"smart":{"enabled":true,"episodes_ahead":2,"max_bytes":%d}}`, 3*testPiece))
+	recent, older := h.clock.Now().Add(-3*24*time.Hour), h.clock.Now().Add(-10*24*time.Hour)
+	alpha, ta := h.smartShowNamed("Alpha", 3)
+	bravo, _ := h.smartShowNamed("Bravo", 3)
+	charlie, tc := h.smartShowNamed("Charlie", 3)
+	picker := NewSmartPicker(h.svc, SmartDeps{Store: h.repo, UpNext: fixedUpNext{
+		{ShowID: alpha, SeasonNumber: 1, EpisodeNumber: 1, LastWatchedAt: &recent},
+		{ShowID: bravo, SeasonNumber: 1, EpisodeNumber: 1, LastWatchedAt: &older},
+	}})
+
+	h.runSmart(picker)
+	upNext := "Alpha E1 up_next, Alpha E2 up_next, Bravo E1 up_next"
+	if got := h.picksByShow(); got != upNext {
+		t.Fatalf("Up next's picks = %s, want %s (the cap fits three)", got, upNext)
+	}
+	h.fill(ta, 0) // Alpha E1 is on disk
+	h.refresh()
+
+	h.sessions.set(streamEpisode("s1", tc, charlie, 1))
+	h.svc.poll(h.ctx)
+	h.runSmart(picker)
+	want := "Alpha E1 up_next, Alpha E2 up_next expired, Bravo E1 up_next expired, " +
+		"Charlie E2 streaming, Charlie E3 streaming"
+	if got := h.picksByShow(); got != want {
+		t.Errorf("with Charlie streaming = %s\nwant                  %s", got, want)
+	}
+	h.runSmart(picker)
+	if got := h.picksByShow(); got != want {
+		t.Errorf("a pass later = %s\nwant          %s", got, want)
 	}
 }

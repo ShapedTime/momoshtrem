@@ -6,7 +6,6 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/me"
-	"github.com/shapedtime/momoshtrem/internal/storagecap"
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
@@ -14,7 +13,6 @@ import (
 type smartDeps struct {
 	db        *library.DB
 	downloads *downloads.Service
-	governor  *storagecap.Governor
 	me        *me.Service
 	traktSync *trakt.Syncer
 }
@@ -23,17 +21,13 @@ type smartDeps struct {
 // the shows being watched (Trakt's Up next, and what streams now), picked
 // through the download manager. A pass runs every 5 minutes, after each
 // Trakt sync, after each storage PUT (smart.enabled, episodes_ahead and
-// the caps; this replaces wireDownloads' wake with a wake and a nudge),
-// and when an episode starts streaming (the manager's session reads).
-// Start it after the manager.
+// the caps: the manager's StorageChanged, which wireDownloads installs on
+// the governor, nudges it), and when an episode starts streaming (the
+// manager's session reads). Start it after the manager.
 func wireSmart(d smartDeps) *downloads.SmartPicker {
 	picker := downloads.NewSmartPicker(d.downloads, downloads.SmartDeps{
 		Store:  library.NewDownloadsRepository(d.db),
 		UpNext: upNextShows{d.me},
-	})
-	d.governor.SetOnChange(func() {
-		d.downloads.Wake()
-		picker.Nudge()
 	})
 	d.traktSync.SetOnSynced(picker.Nudge)
 	return picker

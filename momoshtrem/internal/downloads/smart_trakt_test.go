@@ -349,7 +349,7 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 	want("E3 watched",
 		pickRow{3, library.SmartUpNext, library.ReleaseWatched}, pickRow{4, library.SmartUpNext, ""}, pickRow{5, library.SmartUpNext, ""})
 
-	// E5 dismissed: never picked again.
+	// E5 dismissed: never picked again, and not counted, so E6 joins.
 	var e5 int64
 	if err := db.QueryRow(`SELECT d.id FROM downloads d JOIN episodes e ON e.id = d.episode_id
 		WHERE d.released_at IS NULL AND e.episode_number = 5`).Scan(&e5); err != nil {
@@ -359,19 +359,20 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 		t.Fatal(err)
 	}
 	run()
-	want("E5 dismissed",
-		pickRow{3, library.SmartUpNext, library.ReleaseWatched}, pickRow{4, library.SmartUpNext, ""},
-		pickRow{5, library.SmartUpNext, library.ReleaseDeleted})
+	dismissed := []pickRow{{3, library.SmartUpNext, library.ReleaseWatched}, {4, library.SmartUpNext, ""},
+		{5, library.SmartUpNext, library.ReleaseDeleted}, {6, library.SmartUpNext, ""}}
+	want("E5 dismissed", dismissed...)
 
 	// Trakt disconnected: Up next is gone, and so are its picks. Streaming
-	// E4 picks what follows it, E5 still left out.
+	// E4 picks what follows it: E6 at once (released early, so it isn't
+	// held back) and E7; E5 still left out.
 	if err := auth.Disconnect(ctx); err != nil {
 		t.Fatal(err)
 	}
 	run()
 	want("Trakt off",
 		pickRow{3, library.SmartUpNext, library.ReleaseWatched}, pickRow{4, library.SmartUpNext, library.ReleaseExpired},
-		pickRow{5, library.SmartUpNext, library.ReleaseDeleted})
+		pickRow{5, library.SmartUpNext, library.ReleaseDeleted}, pickRow{6, library.SmartUpNext, library.ReleaseExpired})
 	season, episode := 1, 4
 	path := "Breaking Bad S01/E04.mkv"
 	live.set(sessions.Session{ID: "s1", Source: sessions.SourceTorrent, InfoHash: &hash, FilePath: &path, SizeBytes: 1000,
@@ -382,5 +383,6 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 	run()
 	want("streaming E4 without Trakt",
 		pickRow{3, library.SmartUpNext, library.ReleaseWatched}, pickRow{4, library.SmartUpNext, library.ReleaseExpired},
-		pickRow{5, library.SmartUpNext, library.ReleaseDeleted}, pickRow{6, library.SmartStreaming, ""})
+		pickRow{5, library.SmartUpNext, library.ReleaseDeleted}, pickRow{6, library.SmartUpNext, library.ReleaseExpired},
+		pickRow{6, library.SmartStreaming, ""}, pickRow{7, library.SmartStreaming, ""})
 }

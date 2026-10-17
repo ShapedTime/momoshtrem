@@ -23,22 +23,24 @@ import (
 //   - the episodes streaming now: K episodes after each (streaming). This
 //     works without Trakt.
 //
-// The SmartPicker makes the picks through Service.UpsertSmart (which
-// checks the re-pick rules) and releases those that stop being candidates
-// as expired, never deleted (that's a dismissal, never picked again). The
-// planner releases watched picks (watched, or a later episode streaming)
-// and expired ones, and admits picks against the smart cap. While
-// smart.enabled is off the picker does nothing at all.
+// K counts the episodes the re-pick rules allow (NextEpisodesWithFiles).
+// The SmartPicker makes the picks through Service.UpsertSmart and releases
+// those that stop being candidates as expired, never deleted (that's a
+// dismissal, never picked again). The planner releases watched picks
+// (watched, or a later episode streaming) and expired ones, and admits
+// picks against the smart cap. While smart.enabled is off the picker does
+// nothing at all.
 //
 // Order: picks are admitted by creation, then episode (no score column).
 // A pass makes its picks in the order of its signals: the episodes
 // streaming now first, then Up next by last watched, newest first, each
-// in episode order. A pick made earlier keeps its room, so a later signal
-// never unpins what's on disk already; the stale ones leave on their own
-// (an Up next show after UpNextWithin without a play, a streaming pick
-// within its SmartLifetime).
+// in episode order. A pick made earlier keeps its room, except that a
+// stream's pick that doesn't fit takes it from Up next's picks of other
+// shows (victimsFor); the stale ones leave on their own (an Up next show
+// after UpNextWithin without a play, a streaming pick within its
+// SmartLifetime).
 
-// The smart picks' timings.
+// The smart picks' rules.
 const (
 	// SmartInterval is how often the smart picks are reconsidered without
 	// a nudge (a Trakt sync, a storage change, an episode starting to
@@ -47,6 +49,9 @@ const (
 	// UpNextWithin is how recently an Up next show must have been watched
 	// for its next episodes to be picked.
 	UpNextWithin = 21 * 24 * time.Hour
+	// SmartKeepRecent spares a pick all on disk of a show watched within
+	// it when a stream's pick needs room.
+	SmartKeepRecent = 7 * 24 * time.Hour
 )
 
 // UpNextShow is a library show Trakt's Up next lists, with the library
@@ -120,13 +125,19 @@ func compareEpisodes(a, b episodeNumber) int {
 	return cmp.Or(cmp.Compare(a.season, b.season), cmp.Compare(a.episode, b.episode))
 }
 
+// streamsAfter says an episode of the show after n streams now.
+func streamsAfter(streaming []episodeNumber, n episodeNumber) bool {
+	return slices.ContainsFunc(streaming, func(s episodeNumber) bool { return s.after(n) })
+}
+
 // smartInput is what a smart pass decides from.
 type smartInput struct {
 	// k is smart.episodes_ahead.
 	k       int
 	anchors []smartAnchor
 	// windows are each anchor's episodes (NextEpisodesWithFiles): the
-	// first k from it that were never watched and have a torrent file.
+	// first k from it that the re-pick rules allow and that have a torrent
+	// file.
 	windows [][]library.NextEpisodeFile
 	// picks are the active smart picks; streaming the episodes streaming
 	// now, per show.
@@ -134,9 +145,11 @@ type smartInput struct {
 	streaming map[int64][]episodeNumber
 }
 
-// smartCreate is a pick to make: the episode, why, and its file.
+// smartCreate is a pick to make: the episode, its show, why, and its
+// file.
 type smartCreate struct {
 	episodeID int64
+	show      int64
 	source    library.SmartSource
 	file      FileKey
 	size      int64
@@ -150,7 +163,9 @@ type smartPlan struct {
 }
 
 // planSmart decides a pass. The candidates are the windows' episodes, the
-// first anchor that names one giving its source. An active pick:
+// first anchor that names one giving its source, but those before an
+// episode of their show streaming now (the planner would release them as
+// watched). An active pick:
 //   - watched before it was made (a play that synced late) is released
 //     watched: the planner only counts plays after a download's creation;
 //   - watched since, or before an episode of its show streaming now, is
@@ -160,9 +175,10 @@ type smartPlan struct {
 //     says where the show is), when Up next picked it (the show left Up
 //     next's UpNextWithin, or Trakt is off), or when it has no torrent
 //     file any more;
-//   - else it's a streaming pick whose stream ended: it stays until it's
-//     watched or its SmartLifetime ends, the first k of its show's by
-//     episode (k may have been lowered).
+//   - else it's a streaming pick whose stream ended (or paused): it stays
+//     until it's watched or its SmartLifetime ends, the first k+1 of its
+//     show's by episode (the one that streamed and the k after it; k may
+//     have been lowered).
 //
 // The picks to make are the candidates without an active pick, in order.
 func planSmart(in smartInput) smartPlan {
@@ -175,11 +191,11 @@ func planSmart(in smartInput) smartPlan {
 		}
 		window := in.windows[i]
 		for _, ep := range window[:min(len(window), in.k)] {
-			if candidate[ep.EpisodeID] {
+			if candidate[ep.EpisodeID] || streamsAfter(in.streaming[a.show], episodeNumber{ep.SeasonNumber, ep.EpisodeNumber}) {
 				continue
 			}
 			candidate[ep.EpisodeID] = true
-			order = append(order, smartCreate{episodeID: ep.EpisodeID, source: a.source,
+			order = append(order, smartCreate{episodeID: ep.EpisodeID, show: a.show, source: a.source,
 				file: FileKey{Hash: ep.InfoHash, Path: ep.FilePath}, size: ep.FileSize})
 		}
 	}
@@ -197,7 +213,7 @@ func planSmart(in smartInput) smartPlan {
 		switch {
 		case p.WatchedAt != nil && !p.WatchedAt.After(p.CreatedAt):
 			release(p, library.ReleaseWatched)
-		case p.WatchedAt != nil, slices.ContainsFunc(streaming, func(s episodeNumber) bool { return s.after(n) }):
+		case p.WatchedAt != nil, streamsAfter(streaming, n):
 		case candidate[p.EpisodeID], slices.Contains(streaming, n):
 		case streams[p.ShowID], p.Source == library.SmartUpNext, !p.HasFile:
 			release(p, library.ReleaseExpired)
@@ -210,7 +226,7 @@ func planSmart(in smartInput) smartPlan {
 		slices.SortFunc(ps, func(a, b library.SmartPick) int {
 			return compareEpisodes(episodeNumber{a.SeasonNumber, a.EpisodeNumber}, episodeNumber{b.SeasonNumber, b.EpisodeNumber})
 		})
-		for _, p := range ps[min(len(ps), in.k):] {
+		for _, p := range ps[min(len(ps), in.k+1):] {
 			release(p, library.ReleaseExpired)
 		}
 	}
@@ -250,21 +266,43 @@ func roomOf(s *Snapshot) smartRoom {
 	}
 }
 
+// cost is what c takes of the room: nothing for a file a download has, or
+// an earlier pick of the pass (taken), or before the first pass.
+func (r smartRoom) cost(c smartCreate, taken map[FileKey]bool) int64 {
+	if !r.known || taken[c.file] || r.has(c.file) {
+		return 0
+	}
+	return c.size
+}
+
+// smartEvict makes room for c, a stream's pick short of need bytes, and
+// answers the room after; false when it released nothing.
+type smartEvict func(c smartCreate, need int64) (smartRoom, bool, error)
+
 // fitSmart makes the picks that can fit, in order, through pick (false:
 // not made, as the re-pick rules refuse it, so it takes no room). An
 // episode a Keep holds isn't picked; a file a download has, or an earlier
-// pick of the pass, costs nothing; one larger than what the smart cap has
-// left is skipped (it would only read storage_full; Smart never takes kept
-// room), and a later, smaller one may still fit. skipped counts those.
-func fitSmart(creates []smartCreate, room smartRoom, pick func(smartCreate) (bool, error)) (skipped int, err error) {
+// pick of the pass, costs nothing. A stream's pick that doesn't fit what
+// the smart cap has left first has evict make room; one that still
+// doesn't is skipped (it would only read storage_full; Smart never takes
+// kept room), and a later, smaller one may still fit. skipped counts
+// those.
+func fitSmart(creates []smartCreate, room smartRoom, pick func(smartCreate) (bool, error), evict smartEvict) (skipped int, err error) {
 	taken := map[FileKey]bool{}
 	for _, c := range creates {
 		if room.kept(c.episodeID) {
 			continue
 		}
-		cost := c.size
-		if !room.known || taken[c.file] || room.has(c.file) {
-			cost = 0
+		cost := room.cost(c, taken)
+		if cost > room.left && c.source == library.SmartStreaming && evict != nil {
+			after, ok, err := evict(c, cost-room.left)
+			if err != nil {
+				return skipped, err
+			}
+			if ok {
+				room = after
+				cost = room.cost(c, taken)
+			}
 		}
 		if cost > room.left {
 			skipped++
@@ -282,12 +320,96 @@ func fitSmart(creates []smartCreate, room smartRoom, pick func(smartCreate) (boo
 	return skipped, nil
 }
 
+// smartVictim is an Up next pick that may give its room to a stream's.
+type smartVictim struct {
+	id   int64
+	show int64
+	// bytes are its admitted files, as the last pass planned them; done
+	// says they're all on disk.
+	bytes int64
+	done  bool
+	// watched is its show's last Trakt play; nil when unknown.
+	watched *time.Time
+}
+
+// victimsFor chooses the Up next picks of shows other than show to
+// release, as expired, so a stream's pick short of need bytes fits: the
+// least recently watched shows' first (unknown first; a show's newest
+// picks first). It never chooses a pick all on disk of a show watched
+// within SmartKeepRecent. Nil when they can't free that much.
+func victimsFor(need int64, show int64, pool []smartVictim, now time.Time) []smartVictim {
+	var eligible []smartVictim
+	for _, v := range pool {
+		recent := v.watched != nil && now.Sub(*v.watched) < SmartKeepRecent
+		if v.show != show && v.bytes > 0 && !(v.done && recent) {
+			eligible = append(eligible, v)
+		}
+	}
+	slices.SortStableFunc(eligible, func(a, b smartVictim) int {
+		switch {
+		case a.watched == nil && b.watched != nil:
+			return -1
+		case a.watched != nil && b.watched == nil:
+			return 1
+		case a.watched != nil:
+			if c := a.watched.Compare(*b.watched); c != 0 {
+				return c
+			}
+		}
+		return cmp.Or(cmp.Compare(a.show, b.show), cmp.Compare(b.id, a.id))
+	})
+	var out []smartVictim
+	var freed int64
+	for _, v := range eligible {
+		if freed >= need {
+			break
+		}
+		out = append(out, v)
+		freed += v.bytes
+	}
+	if freed < need {
+		return nil
+	}
+	return out
+}
+
+// victimPool is the Up next picks that may give their room to a stream's:
+// the active ones not released this pass, as the snapshot plans them,
+// with their shows' last plays.
+func victimPool(picks []library.SmartPick, released map[int64]bool, upNext []UpNextShow, s *Snapshot) []smartVictim {
+	watched := map[int64]*time.Time{}
+	for _, u := range upNext {
+		watched[u.ShowID] = u.LastWatchedAt
+	}
+	var pool []smartVictim
+	for _, p := range picks {
+		if p.Source != library.SmartUpNext || released[p.ID] {
+			continue
+		}
+		if d, ok := s.Download(p.ID); ok {
+			pool = append(pool, smartVictim{id: p.ID, show: p.ShowID, bytes: d.WantedBytes, done: d.State == StateDone,
+				watched: watched[p.ShowID]})
+		}
+	}
+	return pool
+}
+
 // demoteWatchedSince demotes the files of the downloads released as
 // watched since t, but those the last pass still pins.
 func (s *Service) demoteWatchedSince(ctx context.Context, t time.Time) {
 	s.passMu.Lock()
 	defer s.passMu.Unlock()
 	s.demoteReleasedWatched(ctx, t, s.refs)
+}
+
+// StorageChanged is the storage governor's OnChange: a storage PUT wakes
+// the manager, and nudges the smart picks (smart.enabled, episodes_ahead
+// and the caps).
+func (s *Service) StorageChanged() {
+	s.Wake()
+	if fn := s.onStorage.Load(); fn != nil {
+		(*fn)()
+	}
 }
 
 // ---- The picker ---------------------------------------------------------------
@@ -300,9 +422,9 @@ type SmartDeps struct {
 }
 
 // SmartPicker makes and ends the smart picks: a pass every SmartInterval,
-// on Nudge (after a Trakt sync or a storage change), and when an episode
-// starts streaming (the manager's session reads tell it). One pass runs at
-// a time.
+// on Nudge (after a Trakt sync), after a storage change (the Service's
+// StorageChanged), and when an episode starts streaming (the manager's
+// session reads tell it). One pass runs at a time.
 type SmartPicker struct {
 	svc   *Service
 	d     SmartDeps
@@ -322,11 +444,12 @@ type SmartPicker struct {
 }
 
 // NewSmartPicker creates the smart picks over the Service, and has its
-// session reads tell it what streams; Start runs it.
+// session reads and storage changes tell it; Start runs it.
 func NewSmartPicker(svc *Service, d SmartDeps) *SmartPicker {
 	p := &SmartPicker{svc: svc, d: d, log: slog.With("component", "downloads", "part", "smart"), nudge: make(chan struct{}, 1)}
-	observe := p.observe
+	observe, nudge := p.observe, p.Nudge
 	svc.onStreams.Store(&observe)
+	svc.onStorage.Store(&nudge)
 	return p
 }
 
@@ -449,36 +572,52 @@ func (p *SmartPicker) Run(ctx context.Context) error {
 	}
 	plan := planSmart(in)
 
-	released, watched := false, false
-	if len(plan.releases) > 0 {
-		ids, err := p.d.Store.ReleaseSmartPicks(ctx, plan.releases, now)
-		if err != nil {
-			return err
-		}
-		for _, rel := range plan.releases {
-			if slices.Contains(ids, rel.ID) {
-				p.log.Info("Smart pick released", "download_id", rel.ID, "reason", rel.Reason)
-				released, watched = true, watched || rel.Reason == library.ReleaseWatched
-			}
-		}
-	}
-	if !released && len(plan.creates) == 0 {
-		return nil
-	}
-
-	// A pass now unpins what was released, and gives the room as the caps
-	// see it (the snapshot may predate smart.enabled turning on). Then the
-	// watched ones' pieces go first when the cache trims.
-	if err := p.svc.Refresh(ctx); err != nil {
+	released, err := p.release(ctx, plan.releases, now, "Smart pick released")
+	if err != nil {
 		return err
 	}
-	if watched {
-		p.svc.demoteWatchedSince(ctx, now)
+	// A pass unpins what was released and frees its room; one also runs
+	// when the last pass's room didn't count the picks (smart downloads
+	// were off). Then the watched ones' pieces go first when the cache
+	// trims.
+	snap := p.svc.Snapshot()
+	if len(released) > 0 || (len(plan.creates) > 0 && (snap == nil || !snap.smartOn)) {
+		if err := p.svc.Refresh(ctx); err != nil {
+			return err
+		}
+		snap = p.svc.Snapshot()
+	}
+	for _, rel := range plan.releases {
+		if released[rel.ID] && rel.Reason == library.ReleaseWatched {
+			p.svc.demoteWatchedSince(ctx, now)
+			break
+		}
 	}
 	if len(plan.creates) == 0 {
 		return nil
 	}
-	skipped, err := fitSmart(plan.creates, roomOf(p.svc.Snapshot()), func(c smartCreate) (bool, error) {
+
+	pool := victimPool(in.picks, released, upNext, snap)
+	evict := func(c smartCreate, need int64) (smartRoom, bool, error) {
+		victims := victimsFor(need, c.show, pool, now)
+		if victims == nil {
+			return smartRoom{}, false, nil
+		}
+		rels := make([]library.DownloadRelease, len(victims))
+		for i, v := range victims {
+			rels[i] = library.DownloadRelease{ID: v.id, Reason: library.ReleaseExpired}
+		}
+		pool = slices.DeleteFunc(pool, func(v smartVictim) bool { return slices.Contains(victims, v) })
+		freed, err := p.release(ctx, rels, now, "Smart pick released: a stream's pick needs its room")
+		if err != nil || len(freed) == 0 {
+			return smartRoom{}, false, err
+		}
+		if err := p.svc.Refresh(ctx); err != nil {
+			return smartRoom{}, false, err
+		}
+		return roomOf(p.svc.Snapshot()), true, nil
+	}
+	skipped, err := fitSmart(plan.creates, roomOf(snap), func(c smartCreate) (bool, error) {
 		_, _, err := p.svc.UpsertSmart(ctx, c.episodeID, c.source)
 		switch {
 		case errors.Is(err, ErrRepickBlocked):
@@ -488,9 +627,34 @@ func (p *SmartPicker) Run(ctx context.Context) error {
 			return false, nil // removed meanwhile
 		}
 		return err == nil, err
-	})
+	}, evict)
 	if skipped > 0 {
 		p.log.Debug("Smart picks skipped: the smart cap has no room for them", "skipped", skipped)
 	}
 	return err
+}
+
+// release releases smart picks, holding the manager's pass lock as
+// UpsertSmart does, so a Keep that read one either turns it kept first
+// (it's skipped) or finds it released. It answers the ids it released.
+func (p *SmartPicker) release(ctx context.Context, rels []library.DownloadRelease, at time.Time, msg string) (map[int64]bool, error) {
+	if len(rels) == 0 {
+		return nil, nil
+	}
+	p.svc.passMu.Lock()
+	ids, err := p.d.Store.ReleaseSmartPicks(ctx, rels, at)
+	p.svc.passMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	for _, rel := range rels {
+		if out[rel.ID] {
+			p.log.Info(msg, "download_id", rel.ID, "reason", rel.Reason)
+		}
+	}
+	return out, nil
 }

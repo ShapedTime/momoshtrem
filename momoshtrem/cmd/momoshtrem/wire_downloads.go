@@ -31,7 +31,8 @@ type downloadsDeps struct {
 // picks pinned in the piece cache, the manager that fetches them in the
 // background, and /downloads (Options.Downloads). It installs the usage
 // and the commit guard on the storage governor (the PUT's 409, its usage),
-// and wakes the manager after each storage PUT.
+// and tells the manager (and the smart picks, wireSmart) about each
+// storage PUT (StorageChanged).
 //
 // Nothing runs yet: startDownloads restores the pins and starts the
 // manager, once the stored pauses are restored. Until then the cache holds
@@ -57,7 +58,7 @@ func wireDownloads(d downloadsDeps, opts *api.Options) *downloads.Service {
 		},
 	})
 	d.governor.SetDownloads(svc)
-	d.governor.SetOnChange(svc.Wake)
+	d.governor.SetOnChange(svc.StorageChanged)
 	opts.Downloads = svc
 	return svc
 }

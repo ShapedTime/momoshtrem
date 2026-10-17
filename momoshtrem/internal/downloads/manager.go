@@ -172,9 +172,11 @@ type Service struct {
 	marks    map[string]*watchMark
 	holdKey  string
 	restored bool
-	// onStreams gets the episodes streaming now after every session read:
-	// the smart picks' (smart.go).
+	// onStreams gets the episodes streaming now after every session read,
+	// and onStorage runs after a storage change (StorageChanged): the
+	// smart picks' (smart.go).
 	onStreams atomic.Pointer[func(map[int64][]episodeNumber)]
+	onStorage atomic.Pointer[func()]
 
 	loadMu     sync.Mutex
 	loading    map[string]bool
@@ -428,7 +430,7 @@ func (s *Service) plan(ctx context.Context) (*passPlan, error) {
 	}
 	reason, resumes := pausedReason(h, s.streams.resumes(now))
 	p.snapshot = buildSnapshot(snapshotInput{at: now, stage: p.stage, torrents: p.torrents, facts: p.facts,
-		views: views, usage: usage, reason: reason, resumes: resumes})
+		views: views, usage: usage, reason: reason, resumes: resumes, smart: settings.Smart.Enabled})
 	return p, nil
 }
 
