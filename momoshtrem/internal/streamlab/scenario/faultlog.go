@@ -8,7 +8,7 @@ import (
 )
 
 // Faults a script injects on purpose declare themselves (Env.Fault), per
-// title: a paused seeder, a vanished proxy, a stalled CDN. A declared fault
+// title: a held seeder, a vanished proxy, a stalled CDN. A declared fault
 // excuses only the watchdog: it doesn't trip for that title while one
 // runs. It never excuses a broken body: play-ok's excuse for those is
 // Env.Expect, narrower, and a body silent during a declared fault isn't
@@ -20,7 +20,7 @@ import (
 type envFaults struct {
 	mu      sync.Mutex
 	list    []envFault
-	resumes []func() // PauseSeeder's
+	resumes []func() // HoldSeeder's releases
 	// open are the faults still running when the script ended.
 	open []string
 }
@@ -39,7 +39,7 @@ func faultKey(t *Title) string {
 	return observe.Title{Hash: t.Hash, Path: t.Path, Remote: t.Remote != nil}.FaultKey()
 }
 
-// Fault declares a fault starting now that starves t (a paused seeder, a
+// Fault declares a fault starting now that starves t (a held seeder, a
 // dropped link, a stalled CDN), or every title when t is nil. Call the
 // returned func when it ends; calling it again does nothing.
 func (e *Env) Fault(name string, t *Title) (end func()) {
@@ -62,23 +62,24 @@ func (e *Env) Fault(name string, t *Title) (end func()) {
 	}
 }
 
-// PauseSeeder pauses t's seeder (swarm.Seeder.Pause) as a declared fault,
-// until the returned func resumes it; calling it again does nothing. A
-// pause the script doesn't resume is resumed when the script ends.
-func (e *Env) PauseSeeder(t *Title) (resume func()) {
-	end := e.Fault("seeder-pause", t)
-	t.Seeder.Pause()
+// HoldSeeder holds t's seeder's uploads (swarm.Seeder.HoldUploads) as a
+// fault called name, until the returned func releases them; calling it
+// again does nothing. A hold the script doesn't release is released when
+// the script ends, and fails the watchdog check.
+func (e *Env) HoldSeeder(t *Title, name string) (release func()) {
+	end := e.Fault(name, t)
+	t.Seeder.HoldUploads()
 	var once sync.Once
-	resume = func() {
+	release = func() {
 		once.Do(func() {
-			t.Seeder.Resume()
+			t.Seeder.ReleaseUploads()
 			end()
 		})
 	}
 	e.faults.mu.Lock()
-	e.faults.resumes = append(e.faults.resumes, resume)
+	e.faults.resumes = append(e.faults.resumes, release)
 	e.faults.mu.Unlock()
-	return resume
+	return release
 }
 
 // faultedDuring reports whether a fault declared on t (or on every title)
@@ -96,7 +97,7 @@ func (e *Env) faultedDuring(t *Title, a, b time.Time) bool {
 }
 
 // endFaults, once the script has ended, notes the faults it left running,
-// ends them and resumes the seeders it paused, so the teardown and the
+// ends them and releases the seeders it held, so the teardown and the
 // quiescence check run on a healthy swarm.
 func (e *Env) endFaults() {
 	e.faults.mu.Lock()

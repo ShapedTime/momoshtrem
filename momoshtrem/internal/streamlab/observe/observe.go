@@ -290,10 +290,10 @@ type torrentSample struct {
 }
 
 type seederSample struct {
-	t      time.Time
-	hash   string
-	sent   int64
-	paused bool
+	t    time.Time
+	hash string
+	sent int64
+	held bool // swarm.Seeder.Held
 }
 
 type runtimeSample struct {
@@ -441,7 +441,7 @@ func (o *Observer) sampleTorrents(now time.Time) {
 		}
 		seen[t.Seeder] = true
 		st := t.Seeder.Stats()
-		o.seeds = append(o.seeds, seederSample{t: now, hash: t.Hash, sent: st.BytesWrittenData.Int64(), paused: t.Seeder.Paused()})
+		o.seeds = append(o.seeds, seederSample{t: now, hash: t.Hash, sent: st.BytesWrittenData.Int64(), held: t.Seeder.Held()})
 	}
 }
 

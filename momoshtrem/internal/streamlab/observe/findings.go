@@ -117,7 +117,7 @@ func (o *Observer) stallFindings(s Stall) []report.Finding {
 			Evidence: fmt.Sprintf("%s; %d of %d reader samples found its piece incomplete below Now; %s", what, below, samples, readers)})
 	}
 
-	sent, paused, ok := o.seederRate(t.Hash, s.Start.Add(-stallLookback), s.End)
+	sent, held, ok := o.seederRate(t.Hash, s.Start.Add(-stallLookback), s.End)
 	if !ok {
 		return out
 	}
@@ -127,8 +127,8 @@ func (o *Observer) stallFindings(s Stall) []report.Finding {
 	switch {
 	case sent < float64(o.cfg.Bitrate):
 		hint := "expected: the swarm sent less than the bitrate"
-		if paused {
-			hint += " (the seeder was paused)"
+		if held {
+			hint += " (the seeder's uploads were held)"
 		}
 		out = append(out, report.Finding{Rule: "starved", AtMS: at, Refs: plot, Hint: hint, Evidence: what + "; " + rates})
 	case len(out) == 0:
@@ -154,19 +154,20 @@ func (o *Observer) activeDuring(hash string, a, b time.Time) bool {
 }
 
 // seederRate is what the torrent's seeder sent per second over [a, b]
-// (stretched to two samples at least), and whether it was paused then.
-func (o *Observer) seederRate(hash string, a, b time.Time) (rate float64, paused, ok bool) {
+// (stretched to two samples at least), and whether its uploads were held
+// then.
+func (o *Observer) seederRate(hash string, a, b time.Time) (rate float64, held, ok bool) {
 	var pts []point
 	for _, s := range o.seeds {
 		if s.hash == hash {
 			pts = append(pts, point{s.t, float64(s.sent)})
-			if !s.t.Before(a) && !s.t.After(b) && s.paused {
-				paused = true
+			if !s.t.Before(a) && !s.t.After(b) && s.held {
+				held = true
 			}
 		}
 	}
 	rate, ok = rateOver(pts, a, b)
-	return rate, paused, ok
+	return rate, held, ok
 }
 
 // downloadRate is the useful data the leecher got per second over [a, b].

@@ -161,11 +161,11 @@ type failure struct {
 	// cache's incompleted/) and the chunk at the break is gone from it
 	// now: the cache evicted dirty data (F11 in forward play).
 	chunkGone bool
-	// seederPaused: the lab paused the torrent's seeder (a fault, not
-	// #195); faulted: a fault the script declared on the title ran while
-	// the body was silent (faultlog.go).
-	seederPaused bool
-	faulted      bool
+	// seederHeld: the lab held the torrent's seeder's uploads (a fault,
+	// not #195); faulted: a fault the script declared on the title ran
+	// while the body was silent (faultlog.go).
+	seederHeld bool
+	faulted    bool
 }
 
 // known is the known issue whose signature the failure carries: #195's
@@ -214,8 +214,8 @@ func (f failure) diagnosis() string {
 	if f.stalled {
 		why = append(why, "piece incomplete, seeder connected, downloads on")
 	}
-	if f.seederPaused {
-		why = append(why, "the seeder paused (the lab's fault)")
+	if f.seederHeld {
+		why = append(why, "the seeder held (the lab's fault)")
 	}
 	if f.faulted {
 		why = append(why, "during a fault the script declared")
@@ -319,14 +319,14 @@ func (e *Env) Player(d client.Device, t *Title) *player.Session {
 func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, err error) {
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
 		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
-	f.seederPaused = t.Seeder != nil && t.Seeder.Paused()
+	f.seederHeld = t.Seeder != nil && t.Seeder.Held()
 	f.faulted = e.faultedDuring(t, f.at.Add(-silence), f.at)
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
 	f.resyncFailed = e.logs.ReadFailed(t.Hash, f.piece, f.at)
 	if tor, ok := e.Stack.Torrent(t.Hash); ok {
-		// A stall the lab made (a paused seeder, a declared fault) isn't
+		// A stall the lab made (a held seeder, a declared fault) isn't
 		// #195's.
-		f.stalled = e.stuck(tor, t.Hash, f.piece) && !f.seederPaused && !f.faulted
+		f.stalled = e.stuck(tor, t.Hash, f.piece) && !f.seederHeld && !f.faulted
 		f.evicted = !e.cached(tor, f.piece)
 		// anacrolix reads only data it holds, so a read that failed after
 		// the resync had the chunk at the break written: missing now, it

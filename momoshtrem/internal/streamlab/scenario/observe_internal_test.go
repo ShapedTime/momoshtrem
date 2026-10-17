@@ -48,15 +48,16 @@ func TestF11NeedsLogProof(t *testing.T) {
 	}
 }
 
-// A read that timed out while the lab had the seeder paused isn't #195:
-// failed() leaves stalled false then, and the diagnosis says why.
-func TestPausedSeederIsNotKnown(t *testing.T) {
-	f := failure{title: &Title{Hash: "aa"}, piece: 3, silence: 8 * time.Second, timedOut: true, broke: true, seederPaused: true}
+// A read that timed out while the lab held the seeder, or during a fault
+// the script declared, isn't #195: failed() leaves stalled false then, and
+// the diagnosis says why.
+func TestHeldSeederIsNotKnown(t *testing.T) {
+	f := failure{title: &Title{Hash: "aa"}, piece: 3, silence: 8 * time.Second, timedOut: true, broke: true, seederHeld: true, faulted: true}
 	if got := f.known(); got != "" {
 		t.Errorf("known = %q, want none", got)
 	}
-	if d := f.diagnosis(); !strings.Contains(d, "seeder paused") {
-		t.Errorf("diagnosis %q doesn't name the pause", d)
+	if d := f.diagnosis(); !strings.Contains(d, "seeder held") || !strings.Contains(d, "declared") {
+		t.Errorf("diagnosis %q doesn't name the hold and the fault", d)
 	}
 }
 

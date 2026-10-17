@@ -243,7 +243,7 @@ func (o *Observer) writeSamples() (string, error) {
 		add(s.t, "torrent", "hash", s.hash, "downloaded", s.downloaded, "useful", s.useful, "seeders", s.seeders, "peers", s.peers, "state", s.state)
 	}
 	for _, s := range o.seeds {
-		add(s.t, "seeder", "hash", s.hash, "sent", s.sent, "paused", s.paused)
+		add(s.t, "seeder", "hash", s.hash, "sent", s.sent, "held", s.held)
 	}
 	for _, s := range o.rts {
 		add(s.t, "runtime", "goroutines", s.goroutines, "heap_bytes", s.heap, "gc_cycles", s.gcCycles)

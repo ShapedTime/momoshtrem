@@ -16,16 +16,16 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/scenario"
 )
 
-// How the stall scenario pauses its seeder.
+// How the stall scenario pauses its seeder (holds its uploads).
 type pauseMode int
 
 const (
-	// undeclared: Seeder.Pause, a stall nothing declared, which the
+	// undeclared: Seeder.HoldUploads, a stall nothing declared, which the
 	// watchdog must catch.
 	undeclared pauseMode = iota
-	// declared: Env.PauseSeeder, resumed after the pause.
+	// declared: Env.HoldSeeder, released after the pause.
 	declared
-	// forgotten: Env.PauseSeeder, never resumed: the script forgets its
+	// forgotten: Env.HoldSeeder, never released: the script forgets its
 	// fault.
 	forgotten
 )
@@ -59,17 +59,17 @@ func stallScenario(mode pauseMode, pause time.Duration) *scenario.Scenario {
 			}
 			switch mode {
 			case undeclared:
-				t.Seeder.Pause()
-				timer := time.AfterFunc(pause, t.Seeder.Resume)
+				t.Seeder.HoldUploads()
+				timer := time.AfterFunc(pause, t.Seeder.ReleaseUploads)
 				defer timer.Stop()
-				defer t.Seeder.Resume()
+				defer t.Seeder.ReleaseUploads()
 			case declared:
-				resume := e.PauseSeeder(t)
-				timer := time.AfterFunc(pause, resume)
+				release := e.HoldSeeder(t, "seeder-pause")
+				timer := time.AfterFunc(pause, release)
 				defer timer.Stop()
-				defer resume() // a no-op once the timer resumed it
+				defer release() // a no-op once the timer released it
 			case forgotten:
-				e.PauseSeeder(t)
+				e.HoldSeeder(t, "seeder-pause")
 			}
 			err = e.Live(p.Watch(pause))
 			p.Stop()
@@ -161,8 +161,8 @@ func TestInjectedStall(t *testing.T) {
 	if wd.Status != report.Fail || wd.Known != "" {
 		t.Errorf("watchdog = %+v, want a fail no known issue explains", wd)
 	}
-	if o := rep.Observe; o == nil || len(o.Trips) == 0 || !strings.Contains(o.Trips[0].Why, "paused") {
-		t.Errorf("trips = %+v, want one naming the paused seeder", o)
+	if o := rep.Observe; o == nil || len(o.Trips) == 0 || !strings.Contains(o.Trips[0].Why, "uploads are held") {
+		t.Errorf("trips = %+v, want one naming the held seeder", o)
 	}
 	for _, key := range []string{"timeline", "samples", "watchdog-1-goroutines", "watchdog-1-status", "watchdog-1-pieces", "watchdog-1-trace"} {
 		name, ok := rep.Artifacts[key]
@@ -211,12 +211,12 @@ func TestInjectedStallDeclared(t *testing.T) {
 
 // A declared pause longer than the read timeout: the read times out and
 // the body breaks with the seeder connected and the piece wanted, but the
-// lab paused the seeder, so it isn't #195: play-ok is a plain fail.
-func TestPausedSeederIsNotKnown(t *testing.T) {
+// lab held the seeder, so it isn't #195: play-ok is a plain fail.
+func TestHeldSeederStallIsNotKnown(t *testing.T) {
 	rep, _ := runStall(t, stallScenario(declared, 14*time.Second), map[string]string{"read_timeout": "6s"})
 	ok := check(rep, "play-ok")
-	if ok.Status != report.Fail || ok.Known != "" || !strings.Contains(ok.Evidence, "seeder paused") {
-		t.Errorf("play-ok = %+v, want a plain fail naming the paused seeder", ok)
+	if ok.Status != report.Fail || ok.Known != "" || !strings.Contains(ok.Evidence, "seeder held") {
+		t.Errorf("play-ok = %+v, want a plain fail naming the held seeder", ok)
 	}
 	if wd := check(rep, "watchdog"); wd.Status != report.Pass {
 		t.Errorf("watchdog = %+v, want a pass during a declared fault", wd)

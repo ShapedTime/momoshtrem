@@ -94,10 +94,12 @@ func (s *stressRun) chaos(ctx context.Context, t *Title, r *rand.Rand) {
 		s.remove(t, s.P.Bool("delete_data") && intn(r, 2) == 0)
 	case 2:
 		pause := time.Duration(200+intn(r, 1300)) * time.Millisecond
+		end := s.Fault("torrent-pause", t) // declared (faultlog.go)
 		svc.Pause(t.Hash)
 		s.count("paused")
 		sleepCtx(ctx, pause)
 		svc.Resume(t.Hash)
+		end()
 	case 3:
 		s.idleUnderReads(ctx, t)
 	}
@@ -127,8 +129,9 @@ func (s *stressRun) idleUnderReads(ctx context.Context, t *Title) {
 			return
 		}
 	}
-	t.Seeder.HoldUploads()
-	defer t.Seeder.ReleaseUploads()
+	// A declared fault (faultlog.go): the watchdog doesn't trip on it.
+	release := s.HoldSeeder(t, "idle-under-reads")
+	defer release()
 	// The idle lasts until the next read starts, a few milliseconds once
 	// the blocked reads fail ("torrent data downloading disabled"): look
 	// every millisecond.

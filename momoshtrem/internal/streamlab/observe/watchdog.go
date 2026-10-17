@@ -150,8 +150,8 @@ func (o *Observer) diagnoseTrip() (readers []report.TripReader, known, why strin
 				reasons = append(reasons, fmt.Sprintf("piece %d isn't wanted (priority none)", p))
 			case tor.Stats().ConnectedSeeders < 1:
 				reasons = append(reasons, "no seeder is connected")
-			case t.Seeder != nil && t.Seeder.Paused():
-				reasons = append(reasons, "the seeder is paused (the lab's fault, undeclared)")
+			case t.Seeder != nil && t.Seeder.Held():
+				reasons = append(reasons, "the seeder's uploads are held (the lab's fault, undeclared)")
 			case o.activity(h) != string(torrent.StateActive):
 				reasons = append(reasons, "downloads are off (the torrent is "+o.activity(h)+")")
 			}
@@ -218,7 +218,7 @@ func (o *Observer) dump(n int, r tripRecord) []string {
 				continue
 			}
 			seen[t.Seeder] = true
-			fmt.Fprintf(f, "\n== seeder of %s (paused %v) ==\n", t.Hash, t.Seeder.Paused())
+			fmt.Fprintf(f, "\n== seeder of %s (uploads held %v) ==\n", t.Hash, t.Seeder.Held())
 			t.Seeder.WriteStatus(f)
 		}
 		return nil
