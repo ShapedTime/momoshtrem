@@ -14,8 +14,8 @@ import { useSheet } from '@/lib/sheets/useSheet';
 import { showSourceParams } from '@/lib/source/context';
 import { episodeCode, parseEpisodeCode } from '@/lib/title/episodes';
 import { formatDate } from '@/lib/title/format';
-import { keepOf } from '@/lib/title/keep';
-import { episodeKeepContext, heldByCopy, keepSheetParams } from '@/lib/title/keep-sheet';
+import { keepOf, NOT_DOWNLOADABLE_COPY } from '@/lib/title/keep';
+import { downloadsAvailable, episodeKeepContext, heldByAction, heldByCopy, keepSheetParams } from '@/lib/title/keep-sheet';
 import { KeepStatus } from '../KeepStatus';
 import { SubtitlesPanel } from '../SubtitlesPanel';
 
@@ -51,9 +51,11 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
   // Watched wins the state (B5): the file, when there is one, still plays
   const watched = episode.state === 'watched';
   const facts = [episode.runtime ? `${episode.runtime} min` : null, episode.air_date ? formatDate(episode.air_date) : null].filter(Boolean);
-  // Download & keep (#206), over this sheet in history too; with a file, or once something keeps it
+  // Download & keep (#206), over this sheet in history too: once something keeps it, or with a torrent file
+  // (HDRezka streams from the CDN, so a Keep would be refused). Nothing while the backend has no downloads.
   const kept = keepOf(episode.keep);
-  const keepSection = (hasFile(episode) || kept) && (
+  const keepable = hasFile(episode) && episode.source !== 'hdrezka';
+  const keepSection = downloadsAvailable(episode) && (kept || keepable) && (
     <EpisodeKeep
       episode={episode}
       name={`${show.title} · ${code}`}
@@ -134,8 +136,13 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
 function keepButtonLabel(keep: Keep | null, seasonNumber: number): string {
   if (!keep) return 'Download & keep';
   if (keep.scope === 'episode') return keep.reason === 'smart' ? 'Keep it' : 'Change duration';
-  if (keep.scope === 'show') return 'Change the show’s keep';
-  return seasonNumber === 0 ? 'Change the Specials keep' : `Change season ${seasonNumber}’s keep`;
+  return heldByAction(keep, seasonNumber);
+}
+
+/** The section's note: what a season or show keep does for it, or why nothing can hold it (HDRezka). */
+function keepNote(keep: Keep, seasonNumber: number): string | null {
+  if (keep.state === 'unavailable') return NOT_DOWNLOADABLE_COPY;
+  return keep.scope === 'episode' ? null : heldByCopy(keep, seasonNumber);
 }
 
 /**
@@ -145,17 +152,19 @@ function keepButtonLabel(keep: Keep | null, seasonNumber: number): string {
  */
 function EpisodeKeep({ episode, name, onOpen }: { episode: EpisodeSummary; name: string; onOpen: () => void }) {
   const keep = keepOf(episode.keep);
+  const note = keep && keepNote(keep, episode.season_number);
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-labelledby="episode-keep-h">
       <h3 className="font-semibold" id="episode-keep-h">
-        {keep ? 'Kept on disk' : 'Download & keep'}
+        {/* The state pill says how far along it is: "Kept", not "Kept on disk" */}
+        {!keep ? 'Download & keep' : keep.reason === 'smart' ? 'Smart pick' : 'Kept'}
       </h3>
       {keep ? (
         <KeepStatus keep={keep} name={name} />
       ) : (
         <p className="t-small text-fg-2">It streams on demand. Keep it to download it in the background and hold it on disk.</p>
       )}
-      {keep && keep.scope !== 'episode' && <p className="t-small text-fg-2">{heldByCopy(keep, episode.season_number)}</p>}
+      {note && <p className="t-small text-fg-2">{note}</p>}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={onOpen} aria-haspopup="dialog">
           {keep ? <Pin size={15} aria-hidden="true" /> : <HardDriveDownload size={15} aria-hidden="true" />} {keepButtonLabel(keep, episode.season_number)}

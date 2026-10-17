@@ -1,7 +1,10 @@
 import type { Keep, MovieTitle, SeasonDetail, ShowTitle, Title } from '@/lib/api/contract';
 import {
   changedToast,
+  downloadsAvailable,
   episodeKeepContext,
+  heldByAction,
+  heldByContext,
   heldByCopy,
   KEEP_PARAMS,
   keepContext,
@@ -97,18 +100,40 @@ describe('keepSubject', () => {
     expect(keepSubject({ kind: 'episode', tmdbId: 82728, season: 3, episode: 999 }, title('tv', 82728), season(82728, 3))).toEqual({ status: 'missing' });
   });
 
-  it('reads a keep the backend doesn’t send yet (before #204) as none', () => {
+  it('can’t keep anything on a backend without downloads (no `keep` field, before #202 and #204)', () => {
     const dune = title('movie', 693134) as MovieTitle;
     const before: MovieTitle = { ...dune, library: { ...dune.library, keep: undefined as unknown as null } };
-    expect(keepSubject({ kind: 'movie', tmdbId: 693134 }, before, undefined)).toMatchObject({ status: 'ready', subject: { own: null } });
+    expect(keepSubject({ kind: 'movie', tmdbId: 693134 }, before, undefined)).toEqual({ status: 'unsupported' });
+    const bluey = title('tv', 82728);
+    const plain = season(82728, 3);
+    const noKeeps: SeasonDetail = { ...plain, keep: undefined as unknown as null, episodes: plain.episodes.map((e) => ({ ...e, keep: undefined as unknown as null })) };
+    expect(keepSubject({ kind: 'season', tmdbId: 82728, season: 3 }, bluey, noKeeps)).toEqual({ status: 'unsupported' });
+    expect(keepSubject({ kind: 'episode', tmdbId: 82728, season: 3, episode: 1 }, bluey, noKeeps)).toEqual({ status: 'unsupported' });
+  });
+
+  it('tells a missing `keep` (no downloads) from `keep: null` (not kept)', () => {
+    expect(downloadsAvailable({ keep: null })).toBe(true);
+    expect(downloadsAvailable({ keep: keep() })).toBe(true);
+    expect(downloadsAvailable({})).toBe(false);
+    expect(downloadsAvailable(undefined)).toBe(false);
   });
 });
 
 describe('the sheet’s mode and copy', () => {
-  it('picks the mode from the target’s own download', () => {
+  it('picks the mode from the target’s own download, or the keep that holds an episode', () => {
     expect(keepSheetMode(null)).toBe('new');
-    expect(keepSheetMode(keep({ reason: 'smart', scope: 'episode' }))).toBe('smart');
-    expect(keepSheetMode(keep())).toBe('manage');
+    expect(keepSheetMode({ own: null, heldBy: null })).toBe('new');
+    expect(keepSheetMode({ own: keep({ reason: 'smart', scope: 'episode' }), heldBy: null })).toBe('smart');
+    expect(keepSheetMode({ own: keep(), heldBy: null })).toBe('manage');
+    expect(keepSheetMode({ own: null, heldBy: keep() })).toBe('held');
+  });
+
+  it('opens the keep that holds an episode', () => {
+    expect(heldByContext(82728, keep({ scope: 'season' }), 3)).toEqual({ kind: 'season', tmdbId: 82728, season: 3 });
+    expect(heldByContext(82728, keep({ scope: 'show' }), 3)).toEqual({ kind: 'show', tmdbId: 82728 });
+    expect(heldByAction(keep({ scope: 'season' }), 3)).toBe('Change season 3’s keep');
+    expect(heldByAction(keep({ scope: 'season' }), 0)).toBe('Change the Specials keep');
+    expect(heldByAction(keep({ scope: 'show' }), 3)).toBe('Change the show’s keep');
   });
 
   it('names seasons, specials and episodes', () => {
@@ -128,6 +153,8 @@ describe('the sheet’s mode and copy', () => {
     expect(heldByCopy(keep({ until_watched: true, expires_at: new Date(2026, 10, 16).toISOString() }), 2)).toMatch(/^Season 2 is kept until watched · by Nov 16, so this episode is too\.$/);
     expect(heldByCopy(keep({ scope: 'show' }), 2)).toBe('The whole show is kept, so this episode is too.');
     expect(heldByCopy(keep(), 0)).toBe('Specials are kept, so this episode is too.');
+    // An HDRezka episode in a kept season: the keep can't hold it, so it doesn't say it does
+    expect(heldByCopy(keep({ state: 'unavailable' }), 2)).toBeNull();
   });
 
   it('says what a Keep did, and what comes next', () => {

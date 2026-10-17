@@ -62,8 +62,7 @@ import { traktImported } from './trakt';
  * account has imported so far (fixtures/trakt.ts): nothing while it's off.
  * Keeps and what's downloading come from the page's downloads
  * (fixtures/downloads.ts, #77): a file is downloading only while a download
- * wants it. (A movie assigned this session still starts out downloading, as
- * before #77, until the title pages follow the new rule.)
+ * wants it, so a file nothing keeps is ready as soon as it's assigned.
  */
 
 /** The mock WEBDAV_PUBLIC_URL. */
@@ -87,7 +86,7 @@ export interface MockLibraryEntry {
   filed: Map<number, EpisodeFile>;
   /** What the open mapping jobs say about this title (kept in sync by handlers/assignment.ts). */
   review: MockReview;
-  /** Movies: a torrent assigned this session (an applied mapping job); it starts downloading. */
+  /** Movies: a torrent assigned this session (an applied mapping job); ready, unless a Keep wants it (then it downloads). */
   assigned?: TitleTorrent;
   /** Movies: an HDRezka stream assigned this session (#63); it replaces any torrent. */
   stream?: TitleStream;

@@ -797,7 +797,7 @@ test.describe('Download & keep (#206)', () => {
 
   test('a kept movie: change duration or stop keeping', async ({ page }, testInfo) => {
     await signIn(page, '/movie/157336?sheet=keep&movie=157336');
-    await page.getByRole('heading', { name: 'Kept on disk' }).waitFor();
+    await page.getByRole('heading', { name: 'Kept', exact: true }).waitFor();
     await settle(page);
     await shoot(page, testInfo, 'keep/manage');
   });
@@ -831,7 +831,7 @@ test.describe('Download & keep (#206)', () => {
 
   test('an episode its season keeps', async ({ page }, testInfo) => {
     await signIn(page, '/tv/82728?season=3&sheet=episode&tmdb=82728&se=S03E01');
-    await page.getByRole('region', { name: 'Kept on disk' }).waitFor();
+    await page.getByRole('region', { name: 'Kept', exact: true }).waitFor();
     await settle(page);
     await shoot(page, testInfo, 'keep/episode');
   });

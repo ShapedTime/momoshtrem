@@ -16,6 +16,7 @@ import {
   seasonLabel,
 } from '@/lib/title/episodes';
 import { keepOf } from '@/lib/title/keep';
+import { downloadsAvailable } from '@/lib/title/keep-sheet';
 import { BulkFind, type SeasonKeep } from './BulkFind';
 import { EarlierWatchedRow } from './EarlierWatchedRow';
 import { EpisodeList, type EpisodeListHandle, type ScrollToEpisodeOptions } from './EpisodeList';
@@ -118,15 +119,14 @@ function SeasonBody(props: SeasonBodyProps) {
   const firstMissing = episodes.find((episode) => episode.state === 'missing');
   const reviewJob = show.library.review_job_id;
   const long = episodes.length > LONG_SEASON || show.episode_ordering === 'absolute';
-  // The season's own keep; else a show keep holds it; else Download & keep makes a season one
+  // The season's own keep; else a show keep holds it; else Download & keep makes a season one.
+  // A backend without downloads (no `keep` on the season) offers none.
   const ownKeep = keepOf(season.keep);
   const showKeep = keepOf(show.library.keep);
   const keepScope = !ownKeep && showKeep?.reason === 'kept' ? 'show' : 'season';
-  const seasonKeep: SeasonKeep = {
-    keep: keepScope === 'show' ? showKeep : ownKeep,
-    scope: keepScope,
-    onKeep: () => onKeep(keepScope === 'show' ? {} : { season: number }),
-  };
+  const seasonKeep: SeasonKeep | undefined = downloadsAvailable(season)
+    ? { keep: keepScope === 'show' ? showKeep : ownKeep, scope: keepScope, onKeep: () => onKeep(keepScope === 'show' ? {} : { season: number }) }
+    : undefined;
 
   return (
     <>

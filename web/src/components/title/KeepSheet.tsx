@@ -7,7 +7,7 @@ import { HardDrive, HardDriveDownload, Pin, PinOff, RefreshCw, Search } from 'lu
 import { Banner, Button, LoadingRegion, Sheet, Skeleton, SkeletonText } from '@/components/ui';
 import { useKeep } from '@/hooks/useKeep';
 import { isApiError } from '@/lib/api/client';
-import type { DownloadEstimate } from '@/lib/api/contract';
+import type { DownloadDuration, DownloadEstimate, StorageKeptSettings } from '@/lib/api/contract';
 import { downloadEstimateQuery, isNotDownloadableError, isStorageFullError, seasonQuery, storageSettingsQuery, titleQuery } from '@/lib/api/endpoints';
 import type { SheetComponentProps } from '@/lib/sheets/registry';
 import { useSheet } from '@/lib/sheets/useSheet';
@@ -27,10 +27,23 @@ import {
   STORAGE_SETTINGS_HREF,
   storageFullLead,
 } from '@/lib/title/keep';
-import { heldByCopy, type KeepContext, keepContext, keepSeasonNumber, type KeepSheetMode, keepSheetMode, keepSubject, type KeepSubject } from '@/lib/title/keep-sheet';
+import {
+  heldByAction,
+  heldByContext,
+  heldByCopy,
+  type KeepContext,
+  keepContext,
+  keepSeasonNumber,
+  type KeepSheetMode,
+  keepSheetMode,
+  keepSheetParams,
+  keepSubject,
+  type KeepSubject,
+} from '@/lib/title/keep-sheet';
 import { KeepStatus } from './KeepStatus';
 
-const SHEET_TITLE: Record<KeepSheetMode, string> = { new: 'Download & keep', smart: 'Keep this smart pick', manage: 'Kept on disk' };
+// The state pill says how far along it is: "Kept", not "Kept on disk" (it may still be downloading, or have no file)
+const SHEET_TITLE: Record<KeepSheetMode, string> = { new: 'Download & keep', smart: 'Keep this smart pick', manage: 'Kept', held: 'Kept' };
 
 /** 409 `storage_full`, from the estimate (before it's sent) or the POST: what it needs, what's left, and where to make room. */
 function StorageFullBanner({ needed, available }: { needed: number; available: number }) {
@@ -108,6 +121,15 @@ function sourceParamsFor(context: KeepContext): Record<string, string> {
   return showSourceParams(context.tmdbId, { season: context.season, episode: context.episode });
 }
 
+/**
+ * What POST sends for a choice. With the storage settings known, the default goes out empty, so
+ * the server applies `kept.default_*` from its own clock; without them (they failed), the
+ * choice is spelled out, as the contract's defaults the sheet shows.
+ */
+function createDuration(choice: KeepChoice, kept: Pick<StorageKeptSettings, 'default_until_watched' | 'default_days'> | null): DownloadDuration {
+  return kept ? keepCreateDuration(choice, kept) : keepDuration(choice, CONTRACT_KEEP_DEFAULTS);
+}
+
 interface KeepBodyProps {
   context: KeepContext;
   subject: KeepSubject;
@@ -128,12 +150,13 @@ function KeepBody({ context, subject, mode, formId, options, estimate, choice, o
     onSubmit();
   };
 
-  // An episode its season or show keeps already: that keep is the one to change
-  if (mode === 'new' && subject.heldBy) {
+  // An episode its season or show keeps already: that keep is the one to change (the foot opens it)
+  if (mode === 'held' && subject.heldBy) {
+    const held = heldByCopy(subject.heldBy, keepSeasonNumber(context) ?? 0);
     return (
       <div className="flex flex-col gap-4">
         <KeepStatus keep={subject.heldBy} name={subject.name} />
-        <p className="text-fg-2">{heldByCopy(subject.heldBy, keepSeasonNumber(context) ?? 0)}</p>
+        <p className="text-fg-2">{held ?? NOT_DOWNLOADABLE_COPY}</p>
       </div>
     );
   }
@@ -157,6 +180,13 @@ function KeepBody({ context, subject, mode, formId, options, estimate, choice, o
   );
 }
 
+/** Why there's nothing to keep: a link that names nothing, a title not in the library, or a server without downloads. */
+const NOTHING_COPY = {
+  bad_link: 'This link doesn’t point to anything that can be kept on disk.',
+  missing: 'This isn’t in your library. Add it first, then it can be kept on disk.',
+  unsupported: 'This momoshtrem can’t keep things on disk yet. Everything still streams to Infuse on demand.',
+} as const;
+
 /**
  * Download & keep (`?sheet=keep`, #206): keep a movie, a show, a season or
  * an episode on disk until it's watched (30 days at most, the default), for
@@ -164,7 +194,8 @@ function KeepBody({ context, subject, mode, formId, options, estimate, choice, o
  * space kept downloads have left (GET /downloads/estimate) and why it can't
  * go ahead (409 `storage_full`, 422 `not_downloadable`). On something kept
  * already it changes the duration (PATCH) or stops keeping it (DELETE); on a
- * smart pick it keeps it or dismisses it.
+ * smart pick it keeps it or dismisses it; on an episode a season or show keep
+ * holds, it opens that keep.
  */
 export function KeepSheet({ params, close }: SheetComponentProps) {
   const formId = useId();
@@ -185,24 +216,33 @@ export function KeepSheet({ params, close }: SheetComponentProps) {
   const loading = context !== null && !failed && (titleResult.isPending || (inLibrary && seasonNumber !== null && seasonResult.isPending));
   const result = context && title && !loading && !failed ? keepSubject(context, title, seasonResult.data) : null;
   const subject = result?.status === 'ready' ? result.subject : null;
-  // While a Keep or a change is sent (and the page refetches), the sheet stays as it was until it closes
-  const [sending, setSending] = useState<KeepSheetMode | null>(null);
-  const mode = sending ?? keepSheetMode(subject?.own ?? null);
-  const held = mode === 'new' && Boolean(subject?.heldBy);
 
+  // While a Keep, a change or Stop keeping is sent (and the page refetches), the sheet stays as it was until it closes
+  const [sending, setSending] = useState<KeepSheetMode | null>(null);
   const [picked, setPicked] = useState<KeepChoice | null>(null);
   const [error, setError] = useState<unknown>(null);
+  // Opening the season's keep from a held episode reuses this sheet: start that one over
+  const contextKey = context ? JSON.stringify(context) : '';
+  const [shownKey, setShownKey] = useState(contextKey);
+  if (shownKey !== contextKey) {
+    setShownKey(contextKey);
+    setSending(null);
+    setPicked(null);
+    setError(null);
+  }
+
+  const mode = sending ?? keepSheetMode(subject);
   // Until /settings/storage answers (or if it can't), the contract's defaults
   const defaults = storage.data?.kept ?? null;
   // A new Keep starts on the default; changing one starts on nothing, so Change duration waits for a pick
   const choice = picked ?? (mode === 'manage' ? null : defaultKeepChoice(defaults ?? CONTRACT_KEEP_DEFAULTS));
-  // Asked once the target is known (the placeholder is never fetched), for a new Keep or a smart pick
+  // Asked once the target is known (the placeholder is never fetched), for a new Keep or a smart pick, and not while one is sent
   const estimate = useQuery({
     ...downloadEstimateQuery(subject?.target ?? { scope: 'movie', id: 0 }),
-    enabled: subject !== null && mode !== 'manage' && !held,
+    enabled: subject !== null && (mode === 'new' || mode === 'smart') && sending === null,
   });
   // It would be 409 or 422: say so before it's sent
-  const blocked = estimate.data !== undefined && estimateCopy(estimate.data).kind !== 'fits';
+  const blocked = estimate.isSuccess && estimateCopy(estimate.data).kind !== 'fits';
 
   const findTorrent = () => {
     if (context) sheets.open('torrent', sourceParamsFor(context));
@@ -214,7 +254,7 @@ export function KeepSheet({ params, close }: SheetComponentProps) {
     setSending(mode);
     try {
       if (mode === 'manage' && subject.own) await keep.change(subject.own.download_id, keepDuration(choice, defaults ?? CONTRACT_KEEP_DEFAULTS), subject.name);
-      else await keep.keep({ ...subject.target, ...keepCreateDuration(choice, defaults) }, subject.name);
+      else await keep.keep({ ...subject.target, ...createDuration(choice, defaults) }, subject.name);
       close();
     } catch (caught) {
       setSending(null);
@@ -222,15 +262,28 @@ export function KeepSheet({ params, close }: SheetComponentProps) {
     }
   };
   const stop = async () => {
-    if (subject?.own && (await keep.stop(subject.own, subject.name))) close();
+    if (!subject?.own) return;
+    setSending(mode);
+    if (await keep.stop(subject.own, subject.name)) close();
+    else setSending(null);
+  };
+  const openHeldBy = () => {
+    if (subject?.heldBy && context && seasonNumber !== null) sheets.open('keep', keepSheetParams(heldByContext(context.tmdbId, subject.heldBy, seasonNumber)));
   };
   const retry = () => {
     if (titleResult.isError) void titleResult.refetch();
     if (seasonResult.isError) void seasonResult.refetch();
   };
 
-  const footer =
-    subject && !held ? (
+  let footer;
+  if (subject && mode === 'held' && subject.heldBy) {
+    footer = (
+      <Button variant="primary" className="grow" onClick={openHeldBy}>
+        <Pin size={18} aria-hidden="true" /> {heldByAction(subject.heldBy, seasonNumber ?? 0)}
+      </Button>
+    );
+  } else if (subject) {
+    footer = (
       <>
         {mode !== 'new' && subject.own && (
           <Button variant="danger-quiet" className="grow" loading={keep.stopping} onClick={() => void stop()}>
@@ -242,7 +295,8 @@ export function KeepSheet({ params, close }: SheetComponentProps) {
           form={formId}
           variant="primary"
           loading={keep.keeping || keep.changing}
-          disabled={!choice || (mode !== 'manage' && blocked)}
+          // A new Keep waits for the storage defaults, so the choice shown is the one the server applies
+          disabled={!choice || (mode !== 'manage' && (blocked || storage.isPending))}
           className="grow"
         >
           {mode === 'manage' ? (
@@ -258,7 +312,10 @@ export function KeepSheet({ params, close }: SheetComponentProps) {
           )}
         </Button>
       </>
-    ) : undefined;
+    );
+  }
+
+  const nothing = !context ? NOTHING_COPY.bad_link : result?.status === 'unsupported' ? NOTHING_COPY.unsupported : NOTHING_COPY.missing;
 
   return (
     <Sheet open onOpenChange={(open) => !open && close()} title={SHEET_TITLE[mode]} description={subject?.name ?? title?.title} size="narrow" footer={footer}>
@@ -301,7 +358,7 @@ export function KeepSheet({ params, close }: SheetComponentProps) {
           onSubmit={() => void submit()}
         />
       ) : (
-        <p className="text-fg-2">This isn’t in your library. Add it first, then it can be kept on disk.</p>
+        <p className="text-fg-2">{nothing}</p>
       )}
     </Sheet>
   );

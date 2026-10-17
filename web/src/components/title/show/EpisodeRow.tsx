@@ -38,7 +38,12 @@ function Pill({ episode }: { episode: EpisodeSummary }) {
     case 'downloading':
       return <StatusPill status="downloading" label={`${Math.round(episode.pct ?? 0)}%`} pct={episode.pct ?? 0} />;
     case 'upcoming':
-      return episode.air_date ? <StatusPill status="airs_on" label={`Airs ${formatShortDate(episode.air_date)}`} /> : <StatusPill status="upcoming" />;
+      // Labelled: narrow rows keep the air date's words (title.css)
+      return episode.air_date ? (
+        <StatusPill status="airs_on" label={`Airs ${formatShortDate(episode.air_date)}`} className="pill--labelled" />
+      ) : (
+        <StatusPill status="upcoming" className="pill--labelled" />
+      );
     default:
       return <StatusPill status={episode.state} />;
   }

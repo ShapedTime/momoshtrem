@@ -6,6 +6,7 @@ import { Button, IconButton, Menu, MenuContent, MenuItem, MenuSeparator, MenuTri
 import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 import type { Title } from '@/lib/api/contract';
 import { keepOf } from '@/lib/title/keep';
+import { downloadsAvailable } from '@/lib/title/keep-sheet';
 
 interface TitleMoreMenuProps {
   title: Title;
@@ -25,18 +26,23 @@ interface TitleMoreMenuProps {
 const tmdbUrl = (title: Title) => `https://www.themoviedb.org/${title.media_type}/${title.tmdb_id}`;
 const traktUrl = (title: Title) => `https://trakt.tv/search/tmdb/${title.tmdb_id}?id_type=${title.media_type === 'movie' ? 'movie' : 'show'}`;
 
-interface MenuAction {
+export interface MenuAction {
   key: string;
   label: string;
   Icon: LucideIcon;
   run: () => void;
 }
 
-/** Download & keep, or Change duration and Stop keeping: the movie's download, or the show's own (show scope). */
-function keepActions(title: Title, onKeep?: () => void, onStopKeeping?: () => void): MenuAction[] {
-  if (!title.library.in_library || !onKeep) return [];
+/**
+ * Download & keep, or Change duration and Stop keeping: the movie's download, or the show's own
+ * (show scope). Nothing while the backend has no downloads (no `keep` field), and no new Keep for a
+ * movie that streams from HDRezka (it would be refused); one kept before can still change or stop.
+ */
+export function keepActions(title: Title, onKeep?: () => void, onStopKeeping?: () => void): MenuAction[] {
+  if (!title.library.in_library || !onKeep || !downloadsAvailable(title.library)) return [];
   const show = title.media_type === 'tv';
   if (keepOf(title.library.keep)?.reason !== 'kept') {
+    if (title.media_type === 'movie' && title.library.stream) return [];
     return [{ key: 'keep', label: show ? 'Download & keep show…' : 'Download & keep…', Icon: HardDriveDownload, run: onKeep }];
   }
   return [

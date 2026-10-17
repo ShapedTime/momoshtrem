@@ -1,5 +1,6 @@
 import type { AvailabilityStage, MissingRun, ShowTitle, Title } from '@/lib/api/contract';
 import { formatBytes, formatSpeed, plural } from './format';
+import { downloadsAvailable } from './keep-sheet';
 import { releaseHighlights } from './release';
 
 /**
@@ -68,10 +69,10 @@ const CHANGE_KEEP: StageButton = { label: 'Change duration', icon: 'kept', inten
 /**
  * A ready movie's second action (#206): Download & keep, or once it's kept, change how long. A
  * stream can't be kept (HDRezka plays from the CDN), and shows keep from the ⋯ menu and seasons.
+ * A backend without downloads (before #202 and #204) leaves `keep` out: then there's none.
  */
 function keepButton(title: Title): StageButton | null {
-  if (title.media_type !== 'movie' || !title.library.torrent) return null;
-  // `keep` is missing until the backend sends it (#204): nothing kept yet
+  if (title.media_type !== 'movie' || !title.library.torrent || !downloadsAvailable(title.library)) return null;
   return title.library.keep?.reason === 'kept' ? CHANGE_KEEP : KEEP;
 }
 

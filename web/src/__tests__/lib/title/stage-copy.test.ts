@@ -89,10 +89,10 @@ describe('primaryActionFor: Download & keep (#206)', () => {
     expect(primaryActionFor(kept(dune)).dock.button.label).toBe('Play in Infuse');
   });
 
-  it('treats a missing keep (the backend before #204) as not kept', () => {
+  it('offers none on a backend without downloads (no `keep` field, before #202 and #204): its POST would 404', () => {
     const dune = movie(693134);
     const before: MovieTitle = { ...dune, library: { ...dune.library, keep: undefined as unknown as null } };
-    expect(primaryActionFor(before).secondary).toMatchObject({ label: 'Download & keep' });
+    expect(primaryActionFor(before).secondary).toBeNull();
   });
 
   it('leaves it off streams, shows and the other stages', () => {

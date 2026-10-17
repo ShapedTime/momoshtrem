@@ -60,8 +60,7 @@ export function keepSheetParams(context: KeepContext): Record<string, string> {
 /** The Keep sheet for what holds an episode: its own download (or a new one), else its season's or its show's. */
 export function episodeKeepContext(tmdbId: number, episode: Pick<EpisodeSummary, 'season_number' | 'episode_number' | 'keep'>): KeepContext {
   const keep = keepOf(episode.keep);
-  if (keep?.scope === 'season') return { kind: 'season', tmdbId, season: episode.season_number };
-  if (keep?.scope === 'show') return { kind: 'show', tmdbId };
+  if (keep && keep.scope !== 'episode') return heldByContext(tmdbId, keep, episode.season_number);
   return { kind: 'episode', tmdbId, season: episode.season_number, episode: episode.episode_number };
 }
 
@@ -90,12 +89,19 @@ export interface KeepSubject {
 export type KeepSubjectResult =
   | { status: 'ready'; subject: KeepSubject }
   /** Not in the library, or an episode the season doesn't list. */
-  | { status: 'missing' };
+  | { status: 'missing' }
+  /** The backend doesn't send `keep` (before #202 and #204): it can't keep anything yet. */
+  | { status: 'unsupported' };
 
 /**
- * The library target for `context`, and its download, from the title and (season and episode
- * scopes) the season. `keep` fields the backend doesn't send yet read as none.
+ * Whether the backend does downloads (#77), read from where a page gets its keep: a title's
+ * library state, a season or an episode. `keep: null` is supported and not kept; a backend from
+ * before #202 and #204 leaves the field out, and then every Keep entry point hides (its POST
+ * would 404).
  */
+export const downloadsAvailable = (holder: { keep?: Keep | null } | null | undefined): boolean => holder?.keep !== undefined;
+
+/** The library target for `context`, and its download, from the title and (season and episode scopes) the season. */
 export function keepSubject(context: KeepContext, title: Title, season: SeasonDetail | undefined): KeepSubjectResult {
   const libraryId = title.library.library_id;
   if (!title.library.in_library || libraryId === null) return { status: 'missing' };
@@ -103,8 +109,10 @@ export function keepSubject(context: KeepContext, title: Title, season: SeasonDe
   switch (context.kind) {
     case 'movie':
     case 'show':
+      if (!downloadsAvailable(title.library)) return { status: 'unsupported' };
       return { status: 'ready', subject: { target: { scope: context.kind, id: libraryId }, name, own: keepOf(title.library.keep), heldBy: null } };
     case 'season':
+      if (season && !downloadsAvailable(season)) return { status: 'unsupported' };
       return {
         status: 'ready',
         subject: { target: { scope: 'season', id: libraryId, season_number: context.season }, name, own: keepOf(season?.keep), heldBy: null },
@@ -112,6 +120,7 @@ export function keepSubject(context: KeepContext, title: Title, season: SeasonDe
     case 'episode': {
       const episode: EpisodeSummary | undefined = season?.episodes.find((e) => e.episode_number === context.episode);
       if (!episode) return { status: 'missing' };
+      if (!downloadsAvailable(episode)) return { status: 'unsupported' };
       const keep = keepOf(episode.keep);
       const own = keep?.scope === 'episode' ? keep : null;
       return { status: 'ready', subject: { target: { scope: 'episode', id: episode.id }, name, own, heldBy: own ? null : keep } };
@@ -119,13 +128,36 @@ export function keepSubject(context: KeepContext, title: Title, season: SeasonDe
   }
 }
 
-/** What the sheet does: a new Keep, keeping a smart pick, or changing a kept one. */
-export type KeepSheetMode = 'new' | 'smart' | 'manage';
+/**
+ * What the sheet does: a new Keep, keeping a smart pick, changing a kept one, or (an episode a
+ * season or show keep holds) pointing to that keep.
+ */
+export type KeepSheetMode = 'new' | 'smart' | 'manage' | 'held';
 
-export const keepSheetMode = (own: Keep | null): KeepSheetMode => (!own ? 'new' : own.reason === 'smart' ? 'smart' : 'manage');
+export function keepSheetMode(subject: Pick<KeepSubject, 'own' | 'heldBy'> | null): KeepSheetMode {
+  const own = subject?.own ?? null;
+  if (own) return own.reason === 'smart' ? 'smart' : 'manage';
+  return subject?.heldBy ? 'held' : 'new';
+}
 
-/** "Season 2 is kept until watched · by Nov 16, so this episode is too." for an episode a season or show keep holds (smart picks are episodes). */
-export function heldByCopy(heldBy: Keep, seasonNumber: number): string {
+/** The Keep sheet for the season or show keep that holds an episode. */
+export function heldByContext(tmdbId: number, heldBy: Pick<Keep, 'scope'>, seasonNumber: number): KeepContext {
+  return heldBy.scope === 'show' ? { kind: 'show', tmdbId } : { kind: 'season', tmdbId, season: seasonNumber };
+}
+
+/** "Change season 3’s keep", "Change the Specials keep", "Change the show’s keep": what opens the keep that holds an episode. */
+export function heldByAction(heldBy: Pick<Keep, 'scope'>, seasonNumber: number): string {
+  if (heldBy.scope === 'show') return 'Change the show’s keep';
+  return seasonNumber === 0 ? 'Change the Specials keep' : `Change season ${seasonNumber}’s keep`;
+}
+
+/**
+ * "Season 2 is kept until watched · by Nov 16, so this episode is too." for an episode a season or
+ * show keep holds (smart picks are episodes). Null while the episode plays from HDRezka: the keep
+ * can't hold it (`unavailable`), and NOT_DOWNLOADABLE_COPY says so instead.
+ */
+export function heldByCopy(heldBy: Keep, seasonNumber: number): string | null {
+  if (heldBy.state === 'unavailable') return null;
   const what = heldBy.scope === 'show' ? 'The whole show is' : seasonNumber === 0 ? 'Specials are' : `Season ${seasonNumber} is`;
   // "Kept until watched · by Nov 16" → "kept until watched · by Nov 16"
   const how = keepExpiryLabel(heldBy).replace(/^Kept/, 'kept');

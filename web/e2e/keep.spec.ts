@@ -67,7 +67,7 @@ test.describe('Download & keep', () => {
     await expect(kept).toContainText(/Kept until \w{3} \d{1,2}/);
 
     await moreAction(page, testInfo, DUNE, 'Change duration…');
-    const change = page.getByRole('dialog', { name: 'Kept on disk' });
+    const change = page.getByRole('dialog', { name: 'Kept', exact: true });
     await expect(change.getByRole('button', { name: 'Change duration' })).toBeDisabled();
     await change.getByText('Until I remove it').click();
     await change.getByRole('button', { name: 'Change duration' }).click();
@@ -139,25 +139,36 @@ test.describe('Download & keep', () => {
   test('an episode its season keeps opens the season’s keep, and Back comes back', async ({ page }) => {
     await signIn(page, '/tv/82728?season=3&sheet=episode&tmdb=82728&se=S03E01');
     const episode = page.getByRole('dialog', { name: 'Episode 1' });
-    const keep = episode.getByRole('region', { name: 'Kept on disk' });
+    const keep = episode.getByRole('region', { name: 'Kept', exact: true });
     await expect(keep).toContainText('Season 3 is kept, so this episode is too.');
     await expect(keep).toContainText('On disk');
     await expectAccessibleAndContained(page);
 
     await keep.getByRole('button', { name: 'Change season 3’s keep' }).click();
-    const season = page.getByRole('dialog', { name: 'Kept on disk' });
+    const season = page.getByRole('dialog', { name: 'Kept', exact: true });
     await expect(season).toContainText('Bluey · Season 3');
     await expect(season.getByRole('button', { name: 'Stop keeping' })).toBeVisible();
     await page.goBack();
     await expect(season).toBeHidden();
     await expect(episode).toBeVisible();
+
+    // A link to the episode's own Keep says what holds it, and opens that keep
+    await page.goto('/tv/82728?season=3&sheet=keep&show=82728&scope=episode&se=S03E01');
+    const held = page.getByRole('dialog', { name: 'Kept', exact: true });
+    await expect(held).toContainText('Bluey · S03E01');
+    await expect(held).toContainText('Season 3 is kept, so this episode is too.');
+    await held.getByRole('button', { name: 'Change season 3’s keep' }).click();
+    await expect(page).toHaveURL(/[?&]scope=season(&|$)/);
+    await expect(held).toContainText('Bluey · Season 3');
+    await expect(held.getByRole('button', { name: 'Stop keeping' })).toBeVisible();
   });
 
   test('a smart pick: keep it from its episode', async ({ page }) => {
     await signIn(page, '/tv/209867');
     await page.getByRole('button', { name: /^S01E27 options/ }).click();
     const episode = page.getByRole('dialog', { name: 'An Ordinary Mage' });
-    const keep = episode.getByRole('region', { name: 'Kept on disk' });
+    const keep = episode.locator('section[aria-labelledby="episode-keep-h"]');
+    await expect(keep.getByRole('heading', { name: 'Smart pick' })).toBeVisible();
     await expect(keep).toContainText(/Smart pick · until watched · by/);
     await keep.getByRole('button', { name: 'Keep it' }).click();
 
@@ -167,6 +178,7 @@ test.describe('Download & keep', () => {
     await sheet.getByRole('button', { name: 'Keep it' }).click();
     await expect(toast(page, `Keeping ${FRIEREN} · S01E27 on disk`)).toBeVisible();
     // Back on the episode: kept now, so its duration can change
+    await expect(keep.getByRole('heading', { name: 'Kept', exact: true })).toBeVisible();
     await expect(keep.getByRole('button', { name: 'Change duration' })).toBeVisible();
     await expect(keep).toContainText(/Kept until watched · by/);
   });

@@ -82,5 +82,15 @@ describe('EpisodeRow', () => {
     expect(screen.getByText(/^Airs /)).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.getByText(/#1122 · S22E37/)).toBeInTheDocument();
+    // Narrow rows keep the air date's words (title.css: .pill--labelled)
+    expect(screen.getByText(/^Airs /).closest('.pill')).toHaveClass('pill--labelled');
+  });
+
+  it('a keep pill beside the state (#206): a smart pick reads Smart, and goes icon-only on narrow rows like the rest', () => {
+    // Frieren S01E27 is a smart pick in the seeds
+    renderRow(episode(209867, 1, 27));
+    const smart = screen.getByText('Smart').closest('.pill');
+    expect(smart).toHaveClass('pill--upcoming');
+    expect(smart).not.toHaveClass('pill--labelled');
   });
 });

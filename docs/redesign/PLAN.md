@@ -1379,6 +1379,12 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
   - "7 days", "30 days" and "90 days".
   - "Until I remove it".
 - It shows the size needed against the space left, from `GET /downloads/estimate`: "Needs 14.2 GB · 61 GB left for kept downloads". When the estimate doesn't fit, it says so before the Keep is sent, with the 409's copy.
+  - With nothing assigned yet (`wanted_bytes` 0): "Nothing to download yet: it starts once there's a file · 61 GB left for kept downloads".
+  - When another keep has the files (`needed_bytes` 0): "Needs no more space: another keep has these files · 61 GB left for kept downloads".
+  - A 404 (no `/downloads` yet) hides the line; another error reads "Couldn't check how much space it needs."
+- Entry points: a ready movie's second action, the ⋯ menu ("Download & keep show"), the season row and the episode sheet.
+  - A new Keep isn't offered for an HDRezka movie or episode; one kept before still changes or stops.
+  - A backend without downloads leaves `keep` out of titles, seasons and episodes (`keep: null` is "not kept"), and then every entry point hides.
 - On `409 storage_full`: "Not enough space: needs X, Y left. Free some kept downloads or raise the limit in Settings › Storage." It links to Settings › Storage.
 - On `422 not_downloadable`: "This plays from HDRezka, so it can't be kept on disk. Pick a torrent for it to keep it."
 - The default choice goes out as a POST without `until_watched` and `expires_at`, so the server applies `kept.default_*`. Any other choice is sent as a duration from now.
