@@ -92,6 +92,15 @@ docker compose exec -T postgres pg_restore -U momoshtrem -d momoshtrem --no-owne
 
 Then, on the Mac, run `ops/deploy/deploy.sh momoshtrem-v2 <older sha>`.
 
+**Rolling back past the storage and downloads commits (#77).**
+- **Past ec50458 (#211).** Older code reads a missing `torrent.global_cache_size` as 4 GiB and trims the cache down to that. Before you deploy it, restore the line in `/mnt/data/momoshtrem/config/config.yaml`. The VM keeps the file from before the line was deleted:
+  ```bash
+  ssh momoshtrem-v2 grep global_cache_size /mnt/data/momoshtrem/config/config.yaml.bak-20261017-pre-auto
+  ```
+  - The older code trims the cache to the line's size (53760 MiB, 52 GiB, in the backup). If Settings › Storage shows more in use and you want to keep it, write a larger value.
+  - When you deploy past #211 again, delete the line. Until Settings › Storage saves a limit, the line still sets it.
+- **Past ac55f90 (#224).** Migration 010 adds the `downloads` and `local_watches` tables. An older binary ignores them and logs a warning that the database has a migration it doesn't know (version 10). Kept and smart downloads stop, and their data becomes ordinary cache that can be evicted. Deploy forward again and they resume: the pins are rebuilt from the table at startup, and anything evicted in the meantime is fetched again.
+
 ## 3. First deploy on a fresh VM, from a copy of the old state
 
 The VM is built from [`VM.md`](VM.md) and converged by the playbook ([`HOST.md`](HOST.md)). The copy holds the PLAN §5 state, for example in `~/restore/` on the VM:

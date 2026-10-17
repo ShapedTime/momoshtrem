@@ -394,7 +394,7 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
   - **A file is downloading** only while a download wants it (#77, "Downloads (#77)") and it isn't all on disk (the piece cache's).
     - It isn't downloading while the download is `paused`: its torrent is paused, or background downloads are off.
     - A file over the kept cap isn't wanted.
-    - A file nothing keeps streams on demand, so it's `ready` as soon as it's assigned, whatever is cached.
+    - A file no download wants streams on demand, so it's `ready` as soon as it's assigned, whatever is cached.
   - Movie: `none` not in the library; `needs_torrent` no active assignment; `downloading` its file is downloading; `ready` otherwise.
   - Show: `none` not in the library; `needs_torrent` nothing assigned, or the frontier is non-empty; `downloading` any assigned episode is downloading; `ready` otherwise.
   - The **frontier**: aired regular episodes after the last one with a file **or watched** (B5). Specials never count, nor do gaps before that episode. `missing` is its first run, within one season.
@@ -867,7 +867,7 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
   - **Shows**: every `trakt_show_progress` row except dropped or hidden ones (`trakt_hidden`, always left out) and those last watched over 180 days ago (left out unless `include_paused`).
   - Trakt's bulk progress also lists watchlisted shows never started (`completed: 0`, no `last_watched_at`, next S01E01). The sync skips them, so a `trakt_show_progress` row is always a show you've started, and an unstarted show is at most a watchlist start.
   - **Watchlist starts**, only with `show_watchlist`: S01E01 of a watchlisted library show with no plays, once it has aired (the library lists it, by its air date); at most 3, newest listed first. A show with Trakt progress, or dropped or hidden, is no start.
-  - **Availability**, first match: the episode has a file → `ready` or `downloading`; a mapping job wants it → `needs_review` (the review rules); it hasn't aired → `airs_on`; the show is in the library → `needs_torrent` (an episode the library doesn't list yet too); else `not_in_library`. It reads the file and review facts, never `watched`.
+  - **Availability**, first match: the episode has a file → `ready`, or `downloading` while a download wants it ("Availability rules", #77); a mapping job wants it → `needs_review` (the review rules); it hasn't aired → `airs_on`; the show is in the library → `needs_torrent` (an episode the library doesn't list yet too); else `not_in_library`. It reads the file and review facts, never `watched`.
   - **Order**: the shows that aren't `airs_on` by `last_watched_at`, newest first; then watchlist starts; then `airs_on` by `airs_at` (unknown last).
   - Reading it starts an incremental sync in the background when the last check is over 5 minutes old (#132; `api.Options.TraktNudge`).
   - No `backdrop_dominant_color` (HANDOFF §6 lists one for up-next): the hero loads the title, which has it.
@@ -1020,7 +1020,7 @@ Types: `web/src/lib/api/contract/torrents.ts`. Served by `internal/activity` (#9
 - **Torrents still stream on demand, and downloads fetch the files they want in the background (#77).**
   - `AddTorrent` sets every piece to no priority, and the prioritizer raises pieces only around open readers.
   - A download ("Downloads (#77)") sets its wanted files to Normal priority. anacrolix takes the max of file, reader and piece priority, so the streaming windows still come first, and the prioritizer's piece-level resets can't cancel it.
-  - The download also pins its pieces in the piece cache (`internal/torrent/piececache`: missinggo's filecache with pins; its limit is "Storage (#77)"). Unpinned pieces are evicted LRU, so a torrent nothing keeps can still lose progress.
+  - The download also pins its pieces in the piece cache (`internal/torrent/piececache`: missinggo's filecache with pins; its limit is "Storage (#77)"). Unpinned pieces are evicted LRU, so a torrent no download wants can still lose progress.
   - A torrent loads on its first WebDAV open, a mapping job, or when the download manager takes it (at most 2 at a time). Nothing else reloads at startup.
 
   So:
@@ -1173,7 +1173,7 @@ Every size is in bytes (int64) and every time is RFC 3339 in UTC.
     - When a lower limit breaks that, a default (null) cap shrinks, smart first.
     - A PUT never shrinks an explicit cap: one that doesn't fit the limit it leaves is refused (422, below).
     - When the limit falls on its own (auto following the disk, or config.yaml's), `Resolve` clamps explicit caps too: kept to the limit less the reserve, then smart to what's left. The stored values don't change.
-  - Smart never evicts kept: a smart pick that doesn't fit is skipped. A Keep that doesn't fit is `409 storage_full` ("Downloads (#77)").
+  - Smart never evicts kept: a smart pick that doesn't fit is skipped, though a stream's pick may take the room of Up next's ("Downloads (#77)"). A Keep that doesn't fit is `409 storage_full`.
 ```
 GET /settings/storage → 200 StorageSettings
 StorageSettings {
@@ -1210,7 +1210,7 @@ StorageSettings {
 - **`PUT /settings/storage`** with any of `{limit_bytes, kept: {max_bytes, default_until_watched, default_days}, smart: {enabled, episodes_ahead, max_bytes}, background: {enabled, pause_while_streaming, windows}}` → `200 StorageSettings` (all of it).
   - It's partial: fields left out keep their value, nested objects merge, and `windows` is replaced whole (`windows: null` is 422). Unknown and read-only fields are ignored, and a body that isn't a JSON object is `400`.
   - **Send `limit_bytes` only when the limit control changes**, never by echoing GET back. GET's null may mean config.yaml's limit, which gives way only once a PUT has sent `limit_bytes`. "Use auto" is `limit_bytes: null`.
-  - **`422 validation_error`**, in two passes. The first failure names a field the PUT sent.
+  - **`422 validation_error`**, in two passes. The first failure names a field the PUT sent. Its message (and the 409's) writes sizes as the web's `formatBytes` does: 4 GiB is "4.3 GB".
     1. Types and allowed values, field by field:
        - `limit_bytes`: a whole number of bytes (0 or more), or null;
        - `kept`: `max_bytes` (the same), `default_until_watched` (a boolean) and `default_days` (7, 30, 90 or null);
@@ -1230,7 +1230,7 @@ StorageSettings {
   - PUTs run one at a time, each checked against the settings it changes. Both routes work with no downloads at all.
 
 ### Downloads (#77)
-A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a movie, a show, a season or an episode. It fetches the scope's torrent files in the background and pins them on disk while it lasts. Decisions: #77's decisions comment. Types: `web/src/lib/api/contract/downloads.ts`. Served by `internal/downloads` (P4 #202: Keep, the manager, caps and windows; P5 #203: smart picks) on the pinnable piece cache (P3 #201). Titles, the library and Activity show them (P6 #204). The web mock is stateful (`web/src/mocks/fixtures/downloads.ts`; scenarios `downloads-full`, `downloads-empty`). UI: P8 #206 (Download & keep) and P9 #207 (Activity), with the copy below.
+A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a movie, a show, a season or an episode. It fetches the scope's torrent files in the background and pins them on disk while it lasts. Decisions: #77's decisions comment. Types: `web/src/lib/api/contract/downloads.ts`. Served by `internal/downloads` (P4 #202: Keep, the manager, caps and windows; P5 #203: smart picks) on the pinnable piece cache (P3 #201). Titles, the library and Activity show them (P6 #204). The web mock is stateful (`web/src/mocks/fixtures/downloads.ts`; scenarios `downloads-*`). UI: P8 #206 (Download & keep) and P9 #207 (Activity), with the copy below.
 
 - **What it covers.** A show or season download also covers episodes assigned later, while the kept cap has room.
   - Files are admitted in episode order. A file assigned later that the kept cap can't take is *over the cap*: it isn't pinned or fetched, `committed_kept_bytes` doesn't count it, and `files.over_cap` does. The download reads `storage_full` until there's room again; then the manager admits it.
@@ -1281,7 +1281,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
     - An episode whose smart row was released `deleted` (dismissed) is never picked again.
     - After a pick ran its whole lifetime (released `expired` at its `expires_at`, 14 days after `created_at`), it's picked again only if there's a play of the show after `released_at`.
     - A pick released early as `expired`, because it stopped being a candidate (its window moved, `episodes_ahead` went down, its file went, the show aged out of Up next, Trakt was disconnected, or a stream needed its room), can be picked again at once.
-  - A Keep on a smart pick turns it kept: the same row, with `created_at` reset to now and its duration from the request or the defaults.
+  - A Keep on a smart pick turns it kept (`POST /downloads` below).
 - **The smart picks' details** (P5 #203, `internal/downloads/smart.go`), where the rules above leave room:
   - **When:** a pass every 5 minutes, after every Trakt sync that ends well, after a storage PUT, and when an episode starts streaming (the manager's 5 s session poll). While `smart.enabled` is off a pass does nothing: it neither picks nor releases. After a storage PUT the pass refreshes the manager's plan before it fits picks, so they fit the new caps.
   - **The windows:** Up next's counts from the episode it names, that one included; a stream's from the episode after the one streaming. Specials anchor nothing. `episodes_ahead` counts episodes in regular seasons whose active assignment is a torrent file.
@@ -1293,7 +1293,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
     - an episode a Keep holds;
     - an episode before one of its show streaming now (Up next naming E1, skipped or stopped at 85%, while E3 streams): the manager would release it as watched at once;
     - a pick whose file doesn't fit what the smart cap has left after the admitted smart files (it would only read `storage_full`; a later pass makes it once there's room). A file a download has already costs nothing, and a later, smaller file may still fit.
-  - **The show streaming gets the room first:** a stream's pick that doesn't fit `smart.max_bytes` releases Up next's picks of other shows (`expired`, so they can be picked again), the least recently watched show's first, until it fits, and the manager is woken.
+  - **The show streaming gets the room first:** a stream's pick that doesn't fit the smart cap (`smart.effective_max_bytes`) releases Up next's picks of other shows (`expired`, so they can be picked again), the least recently watched show's first, until it fits, and the manager is woken.
     - It never releases a pick all on disk of a show watched within the last 7 days to make room, nor a pick of any show streaming now.
     - Only a pick whose file smart pays for, and no other download wants, counts: releasing one whose file a Keep or another pick has frees nothing.
     - Up next's released picks then wait: they don't fit while the stream's hold the room.
@@ -1408,6 +1408,7 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 | `no_file` | "No file yet" |
 | `unavailable` | "Can't keep this file" (HDRezka, or a pure-v2 torrent) |
 
+- **An episode row** has room for one keep pill: "Kept" or "Smart", unless its file isn't held: "Can't keep" (`unavailable`), "Kept space is full" or "Disk full".
 - **Expiry** reads "Kept until watched", "Kept until Nov 16", or "Kept until watched · by Nov 16". With neither, it's "Kept".
   - A smart pick reads "Smart pick · until watched · by Oct 31".
   - A title's `Keep` has no `resumes_at`, so there `waiting_for_window` reads "Waits for its window".
@@ -1430,7 +1431,7 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
   - A 404 (no `/downloads` yet) hides the line; another error reads "Couldn't check how much space it needs."
 - Entry points: a ready movie's second action, the ⋯ menu ("Download & keep show"), the season row and the episode sheet.
   - A new Keep isn't offered for an HDRezka movie or episode; one kept before still changes or stops.
-  - A backend without downloads leaves `keep` out of titles, seasons and episodes (`keep: null` is "not kept"), and then every entry point hides.
+  - A backend without downloads leaves `keep` out of titles, seasons and episodes (`keep: null` is "not kept"), and then every entry point hides (mock scenario `downloads-absent`).
 - On `409 storage_full`: "Not enough space: needs X, Y left. Free some kept downloads or raise the limit in Settings › Storage." It links to Settings › Storage.
 - On `422 not_downloadable`: "This plays from HDRezka, so it can't be kept on disk. Pick a torrent for it to keep it."
 - The default choice goes out as a POST without `until_watched` and `expires_at`, so the server applies `kept.default_*`. Any other choice is sent as a duration from now.
@@ -1438,6 +1439,7 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
   - Change duration starts with nothing picked, and a pick is a duration from now.
   - Stop keeping is confirmed on title pages: "Stop keeping Interstellar?", "It's no longer held on disk. What's downloaded stays as cache and plays until it's cleared to make room."
   - On a smart pick it's "Dismiss the smart pick for …?", and the sheet's main action is "Keep it".
+  - The toast after it, here and on Activity, is "Stopped keeping …" ("Dismissed the smart pick for …") with the same sentence about the cache (`stopKeepingCopy`).
 - An episode that its season's or show's keep holds opens that keep ("Season 2 is kept until watched · by Nov 16, so this episode is too.").
 
 **Settings › Storage** (P7, #205: `components/settings/StorageSection.tsx` and `storage/`, the rules in `lib/settings/storage.ts`):

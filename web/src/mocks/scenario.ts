@@ -50,7 +50,8 @@
  *   (a movie, a season, a show) answers 409 `storage_full` with `needed_bytes` and `available_bytes`; one inside a
  *   kept season (a Bluey S3 episode) still fits.
  * - `downloads-absent`: a backend before #77's P4 and P6: every /downloads route answers 404, torrents have no
- *   `wanted` or `holds`, and the summary's disk no `kept_bytes` or `smart_bytes` (Activity shows no "Kept & smart").
+ *   `wanted` or `holds`, and the summary's disk no `kept_bytes` or `smart_bytes` (Activity shows no "Kept & smart");
+ *   titles, seasons and episodes have no `keep` and a title's `download.eta_seconds` is null (title pages offer no Keep).
  * - `downloads-error`: GET /downloads answers 500 (Activity's "Couldn’t load" banner, or its stale note once it had a list).
  * - `storage-config`: config.yaml sets `global_cache_size: 53760` (MiB: 56.4 GB) and no PUT has sent a limit, so
  *   /settings/storage answers `source: config`, `limit_bytes: null` and `config_bytes`. The cache's 62.4 GB fill

@@ -274,7 +274,7 @@ test.describe('background downloads (#77)', () => {
     await signIn(page, '/activity');
     await row(page, 'Interstellar').getByRole('button', { name: 'Stop keeping: Interstellar' }).click();
     const undo = toast(page, 'Stopped keeping Interstellar');
-    await expect(undo).toContainText('What’s downloaded stays as cache until it’s cleared to make room. Undo within 10 seconds.');
+    await expect(undo).toContainText('What’s downloaded stays as cache and plays until it’s cleared to make room. Undo within 10 seconds.');
     await expect(row(page, 'Interstellar')).toHaveCount(0);
     // Its card lets go of the Keep at once too
     await expect(card(page, 'Interstellar').getByText('Kept', { exact: true })).toHaveCount(0);

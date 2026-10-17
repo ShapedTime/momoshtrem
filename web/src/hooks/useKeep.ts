@@ -5,7 +5,8 @@ import { Pin, PinOff } from 'lucide-react';
 import { useConfirm, useToast } from '@/components/ui';
 import type { Download, DownloadCreate, DownloadPatch, Keep } from '@/lib/api/contract';
 import { downloadKeys, downloadsApi, libraryKeys, settingsKeys, titleKeys, torrentKeys } from '@/lib/api/endpoints';
-import { changedToast, keptToast, stopKeepingConfirm, stoppedToast } from '@/lib/title/keep-sheet';
+import { stopKeepingCopy } from '@/lib/title/keep';
+import { changedToast, keptToast } from '@/lib/title/keep-sheet';
 
 /**
  * Download & keep on title pages (#206): Keep (POST /downloads), Change
@@ -49,13 +50,14 @@ export function useKeep() {
     changing: change.isPending,
     /** Confirms first, saying what goes and what stays. Resolves true once it's released. */
     stop: async (keep: Pick<Keep, 'download_id' | 'reason'>, name: string): Promise<boolean> => {
-      if (!(await confirm(stopKeepingConfirm(keep, name)))) return false;
+      const copy = stopKeepingCopy(keep.reason, name);
+      if (!(await confirm(copy.confirm))) return false;
       try {
         await stop.mutateAsync(keep.download_id);
-        toast({ tone: 'info', icon: PinOff, ...stoppedToast(keep, name) });
+        toast({ tone: 'info', icon: PinOff, title: copy.title, body: copy.body });
         return true;
       } catch (error) {
-        toast({ tone: 'error', title: `Couldn’t stop keeping ${name}`, body: error instanceof Error ? error.message : undefined });
+        toast({ tone: 'error', title: copy.failed, body: error instanceof Error ? error.message : undefined });
         return false;
       }
     },
