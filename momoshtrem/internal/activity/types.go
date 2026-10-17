@@ -3,6 +3,7 @@ package activity
 import (
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 )
@@ -46,6 +47,12 @@ type Item struct {
 	Titles       []Title            `json:"titles"`
 	OpenJob      *OpenJob           `json:"open_job"`  // the newest open, non-dry-run job
 	Streaming    []StreamingSession `json:"streaming"` // its files' sessions, the most recently read first
+	// Wanted is what downloads want of it (#77): its wanted files' size and
+	// what's on disk of them, the manager's state for it and the ETA; null
+	// when no download wants it.
+	Wanted *downloads.TorrentWanted `json:"wanted"`
+	// Holds are the downloads that want it, kept first, then by id.
+	Holds []downloads.TorrentHold `json:"holds"`
 }
 
 // Title is a library title a torrent is for.
@@ -178,8 +185,12 @@ type Counts struct {
 type Disk struct {
 	TotalBytes      int64 `json:"total_bytes"`
 	FreeBytes       int64 `json:"free_bytes"`
-	TorrentsBytes   int64 `json:"torrents_bytes"`    // pieces in the cache
-	CacheLimitBytes int64 `json:"cache_limit_bytes"` // the cache's capacity (global_cache_size)
+	TorrentsBytes   int64 `json:"torrents_bytes"`    // pieces in the cache: kept, smart and streaming cache together
+	CacheLimitBytes int64 `json:"cache_limit_bytes"` // the cap the cache applies now
+	// KeptBytes and SmartBytes are what's pinned on disk for kept and smart
+	// downloads (#77), as /settings/storage's usage.
+	KeptBytes  int64 `json:"kept_bytes"`
+	SmartBytes int64 `json:"smart_bytes"`
 }
 
 // PauseCount is POST /torrents/pause-all and /resume-all.

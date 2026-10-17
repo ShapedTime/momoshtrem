@@ -25,7 +25,7 @@ func (s *Service) Detail(ctx context.Context, infoHash string) (*Detail, error) 
 	if err != nil {
 		return nil, err
 	}
-	d := &Detail{Item: s.item(hash, known, st, s.torrents.Pauses(), s.streams(ctx))}
+	d := &Detail{Item: s.item(hash, known, st, s.torrents.Pauses(), s.streams(ctx), s.snapshot())}
 
 	var live *torrent.Detail
 	if st != nil {
