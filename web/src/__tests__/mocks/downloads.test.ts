@@ -179,6 +179,18 @@ describe('POST /downloads', () => {
     expect((await episode(209867, 1, 27)).keep).toMatchObject({ download_id: 6, reason: 'kept' });
   });
 
+  it('turns a smart pick kept while smart downloads are off: 200, the same row, though it wasn’t listed', async () => {
+    await settingsApi.putStorage({ smart: { enabled: false } });
+    expect((await downloadsApi.list()).items.some((d) => d.id === 6)).toBe(false);
+    const res = await fetch('/api/downloads', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'episode', id: episodeId(209867, 1, 27) }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: 6, reason: 'kept', smart_source: null });
+  });
+
   it('keeps an episode or a show with nothing assigned yet as no_file', async () => {
     expect(await downloadsApi.create({ scope: 'episode', id: episodeId(209867, 1, 30) })).toMatchObject({ state: 'no_file', wanted_bytes: 0, files: { total: 0 } });
     expect((await episode(209867, 1, 30)).keep).toMatchObject({ state: 'no_file' });
@@ -262,6 +274,13 @@ describe('PATCH and DELETE /downloads/{id}', () => {
     expect(res.status).toBe(400);
   });
 
+  it('answers 400 bad_request for a malformed id, as the backend parses ids', async () => {
+    for (const [method, id] of [['PATCH', 'abc'], ['PATCH', '0'], ['DELETE', 'abc'], ['DELETE', '0']]) {
+      const res = await fetch(`/api/downloads/${id}`, { method, body: '{}', headers: { 'Content-Type': 'application/json' } });
+      expect([method, id, res.status, (await res.json()).error?.code]).toEqual([method, id, 400, 'bad_request']);
+    }
+  });
+
   it('stops keeping: a soft release; the file streams on demand again, and nothing holds the torrent', async () => {
     await downloadsApi.remove(5);
     expect(byTitle(await downloadsApi.list(), 'Interstellar')).toEqual([]);
@@ -325,6 +344,22 @@ describe('what other mocks change', () => {
     expect(grown?.files.total).toBeGreaterThan(show.files.total);
     expect(grown?.wanted_bytes).toBeGreaterThan(show.wanted_bytes);
     expect((await downloadsApi.list()).usage.committed_kept_bytes - committed).toBe((grown?.wanted_bytes ?? 0) - show.wanted_bytes);
+  });
+
+  it('a grouped file a mapping job gives two episodes counts once in a kept season’s files', async () => {
+    const season = await downloadsApi.create({ scope: 'season', id: 1, season_number: 1 });
+    const { proposals } = await assignmentApi.job(101);
+    // One file plays as #29 and #30; every other file of the job is left out
+    const [grouped, ...rest] = proposals.filter((p) => p.targets.length > 0);
+    await assignmentApi.patchProposals(101, {
+      items: [
+        { id: grouped.id, episode_ids: [episodeId(209867, 1, 29), episodeId(209867, 1, 30)], decision: 'accepted' as const },
+        ...rest.map((p) => ({ id: p.id, decision: 'ignored' as const })),
+      ],
+    });
+    await assignmentApi.apply(101);
+    const after = (await downloadsApi.list()).items.find((d) => d.id === season.id);
+    expect(after?.files.total).toBe(season.files.total + 1);
   });
 
   it('episodes a mapping job assigns to a kept season past the kept cap make it storage_full', async () => {

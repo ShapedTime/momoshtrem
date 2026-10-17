@@ -492,7 +492,8 @@ export function episodeFileKind(row: MockLibraryEntry, episodeId: number): Episo
   const episode = findEpisode(episodeId);
   const seed = episode && seedEpisode(SHOWS[episode.tmdbId], [episode.season, episode.episode]);
   if (!seed || fileState(seed, episodeId, row) !== 'ready') return null;
-  return { bytes: seed.runtime * EPISODE_BYTES_PER_MINUTE };
+  const filed = row.filed.get(episodeId);
+  return { bytes: seed.runtime * EPISODE_BYTES_PER_MINUTE, file: filed && `${filed.info_hash}/${filed.file_path}` };
 }
 
 function libraryState(entry: CatalogEntry, library: MockLibrary): TitleLibraryState {

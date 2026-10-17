@@ -136,7 +136,11 @@ function applyJob(job: MockJob): void {
         // One active source per item: the torrent replaces an HDRezka stream
         row.streamed.delete(target.episode_id);
         // A kept show or season takes the file while the kept cap has room (#77)
-        onEpisodeFile(target.episode_id, { bytes: Math.round(p.file_size / p.targets.length) }, before.get(target.episode_id) ?? null);
+        onEpisodeFile(
+          target.episode_id,
+          { bytes: Math.round(p.file_size / p.targets.length), file: `${job.info_hash}/${p.file_path}` },
+          before.get(target.episode_id) ?? null
+        );
       }
     }
   } else if (found) {

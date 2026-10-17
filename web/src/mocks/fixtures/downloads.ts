@@ -62,6 +62,11 @@ export interface MockDownload {
   over_cap: string[];
   /** What it was before its torrent was paused, so a resume puts it back. */
   before_pause?: DownloadState;
+  /**
+   * Torrent files ("hash/path") a mapping job gave its episodes, by how many of its episodes play each: a
+   * grouped file ("S01E01-E02") counts once in `files.total`.
+   */
+  file_refs?: Record<string, number>;
   /** Set once it's released; released rows stay, out of every read. */
   released_at?: Timestamp;
   release_reason?: 'deleted' | 'expired' | 'watched';
@@ -245,6 +250,7 @@ const cloneRecord = (d: MockDownload): MockDownload => ({
   download: cloneDownload(d.download),
   torrents: d.torrents.map((t) => ({ ...t })),
   over_cap: [...d.over_cap],
+  file_refs: d.file_refs && { ...d.file_refs },
 });
 
 /** Scenarios that start with no downloads. */
@@ -286,6 +292,9 @@ const active = () => current().items.filter((d) => d.released_at === undefined);
 export function mockDownloadRecords(): MockDownload[] {
   return visible(current().items, mockStorageDocument());
 }
+
+/** Every active row, smart picks too while smart downloads are off: a Keep turns a hidden pick kept (PLAN §6). */
+export const mockActiveDownloadRecords = (): MockDownload[] => active();
 
 export function findMockDownload(id: number): MockDownload | undefined {
   return mockDownloadRecords().find((d) => d.download.id === id);
@@ -641,8 +650,11 @@ function episodeOf(id: number): { tmdbId: number; season: number; episode: numbe
 /** What's left of the kept cap now. */
 const keptRoom = () => storageCaps(mockStorageDocument()).kept - downloadsUsage().committed_kept_bytes;
 
-/** An episode's file, as the hooks are told it: a torrent file (its bytes), an HDRezka stream, or none. */
-export type EpisodeFileKind = { bytes: number } | 'stream' | null;
+/**
+ * An episode's file, as the hooks are told it: a torrent file (its bytes, and "hash/path" when a mapping job
+ * wrote it), an HDRezka stream, or none.
+ */
+export type EpisodeFileKind = { bytes: number; file?: string } | 'stream' | null;
 
 /**
  * An episode's file changed from `previous` to `next`: a torrent file assigned
@@ -667,16 +679,30 @@ export function onEpisodeFile(episodeId: number, next: EpisodeFileKind, previous
     }
     if (d.scope === 'season' && d.item.season_number !== found.season) continue;
 
+    // A grouped file counts once: the first of its episodes to join adds it, the last to leave takes it away
+    const refs = (record.file_refs ??= {});
+    const leaves = (kind: EpisodeFileKind) => {
+      if (!kind || kind === 'stream' || !kind.file) return true;
+      const left = (refs[kind.file] ?? 1) - 1;
+      if (left > 0) refs[kind.file] = left;
+      else delete refs[kind.file];
+      return left <= 0;
+    };
+    const joins = (kind: EpisodeFileKind) => {
+      if (!kind || kind === 'stream' || !kind.file) return true;
+      refs[kind.file] = (refs[kind.file] ?? 0) + 1;
+      return refs[kind.file] === 1;
+    };
     // The file it replaces leaves: an HDRezka one was unavailable, a torrent one wanted (unless over the cap)
     const wasOver = record.over_cap.includes(key);
     record.over_cap = record.over_cap.filter((k) => k !== key);
     if (previous) {
-      d.files.total = Math.max(0, d.files.total - 1);
+      if (leaves(previous)) d.files.total = Math.max(0, d.files.total - 1);
       if (previous === 'stream') d.files.unavailable = Math.max(0, d.files.unavailable - 1);
       else if (!wasOver) d.wanted_bytes = Math.max(0, d.wanted_bytes - previous.bytes);
     }
     if (next) {
-      d.files.total += 1;
+      if (joins(next)) d.files.total += 1;
       if (next === 'stream') d.files.unavailable += 1;
       // Admitted in episode order while the kept cap has room; the rest wait over it
       else if (d.reason === 'kept' && keptRoom() < next.bytes) record.over_cap.push(key);
