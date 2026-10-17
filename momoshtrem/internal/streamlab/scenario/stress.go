@@ -38,7 +38,7 @@ import (
 //
 // S12 (#183) adds its tree-race scenarios (InvalidateTree during opens:
 // F4, F5) to this tier the same way: a file of its own whose init appends
-// them to stressTier's place in the catalog.
+// them to the catalog, with Tier Stress.
 
 // Stress is the tier streamlab check runs with -race.
 const Stress Tier = "stress"
@@ -66,9 +66,10 @@ func init() {
 	Checks = append(Checks,
 		CheckDef{ID: known.RaceCheck, Doc: "The repetition's process reported no data race (streamlab check's -race build: the GORACE log of each repetition). " +
 			"A known race explains a failure only when every race of the repetition carries its exact signature: both accesses' kinds, top frames and top momoshtrem frames."},
-		CheckDef{ID: checkOpsBounded, Doc: "Every VFS call the script made directly (open, ReadAt, Close) returned within its bound: a read within twice the read timeout " +
-			"(a drain of the pending read, then the read), a Close within that too (it waits for a read holding the file). One that didn't is stuck: a deadlock " +
-			"the hard timeout would otherwise only show as a hung repetition."},
+		CheckDef{ID: checkOpsBounded, Doc: "Every call the script made directly returned within its bound, plus 5 s of slack. " +
+			"A ReadAt has twice the read timeout: a drain of the pending read, then the read. A Close after its read has one read timeout, since nothing should hold the file. " +
+			"An Open or a RemoveTorrent has the add timeout plus the read timeout, for an add in flight. A call past its bound is stuck: a deadlock the hard timeout would only show " +
+			"as a hung repetition. Its stuck-N.txt holds every goroutine. #230 explains a failure whose stuck calls are all removes and opens, each dump showing its lock cycle."},
 		CheckDef{ID: checkTorrentConsistent, Doc: "Once the script's adds and removes are done, the torrent service and the anacrolix client agree on every library torrent: " +
 			"loaded in both or in neither. A torrent the client still has that the service forgot leaks; one the service lists that the client dropped breaks every open."},
 	)
