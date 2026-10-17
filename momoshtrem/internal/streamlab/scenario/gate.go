@@ -508,14 +508,16 @@ At the start of the file the overlap is the header's last pieces, which the serv
 var pauseResume = &Scenario{
 	Name: "pause-resume",
 	Tier: Gate,
-	Doc: `A player plays, pauses past the idle timeout (the activity manager idles the torrent: downloads off), then resumes on the same request.
+	Doc: `A player plays, pauses until the activity manager idles the torrent (downloads off), then resumes on the same request.
 
-The read after the pause must wake the torrent (MarkActive) and playback carry on: idle-resume checks the torrent went idle and came back. The player's buffer is small here, so a slow wake shows as a stall. It guards the activation path of ffda214.`,
+The read after the pause must wake the torrent (MarkActive) and playback carry on: idle-resume checks the torrent went idle and came back. The player's buffer is small here, so a slow wake shows as a stall. It guards the activation path of ffda214.
+
+The idle timeout stays above the read timeout, as production's (300 s against 120 s): the idle check doesn't count a read blocked on a piece as activity, so a shorter one idles the torrent under the read, which then fails ("torrent data downloading disabled").`,
 	Guards: []string{"ffda214"},
 	Params: []Param{
-		{Name: "idle_timeout", Kind: Duration, Default: "3s", Doc: "torrent.idle_timeout (whole seconds)."},
+		{Name: "idle_timeout", Kind: Duration, Default: "12s", Doc: "torrent.idle_timeout (whole seconds). Keep it above read_timeout, as production does."},
 		{Name: "idle_check", Kind: Duration, Default: "250ms", Doc: "The activity manager's check interval (SetCheckInterval)."},
-		{Name: "pause", Kind: Duration, Default: "6s", Doc: "How long the player pauses: past the idle timeout."},
+		{Name: "pause", Kind: Duration, Default: "25s", Doc: "The longest the player stays paused: it resumes a second after the torrent idles."},
 		{Name: "max_buffer", Kind: Bytes, Default: "4MiB"},
 		{Name: "watch", Kind: Duration, Default: "6s", Doc: "How much media to play before and after the pause."},
 	},
@@ -542,16 +544,24 @@ The read after the pause must wake the torrent (MarkActive) and playback carry o
 			return err
 		}
 		p.Pause()
+		// Hold the pause until the torrent idles (after the server has
+		// filled the connection's buffers and the idle timeout has passed),
+		// a moment more, then resume; give up at the pause param.
+		paused := time.Now()
 		idled := false
-		deadline := time.Now().Add(e.P.Duration("pause"))
+		deadline := paused.Add(e.P.Duration("pause"))
 		for time.Now().Before(deadline) {
 			if e.Stack.Activity != nil && string(e.Stack.Activity.GetState(t.Hash)) == "idle" {
 				idled = true
+				if soon := time.Now().Add(time.Second); soon.Before(deadline) {
+					deadline = soon
+				}
 			}
 			if err := e.Sleep(50 * time.Millisecond); err != nil {
 				return err
 			}
 		}
+		e.Note("paused %v", time.Since(paused).Round(100*time.Millisecond))
 		received := p.Model().Received()
 		if err := e.Live(p.Watch(watch)); err != nil {
 			return err

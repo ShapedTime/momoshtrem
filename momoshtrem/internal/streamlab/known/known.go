@@ -209,9 +209,10 @@ var Issues = []Issue{
 		Ref:     "#215",
 		Checks:  []string{"cache-holds-complete", "play-ok"},
 		MaxRate: Always,
-		Doc: "The piece cache (a filecache LRU) evicts pieces anacrolix still believes complete. Reading one fails: " +
-			"anacrolix resyncs the piece's completion but returns the error, and the response ends early. Its play-ok " +
-			"signature: a body that broke with no read timeout, at a piece the cache no longer holds.",
+		Doc: "The piece cache (a filecache LRU) evicts data anacrolix still believes it has: complete pieces, and the " +
+			"dirty chunks of incomplete ones the responsive PriorityReader reads. Reading it fails: anacrolix resyncs the " +
+			"piece's completion but returns the error, and the response ends early. Its play-ok signature: a body that " +
+			"broke within 3 s of its last byte, at a piece the leecher had downloaded and the cache no longer holds.",
 	},
 	{
 		ID:      "F12",

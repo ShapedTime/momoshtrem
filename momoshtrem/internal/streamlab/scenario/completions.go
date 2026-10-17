@@ -7,10 +7,12 @@ import (
 	atorrent "github.com/anacrolix/torrent"
 )
 
-// completions remembers every piece anacrolix reported complete, per
-// torrent, from the moment the torrent loads: F11's signature needs a
-// piece that was complete before its read broke, since anacrolix resyncs
-// the piece's completion when the read fails.
+// completions remembers every piece anacrolix had data for, per torrent,
+// from the moment the torrent loads: complete, or partial (dirty chunks,
+// which the PriorityReader reads before the piece is verified: it's
+// responsive). F11's signature needs a piece the leecher had downloaded
+// before its read broke, since anacrolix resyncs the piece's completion
+// when the read fails; a piece never downloaded isn't evicted.
 type completions struct {
 	mu   sync.Mutex
 	done map[string]map[int]bool
@@ -57,7 +59,7 @@ func (c *completions) follow(e *Env, hash string) {
 	i := 0
 	for _, r := range tor.PieceStateRuns() {
 		for range r.Length {
-			if r.Complete {
+			if r.Complete || r.Partial {
 				c.mark(hash, i)
 			}
 			i++
@@ -71,7 +73,7 @@ func (c *completions) follow(e *Env, hash string) {
 			if !ok {
 				return
 			}
-			if v.Complete {
+			if v.Complete || v.Partial {
 				c.mark(hash, v.Index)
 			}
 		}
@@ -84,7 +86,8 @@ func (c *completions) mark(hash string, i int) {
 	c.done[hash][i] = true
 }
 
-// was reports whether piece i of the torrent was ever complete.
+// was reports whether the leecher ever had data of piece i: complete or
+// partial.
 func (c *completions) was(hash string, i int) bool {
 	if c == nil {
 		return false

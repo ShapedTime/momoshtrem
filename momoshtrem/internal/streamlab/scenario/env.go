@@ -122,22 +122,23 @@ type failure struct {
 	// that timed out leaves a body (the server then ends it early).
 	timedOut bool
 	stalled  bool // swarm.Stalled: the piece wanted and incomplete, a seeder connected
-	// evicted: the piece cache doesn't hold the piece, and wasComplete:
-	// anacrolix had reported it complete before (F11).
-	evicted     bool
-	wasComplete bool
-	broke       bool // a body that ended early, not a request that failed
+	// evicted: the piece cache doesn't hold the piece complete, and
+	// hadData: anacrolix had reported it complete or partial before (F11).
+	evicted bool
+	hadData bool
+	broke   bool // a body that ended early, not a request that failed
 }
 
 // known is the known issue whose signature the failure carries: #195's
 // stall (a body silent through a read timeout, at a wanted, incomplete
 // piece with the seeder connected), or F11's quick break at a piece
-// anacrolix had complete and the cache no longer holds.
+// anacrolix had downloaded (complete or partial) and the cache no longer
+// holds.
 func (f failure) known() string {
 	switch {
 	case f.timedOut && f.stalled:
 		return "#195"
-	case f.silence < quickBreak && f.broke && f.evicted && f.wasComplete:
+	case f.silence < quickBreak && f.broke && f.evicted && f.hadData:
 		return "F11"
 	}
 	return ""
@@ -149,7 +150,7 @@ func (f failure) diagnosis() string {
 	case "#195":
 		return fmt.Sprintf("known stall (#195): %s, piece %d wanted and incomplete, seeder connected", silent, f.piece)
 	case "F11":
-		return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds", silent, f.piece)
+		return fmt.Sprintf("F11: broke at once (%s) at piece %d, downloaded before, which the piece cache no longer holds", silent, f.piece)
 	}
 	var why []string
 	if f.timedOut {
@@ -161,8 +162,8 @@ func (f failure) diagnosis() string {
 	if f.evicted {
 		why = append(why, "piece not in the cache")
 	}
-	if f.wasComplete {
-		why = append(why, "piece was complete")
+	if f.hadData {
+		why = append(why, "piece was downloaded")
 	}
 	return fmt.Sprintf("no known signature: %s, piece %d (%s)", silent, f.piece, strings.Join(why, ", "))
 }
@@ -252,7 +253,7 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 		f.stalled = swarm.Stalled(tor, f.piece)
 		f.evicted = !e.cached(tor, f.piece)
 	}
-	f.wasComplete = e.completions.was(t.Hash, f.piece)
+	f.hadData = e.completions.was(t.Hash, f.piece)
 	e.rec.mu.Lock()
 	e.rec.failures = append(e.rec.failures, f)
 	n := len(e.rec.failures)
