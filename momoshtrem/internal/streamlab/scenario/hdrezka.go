@@ -411,6 +411,10 @@ A burst of one meets a seek: the streamer retries once a second later, so the se
 				wantBreaks = 1
 				x = e.Expect(t, breakAt, 1, fmt.Sprintf("a burst of %d 503s exhausts the streamer's one retry", burst))
 			}
+			// The burst is a declared fault until the playback recovered
+			// (faultlog.go); Expect, above, is play-ok's own excuse.
+			endBurst := e.Fault(fmt.Sprintf("cdn-503x%d", burst), t)
+			defer endBurst()
 			c.Unavailable(burst)
 			if err := move(); err != nil {
 				return err
@@ -418,6 +422,7 @@ A burst of one meets a seek: the streamer retries once a second later, so the se
 			if err := e.Live(p.Watch(watch)); err != nil {
 				return err
 			}
+			endBurst()
 			breaks := failures() - before
 			if x != nil {
 				e.End(x)
@@ -491,12 +496,16 @@ Last, a scrub while every CDN body stalls: stall_scrub GETs, each dropped scrub_
 		// stopped.
 		logged := len(c.Log())
 		stalled := time.Now()
+		// A declared fault until the RemoteFile has reopened (faultlog.go).
+		endStall := e.Fault("cdn-stall", t)
+		defer endStall()
 		if n := c.Stall(); n != 1 {
 			problems = append(problems, fmt.Sprintf("the stall caught %d bodies, want the playing one", n))
 		}
 		if err := e.Live(p.Watch(timeout + watch)); err != nil {
 			return err
 		}
+		endStall()
 		// The watchdog counts from the RemoteFile's last progress, and the
 		// bytes already in the connection's buffers still arrive after the
 		// stall (measured: 1.3-2.1 s at a 3 s timeout), so the bound is twice
@@ -555,6 +564,8 @@ func (e *Env) scrubDuringStall(t *Title, c *cdn.CDN, dev client.Device, n int) (
 	scrub := e.P.Duration("scrub_time")
 	step := scrub / time.Duration(n)
 	peak := c.Stats().PeakOpen
+	endStall := e.Fault("cdn-stall", t) // until the stall is over (faultlog.go)
+	defer endStall()
 	c.StallFor(scrub)
 	for range n {
 		conn := e.Conn(dev)
@@ -576,6 +587,7 @@ func (e *Env) scrubDuringStall(t *Title, c *cdn.CDN, dev client.Device, n int) (
 	if err := e.Sleep(time.Second); err != nil {
 		return "", err
 	}
+	endStall()
 	scrubPeak := c.Stats().PeakOpen
 	q, err := e.Player(dev, t).Open(e.Ctx, e.Conn(dev), at(t, 0.5))
 	if err := e.Live(err); err != nil {

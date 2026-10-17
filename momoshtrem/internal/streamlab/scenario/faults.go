@@ -71,6 +71,8 @@ No read may break meanwhile: the slow seeder keeps every read under the read tim
 			return err
 		}
 		outage := e.P.Duration("outage")
+		// No declared fault (faultlog.go): the slow seeder must keep the
+		// playback going, so the watchdog watches this window too.
 		cut := fast.Proxy.Vanish(outage)
 		gone := time.Now()
 		if err := e.Live(p.Watch(outage)); err != nil {

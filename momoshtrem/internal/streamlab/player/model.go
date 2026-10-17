@@ -288,7 +288,10 @@ func (m *Model) Resume(now time.Time) {
 
 // Stats are a playback's numbers.
 type Stats struct {
-	From int64
+	// Start is when the playback's request went out: a Stall's At is from
+	// here.
+	Start time.Time
+	From  int64
 	// TTFB is from the request to the first byte; 0 without one.
 	TTFB time.Duration
 	// TimeToPlayable is from the request to Playable bytes buffered; 0
@@ -326,6 +329,7 @@ func (m *Model) End(now time.Time) Stats {
 		m.pauseStart = now
 	}
 	s := Stats{
+		Start:     m.start,
 		From:      m.from,
 		Playable:  !m.playableAt.IsZero(),
 		Stalls:    append([]Stall(nil), m.stalls...),

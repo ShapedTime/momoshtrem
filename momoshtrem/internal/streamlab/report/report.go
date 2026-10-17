@@ -246,6 +246,10 @@ type Rep struct {
 	Torrent   Torrent            `json:"torrent"`
 	Resources Resources          `json:"resources"`
 	Artifacts map[string]string  `json:"artifacts,omitempty"`
+	// Observe is the observer's view (observe.go); nil when it was off.
+	// Findings are its hints, which never change a verdict.
+	Observe  *Observation `json:"observe,omitempty"`
+	Findings []Finding    `json:"findings,omitempty"`
 }
 
 // RepCheck is a check's outcome in one repetition: pass, fail or n/a.

@@ -20,6 +20,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/client"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/observe"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/player"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
@@ -86,6 +87,11 @@ type Env struct {
 	// quietKnown names the known issues a quiescence failure carries
 	// beyond #225's: a stress script's (stress_deadlock.go). Optional.
 	quietKnown func(checks.QuiescenceResult) string
+	// obs observes the repetition (observe.go); nil when it's off. logs
+	// is the process's log capture (RunOptions.Logs), observed or not.
+	obs    *observe.Observer
+	logs   *observe.Capture
+	faults envFaults
 }
 
 // recorder keeps what a repetition did.
@@ -146,17 +152,39 @@ type failure struct {
 	// expected is why the script expected it (Env.Expect): a fault
 	// meant to break it. play-ok leaves it out.
 	expected string
+	// resyncFailed: anacrolix logged that its read of the piece failed
+	// after a completion resync, just before the break: the storage lost
+	// data anacrolix believed it had (F11's log proof,
+	// observe.Capture.ReadFailed).
+	resyncFailed bool
+	// chunkGone: the piece was partial before (its chunks written to the
+	// cache's incompleted/) and the chunk at the break is gone from it
+	// now: the cache evicted dirty data (F11 in forward play).
+	chunkGone bool
+	// seederHeld: the lab held the torrent's seeder's uploads (a fault,
+	// not #195); faulted: faults the script declared on the title explain
+	// the silence, which didn't outlast them by #195's threshold
+	// (faultlog.go).
+	seederHeld bool
+	faulted    bool
 }
 
 // known is the known issue whose signature the failure carries: #195's
 // stall (a body silent through a read timeout, at an incomplete piece
-// with the seeder connected and downloads on), or F11's quick break at a
-// piece anacrolix had complete and the cache no longer holds.
+// with a seeder connected that the lab didn't pause, downloads on), or
+// F11's quick break at a piece the cache lost: one anacrolix had complete
+// and the cache no longer holds, or (forward play, the readahead window
+// outgrowing the cache) a partial piece whose chunk at the break the
+// cache evicted, and whose read anacrolix logged failing after the
+// completion resync. Without both, a quick break at a piece that was
+// never complete is no known issue's.
 func (f failure) known() string {
 	switch {
 	case f.timedOut && f.stalled:
 		return "#195"
 	case f.silence < quickBreak && f.broke && f.evicted && f.wasComplete:
+		return "F11"
+	case f.silence < quickBreak && f.broke && f.resyncFailed && f.chunkGone:
 		return "F11"
 	}
 	return ""
@@ -171,7 +199,14 @@ func (f failure) diagnosis() string {
 	case "#195":
 		return fmt.Sprintf("known stall (#195): %s, piece %d incomplete, seeder connected, downloads on", silent, f.piece)
 	case "F11":
-		return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds", silent, f.piece)
+		if f.evicted && f.wasComplete {
+			proof := ""
+			if f.resyncFailed {
+				proof = "; anacrolix logged the read failing after the completion resync"
+			}
+			return fmt.Sprintf("F11: broke at once (%s) at piece %d, complete before, which the piece cache no longer holds%s", silent, f.piece, proof)
+		}
+		return fmt.Sprintf("F11: broke at once (%s) at piece %d, partial, whose chunk there the cache evicted and whose read anacrolix logged failing after the completion resync", silent, f.piece)
 	}
 	var why []string
 	if f.timedOut {
@@ -180,11 +215,23 @@ func (f failure) diagnosis() string {
 	if f.stalled {
 		why = append(why, "piece incomplete, seeder connected, downloads on")
 	}
+	if f.seederHeld {
+		why = append(why, "the seeder held (the lab's fault)")
+	}
+	if f.faulted {
+		why = append(why, "silent through a fault the script declared")
+	}
+	if f.chunkGone {
+		why = append(why, "its written chunk gone from the cache")
+	}
 	if f.evicted {
 		why = append(why, "piece not in the cache")
 	}
 	if f.wasComplete {
 		why = append(why, "piece was complete")
+	}
+	if f.resyncFailed {
+		why = append(why, "anacrolix's read failed after the completion resync")
 	}
 	if f.title != nil && f.title.Remote != nil {
 		return fmt.Sprintf("no known signature: %s, an HDRezka file", silent)
@@ -273,11 +320,20 @@ func (e *Env) Player(d client.Device, t *Title) *player.Session {
 func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, err error) {
 	f := failure{device: device, title: t, at: time.Now(), offset: off, piece: t.Piece(off), err: err.Error(),
 		silence: silence, timedOut: silence >= e.P.Duration("read_timeout")/2, broke: errors.Is(err, io.ErrUnexpectedEOF)}
-	if tor, ok := e.Stack.Torrent(t.Hash); ok {
-		f.stalled = e.stuck(tor, t.Hash, f.piece)
-		f.evicted = !e.cached(tor, f.piece)
-	}
+	f.seederHeld = t.Seeder != nil && t.Seeder.Held()
+	f.faulted = e.faultExplains(t, f.at.Add(-silence), f.at, e.knownStall())
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
+	f.resyncFailed = e.logs.ReadFailed(t.Hash, f.piece, f.at)
+	if tor, ok := e.Stack.Torrent(t.Hash); ok {
+		// A stall the lab made (a held seeder, a declared fault) isn't
+		// #195's.
+		f.stalled = e.stuck(tor, t.Hash, f.piece) && !f.seederHeld && !f.faulted
+		f.evicted = !e.cached(tor, f.piece)
+		// anacrolix reads only data it holds, so a read that failed after
+		// the resync had the chunk at the break written: missing now, it
+		// was evicted.
+		f.chunkGone = f.resyncFailed && e.completions.wasPartial(t.Hash, f.piece) && !e.chunkCached(tor, t.Offset+off)
+	}
 	e.rec.mu.Lock()
 	f.expected = e.rec.expected(f)
 	e.rec.failures = append(e.rec.failures, f)

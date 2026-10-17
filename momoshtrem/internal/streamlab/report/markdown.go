@@ -31,6 +31,7 @@ func (r *Report) Markdown() string {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n", c.ID, c.Status, orDash(c.Known), strings.Join(c.Reps, " "), cell(c.Evidence))
 	}
 	b.WriteString(RacesMarkdown(r.Races))
+	b.WriteString(r.findingsMarkdown())
 
 	b.WriteString("\n## Metrics\n\n| Metric | Kind | Median | p95 | Values | Unit | Better |\n|---|---|---|---|---|---|---|\n")
 	names := make([]string, 0, len(r.Metrics))
@@ -105,6 +106,7 @@ func (r *Report) Markdown() string {
 		res := rep.Resources
 		fmt.Fprintf(&b, "\n**Resources:** peak %d goroutines, %d readers, %s heap; %d leaked goroutine stacks, %d inherited.\n",
 			res.PeakGoroutines, res.PeakReaders, Bytes(int64(res.PeakHeapBytes)), len(res.Leaked), res.Inherited)
+		b.WriteString(observationMarkdown(rep))
 	}
 
 	b.WriteString("\n## Params\n\n")

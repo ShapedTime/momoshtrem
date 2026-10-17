@@ -5,7 +5,7 @@
 //
 //	streamlab run [--tier gate] [--scenario a,b] [--reps N] [--warmup N]
 //	              [--config prod.yaml] [--set k=v]... [--out dir]
-//	              [--gomaxprocs N] [--timeout d]
+//	              [--gomaxprocs N] [--timeout d] [--diagnose]
 //	streamlab check [--scenario a,b] [--reps N] [--warmup N] [--set k=v]...
 //	                [--out dir] [--timeout d] [--exe race-binary] [--tests=false]
 //	streamlab list
@@ -101,6 +101,8 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 	out := fs.String("out", "", "the run's folder (default .streamlab/runs/<id> at the repo root)")
 	gomaxprocs := fs.Int("gomaxprocs", 0, "pin the repetitions' GOMAXPROCS (0: the default)")
 	timeout := fs.Duration("timeout", 0, "each repetition's hard timeout, positive (0: the scenario's)")
+	diagnose := fs.Bool("diagnose", false, "observe in depth: DEBUG logs of the prioritizer, priority readers and activity manager, "+
+		"full-rate mutex and block profiles, the flight recorder all along (timings aren't faithful then)")
 	sets := runner.Sets{}
 	fs.Var(sets, "set", "override a scenario param, k=v (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -137,6 +139,7 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 		Timeout:    *timeout,
 		Command:    append([]string{"streamlab", "run"}, args...),
 		Progress:   stdout,
+		Diagnose:   *diagnose,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "run: %v\n", err)

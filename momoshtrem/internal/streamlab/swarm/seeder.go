@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	atorrent "github.com/anacrolix/torrent"
@@ -47,6 +48,7 @@ type Seeder struct {
 	t       *atorrent.Torrent
 	storage *Storage
 	addr    string
+	held    atomic.Bool // HoldUploads, in upload_hold.go
 }
 
 // StartSeeder starts a seeder listening on 127.0.0.1 on a free port.

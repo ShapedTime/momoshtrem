@@ -138,7 +138,9 @@ The read runs under context.Background() plus read_timeout, not the request's co
 		dev := s.Device("stress-abort")
 		timeout := s.Stack.ReadTimeout
 		for i := range s.P.Int("iterations") {
-			t.Seeder.HoldUploads()
+			// A declared fault (faultlog.go): the watchdog doesn't trip on
+			// it.
+			release := s.HoldSeeder(t, "hold-uploads")
 			conn := s.Conn(dev)
 			off := s.incomplete(t, s.rng)
 			dropAfter := time.Duration(50+intn(s.rng, 350)) * time.Millisecond
@@ -166,13 +168,13 @@ The read runs under context.Background() plus read_timeout, not the request's co
 				if err := s.Sleep(releaseAfter); err != nil {
 					return err
 				}
-				t.Seeder.ReleaseUploads()
+				release()
 				s.event("seeder released")
 			}
 			if !s.RequestsDone(func(r stack.Request) bool { return r.UserAgent == dev.UserAgent }, timeout+5*time.Second) {
 				s.Note("iteration %d: the dropped handler hadn't returned %v after the drop", i, timeout+5*time.Second)
 			}
-			t.Seeder.ReleaseUploads()
+			release()
 		}
 		return nil
 	}),
