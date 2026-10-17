@@ -72,6 +72,15 @@ func (s *Service) Keep(ctx context.Context, body []byte) (Download, bool, error)
 
 	s.passMu.Lock()
 	defer s.passMu.Unlock()
+	// The releases due now go first: a Keep on an until-watched download
+	// that was just watched is a new Keep (201), not that one (200).
+	p, err := s.plan(ctx)
+	if err != nil {
+		return Download{}, false, err
+	}
+	if err := s.writeReleases(ctx, p); err != nil {
+		return Download{}, false, err
+	}
 	existing, err := s.d.Store.ActiveDownloadFor(ctx, target.DownloadRecord)
 	if err != nil {
 		return Download{}, false, err
@@ -79,10 +88,6 @@ func (s *Service) Keep(ctx context.Context, body []byte) (Download, bool, error)
 	if existing != nil && existing.Reason == library.DownloadKept {
 		d, err := s.viewAfterPass(ctx, existing.ID)
 		return d, false, err
-	}
-	p, err := s.plan(ctx)
-	if err != nil {
-		return Download{}, false, err
 	}
 	if needed, available := s.room(p, target); needed > available {
 		return Download{}, false, &StorageFullError{NeededBytes: needed, AvailableBytes: available}
@@ -147,9 +152,10 @@ func (s *Service) Estimate(ctx context.Context, t library.DownloadTarget) (Estim
 	return est, nil
 }
 
-// Update is PATCH /downloads/{id}: a kept download's duration. Errors, in
-// the contract's order: ErrNotFound, ErrNotAnObject, ErrSmartPick,
-// *FieldError.
+// Update is PATCH /downloads/{id}: a kept download's duration. A change
+// that ends the download (until watched, on a movie watched since) answers
+// its final view; the next GET doesn't list it. Errors, in the contract's
+// order: ErrNotFound, ErrNotAnObject, ErrSmartPick, *FieldError.
 func (s *Service) Update(ctx context.Context, id int64, body []byte) (Download, error) {
 	rec, err := s.listed(ctx, id)
 	if err != nil {
@@ -243,7 +249,8 @@ func (s *Service) release(ctx context.Context, id int64, reason library.ReleaseR
 		return ErrNotFound
 	}
 	s.log.Info("Download released", "download_id", id, "reason", reason)
-	return s.passLocked(ctx, true)
+	_, err = s.passLocked(ctx, true)
+	return err
 }
 
 // listed is the active download with the id, as the API sees it: a smart
@@ -269,16 +276,20 @@ func (s *Service) listed(ctx context.Context, id int64) (library.DownloadRecord,
 }
 
 // viewAfterPass runs a pass (passMu held) and answers the download as it
-// planned it.
+// planned it; one the pass released (a PATCH that made a watched download
+// until watched) as it read just before.
 func (s *Service) viewAfterPass(ctx context.Context, id int64) (Download, error) {
-	if err := s.passLocked(ctx, true); err != nil {
+	p, err := s.passLocked(ctx, true)
+	if err != nil {
 		return Download{}, err
 	}
-	d, ok := s.Snapshot().Download(id)
-	if !ok {
-		return Download{}, fmt.Errorf("download %d isn't planned", id)
+	if d, ok := p.snapshot.Download(id); ok {
+		return d, nil
 	}
-	return d, nil
+	if d, ok := p.final[id]; ok {
+		return d, nil
+	}
+	return Download{}, fmt.Errorf("download %d isn't planned", id)
 }
 
 func (s *Service) resolveTarget(ctx context.Context, t library.DownloadTarget) (*library.ResolvedDownload, error) {

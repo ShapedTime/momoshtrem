@@ -293,7 +293,8 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
   - `created_at`, `updated_at`;
   - indexes:
     - a partial unique index per target column (`WHERE movie_id IS NOT NULL AND released_at IS NULL`, …): one active download per target, so a Keep on a smart pick turns that row kept;
-    - an index on `expires_at` for active rows.
+    - an index on `expires_at` for active rows;
+    - a plain index on each target column, over every row, for the FK cascades and the smart re-pick rule.
 - **Releases are soft.** A row is never deleted on release; it gets `released_at` and a reason:
   - `deleted` is a DELETE;
   - `expired` means `expires_at` passed;
@@ -1241,13 +1242,15 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
   - sets their wanted files to Normal priority.
 - **The manager's details** (P4 #202, `internal/downloads`), where the rules above leave room:
   - **Wakes:** a Keep, PATCH or DELETE, a storage PUT, a removal, an Apply, an override or an HDRezka assign, and a pause or resume. A session poll every 5 s notices streams starting and ending, and local watches.
-  - **Admission order:** a file joins a download when its assignment is written or the download is created, whichever is later. Kept files are admitted first, by that time, then by the download's creation, then in episode order; smart files follow under their own cap. So a file assigned later is the one over the cap. A file that doesn't fit is over the cap, and a later, smaller one may still fit.
+  - **Admission order:** a file joins a download when its assignment is written or the download is created, whichever is later. Kept files are admitted first, by that time, then by the download's creation, then in episode order with specials (season 0) last; smart files follow under their own cap. An Apply of a torrent already assigned keeps its rows' time, so it doesn't reorder admission. So a file assigned later is the one over the cap. A file that doesn't fit is over the cap, and a later, smaller one may still fit.
   - **Smart picks while `smart.enabled` is off** aren't planned, listed, or found by PATCH and DELETE (`404`), but they still expire. A Keep on one still turns it kept.
   - **Slots:** streamed torrents first (their prefetch carries on), then the ones holding a slot, then plan order (kept by creation, then smart). A torrent loads in the background; a failed load is retried after a minute.
   - **`stalled`:** 10 minutes in a slot without its bytes on disk or arrived growing. It's retried after 5, 10, 20 and 40 minutes, then hourly; progress starts the backoff over.
-  - **`disk_full`:** the floor holds the cache below its limit (`floored`), and pinned bytes plus the streaming reserve reach `effective_bytes`.
+  - **`disk_full`:** the floor holds the cache below its limit (`floored`), and pinned bytes plus the streaming reserve reach `effective_bytes`. A download with every file over the cap still reads `paused` with background downloads off, and `disk_full` with a full disk, before `storage_full`.
+  - **A Keep after a release:** the releases due (an until-watched movie just watched) are stored before a Keep looks for an existing download, so keeping it again is a new row (`201`).
   - **Pause while streaming:** HDRezka sessions count. A torrent streamed within the last minute carries on through the grace minute.
-  - **A local watch:** a session reads at 90% of its file or more, for 20 s (players read a file's index at its end). Every item the file plays as is recorded, so a grouped file records all its episodes.
+  - **A local watch:** a session reads past 90% of its file and reads on: 20 s after it was first seen there, it has read further, after that moment. A session's offset is where its last read ended, and it stays listed 30 s after its last read, so a player that reads a file's index at its end and stops isn't a watch. Every item the file plays as is recorded, so a grouped file records all its episodes.
+  - **The F11 re-sync** asks the client about every missing admitted piece on the first pass after a torrent loads or its pins change, and after that only about pieces the cache had at the last pass and lost.
   - **Until-watched endings:** a season has finished airing when every episode it lists has aired by today (in `TZ`), and the show has a later season, has ended (TMDB's `Ended` or `Canceled`), or the season's last episode is its finale. A show's "everything watched" is its regular episodes; specials don't count.
   - **What's on disk** counts the bytes of a boundary piece that fall inside the file.
   - **Pins:** one owner per torrent, covering every piece of its admitted files, boundary pieces included. At startup the cache defers its trims (`DeferTrim`) until `RestorePins` has pinned every download (it loads nothing); then `Ready`, and the governor steps any excess down. Watched files' pieces are demoted once per process, and again after a restart (downloads released as watched in the last 30 days).
@@ -1360,6 +1363,7 @@ Download {
   - `404` for an unknown or released id;
   - `400` for a body that isn't a JSON object;
   - `422 validation_error` for a smart pick (Keep it with POST first), or for a bad value, naming `until_watched` or `expires_at` (null, or a time in the future).
+  - A change that releases the download (`until_watched: true` on one watched since) answers `200` with its final view; the next GET doesn't list it.
 - **`DELETE /downloads/{id}`** → `204`, or `404` for an unknown or released id. It releases the download (`release_reason: deleted`). A smart pick released this way is never picked again.
 
 ### Storage and downloads: UI copy (#77, P7–P9)

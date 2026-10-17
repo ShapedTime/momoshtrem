@@ -55,6 +55,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS downloads_active_episode ON downloads (episode
 -- Expiry, over the active rows.
 CREATE INDEX IF NOT EXISTS idx_downloads_expires ON downloads (expires_at)
     WHERE released_at IS NULL;
+-- Every row by target, released ones too: the FK cascades (a title's
+-- delete) and the smart re-pick rule read them.
+CREATE INDEX IF NOT EXISTS idx_downloads_movie ON downloads (movie_id);
+CREATE INDEX IF NOT EXISTS idx_downloads_show ON downloads (show_id);
+CREATE INDEX IF NOT EXISTS idx_downloads_season ON downloads (season_id);
+CREATE INDEX IF NOT EXISTS idx_downloads_episode ON downloads (episode_id);
 
 -- What was watched here, not on Trakt: a local session that reaches 90%
 -- upserts its item's row. Watched is a Trakt play or a row here, after the

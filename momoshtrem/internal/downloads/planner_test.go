@@ -258,6 +258,13 @@ func TestAdmit(t *testing.T) {
 			t.Errorf("admitted %v, over %v", in, over)
 		}
 	})
+	t.Run("specials last", func(t *testing.T) {
+		show := showDL(1, library.DownloadScopeShow, episode(9, 0, 1, "bb", "sp.mkv", 60), episode(10, 1, 1, "bb", "e1.mkv", 60))
+		in, over := admitted(plan(100, 0, show), 1)
+		if !reflect.DeepEqual(in, []FileKey{{"bb", "e1.mkv"}}) || !reflect.DeepEqual(over, []FileKey{{"bb", "sp.mkv"}}) {
+			t.Errorf("admitted %v, over %v", in, over)
+		}
+	})
 	t.Run("smart has its own cap and never takes kept room; a kept file costs smart nothing", func(t *testing.T) {
 		kept := movieDL(1, "aa", "A.mkv", 90)
 		s1 := showDL(2, library.DownloadScopeEpisode, episode(10, 1, 1, "aa", "A.mkv", 90))
@@ -465,7 +472,7 @@ func TestViewDownload_MultiTorrent(t *testing.T) {
 		"bb": {state: StateStalled, resumesAt: &retry},
 		"cc": {state: StateQueued},
 	}
-	v := viewDownload(cov, adm, torrents, facts)
+	v := viewDownload(cov, adm, torrents, facts, holds{})
 	dl := v.download
 	if dl.State != StateStalled || dl.ResumesAt == nil || !dl.ResumesAt.Equal(retry) {
 		t.Errorf("state %s resumes %v, want stalled until %v", dl.State, dl.ResumesAt, retry)
@@ -475,9 +482,30 @@ func TestViewDownload_MultiTorrent(t *testing.T) {
 	}
 
 	torrents["cc"] = &torrentPlan{state: StateDownloading, speed: 50}
-	dl = viewDownload(cov, adm, torrents, facts).download
+	dl = viewDownload(cov, adm, torrents, facts, holds{}).download
 	if dl.State != StateDownloading || dl.DownloadBps != 50 || dl.EtaSeconds == nil || *dl.EtaSeconds != 4 {
 		t.Errorf("one torrent downloading: %s at %d, eta %v", dl.State, dl.DownloadBps, dl.EtaSeconds)
+	}
+}
+
+// With every file over the cap nothing is admitted: background off and a
+// full disk still read first, then storage_full.
+func TestViewDownload_NothingAdmitted(t *testing.T) {
+	d := movieDL(1, "aa", "A.mkv", 100)
+	cov := cover(&d, fileInput{pieces: noPieces})
+	adm := admit([]*coverage{cov}, 10, 0)
+	for _, tt := range []struct {
+		h    holds
+		want State
+	}{
+		{holds{}, StateStorageFull},
+		{holds{disabled: true, diskFull: true}, StatePaused},
+		{holds{diskFull: true}, StateDiskFull},
+		{holds{outside: true}, StateStorageFull},
+	} {
+		if got := viewDownload(cov, adm, nil, nil, tt.h).download.State; got != tt.want {
+			t.Errorf("holds %+v: state %s, want %s", tt.h, got, tt.want)
+		}
 	}
 }
 

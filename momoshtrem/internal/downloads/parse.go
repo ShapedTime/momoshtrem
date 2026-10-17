@@ -166,7 +166,7 @@ func ParseTarget(scope, id, seasonNumber string) (library.DownloadTarget, error)
 	t.ID = n
 	if t.Scope == library.DownloadScopeSeason {
 		season, err := strconv.Atoi(seasonNumber)
-		if err != nil || season < 0 {
+		if err != nil || season < 0 || season > math.MaxInt32 {
 			return t, &FieldError{"season_number", "season_number must be a season of the show"}
 		}
 		t.SeasonNumber = season

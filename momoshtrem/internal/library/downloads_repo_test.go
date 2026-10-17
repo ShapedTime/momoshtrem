@@ -167,17 +167,17 @@ func TestDownloadsRepository_Resolve(t *testing.T) {
 	if s.Title.MediaType != "tv" || s.Title.LibraryID != f.show.ID || s.Title.ShowStatus != "Returning Series" || len(s.Items) != 5 {
 		t.Fatalf("show = %+v with %d items", s.Title, len(s.Items))
 	}
-	// Episode order, specials first.
-	if s.Items[0].SeasonNumber != 0 || s.Items[1].ItemID != e11 || s.Items[4].SeasonNumber != 2 {
+	// Episode order, specials last.
+	if s.Items[0].ItemID != e11 || s.Items[3].SeasonNumber != 2 || s.Items[4].SeasonNumber != 0 {
 		t.Errorf("order: %+v", s.Items)
 	}
-	if w := s.Items[1].WatchedAt; w == nil || !w.Equal(watchedTrakt) {
+	if w := s.Items[0].WatchedAt; w == nil || !w.Equal(watchedTrakt) {
 		t.Errorf("E1's watch = %v, want Trakt's %v", w, watchedTrakt)
 	}
-	if w := s.Items[2].WatchedAt; w == nil || !w.Equal(watchedHere) {
+	if w := s.Items[1].WatchedAt; w == nil || !w.Equal(watchedHere) {
 		t.Errorf("E2's watch = %v, want the later local one %v", w, watchedHere)
 	}
-	if f3 := s.Items[3].File; f3 == nil || f3.Kind != AssignmentKindHDRezka {
+	if f3 := s.Items[2].File; f3 == nil || f3.Kind != AssignmentKindHDRezka {
 		t.Errorf("S2E1's file = %+v, want HDRezka", f3)
 	}
 	sn := byID[season.ID]
@@ -284,4 +284,42 @@ func TestDownloadsRepository_SmartPicks(t *testing.T) {
 	f.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, plays, last_watched_at)
 		VALUES ($1, 2, 1, 1, NOW())`, f.show.TMDBID)
 	check(e21, "watched")
+}
+
+// Writing a torrent's file again keeps an active row's time (a download's
+// admission order goes by it); one reactivated is stamped anew.
+func TestAssignmentUpsert_KeepsAnActiveRowsTime(t *testing.T) {
+	db := openSchemaDB(t)
+	ctx := context.Background()
+	show, eps := jobShow(t, db, 1)
+	repo := NewAssignmentRepository(db)
+	write := func() {
+		t.Helper()
+		if err := repo.WriteOverride(ctx, AssignmentWrite{ItemType: ItemTypeEpisode, InfoHash: "aa", MagnetURI: "magnet:?xt=urn:btih:aa",
+			ShowID: show.ID, Rows: []TorrentAssignment{{ItemID: eps[1], FilePath: "S1/E1.mkv", FileSize: 10}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp := func() time.Time {
+		t.Helper()
+		var at time.Time
+		if err := db.QueryRow(`SELECT created_at FROM torrent_assignments WHERE item_id = $1`, eps[1]).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	write()
+	first := stamp()
+	time.Sleep(10 * time.Millisecond)
+	write()
+	if again := stamp(); !again.Equal(first) {
+		t.Errorf("an active row's time moved from %v to %v", first, again)
+	}
+	if _, err := db.Exec(`UPDATE torrent_assignments SET is_active = FALSE WHERE item_id = $1`, eps[1]); err != nil {
+		t.Fatal(err)
+	}
+	write()
+	if re := stamp(); !re.After(first) {
+		t.Errorf("a reactivated row kept its old time %v", re)
+	}
 }

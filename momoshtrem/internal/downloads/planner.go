@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"cmp"
+	"math"
 	"slices"
 	"time"
 
@@ -110,7 +111,9 @@ type coverage struct {
 // fileStage is phase 1's answer.
 type fileStage struct {
 	releases []library.DownloadRelease
-	// released are the downloads released now, for their files' demotion.
+	// ending are the downloads released now; released those released as
+	// watched, for their files' demotion.
+	ending   []*coverage
 	released []*coverage
 	// covs are the downloads planned, kept by creation, then smart picks.
 	covs []*coverage
@@ -126,6 +129,7 @@ func planFiles(in fileInput) fileStage {
 		cov := cover(d, in)
 		if reason, ok := releaseFor(d, in.now, in.loc, in.streaming); ok {
 			st.releases = append(st.releases, library.DownloadRelease{ID: d.ID, Reason: reason})
+			st.ending = append(st.ending, cov)
 			if reason == library.ReleaseWatched {
 				st.released = append(st.released, cov)
 			}
@@ -311,11 +315,19 @@ type admission struct {
 	sizes                         map[FileKey]int64
 }
 
+// seasonRank orders seasons for admission: specials (season 0) last.
+func seasonRank(season int) int {
+	if season == 0 {
+		return math.MaxInt
+	}
+	return season
+}
+
 // admit admits files against the caps: kept downloads' first, then smart
 // picks', each in the order they joined (a file assigned later comes
-// last), then by download and episode order. A file another download has
-// costs nothing. A file that doesn't fit is over the cap; a later, smaller
-// one may still fit. Smart never takes kept room.
+// last), then by download and episode order, specials last. A file
+// another download has costs nothing. A file that doesn't fit is over the
+// cap; a later, smaller one may still fit. Smart never takes kept room.
 func admit(covs []*coverage, keptMax, smartMax int64) admission {
 	a := admission{
 		kept: map[FileKey]bool{}, smart: map[FileKey]bool{},
@@ -339,7 +351,7 @@ func admit(covs []*coverage, keptMax, smartMax int64) admission {
 		slices.SortStableFunc(out, func(x, y candidate) int {
 			return cmp.Or(x.want.joined.Compare(y.want.joined),
 				x.cov.d.CreatedAt.Compare(y.cov.d.CreatedAt), cmp.Compare(x.cov.d.ID, y.cov.d.ID),
-				cmp.Compare(x.want.number.season, y.want.number.season),
+				cmp.Compare(seasonRank(x.want.number.season), seasonRank(y.want.number.season)),
 				cmp.Compare(x.want.number.episode, y.want.number.episode),
 				compareKeys(x.want.key, y.want.key))
 		})

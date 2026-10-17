@@ -154,9 +154,9 @@ type CoveredFile struct {
 }
 
 // ResolvedDownload is a download with its target and every item its scope
-// covers, in episode order. A movie covers the movie; a show every episode
-// of every season the library lists; a season its episodes; an episode
-// itself.
+// covers, in episode order, specials last. A movie covers the movie; a
+// show every episode of every season the library lists; a season its
+// episodes; an episode itself.
 type ResolvedDownload struct {
 	DownloadRecord
 	Title DownloadTitle
@@ -357,38 +357,43 @@ func (r *DownloadsRepository) ReleaseDownloads(ctx context.Context, releases []D
 // ids set) with its title and items. ErrMovieNotFound, ErrShowNotFound,
 // ErrSeasonNotFound or ErrEpisodeNotFound when the library hasn't got it.
 func (r *DownloadsRepository) ResolveTarget(ctx context.Context, target DownloadTarget) (*ResolvedDownload, error) {
-	rec := DownloadRecord{Scope: target.Scope}
-	var err error
-	switch target.Scope {
-	case DownloadScopeMovie:
-		err = r.exists(ctx, `SELECT id FROM movies WHERE id = $1`, ErrMovieNotFound, &rec.MovieID, target.ID)
-	case DownloadScopeShow:
-		err = r.exists(ctx, `SELECT id FROM shows WHERE id = $1`, ErrShowNotFound, &rec.ShowID, target.ID)
-	case DownloadScopeSeason:
-		if err = r.exists(ctx, `SELECT id FROM shows WHERE id = $1`, ErrShowNotFound, new(int64), target.ID); err == nil {
-			err = r.exists(ctx, `SELECT id FROM seasons WHERE show_id = $1 AND season_number = $2`,
-				ErrSeasonNotFound, &rec.SeasonID, target.ID, target.SeasonNumber)
+	var out *ResolvedDownload
+	err := r.readTx(ctx, func(q queryer) error {
+		rec := DownloadRecord{Scope: target.Scope}
+		var err error
+		switch target.Scope {
+		case DownloadScopeMovie:
+			err = exists(ctx, q, `SELECT id FROM movies WHERE id = $1`, ErrMovieNotFound, &rec.MovieID, target.ID)
+		case DownloadScopeShow:
+			err = exists(ctx, q, `SELECT id FROM shows WHERE id = $1`, ErrShowNotFound, &rec.ShowID, target.ID)
+		case DownloadScopeSeason:
+			if err = exists(ctx, q, `SELECT id FROM shows WHERE id = $1`, ErrShowNotFound, new(int64), target.ID); err == nil {
+				err = exists(ctx, q, `SELECT id FROM seasons WHERE show_id = $1 AND season_number = $2`,
+					ErrSeasonNotFound, &rec.SeasonID, target.ID, target.SeasonNumber)
+			}
+		case DownloadScopeEpisode:
+			err = exists(ctx, q, `SELECT id FROM episodes WHERE id = $1`, ErrEpisodeNotFound, &rec.EpisodeID, target.ID)
+		default:
+			return fmt.Errorf("unknown download scope %q", target.Scope)
 		}
-	case DownloadScopeEpisode:
-		err = r.exists(ctx, `SELECT id FROM episodes WHERE id = $1`, ErrEpisodeNotFound, &rec.EpisodeID, target.ID)
-	default:
-		return nil, fmt.Errorf("unknown download scope %q", target.Scope)
-	}
-	if err != nil {
-		return nil, err
-	}
-	targets := `SELECT 0::bigint AS id, $1::text AS scope, $2::bigint AS movie_id, $3::bigint AS show_id,
-		$4::bigint AS season_id, $5::bigint AS episode_id`
-	args := []any{rec.Scope, nullID(rec.MovieID), nullID(rec.ShowID), nullID(rec.SeasonID), nullID(rec.EpisodeID)}
-	resolved, err := r.resolve(ctx, []DownloadRecord{rec}, targets, args)
-	if err != nil {
-		return nil, err
-	}
-	return &resolved[0], nil
+		if err != nil {
+			return err
+		}
+		targets := `SELECT 0::bigint AS id, $1::text AS scope, $2::bigint AS movie_id, $3::bigint AS show_id,
+			$4::bigint AS season_id, $5::bigint AS episode_id`
+		args := []any{rec.Scope, nullID(rec.MovieID), nullID(rec.ShowID), nullID(rec.SeasonID), nullID(rec.EpisodeID)}
+		resolved, err := resolve(ctx, q, []DownloadRecord{rec}, targets, args)
+		if err != nil {
+			return err
+		}
+		out = &resolved[0]
+		return nil
+	})
+	return out, err
 }
 
-func (r *DownloadsRepository) exists(ctx context.Context, query string, missing error, id *int64, args ...any) error {
-	err := r.db.QueryRowContext(ctx, query, args...).Scan(id)
+func exists(ctx context.Context, q queryer, query string, missing error, id *int64, args ...any) error {
+	err := q.QueryRowContext(ctx, query, args...).Scan(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return missing
 	}
@@ -398,15 +403,36 @@ func (r *DownloadsRepository) exists(ctx context.Context, query string, missing 
 	return nil
 }
 
+// readTx runs f's statements in one read-only REPEATABLE READ transaction:
+// one snapshot, so a title deleted between them (its downloads cascading)
+// can't leave a download without its title or items.
+func (r *DownloadsRepository) readTx(ctx context.Context, f func(q queryer) error) error {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("failed to begin a read: %w", err)
+	}
+	defer tx.Rollback()
+	if err := f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ResolveDownloads returns every active download, oldest first, with its
 // title and the items it covers: the resolve the download manager runs on
-// each tick. Three queries, whatever the number of downloads.
+// each tick. Three queries in one snapshot, whatever the number of
+// downloads.
 func (r *DownloadsRepository) ResolveDownloads(ctx context.Context) ([]ResolvedDownload, error) {
-	recs, err := r.records(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE released_at IS NULL ORDER BY created_at, id`)
-	if err != nil || len(recs) == 0 {
-		return nil, err
-	}
-	return r.resolve(ctx, recs, `SELECT id, scope, movie_id, show_id, season_id, episode_id FROM downloads WHERE released_at IS NULL`, nil)
+	var out []ResolvedDownload
+	err := r.readTx(ctx, func(q queryer) error {
+		recs, err := records(ctx, q, `SELECT `+downloadColumns+` FROM downloads WHERE released_at IS NULL ORDER BY created_at, id`)
+		if err != nil || len(recs) == 0 {
+			return err
+		}
+		out, err = resolve(ctx, q, recs, `SELECT id, scope, movie_id, show_id, season_id, episode_id FROM downloads WHERE released_at IS NULL`, nil)
+		return err
+	})
+	return out, err
 }
 
 // ResolveReleasedWatched returns the downloads released as watched since
@@ -414,15 +440,20 @@ func (r *DownloadsRepository) ResolveDownloads(ctx context.Context) ([]ResolvedD
 // again after a restart (the cache's demotion lives in memory).
 func (r *DownloadsRepository) ResolveReleasedWatched(ctx context.Context, since time.Time) ([]ResolvedDownload, error) {
 	const where = ` FROM downloads WHERE release_reason = 'watched' AND released_at >= $1`
-	recs, err := r.records(ctx, `SELECT `+downloadColumns+where+` ORDER BY created_at, id`, since)
-	if err != nil || len(recs) == 0 {
-		return nil, err
-	}
-	return r.resolve(ctx, recs, `SELECT id, scope, movie_id, show_id, season_id, episode_id`+where, []any{since})
+	var out []ResolvedDownload
+	err := r.readTx(ctx, func(q queryer) error {
+		recs, err := records(ctx, q, `SELECT `+downloadColumns+where+` ORDER BY created_at, id`, since)
+		if err != nil || len(recs) == 0 {
+			return err
+		}
+		out, err = resolve(ctx, q, recs, `SELECT id, scope, movie_id, show_id, season_id, episode_id`+where, []any{since})
+		return err
+	})
+	return out, err
 }
 
-func (r *DownloadsRepository) records(ctx context.Context, query string, args ...any) ([]DownloadRecord, error) {
-	rows, err := r.db.QueryContext(ctx, query, args...)
+func records(ctx context.Context, q queryer, query string, args ...any) ([]DownloadRecord, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list downloads: %w", err)
 	}
@@ -444,24 +475,24 @@ func (r *DownloadsRepository) records(ctx context.Context, query string, args ..
 // resolve joins recs to their titles and covered items. targets is the
 // SQL of (id, scope, movie_id, show_id, season_id, episode_id) rows, one
 // per record, with its args.
-func (r *DownloadsRepository) resolve(ctx context.Context, recs []DownloadRecord, targets string, args []any) ([]ResolvedDownload, error) {
+func resolve(ctx context.Context, q queryer, recs []DownloadRecord, targets string, args []any) ([]ResolvedDownload, error) {
 	out := make([]ResolvedDownload, len(recs))
 	byID := make(map[int64]*ResolvedDownload, len(recs))
 	for i, rec := range recs {
 		out[i].DownloadRecord = rec
 		byID[rec.ID] = &out[i]
 	}
-	if err := r.titles(ctx, byID, targets, args); err != nil {
+	if err := titles(ctx, q, byID, targets, args); err != nil {
 		return nil, err
 	}
-	if err := r.items(ctx, byID, targets, args); err != nil {
+	if err := items(ctx, q, byID, targets, args); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (r *DownloadsRepository) titles(ctx context.Context, byID map[int64]*ResolvedDownload, targets string, args []any) error {
-	rows, err := r.db.QueryContext(ctx, `
+func titles(ctx context.Context, q queryer, byID map[int64]*ResolvedDownload, targets string, args []any) error {
+	rows, err := q.QueryContext(ctx, `
 		WITH t AS (`+targets+`)
 		SELECT t.id, CASE WHEN m.id IS NOT NULL THEN 'movie' ELSE 'tv' END,
 		       COALESCE(m.tmdb_id, s.tmdb_id), COALESCE(m.id, s.id), COALESCE(m.title, s.title),
@@ -500,20 +531,20 @@ func (r *DownloadsRepository) titles(ctx context.Context, byID map[int64]*Resolv
 
 // episodeItemSQL selects the episodes joined as e (with sn and s) as
 // covered items of download t.id, each with its latest watch: Trakt's by
-// the matching rule (two lookups, as episodeWatchedSQL), or local.
-const episodeItemSQL = `
+// the matching rule (its two halves as two lookups, as episodeWatchedSQL
+// does), or local.
+var episodeItemSQL = `
 	SELECT t.id AS download_id, 'episode' AS item_type, e.id AS item_id, sn.season_number, e.episode_number,
 	       e.air_date, e.episode_type,
 	       GREATEST(
 	         (SELECT max(w.last_watched_at) FROM trakt_watched_episodes w
-	          WHERE w.show_tmdb_id = s.tmdb_id AND w.episode_tmdb_id = e.tmdb_episode_id),
+	          WHERE w.show_tmdb_id = s.tmdb_id AND ` + sameEpisodeByID(traktEpisode("w"), libraryEpisode) + `),
 	         (SELECT max(w.last_watched_at) FROM trakt_watched_episodes w
-	          WHERE w.show_tmdb_id = s.tmdb_id AND (w.episode_tmdb_id IS NULL OR e.tmdb_episode_id IS NULL)
-	            AND w.season = sn.season_number AND w.episode = e.episode_number),
+	          WHERE w.show_tmdb_id = s.tmdb_id AND ` + sameEpisodeByNumber(traktEpisode("w"), libraryEpisode) + `),
 	         (SELECT lw.watched_at FROM local_watches lw WHERE lw.episode_id = e.id)) AS watched_at`
 
-func (r *DownloadsRepository) items(ctx context.Context, byID map[int64]*ResolvedDownload, targets string, args []any) error {
-	rows, err := r.db.QueryContext(ctx, `
+func items(ctx context.Context, q queryer, byID map[int64]*ResolvedDownload, targets string, args []any) error {
+	rows, err := q.QueryContext(ctx, `
 		WITH t AS (`+targets+`),
 		items AS (
 			SELECT t.id AS download_id, 'movie' AS item_type, m.id AS item_id, 0 AS season_number, 0 AS episode_number,
@@ -543,7 +574,7 @@ func (r *DownloadsRepository) items(ctx context.Context, byID map[int64]*Resolve
 			ORDER BY ta.created_at DESC, ta.id DESC
 			LIMIT 1
 		) a ON TRUE
-		ORDER BY i.download_id, i.season_number, i.episode_number, i.item_id
+		ORDER BY i.download_id, i.season_number = 0, i.season_number, i.episode_number, i.item_id
 	`, args...)
 	if err != nil {
 		return fmt.Errorf("failed to resolve the downloads' items: %w", err)
@@ -602,6 +633,9 @@ func (r *DownloadsRepository) UpsertSmartDownload(ctx context.Context, episodeID
 	return id, true, nil
 }
 
+// pickEpisode is SmartPickBlocked's episode (ep) for the matching rule.
+var pickEpisode = episodeCols{"ep.tmdb_episode_id", "ep.season_number", "ep.episode_number"}
+
 // SmartPickBlocked says why an episode can't be a smart pick (PLAN §6
 // "Re-picks"), "" when it can: watched (a Trakt play or a local watch,
 // ever), dismissed (a smart pick of it was released deleted), or expired
@@ -619,10 +653,7 @@ func (r *DownloadsRepository) SmartPickBlocked(ctx context.Context, episodeID in
 		)
 		SELECT CASE
 			WHEN EXISTS (SELECT 1 FROM local_watches lw WHERE lw.episode_id = ep.id)
-			  OR EXISTS (SELECT 1 FROM trakt_watched_episodes w WHERE w.show_tmdb_id = ep.show_tmdb_id
-			             AND (w.episode_tmdb_id = ep.tmdb_episode_id
-			                  OR ((w.episode_tmdb_id IS NULL OR ep.tmdb_episode_id IS NULL)
-			                      AND w.season = ep.season_number AND w.episode = ep.episode_number)))
+			  OR `+episodeWatchedSQL("ep.show_tmdb_id", pickEpisode, "TRUE")+`
 			  THEN 'watched'
 			WHEN EXISTS (SELECT 1 FROM downloads d WHERE d.episode_id = $1 AND d.reason = 'smart' AND d.release_reason = 'deleted')
 			  THEN 'dismissed'

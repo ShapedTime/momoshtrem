@@ -413,22 +413,30 @@ func TestLocalWatches(t *testing.T) {
 	sd, _ := h.keep(fmt.Sprintf(`{"scope":"show","id":%d}`, show))
 	h.clock.advance(time.Hour) // the watches come after the Keeps
 
-	// Reading the index at the end isn't a watch.
-	h.sessions.set(session("m", tm, 0, 4*testPiece, 4*testPiece))
-	h.svc.poll(h.ctx)
-	h.clock.advance(5 * time.Second)
-	h.sessions.set(session("m", tm, 0, testPiece, 4*testPiece))
-	h.svc.poll(h.ctx)
-	h.clock.advance(30 * time.Second)
-	h.svc.poll(h.ctx)
+	// Reading the index at the end, then nothing more, isn't a watch: the
+	// session sits at 100% until it expires.
+	read := func(id string, tt testTorrent, file int, offset, size int64) sessions.Session {
+		s := session(id, tt, file, offset, size)
+		s.LastReadAt = h.clock.Now()
+		return s
+	}
+	index := read("m", tm, 0, 4*testPiece, 4*testPiece)
+	for range 6 {
+		h.sessions.set(index)
+		h.svc.poll(h.ctx)
+		h.clock.advance(PollInterval)
+	}
+	h.refresh()
 	if _, ok := h.svc.Snapshot().Download(md.ID); !ok {
 		t.Fatal("an index read released the movie")
 	}
 
-	// 95% for 20 s: watched.
-	h.sessions.set(session("m", tm, 0, 4*testPiece*95/100, 4*testPiece), session("e", ts, 0, 2*testPiece-10, 2*testPiece))
+	// Reading on from 90% through the end for 20 s: watched.
+	h.clock.advance(time.Minute)
+	h.sessions.set(read("m2", tm, 0, 4*testPiece*91/100, 4*testPiece), read("e", ts, 0, 2*testPiece*91/100, 2*testPiece))
 	h.svc.poll(h.ctx)
 	h.clock.advance(watchConfirm)
+	h.sessions.set(read("m2", tm, 0, 4*testPiece, 4*testPiece), read("e", ts, 0, 2*testPiece, 2*testPiece))
 	if poll := h.svc.poll(h.ctx); !poll {
 		t.Error("a watch didn't call for a pass")
 	}
@@ -593,6 +601,64 @@ func TestKeepAndUpdate_Errors(t *testing.T) {
 	}
 	if _, err := h.svc.Update(h.ctx, d.ID, []byte(`{}`)); !errors.Is(err, ErrNotFound) {
 		t.Errorf("PATCH a released download: %v", err)
+	}
+}
+
+// A change that ends a download: a Keep on an until-watched movie just
+// watched is a new Keep (201); a PATCH that makes a watched movie until
+// watched answers its final view (200), and the next GET doesn't list it.
+func TestKeepAndUpdate_Releases(t *testing.T) {
+	h := newHarness(t)
+	seen := func(movie int64) {
+		h.t.Helper()
+		h.clock.advance(time.Hour)
+		if err := h.repo.UpsertLocalWatch(h.ctx, library.ItemRef{Type: library.ItemTypeMovie, ID: movie}, h.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		h.clock.advance(time.Minute)
+	}
+	reason := func(id int64) string {
+		var r *string
+		if err := h.db.QueryRow(`SELECT release_reason FROM downloads WHERE id = $1`, id).Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		if r == nil {
+			return ""
+		}
+		return *r
+	}
+
+	a := h.movie("Seen")
+	ta := h.torrent("Seen", true, 2*testPiece)
+	h.assign(library.ItemTypeMovie, a, ta, 0)
+	first, _ := h.keep(fmt.Sprintf(`{"scope":"movie","id":%d}`, a)) // until watched
+	seen(a)
+	again, created := h.keep(fmt.Sprintf(`{"scope":"movie","id":%d}`, a))
+	if !created || again.ID == first.ID || reason(first.ID) != "watched" {
+		t.Errorf("Keep after the watch = %d (created %v); the first is released %q", again.ID, created, reason(first.ID))
+	}
+
+	b := h.movie("Rewatch")
+	tb := h.torrent("Rewatch", true, 2*testPiece)
+	h.assign(library.ItemTypeMovie, b, tb, 0)
+	h.fill(tb, 0, 1)
+	kept, _ := h.keep(fmt.Sprintf(`{"scope":"movie","id":%d,"until_watched":false}`, b))
+	seen(b)
+	if d := h.download(kept.ID); d.UntilWatched {
+		t.Fatal("kept until removed reads until watched")
+	}
+	got, err := h.svc.Update(h.ctx, kept.ID, []byte(`{"until_watched":true}`))
+	if err != nil {
+		t.Fatalf("PATCH that ends the download: %v", err)
+	}
+	if got.ID != kept.ID || !got.UntilWatched || got.State != StateDone || got.WantedBytes != 2*testPiece || got.Files.Done != 1 {
+		t.Errorf("final view = %+v", got)
+	}
+	if reason(kept.ID) != "watched" {
+		t.Errorf("released %q, want watched", reason(kept.ID))
+	}
+	if _, ok := h.svc.Snapshot().Download(kept.ID); ok {
+		t.Error("the ended download is still listed")
 	}
 }
 

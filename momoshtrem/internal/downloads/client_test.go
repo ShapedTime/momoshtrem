@@ -197,36 +197,36 @@ func TestManager_RealClient(t *testing.T) {
 		h.exec(`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, is_active)
 			VALUES ('episode', $1, $2, $3, $4, $5, TRUE)`, eps[[2]int{1, e}], r.hash, r.magnet(), name, len(r.data[name]))
 	}
+	// Loaded (it streamed), and all of it in the cache: done, nothing to
+	// fetch.
+	c := ServiceClient{Torrents: r.svc}
+	if err := c.Load(r.magnet()); err != nil {
+		t.Fatal(err)
+	}
 	d, _ := h.keep(fmt.Sprintf(`{"scope":"season","id":%d,"season_number":1}`, show))
 	if d.State != StateDone || d.DoneBytes != d.WantedBytes {
 		t.Fatalf("a season all in the cache = %s, %d of %d", d.State, d.DoneBytes, d.WantedBytes)
 	}
 
-	// The cache loses piece 4 (E02's start) behind the client's back.
+	// The cache loses piece 4 (E02's start) behind the loaded client's
+	// back: the client still believes it complete, until the pass re-reads
+	// it.
 	ref, _ := piececache.PieceRefFor(r.info.Piece(4))
 	if err := r.cache.Remove("completed/" + ref.Hex); err != nil {
 		t.Fatal(err)
 	}
-	h.refresh() // not loaded: it needs a slot, and loads
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
-		if _, err := r.svc.GetTorrent(r.hash); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the manager never loaded the torrent")
-		}
+	if complete, _ := c.Completion(r.hash, "Season/E01.mkv"); !complete[4] {
+		t.Fatal("the client noticed the loss on its own; the test proves nothing")
 	}
-	h.waitLoadsSettled()
 	d = h.download(d.ID)
+	if complete, _ := c.Completion(r.hash, "Season/E01.mkv"); complete[4] || !complete[3] {
+		t.Errorf("after the pass, completion = %v: no F11 re-sync of piece 4", complete)
+	}
 	if d.State != StateDownloading {
 		t.Errorf("after the loss: %s", d.State)
 	}
 	if r.priority(t, "Season/E01.mkv") != types.PiecePriorityNormal || r.priority(t, "Season/E02.mkv") != types.PiecePriorityNormal {
 		t.Error("the season's files aren't at Normal")
-	}
-	c := ServiceClient{Torrents: r.svc}
-	if complete, _ := c.Completion(r.hash, "Season/E01.mkv"); complete[4] {
-		t.Error("the lost piece still reads complete: no F11 re-sync")
 	}
 	if k, ok := h.svc.Snapshot().Episode(eps[[2]int{1, 1}]); !ok || k.State != StateDone || k.Pct != 100 {
 		t.Errorf("E01's keep = %+v %v", k, ok)

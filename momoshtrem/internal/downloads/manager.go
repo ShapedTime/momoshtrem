@@ -51,8 +51,9 @@ const (
 	// WatchedAt is how much of a file a local session must reach for its
 	// items to count as watched here, in percent.
 	WatchedAt = 90
-	// watchConfirm is how long a session must stay past WatchedAt before
-	// it counts: a player reading the index at a file's end isn't a watch.
+	// watchConfirm is how long a session must go on reading past WatchedAt
+	// before it counts: a player reading the index at a file's end isn't a
+	// watch (markWatch).
 	watchConfirm = 20 * time.Second
 	// loadRetry is the wait after a failed load before the next.
 	loadRetry = time.Minute
@@ -154,14 +155,19 @@ type Service struct {
 
 	// passMu serialises passes, Keeps and storage PUTs (LockCommits); the
 	// fields below it are a pass's.
-	passMu   sync.Mutex
-	maps     map[string]*PieceMap
-	misses   map[string]bool // piece maps asked for in vain this pass
-	refs     map[string]*pieceRefs
-	pinned   map[string]string   // per torrent, the pinned pieces' key
-	normal   map[string][]string // per torrent, the files set to Normal
-	stalls   map[string]stall
-	demoted  map[FileKey]bool
+	passMu  sync.Mutex
+	maps    map[string]*PieceMap
+	misses  map[string]bool // piece maps asked for in vain this pass
+	refs    map[string]*pieceRefs
+	pinned  map[string]string   // per torrent, the pinned pieces' key
+	normal  map[string][]string // per torrent, the files set to Normal
+	stalls  map[string]stall
+	demoted map[FileKey]bool
+	// prevHave, prevLive and resynced decide when the F11 re-sync asks
+	// the client (resync).
+	prevHave map[string]haveRecord
+	prevLive map[string]bool
+	resynced map[string]string
 	streams  streamState
 	marks    map[string]*watchMark
 	holdKey  string
@@ -183,6 +189,7 @@ func New(d Deps) *Service {
 		wake: make(chan struct{}, 1),
 		maps: map[string]*PieceMap{}, misses: map[string]bool{}, refs: map[string]*pieceRefs{}, pinned: map[string]string{},
 		normal: map[string][]string{}, stalls: map[string]stall{}, demoted: map[FileKey]bool{},
+		prevHave: map[string]haveRecord{}, prevLive: map[string]bool{}, resynced: map[string]string{},
 		marks: map[string]*watchMark{}, loading: map[string]bool{}, loadFailed: map[string]time.Time{},
 	}
 	if s.clock == nil {
@@ -294,7 +301,8 @@ func (s *Service) runPass(ctx context.Context) {
 func (s *Service) Refresh(ctx context.Context) error {
 	s.passMu.Lock()
 	defer s.passMu.Unlock()
-	return s.passLocked(ctx, true)
+	_, err := s.passLocked(ctx, true)
+	return err
 }
 
 // poll reads the sessions; it reports whether a pass should follow (a
@@ -321,7 +329,13 @@ type passPlan struct {
 	refs     map[string]*pieceRefs
 	have     map[string][]bool
 	torrents map[string]*torrentPlan
+	holds    holds
 	snapshot *Snapshot
+	// final are the views of the downloads the pass releases, as they read
+	// just before: a PATCH whose change releases its download answers one.
+	final map[int64]Download
+	// released says its releases are stored.
+	released bool
 }
 
 // pieceRefs are a torrent's admitted pieces, kept while its admitted files
@@ -334,14 +348,15 @@ type pieceRefs struct {
 	spans map[string]FileSpan
 }
 
-func (s *Service) passLocked(ctx context.Context, loads bool) error {
+// passLocked runs a pass (passMu held) and answers its plan.
+func (s *Service) passLocked(ctx context.Context, loads bool) (*passPlan, error) {
 	p, err := s.plan(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.apply(ctx, p, loads)
 	s.snap.Store(p.snapshot)
-	return nil
+	return p, nil
 }
 
 // plan reads everything a pass needs and plans it, changing nothing but
@@ -372,7 +387,7 @@ func (s *Service) plan(ctx context.Context) (*passPlan, error) {
 	})
 	p.wants = torrentWants(p.stage)
 	for hash, w := range p.wants {
-		p.facts[hash] = s.readTorrent(p, w)
+		p.facts[hash] = s.readTorrent(p, w, true)
 	}
 
 	inside, next := windowNow(settings.Background.Windows, now, s.loc)
@@ -384,10 +399,15 @@ func (s *Service) plan(ctx context.Context) (*passPlan, error) {
 		nextWindow: next,
 		stream:     settings.Background.PauseWhileStreaming && s.streams.hold(now),
 	}
+	p.holds = h
 	p.torrents = planTorrents(p.wants, stateInput{now: now, holds: h, facts: p.facts})
 	views := make([]downloadView, 0, len(p.stage.covs))
 	for _, cov := range p.stage.covs {
-		views = append(views, viewDownload(cov, p.stage.adm, p.torrents, p.facts))
+		views = append(views, viewDownload(cov, p.stage.adm, p.torrents, p.facts, h))
+	}
+	p.final = map[int64]Download{}
+	for _, cov := range p.stage.ending {
+		p.final[cov.d.ID] = s.finalView(p, cov)
 	}
 	usage := Usage{CommittedKeptBytes: p.stage.adm.committedKept,
 		KeptMaxBytes: limits.KeptMaxBytes, SmartMaxBytes: limits.SmartMaxBytes}
@@ -403,6 +423,27 @@ func (s *Service) plan(ctx context.Context) (*passPlan, error) {
 	return p, nil
 }
 
+// finalView is a download the pass releases as it reads just before: its
+// files as if it stayed (watched ones too), admitted after the others.
+func (s *Service) finalView(p *passPlan, ending *coverage) Download {
+	d := *ending.d
+	d.UntilWatched = false // as it read before the watch that ends it
+	cov := cover(&d, fileInput{pieces: s.pieceMap, streaming: s.streams.episodes})
+	covs := append(slices.Clone(p.stage.covs), cov)
+	adm := admit(covs, p.limits.KeptMaxBytes, p.limits.SmartMaxBytes)
+	wants := torrentWants(fileStage{covs: covs, adm: adm})
+	facts := maps.Clone(p.facts)
+	for hash, w := range wants {
+		if had := p.wants[hash]; had == nil || !maps.Equal(had.files, w.files) {
+			facts[hash] = s.readTorrent(p, w, false)
+		}
+	}
+	torrents := planTorrents(wants, stateInput{now: p.now, holds: p.holds, facts: facts})
+	view := viewDownload(cov, adm, torrents, facts, p.holds).download
+	view.UntilWatched = ending.d.UntilWatched
+	return view
+}
+
 func (p *passPlan) doneOf(key FileKey) int64 {
 	if f := p.facts[key.Hash]; f != nil {
 		return min(f.done[key.Path], p.stage.adm.sizes[key])
@@ -412,17 +453,19 @@ func (p *passPlan) doneOf(key FileKey) int64 {
 
 // readTorrent reads what the cache and the client say of a torrent with
 // admitted files: its pieces on disk (one HavePieces), its pause, speed
-// and progress.
-func (s *Service) readTorrent(p *passPlan, w *torrentWant) *torrentFacts {
+// and progress. With pin, the pieces are the pass's to pin (p.refs).
+func (s *Service) readTorrent(p *passPlan, w *torrentWant, pin bool) *torrentFacts {
 	f := &torrentFacts{done: map[string]int64{}, complete: map[string]bool{}, speed: p.live[w.hash],
 		streamed: s.streams.streamed(w.hash, p.now), stall: s.stalls[w.hash]}
 	f.holder = !f.stall.slotSince.IsZero()
 	_, f.paused = s.d.Client.PausedAt(w.hash)
-	if refs := s.pieceRefsFor(w); refs != nil {
+	if refs := s.pieceRefsFor(w, pin); refs != nil {
 		have := s.d.Cache.HavePieces(refs.refs)
-		p.refs[w.hash], p.have[w.hash] = refs, have
+		if pin {
+			p.refs[w.hash], p.have[w.hash] = refs, have
+		}
 		pm := s.maps[w.hash]
-		at := make(map[int]bool, len(refs.index))
+		at := make([]bool, pm.NumPieces())
 		for k, i := range refs.index {
 			at[i] = have[k]
 		}
@@ -446,8 +489,8 @@ func (s *Service) readTorrent(p *passPlan, w *torrentWant) *torrentFacts {
 }
 
 // pieceRefsFor is the torrent's admitted pieces; nil while its piece map
-// is unknown.
-func (s *Service) pieceRefsFor(w *torrentWant) *pieceRefs {
+// is unknown. With keep, they're kept for the next pass.
+func (s *Service) pieceRefsFor(w *torrentWant, keep bool) *pieceRefs {
 	paths := slices.Sorted(maps.Keys(w.files))
 	pm := s.pieceMap(w.hash, paths[0])
 	if !pm.V1() {
@@ -458,7 +501,7 @@ func (s *Service) pieceRefsFor(w *torrentWant) *pieceRefs {
 		return r
 	}
 	r := &pieceRefs{key: key, spans: map[string]FileSpan{}}
-	seen := map[int]bool{}
+	seen := make([]bool, pm.NumPieces())
 	for _, path := range paths {
 		span, ok := pm.File(path)
 		if !ok {
@@ -469,13 +512,18 @@ func (s *Service) pieceRefsFor(w *torrentWant) *pieceRefs {
 			seen[i] = true
 		}
 	}
-	r.index = slices.Sorted(maps.Keys(seen))
-	for _, i := range r.index {
+	for i, ok := range seen {
+		if !ok {
+			continue
+		}
 		ref := pm.Ref(i)
+		r.index = append(r.index, i)
 		r.refs = append(r.refs, ref)
 		r.hexes = append(r.hexes, ref.Hex)
 	}
-	s.refs[w.hash] = r
+	if keep {
+		s.refs[w.hash] = r
+	}
 	return r
 }
 
@@ -523,16 +571,8 @@ func (s *Service) pieceMap(hash, path string) *PieceMap {
 // apply carries a plan out: releases, pins, demotions, priorities, the F11
 // re-sync, MarkActive and (with loads) loading the slots' torrents.
 func (s *Service) apply(ctx context.Context, p *passPlan, loads bool) {
-	if len(p.stage.releases) > 0 {
-		ids, err := s.d.Store.ReleaseDownloads(ctx, p.stage.releases, p.now)
-		if err != nil {
-			s.log.Warn("Couldn't release downloads; the next pass tries again", "error", err)
-		}
-		for _, rel := range p.stage.releases {
-			if slices.Contains(ids, rel.ID) {
-				s.log.Info("Download released", "download_id", rel.ID, "reason", rel.Reason)
-			}
-		}
+	if err := s.writeReleases(ctx, p); err != nil {
+		s.log.Warn("Couldn't release downloads; the next pass tries again", "error", err)
 	}
 
 	// Pins, one owner per torrent.
@@ -615,24 +655,71 @@ func (s *Service) apply(ctx context.Context, p *passPlan, loads bool) {
 			delete(s.refs, hash)
 		}
 	}
+	s.prevHave = make(map[string]haveRecord, len(p.refs))
+	for hash, r := range p.refs {
+		s.prevHave[hash] = haveRecord{key: r.key, have: p.have[hash]}
+	}
+	s.prevLive = make(map[string]bool, len(p.live))
+	for hash := range p.live {
+		s.prevLive[hash] = true
+	}
+	for hash := range s.resynced {
+		if !s.prevLive[hash] {
+			delete(s.resynced, hash)
+		}
+	}
 	s.holdKey = s.streams.key(p.now)
+}
+
+// writeReleases stores the plan's releases, once.
+func (s *Service) writeReleases(ctx context.Context, p *passPlan) error {
+	if len(p.stage.releases) == 0 || p.released {
+		return nil
+	}
+	ids, err := s.d.Store.ReleaseDownloads(ctx, p.stage.releases, p.now)
+	if err != nil {
+		return err
+	}
+	p.released = true
+	for _, rel := range p.stage.releases {
+		if slices.Contains(ids, rel.ID) {
+			s.log.Info("Download released", "download_id", rel.ID, "reason", rel.Reason)
+		}
+	}
+	return nil
 }
 
 // resync is streamlab F11's fix: admitted pieces the cache lacks that the
 // client believes complete are read again from the storage, so they're
-// fetched again.
+// fetched again. It asks the client only when something can have gone:
+// every missing piece on the first pass after the torrent loaded or its
+// pins changed, else the pieces the cache had at the last pass and lost
+// since.
 func (s *Service) resync(p *passPlan, hash string, paths []string) {
 	refs, have := p.refs[hash], p.have[hash]
-	if refs == nil || !slices.Contains(have, false) || len(paths) == 0 {
+	if refs == nil || len(paths) == 0 {
+		return
+	}
+	full := !s.prevLive[hash] || s.resynced[hash] != refs.key
+	prev := s.prevHave[hash]
+	var check []int
+	for k, i := range refs.index {
+		if !have[k] && (full || (prev.key == refs.key && prev.have[k])) {
+			check = append(check, i)
+		}
+	}
+	s.resynced[hash] = refs.key
+	if len(check) == 0 {
 		return
 	}
 	complete, err := s.d.Client.Completion(hash, paths[0])
 	if err != nil {
+		delete(s.resynced, hash) // try again next pass
 		return
 	}
 	var lost []int
-	for k, i := range refs.index {
-		if !have[k] && i < len(complete) && complete[i] {
+	for _, i := range check {
+		if i < len(complete) && complete[i] {
 			lost = append(lost, i)
 		}
 	}
@@ -641,9 +728,17 @@ func (s *Service) resync(p *passPlan, hash string, paths []string) {
 	}
 	if err := s.d.Client.UpdateCompletion(hash, paths[0], lost); err != nil {
 		s.log.Warn("Couldn't re-read lost pieces' completion", "info_hash", hash, "error", err)
+		delete(s.resynced, hash)
 		return
 	}
 	s.log.Info("Re-read the completion of pieces the cache lost", "info_hash", hash, "pieces", len(lost))
+}
+
+// haveRecord is what the cache had of a torrent's admitted pieces at a
+// pass (key: its pins').
+type haveRecord struct {
+	key  string
+	have []bool
 }
 
 // demote makes the pieces of watched files the first the cache evicts,
@@ -653,6 +748,7 @@ func (s *Service) resync(p *passPlan, hash string, paths []string) {
 // watched).
 func (s *Service) demote(covs []*coverage, whole bool, wanted map[string]*pieceRefs) {
 	var hexes []string
+	var done []FileKey
 	for _, cov := range covs {
 		keys := cov.released
 		if whole {
@@ -671,10 +767,9 @@ func (s *Service) demote(covs []*coverage, whole bool, wanted map[string]*pieceR
 					continue
 				}
 			}
-			s.demoted[key] = true
 			pm := s.pieceMap(key.Hash, key.Path)
 			if !pm.V1() {
-				continue
+				continue // no names for its pieces yet: try again next pass
 			}
 			span, ok := pm.File(key.Path)
 			if !ok {
@@ -683,10 +778,14 @@ func (s *Service) demote(covs []*coverage, whole bool, wanted map[string]*pieceR
 			for i := span.Begin; i < span.End; i++ {
 				hexes = append(hexes, pm.Ref(i).Hex)
 			}
+			done = append(done, key)
 		}
 	}
 	if len(hexes) > 0 {
 		s.d.Cache.Demote(hexes)
+	}
+	for _, key := range done {
+		s.demoted[key] = true
 	}
 }
 
@@ -774,10 +873,11 @@ func (st *streamState) key(now time.Time) string {
 	return fmt.Sprint(st.hold(now), held)
 }
 
-// watchMark is a session past WatchedAt: since when, and whether it was
-// recorded.
+// watchMark is a session past WatchedAt: since when, where it read then,
+// and whether it was recorded.
 type watchMark struct {
 	since    time.Time
+	offset   int64
 	recorded bool
 }
 
@@ -826,7 +926,12 @@ func (s *Service) observeSessions(ctx context.Context, now time.Time) bool {
 }
 
 // markWatch follows a session past WatchedAt and records its items as
-// watched here once it has stayed there watchConfirm.
+// watched here once it has played on through the end: watchConfirm after
+// it was first seen there, it has read past where it was then, after then.
+// A session's offset is where its last read ended, and it stays listed a
+// while after its last read, so a player that reads a file's index at the
+// end and then stops (a probe, or a playback abandoned at the start) sits
+// past WatchedAt without reading on: that isn't a watch.
 func (s *Service) markWatch(ctx context.Context, sess sessions.Session, now time.Time) bool {
 	if sess.SizeBytes <= 0 || sess.OffsetBytes*100 < sess.SizeBytes*WatchedAt {
 		delete(s.marks, sess.ID)
@@ -834,10 +939,10 @@ func (s *Service) markWatch(ctx context.Context, sess sessions.Session, now time
 	}
 	m := s.marks[sess.ID]
 	if m == nil {
-		s.marks[sess.ID] = &watchMark{since: now}
+		s.marks[sess.ID] = &watchMark{since: now, offset: sess.OffsetBytes}
 		return false
 	}
-	if m.recorded || now.Sub(m.since) < watchConfirm {
+	if m.recorded || now.Sub(m.since) < watchConfirm || sess.OffsetBytes <= m.offset || !sess.LastReadAt.After(m.since) {
 		return false
 	}
 	items, err := s.sessionItems(ctx, sess)

@@ -72,6 +72,8 @@ func TestDownloadRoutes(t *testing.T) {
 		{"estimate", "GET", "/api/downloads/estimate?scope=season&id=3&season_number=2", "", fakeDownloads{}, 200, "", ""},
 		{"estimate: malformed target", "GET", "/api/downloads/estimate?scope=season&id=3", "", fakeDownloads{}, 400, CodeBadRequest, ""},
 		{"estimate: bad scope", "GET", "/api/downloads/estimate?scope=film&id=3", "", fakeDownloads{}, 400, CodeBadRequest, ""},
+		{"estimate: a season past int32", "GET", "/api/downloads/estimate?scope=season&id=3&season_number=2147483648", "", fakeDownloads{}, 400, CodeBadRequest, ""},
+		{"estimate: a malformed id", "GET", "/api/downloads/estimate?scope=movie&id=x", "", fakeDownloads{}, 400, CodeBadRequest, ""},
 		{"estimate: not in the library", "GET", "/api/downloads/estimate?scope=movie&id=3", "",
 			fakeDownloads{err: fmt.Errorf("%w: %w", downloads.ErrTargetNotFound, library.ErrMovieNotFound)}, 404, CodeNotFound, ""},
 		{"POST: a new Keep", "POST", "/api/downloads", `{"scope":"movie","id":1}`, fakeDownloads{download: ok, created: true}, 201, "", ""},

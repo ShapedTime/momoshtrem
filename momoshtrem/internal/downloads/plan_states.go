@@ -142,8 +142,8 @@ type downloadView struct {
 }
 
 // viewDownload builds a download's wire shape from its coverage, the
-// admission and its torrents.
-func viewDownload(cov *coverage, adm admission, torrents map[string]*torrentPlan, facts map[string]*torrentFacts) downloadView {
+// admission, its torrents and the holds on every download.
+func viewDownload(cov *coverage, adm admission, torrents map[string]*torrentPlan, facts map[string]*torrentFacts, h holds) downloadView {
 	d := cov.d
 	v := downloadView{cov: cov}
 	dl := Download{
@@ -191,6 +191,16 @@ func viewDownload(cov *coverage, adm admission, torrents map[string]*torrentPlan
 		}
 	}
 	v.admitted = combineStates(states)
+	if len(states) == 0 {
+		// Nothing admitted (all over the cap): the holds on every download
+		// still come first (paused, then disk_full, then storage_full).
+		switch {
+		case h.disabled:
+			v.admitted = StatePaused
+		case h.diskFull:
+			v.admitted = StateDiskFull
+		}
+	}
 	dl.Files.Total, dl.Files.Unavailable, dl.Files.OverCap = cov.total, cov.unavailable, len(adm.overCap[d.ID])
 	dl.State = downloadState(cov.total, len(cov.wants), dl.Files.OverCap, v.admitted)
 	switch dl.State {
