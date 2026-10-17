@@ -66,6 +66,10 @@ Most of these come from reading the code during planning; F2 and F3 were already
 
 (F8 and F9 from planning were folded into F12 and the HDRezka scenarios.)
 
+The lab found two more (S6, #177):
+- **#231.** The responsive reader serves a chunk before its piece's hash check, so a bad peer's bytes reach the player.
+- **#232.** A dropped HDRezka request's handler holds its streamer slot until its stalled read times out. It's F12's HDRezka counterpart.
+
 ## 4. Production-code hooks
 
 All are additive or pure refactors.
@@ -90,10 +94,11 @@ momoshtrem/cmd/streamlab/              CLI: run, list, explain, gate, check, ab,
 momoshtrem/internal/streamlab/
   media/     f(seed, offset) content (splitmix64), MKV / MP4 (moov-at-end) overlays, multi-file layouts,
              metainfo builder + cache (os.UserCacheDir()/momoshtrem-streamlab)
-  swarm/     generated-storage seeders (UploadRateLimiter), TCP proxy (latency, jitter, bandwidth, drop,
-             vanish), discovery delay, corrupt piece, metadata-from-peers
-  cdn/       fake HDRezka CDN (httptest + ServeContent over media; 403 expiry, 503 bursts, slow/drop),
-             fake hdrezka.LinkResolver, wired through the real Streamer and NewHDRezkaSource
+  swarm/     generated-storage seeders (paced reads), TCP proxy (latency, jitter, bandwidth, drop,
+             vanish), discovery delay, corrupt piece (dialled by alias), partial seeders, metadata-from-peers
+  cdn/       fake HDRezka CDN (httptest + ServeContent over media; 403/404/410 expiry, 503 bursts,
+             slow/drop/stall), fake hdrezka.LinkResolver and slot probe, wired through the real Streamer
+             and NewHDRezkaSource
   stack/     the system under test, wired as cmd/momoshtrem/main.go does, on 127.0.0.1:0 with no server
              timeouts; lab middleware: request ID, pprof labels, server-side TTFB/status/bytes/abort
   client/    WebDAV primitives (Propfind, Head, Probe, Play, Seek, Pause, Reconnect, Parallel), one
@@ -113,6 +118,8 @@ momoshtrem/internal/streamlab/
 **Seeder storage.**
 - A custom `storage.ClientImpl` whose `PieceImpl.ReadAt` generates bytes from `media`. `WriteAt` is a no-op and `Completion()` is always complete, so no gigabytes are written.
 - The seeder, the integrity check and the fake CDN all read from `media.Layout.ReadAt`.
+- **Upload rate.** A seeder's upload rate paces its storage reads, not anacrolix's `UploadRateLimiter`. The limiter's retry timer is one of #195's lost writer wakeups (signature D). Real peers don't share that bug, so the lab shouldn't add it.
+- **Shared IP.** anacrolix bans peers by IP, and every lab peer is 127.0.0.1. A seeder that serves bad data is therefore dialled by its alias, `0.0.0.0:port`, which connects to the same host. anacrolix then sees an IP of its own, so a ban drops that seeder alone, as production drops one bad peer.
 
 **Leecher storage.** The leecher uses the real `torrent.InitStorage`, the filecache LRU that production uses (after H5, `piececache` with no pins).
 
@@ -141,10 +148,11 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 | `dual-reader-open`: A's window, then a probe opens | F13 |
 | `pause-resume` across the idle threshold | ffda214 |
 | `next-episode` | 3907536 |
-| `slow-swarm` (stalls expected), `seeder-loss`, `corrupt-piece` | |
+| `slow-swarm` (stalls expected), `seeder-loss` | |
+| `corrupt-piece`: a partial good seeder, and one that serves piece *k* wrong | #231 |
 | `small-cache` | F11 |
 | `etag-stability` | F2 |
-| `hdrezka-{play,seek,expiry,503,stall}` | #66 |
+| `hdrezka-{play,seek,expiry,503,stall}` | #66; `stall` also #232 |
 
 **Stress tier** (`check`, `-race`, seeded):
 - close during a blocked read
@@ -163,7 +171,7 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 |---|---|
 | Integrity | Zero mismatched bytes. |
 | HTTP | A Range GET answers 206 with the right `Content-Range` and `Content-Length`, and no handler panics. |
-| Quiescence | After the last request, within the settle time: `ReaderTracker.Count()==0`; the `open_files`, `blocked_reads` and `requests_inflight` gauges are 0; no `slreq`-labelled goroutine running momoshtrem code, or started by momoshtrem on a library function (anacrolix-rooted ones a request started, such as peer connections and hashers, are reported as inherited); `sessions.Count()==0` after skewing the session clock 31 s; zero open CDN bodies. This is the leak signal that matters, because production never tears down. |
+| Quiescence | After the last request, within the settle time: `ReaderTracker.Count()==0`; the `open_files`, `blocked_reads` and `requests_inflight` gauges are 0; no `slreq`-labelled goroutine running momoshtrem code, or started by momoshtrem on a library function (anacrolix-rooted ones a request started, such as peer connections and hashers, are reported as inherited); `sessions.Count()==0` after skewing the session clock 31 s; zero open CDN bodies, and all 8 streamer slots free (a probe through the real `Streamer` that reaches no CDN). This is the leak signal that matters, because production never tears down. |
 | Priority invariants | Stated over the **effective** priority of incomplete pieces while downloads are allowed: `Piece.State()` can't read the explicit priority. During playback, `[pos, pos+urgent)` is Now. `residual_download_bytes` measures what downloads after the last close. |
 
 **Watchdog.** If requests are active, no fault is running, and the client has made no progress for N s, it dumps:
@@ -195,8 +203,8 @@ The config is `config.DefaultConfig()` with an optional `--config prod.yaml` ove
 
 | Kind | Metrics |
 |---|---|
-| Exact | integrity errors, panics, race reports, leaked goroutines, quiescence counts, readers created, torrents loaded by PROPFIND, HDRezka upstream opens, ETag changes |
-| Count | reads, debounced and seek updates per MiB, actual vs redundant seeks, downgraded pieces, waste ratio, residual download, read timeouts, slow reads |
+| Exact | integrity errors, panics, race reports, leaked goroutines, quiescence counts (CDN bodies and streamer slots included), readers created, torrents loaded by PROPFIND, HDRezka link resolves and invalidations, ETag changes |
+| Count | reads, debounced and seek updates per MiB, actual vs redundant seeks, downgraded pieces, waste ratio, residual download, read timeouts, slow reads, HDRezka upstream opens (under faults a dropped request may open its body or not), hash failures |
 | Timing | TTFB, time to playable, seek latency p50/p95, stall count and duration, rebuffer ratio, activation wait, `handler_lag_after_abort`, PROPFIND latency, mutex wait |
 
 **Compare.** The verdict is one of `pass | regression | improvement | inconclusive | fail`.

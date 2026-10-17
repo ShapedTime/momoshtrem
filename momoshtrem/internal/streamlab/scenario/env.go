@@ -16,6 +16,7 @@ import (
 
 	atorrent "github.com/anacrolix/torrent"
 
+	"github.com/shapedtime/momoshtrem/internal/streamlab/cdn"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/client"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
@@ -44,7 +45,13 @@ type Title struct {
 	// Offset is the file's torrent offset, Size its length.
 	Offset, Size int64
 	Integrity    *checks.Integrity
-	Seeder       *swarm.Seeder
+	// Seeder is the torrent's first seeder, Peers all of them; nil for an
+	// HDRezka movie.
+	Seeder *swarm.Seeder
+	Peers  []*Peer
+	// Remote is an HDRezka movie's file on the fake CDN; nil for a
+	// torrent's.
+	Remote *cdn.File
 }
 
 // Piece is the torrent piece holding the file offset off.
@@ -74,6 +81,8 @@ type Env struct {
 	completions *completions
 	// dir is the repetition's folder for artifacts; "" keeps none.
 	dir string
+	// swarm is the seeders, proxies and fake CDN (Remote).
+	swarm *swarmSet
 }
 
 // recorder keeps what a repetition did.
@@ -93,6 +102,7 @@ type recorder struct {
 	notes      []string
 	probesDone int
 	artifacts  map[string]string
+	expects    []*Expectation
 }
 
 type playerRec struct {
@@ -130,6 +140,9 @@ type failure struct {
 	evicted     bool
 	wasComplete bool
 	broke       bool // a body that ended early, not a request that failed
+	// expected is why the script expected it (Env.Expect): a fault
+	// meant to break it. play-ok leaves it out.
+	expected string
 }
 
 // known is the known issue whose signature the failure carries: #195's
@@ -148,6 +161,9 @@ func (f failure) known() string {
 
 func (f failure) diagnosis() string {
 	silent := fmt.Sprintf("silent %v", f.silence.Round(time.Millisecond))
+	if f.expected != "" {
+		return fmt.Sprintf("expected (%s): %s", f.expected, silent)
+	}
 	switch f.known() {
 	case "#195":
 		return fmt.Sprintf("known stall (#195): %s, piece %d incomplete, seeder connected, downloads on", silent, f.piece)
@@ -166,6 +182,9 @@ func (f failure) diagnosis() string {
 	}
 	if f.wasComplete {
 		why = append(why, "piece was complete")
+	}
+	if f.title != nil && f.title.Remote != nil {
+		return fmt.Sprintf("no known signature: %s, an HDRezka file", silent)
 	}
 	return fmt.Sprintf("no known signature: %s, piece %d (%s)", silent, f.piece, strings.Join(why, ", "))
 }
@@ -257,6 +276,7 @@ func (e *Env) failed(device string, t *Title, off int64, silence time.Duration, 
 	}
 	f.wasComplete = e.completions.was(t.Hash, f.piece)
 	e.rec.mu.Lock()
+	f.expected = e.rec.expected(t)
 	e.rec.failures = append(e.rec.failures, f)
 	n := len(e.rec.failures)
 	e.rec.mu.Unlock()
@@ -313,8 +333,13 @@ func (e *Env) dumpStatus(name string, f failure, t *Title) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s at %d, piece %d: %s\n%s\n\n== leecher ==\n", f.device, t.Name, f.offset, f.piece, f.err, f.diagnosis())
 	e.Stack.Client.WriteStatus(&b)
-	b.WriteString("\n== seeder ==\n")
-	t.Seeder.WriteStatus(&b)
+	for i, p := range t.Peers {
+		fmt.Fprintf(&b, "\n== seeder %d (the leecher dials %s) ==\n", i, p.Addr)
+		p.Seeder.WriteStatus(&b)
+	}
+	if t.Remote != nil && e.swarm != nil && e.swarm.cdn != nil {
+		e.writeRemoteStatus(&b)
+	}
 	if os.WriteFile(filepath.Join(e.dir, name), []byte(b.String()), 0o644) == nil {
 		e.rec.mu.Lock()
 		e.rec.artifacts[strings.TrimSuffix(name, ".txt")] = name

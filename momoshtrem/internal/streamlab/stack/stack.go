@@ -15,9 +15,16 @@
 // them the first read is 512 bytes (#210). Production runs with metrics on
 // (METRICS_ENABLED), but the default is off.
 //
+// HDRezka streams go through production's hdrezka.Streamer and
+// service.HDRezkaSource, set as the VFS's remote source as main.go does
+// when HDREZKA_ENABLED is on. Only the link resolver is the lab's
+// (Options.HDRezka: cdn.Links over the fake CDN), in place of the site's
+// client and hdrezka.Resolver.
+//
 // What main.go wires and the lab leaves out, and why:
 //   - SetSubtitleRepository: it needs the database.
-//   - SetRemoteSource: HDRezka streams come with S6 (#177).
+//   - HDRezka's site client and Resolver: the lab has no site; the fake
+//     CDN's resolver stands in (above).
 //   - SetCacheDir: the tree cache only applies to the database's tree.
 //   - The DHT item store: without DHT it's never used.
 //   - sessions.WithItems: it resolves items from the database; the lab's
@@ -27,6 +34,7 @@
 package stack
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -45,7 +53,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/shapedtime/momoshtrem/internal/config"
+	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/metrics"
+	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/streaming"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/swarm"
@@ -85,7 +95,18 @@ type Options struct {
 	// do. A torrent not here gets its info dict from its seeder (metadata
 	// from peers).
 	Stored []*metainfo.MetaInfo
+	// HDRezka resolves HDRezka streams' links (cdn.Links): with it, the
+	// library's streams (Source.Stream) play through production's
+	// streamer, as with HDREZKA_ENABLED. Nil: HDRezka is off, and their
+	// reads fail.
+	HDRezka hdrezka.LinkResolver
+	// HDRezkaReadTimeout bounds opening a stream's body and each stretch
+	// of a read that receives nothing; HDRezkaReadTimeout when 0.
+	HDRezkaReadTimeout time.Duration
 }
+
+// HDRezkaReadTimeout is production's hdrezkaReadTimeout (cmd/momoshtrem).
+const HDRezkaReadTimeout = 30 * time.Second
 
 // stacks numbers the stacks of the process.
 var stacks atomic.Int64
@@ -119,6 +140,11 @@ type Stack struct {
 	Activity *torrent.ActivityManager // nil when idle mode is off, as in main.go
 	FS       *vfs.LibraryFS
 	Requests *RequestLog
+	// HDRezka is the streamer of HDRezka streams; nil when HDRezka is off
+	// (Options.HDRezka). HDRezkaReadTimeout is the remote files' read
+	// timeout.
+	HDRezka            *hdrezka.Streamer
+	HDRezkaReadTimeout time.Duration
 
 	hashes     []string
 	server     *http.Server
@@ -136,11 +162,11 @@ type Stack struct {
 // The wiring is cmd/momoshtrem/main.go's, step for step: InitStorage, the
 // client from torrent.ClientConfigFor, the activity manager, the metainfo
 // store, the torrent service and its speed sampler, then the VFS with the
-// service, the reader tracker, the sessions and the metrics, and the
-// WebDAV server with the same metrics on an http.Server with no timeouts.
-// What it leaves out (subtitles, HDRezka, the tree cache, the DHT item
-// store, session items, the extra collectors) is listed, with why, in the
-// package doc.
+// service, the reader tracker, the sessions, the metrics and HDRezka's
+// remote source, and the WebDAV server with the same metrics on an
+// http.Server with no timeouts. What it leaves out (subtitles, HDRezka's
+// site, the tree cache, the DHT item store, session items, the extra
+// collectors) is listed, with why, in the package doc.
 func Start(opts Options) (_ *Stack, err error) {
 	id := fmt.Sprintf("s%d", stacks.Add(1))
 	s := &Stack{ID: id, Requests: &RequestLog{prefix: id + "."}, errs: &errorLog{}}
@@ -237,6 +263,13 @@ func Start(opts Options) (_ *Stack, err error) {
 	s.Registry = prometheus.NewRegistry()
 	s.Metrics = metrics.New(s.Registry)
 	s.FS.SetMetrics(s.Metrics)
+	// HDRezka, as main.go wires it with HDREZKA_ENABLED: the lab's
+	// resolver in place of the site's.
+	if opts.HDRezka != nil {
+		s.HDRezka = hdrezka.NewStreamer(opts.HDRezka, hdrezka.WithStreamUserAgent(hdrezka.DefaultUserAgent))
+		s.HDRezkaReadTimeout = cmp.Or(opts.HDRezkaReadTimeout, HDRezkaReadTimeout)
+		s.FS.SetRemoteSource(service.NewHDRezkaSource(s.HDRezka), s.HDRezkaReadTimeout)
+	}
 
 	webdav.ValidateConfig(cfg.Server.WebDAVAuth)
 	ws := webdav.NewServer(s.FS, cfg.Server.WebDAVAuth)

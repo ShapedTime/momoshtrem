@@ -33,6 +33,7 @@ type collector struct {
 	rep       *report.Rep
 	players   []playerResult
 	quiet     checks.QuiescenceResult
+	remote    remoteQuiet // the fake CDN's and the streamer's (HDRezka)
 	scriptErr error
 	lags      []abortLag
 }
@@ -40,6 +41,7 @@ type collector struct {
 // abortLag is a dropped request's handler time after the drop.
 type abortLag struct {
 	reqID string
+	path  string
 	lag   time.Duration
 	done  bool
 }
@@ -169,6 +171,8 @@ func (c *collector) metrics(wall time.Duration, atClose, after int64, window tim
 		c.set("handler_lag_after_abort", report.MS(worst))
 	}
 
+	c.faultMetrics()
+	c.remoteMetrics()
 	for name, v := range e.rec.metrics {
 		c.set(name, v)
 	}
@@ -207,7 +211,7 @@ func (c *collector) abortLags() []abortLag {
 			if !r.Done() {
 				end = now
 			}
-			out = append(out, abortLag{reqID: r.ID, lag: max(end.Sub(d.at), 0), done: r.Done()})
+			out = append(out, abortLag{reqID: r.ID, path: r.Path, lag: max(end.Sub(d.at), 0), done: r.Done()})
 			break
 		}
 	}
@@ -332,8 +336,9 @@ func (c *collector) checks() {
 		add("script", report.Pass, "", "ran to the end")
 	}
 
-	var checked, mismatched int64
+	var checked, mismatched, unexplained int64
 	var first string
+	explained := map[string]int64{}
 	seen := map[*checks.Integrity]bool{}
 	for _, t := range e.Titles {
 		if seen[t.Integrity] {
@@ -343,12 +348,17 @@ func (c *collector) checks() {
 		r := t.Integrity.Result()
 		checked += r.Checked
 		mismatched += r.Mismatched
+		unexplained += r.Unexplained()
+		for id, n := range r.Explained {
+			explained[id] += n
+		}
 		if r.First != nil && first == "" {
 			first = r.First.String()
 		}
 	}
 	if mismatched > 0 {
-		add("integrity", report.Fail, "", fmt.Sprintf("%d of %d bytes don't match the media; the first: %s", mismatched, checked, first))
+		add("integrity", report.Fail, integrityKnown(unexplained, explained),
+			fmt.Sprintf("%d of %d bytes don't match the media%s; the first: %s", mismatched, checked, explainedNote(explained), first))
 	} else {
 		add("integrity", report.Pass, "", fmt.Sprintf("%s checked, all matching", report.Bytes(checked)))
 	}
@@ -369,11 +379,18 @@ func (c *collector) checks() {
 
 	add(c.playOK())
 
-	if err := c.quiet.Err(); err != nil {
-		add("quiescence", report.Fail, orphanedReads(c.quiet, c.rep.Metrics["read_timeouts"]), err.Error())
-	} else {
-		add("quiescence", report.Pass, "", fmt.Sprintf("quiet after %v (%d labelled anacrolix goroutines inherited)",
-			c.quiet.Waited.Round(time.Millisecond), c.quiet.Inherited))
+	switch err := c.quiet.Err(); {
+	case err != nil:
+		known := ""
+		if c.remote.Err() == nil {
+			known = orphanedReads(c.quiet, c.rep.Metrics["read_timeouts"])
+		}
+		add("quiescence", report.Fail, known, joinErrs(err, c.remote.Err()))
+	case c.remote.Err() != nil:
+		add("quiescence", report.Fail, "", c.remote.Err().Error())
+	default:
+		add("quiescence", report.Pass, "", fmt.Sprintf("quiet after %v (%d labelled anacrolix goroutines inherited)%s",
+			c.quiet.Waited.Round(time.Millisecond), c.quiet.Inherited, c.remote.String()))
 	}
 
 	if slices.Contains(c.sc.Checks, "abort-lag") {
@@ -420,13 +437,13 @@ func orphanedReads(q checks.QuiescenceResult, timeouts float64) string {
 // a known issue's signature (#195's stall, F11's quick break at an
 // evicted piece), the failure names them all.
 func (c *collector) playOK() (string, report.Status, string, string) {
-	fs := c.e.rec.failures
+	fs, expected := unexpected(c.e.rec.failures)
 	plays := 0
 	for _, pr := range c.players {
 		plays += len(pr.stats.Plays)
 	}
 	if len(fs) == 0 {
-		return "play-ok", report.Pass, "", fmt.Sprintf("%d playbacks and %d probes got their bytes", plays, c.e.rec.probesDone)
+		return "play-ok", report.Pass, "", fmt.Sprintf("%d playbacks and %d probes got their bytes%s", plays, c.e.rec.probesDone, expected)
 	}
 	pieces := map[string]bool{}
 	var lines []string
@@ -479,25 +496,37 @@ func (c *collector) abortLag() (string, report.Status, string, string) {
 		return "abort-lag", report.NA, "", "no request was dropped"
 	}
 	var over []string
-	f12 := true
 	worst := time.Duration(0)
+	ids := map[string]bool{}
+	explained := true
 	for _, l := range c.lags {
 		worst = max(worst, l.lag)
 		if l.lag <= limit {
 			continue
 		}
 		over = append(over, fmt.Sprintf("%s %v", l.reqID, l.lag.Round(time.Millisecond)))
-		f12 = f12 && l.done && l.lag <= timeout+abortLagSlack
+		id := c.lagKnown(l, timeout)
+		ids[id] = true
+		explained = explained && id != ""
 	}
 	if len(over) == 0 {
 		return "abort-lag", report.Pass, "", fmt.Sprintf("%d dropped requests, the slowest handler ended %v after", len(c.lags), worst.Round(time.Millisecond))
 	}
 	known := ""
-	if f12 {
-		known = "F12"
+	if explained {
+		var list []string
+		for id := range ids {
+			list = append(list, id)
+		}
+		slices.Sort(list)
+		known = strings.Join(list, knownSep)
 	}
-	return "abort-lag", report.Fail, known, fmt.Sprintf("%d of %d handlers ran over %v after their client dropped them (%s); the slowest %v (read timeout %v)",
-		len(over), len(c.lags), limit, strings.Join(over, ", "), worst.Round(time.Millisecond), timeout)
+	timeouts := fmt.Sprintf("read timeout %v", timeout)
+	if c.e.Stack.HDRezka != nil {
+		timeouts += fmt.Sprintf(", HDRezka's %v", c.e.Stack.HDRezkaReadTimeout)
+	}
+	return "abort-lag", report.Fail, known, fmt.Sprintf("%d of %d handlers ran over %v after their client dropped them (%s); the slowest %v (%s)",
+		len(over), len(c.lags), limit, strings.Join(over, ", "), worst.Round(time.Millisecond), timeouts)
 }
 
 func first3(s []string) []string {

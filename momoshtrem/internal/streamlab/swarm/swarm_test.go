@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	atorrent "github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -73,7 +74,7 @@ func TestStorage_ServesTheLayout(t *testing.T) {
 func TestStoragePiece_ReadAtBounds(t *testing.T) {
 	l, _, info := buildPack(t)
 	last := info.Piece(info.NumPieces() - 1)
-	p := generatedPiece{layout: l, off: last.Offset(), length: last.Length()}
+	p := generatedPiece{s: NewStorage(l), index: last.Index(), off: last.Offset(), length: last.Length()}
 	buf := make([]byte, last.Length()+10)
 	n, err := p.ReadAt(buf, 0)
 	if int64(n) != last.Length() || err != io.EOF {
@@ -100,16 +101,138 @@ func TestStorage_RejectsAnotherTorrent(t *testing.T) {
 	}
 }
 
-func TestUploadLimiter(t *testing.T) {
-	if l := uploadLimiter(0); l.Limit() != rate.Inf {
-		t.Errorf("0 B/s gives limit %v, want unlimited", l.Limit())
+func TestPaceLimiter(t *testing.T) {
+	if l := paceLimiter(0); l != nil {
+		t.Errorf("0 B/s gives limit %v, want none", l.Limit())
 	}
 	for _, bps := range []int64{1000, 100 << 10, 50 << 20} {
-		l := uploadLimiter(bps)
-		if l.Limit() != rate.Limit(bps) || l.Burst() < minUploadBurst {
+		l := paceLimiter(bps)
+		if l.Limit() != rate.Limit(bps) || l.Burst() < ChunkSize {
 			t.Errorf("%d B/s: limit %v burst %d", bps, l.Limit(), l.Burst())
 		}
 	}
+}
+
+// A corrupt piece is served with one byte flipped, CorruptServes times,
+// and then right; the other pieces are untouched. Its hash fails while
+// it's bad.
+func TestStorage_CorruptPiece(t *testing.T) {
+	l, mi, info := buildPack(t)
+	const bad = 3
+	st := NewStorageWith(l, StorageOptions{Corrupt: []int{bad}, CorruptServes: 2})
+	ts, err := storage.NewClient(st).OpenTorrent(context.Background(), &info, mi.HashInfoBytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashOK := func(i int) bool {
+		var buf bytes.Buffer
+		if _, err := ts.Piece(info.Piece(i)).WriteTo(&buf); err != nil {
+			t.Fatalf("piece %d: %v", i, err)
+		}
+		sum := sha1.Sum(buf.Bytes())
+		return bytes.Equal(sum[:], info.Pieces[i*20:(i+1)*20])
+	}
+	for serve := 1; serve <= 2; serve++ {
+		if hashOK(bad) {
+			t.Fatalf("serve %d of the corrupt piece passed its hash", serve)
+		}
+	}
+	if !hashOK(bad) {
+		t.Error("the third serve of the corrupt piece is still bad")
+	}
+	if !hashOK(bad-1) || !hashOK(bad+1) {
+		t.Error("a piece next to the corrupt one is bad")
+	}
+	chunks := int(info.PieceLength / ChunkSize)
+	if n := st.BadServes(); n != 2*chunks {
+		t.Errorf("BadServes = %d, want 2 serves of %d chunks", n, chunks)
+	}
+	// A read that misses every chunk's first byte serves no chunk.
+	if _, err := ts.Piece(info.Piece(bad)).ReadAt(make([]byte, 10), 1); err != nil {
+		t.Fatal(err)
+	}
+	if n := st.BadServes(); n != 2*chunks {
+		t.Errorf("a read away from the bad bytes counted: BadServes = %d", n)
+	}
+}
+
+// The chunk that completes a corrupt piece's first serve waits the hold;
+// the others, and the later serves, don't.
+func TestStorage_CorruptHold(t *testing.T) {
+	l, mi, info := buildPack(t)
+	const hold = 300 * time.Millisecond
+	st := NewStorageWith(l, StorageOptions{Corrupt: []int{1}, CorruptServes: 1, CorruptHold: hold})
+	ts, err := storage.NewClient(st).OpenTorrent(context.Background(), &info, mi.HashInfoBytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := ts.Piece(info.Piece(1))
+	buf := make([]byte, ChunkSize)
+	read := func(off int64) (time.Duration, byte) {
+		start := time.Now()
+		if _, err := p.ReadAt(buf, off); err != nil {
+			t.Fatal(err)
+		}
+		return time.Since(start), buf[0]
+	}
+	want := make([]byte, 1)
+	last := info.PieceLength - ChunkSize
+	for off := int64(0); off < last; off += ChunkSize {
+		if took, _ := read(off); took >= hold {
+			t.Errorf("chunk at %d waited %v", off, took)
+		}
+	}
+	took, got := read(last)
+	if took < hold {
+		t.Errorf("the last chunk of the first serve took %v, want the %v hold", took, hold)
+	}
+	if _, err := l.ReadAt(want, info.Piece(1).Offset()+last); err != nil {
+		t.Fatal(err)
+	}
+	if got != want[0]^0xff {
+		t.Errorf("the held chunk's first byte = %#02x, want it flipped from %#02x", got, want[0])
+	}
+	if took, got := read(last); took >= hold || got != want[0] {
+		t.Errorf("the second serve took %v and gave %#02x: want no hold and the right byte %#02x", took, got, want[0])
+	}
+}
+
+// Paced reads take at least their bytes' worth of time past the burst,
+// and Stop fails the ones waiting.
+func TestStorage_Paced(t *testing.T) {
+	l, mi, info := buildPack(t)
+	const bps = 256 << 10
+	st := NewStorageWith(l, StorageOptions{Rate: bps})
+	ts, err := storage.NewClient(st).OpenTorrent(context.Background(), &info, mi.HashInfoBytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	var read int64
+	buf := make([]byte, 16<<10)
+	for i := range 4 {
+		p := ts.Piece(info.Piece(i))
+		for off := int64(0); off < info.Piece(i).Length(); off += int64(len(buf)) {
+			n, err := p.ReadAt(buf, off)
+			if err != nil && err != io.EOF {
+				t.Fatal(err)
+			}
+			read += int64(n)
+		}
+	}
+	// A floor, not a timing check: a loaded machine only takes longer.
+	floor := time.Duration(float64(read-bps/10) / bps * 0.8 * float64(time.Second))
+	if elapsed := time.Since(start); elapsed < floor {
+		t.Errorf("read %d bytes in %v at %d B/s: the pace isn't applied", read, elapsed, bps)
+	}
+	st.Stop()
+	p := ts.Piece(info.Piece(5))
+	for range 100 { // past the burst, a read must wait: it fails at once
+		if _, err := p.ReadAt(buf, 0); err != nil {
+			return
+		}
+	}
+	t.Error("reads still succeed after Stop")
 }
 
 // The magnet is how a leecher finds the seeder: service.add parses it with

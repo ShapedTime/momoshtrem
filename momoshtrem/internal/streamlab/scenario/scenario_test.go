@@ -19,7 +19,9 @@ func TestCatalog(t *testing.T) {
 	}
 	gate := scenario.InTier(scenario.Gate)
 	want := []string{"cold-start", "steady-play", "seek-fwd", "seek-back", "scrub", "probe-burst", "parallel-ranges",
-		"dual-reader-close", "dual-reader-open", "pause-resume", "reconnect", "next-episode", "small-cache", "etag-stability"}
+		"dual-reader-close", "dual-reader-open", "pause-resume", "reconnect", "next-episode", "small-cache", "etag-stability",
+		"seeder-loss", "slow-swarm", "corrupt-piece", // faults.go
+		"hdrezka-play", "hdrezka-seek", "hdrezka-expiry", "hdrezka-503", "hdrezka-stall"} // hdrezka.go
 	var got []string
 	for _, sc := range gate {
 		got = append(got, sc.Name)

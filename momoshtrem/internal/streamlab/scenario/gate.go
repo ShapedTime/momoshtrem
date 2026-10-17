@@ -20,8 +20,9 @@ import (
 )
 
 // The gate tier (PLAN §5 "Tiers"): Infuse's everyday moves, 15-45 s each,
-// with the seeder above the bitrate. seeder-loss, corrupt-piece and the
-// HDRezka scenarios come with S6 (#177).
+// with the seeder above the bitrate. The swarm-fault scenarios
+// (seeder-loss, slow-swarm, corrupt-piece) are in faults.go, the HDRezka
+// ones in hdrezka.go.
 
 // at is the file offset at frac of t, rounded down to a 64 KiB boundary
 // as a player's seeks are.
