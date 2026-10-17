@@ -189,17 +189,38 @@ func (c *Conn) Probe(ctx context.Context, p string, off, n int64) (*http.Respons
 // starts or resumes playback, and returns once the headers are in. Read
 // the body from the Stream, then Close it, or Abort it to seek away.
 func (c *Conn) Play(ctx context.Context, p string, from int64) (*Stream, error) {
+	st, err := c.Get(ctx, p, http.Header{"Range": {fmt.Sprintf("bytes=%d-", from)}})
+	if err != nil {
+		return nil, err
+	}
+	st.From = from // the caller checks the answer is the range it asked for
+	return st, nil
+}
+
+// Get sends a GET of p with the extra headers (Range, If-Range) and
+// returns once the answer's headers are in: read the body from the
+// Stream, then Close it, or Abort it. From is the first byte of a 206's
+// Content-Range, 0 otherwise.
+func (c *Conn) Get(ctx context.Context, p string, header http.Header) (*Stream, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	req, err := c.request(ctx, http.MethodGet, p, nil)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", from))
+	for k, vs := range header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		cancel()
 		return nil, err
+	}
+	var from int64
+	if resp.StatusCode == http.StatusPartialContent {
+		fmt.Sscanf(resp.Header.Get("Content-Range"), "bytes %d-", &from)
 	}
 	return &Stream{Response: resp, From: from, cancel: cancel}, nil
 }

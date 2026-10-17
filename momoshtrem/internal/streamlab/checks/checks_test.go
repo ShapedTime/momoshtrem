@@ -84,10 +84,29 @@ func TestF3Result_String(t *testing.T) {
 		{checks.F3Result{Dir: "/d", Entries: 2, Loaded: []string{"aa"}}, "torrent loaded by PROPFIND (Depth 1 of /d, 2 entries): aa"},
 		{checks.F3Result{Dir: "/d", Entries: 2, Before: []string{"aa"}}, "already loaded before the PROPFIND (Depth 1 of /d, 2 entries): aa"},
 		{checks.F3Result{Dir: "/d", Entries: 2}, "no torrent loaded by PROPFIND (Depth 1 of /d, 2 entries)"},
+		{checks.F3Result{Dir: "/d", Entries: 1}, "the listing had no file to open (Depth 1 of /d, 1 entries)"},
 	}
 	for _, tt := range tests {
 		if got := tt.r.String(); got != tt.want {
 			t.Errorf("String = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+// The probe tells only when the listing had a file to open and nothing
+// was loaded before it.
+func TestF3Result_Conclusive(t *testing.T) {
+	for _, tt := range []struct {
+		r    checks.F3Result
+		want bool
+	}{
+		{checks.F3Result{Entries: 2}, true},
+		{checks.F3Result{Entries: 2, Loaded: []string{"aa"}}, true},
+		{checks.F3Result{Entries: 2, Before: []string{"aa"}}, false},
+		{checks.F3Result{Entries: 1}, false},
+	} {
+		if got := tt.r.Conclusive(); got != tt.want {
+			t.Errorf("%+v: Conclusive = %v, want %v", tt.r, got, tt.want)
 		}
 	}
 }

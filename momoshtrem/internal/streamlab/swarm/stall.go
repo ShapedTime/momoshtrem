@@ -17,8 +17,9 @@ const StallIssue = "#195"
 // left idle or paused isn't the known stall, and neither is one with no
 // seeder connected.
 //
-// It's an expected failure (PLAN D6) until the issue is fixed; S4's
-// known-issue registry (#175) replaces this.
+// It's an expected failure (PLAN D6) until the issue is fixed. The
+// scenarios measure it when a read breaks, as #195's signature in the
+// known-issue registry (internal/streamlab/known).
 func Stalled(t *atorrent.Torrent, piece int) bool {
 	if t == nil || t.Info() == nil || piece < 0 || piece >= t.NumPieces() || t.Stats().ConnectedSeeders < 1 {
 		return false

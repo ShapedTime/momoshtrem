@@ -30,18 +30,22 @@ type F3Result struct {
 // torrent's file adds the torrent (vfs.LibraryFS.openTorrentFile).
 func (r F3Result) LoadedByPropfind() bool { return len(r.Loaded) > 0 }
 
-// Conclusive reports whether the probe could see a load: no torrent was
-// loaded before the PROPFIND. One that was can't be loaded again, so a
-// PROPFIND that loaded nothing proves nothing then (not a fix of F3).
-func (r F3Result) Conclusive() bool { return len(r.Before) == 0 }
+// Conclusive reports whether the probe could see a load: the listing had
+// a file besides the folder, and no torrent was loaded before the
+// PROPFIND. One that was can't be loaded again, so a PROPFIND that loaded
+// nothing proves nothing then (not a fix of F3); neither does a listing
+// with no file to open.
+func (r F3Result) Conclusive() bool { return len(r.Before) == 0 && r.Entries > 1 }
 
 func (r F3Result) String() string {
 	where := fmt.Sprintf("Depth 1 of %s, %d entries", r.Dir, r.Entries)
 	switch {
 	case r.LoadedByPropfind():
 		return fmt.Sprintf("torrent loaded by PROPFIND (%s): %s", where, strings.Join(r.Loaded, ", "))
-	case !r.Conclusive():
+	case len(r.Before) > 0:
 		return fmt.Sprintf("already loaded before the PROPFIND (%s): %s", where, strings.Join(r.Before, ", "))
+	case !r.Conclusive():
+		return fmt.Sprintf("the listing had no file to open (%s)", where)
 	default:
 		return fmt.Sprintf("no torrent loaded by PROPFIND (%s)", where)
 	}
