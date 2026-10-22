@@ -536,6 +536,44 @@ func TestAuth_Disconnect(t *testing.T) {
 	}
 }
 
+// Snapshot has Integration's state and username in every state
+// (/members' summary).
+func TestAuth_Snapshot(t *testing.T) {
+	e := newEnv(t)
+	check := func(want State, wantUser string) {
+		t.Helper()
+		state, username := e.auth.Snapshot()
+		in := e.integration(e.auth)
+		if state != want || state != in.State || ptrValue(username) != wantUser || (username == nil) != (in.Username == nil) {
+			t.Errorf("Snapshot = %s %q, Integration %s %v, want %s %q", state, ptrValue(username), in.State, in.Username, want, wantUser)
+		}
+	}
+	check(StateOff, "")
+	e.clock.Block(true)
+	if _, err := e.auth.Connect(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	check(StatePending, "")
+	if err := e.auth.Disconnect(e.ctx); err != nil { // cancels the code
+		t.Fatal(err)
+	}
+	e.clock.Block(false)
+	e.connect(e.auth)
+	check(StateConnected, "Teymur")
+
+	e.srv.RevokeAll()
+	e.clock.Advance(6*24*time.Hour + time.Hour)
+	if _, err := e.auth.Token(e.ctx); !errors.Is(err, ErrReauth) {
+		t.Fatalf("Token = %v, want ErrReauth", err)
+	}
+	check(StateReauth, "Teymur")
+	e.clock.Block(true)
+	if _, err := e.auth.Connect(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	check(StatePending, "Teymur") // a code from reauth keeps the account
+}
+
 func TestAuth_SyncHooks(t *testing.T) {
 	e := newEnv(t)
 	if _, err := e.auth.SyncNow(e.ctx); !errors.Is(err, ErrSyncUnavailable) {

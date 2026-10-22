@@ -184,6 +184,18 @@ func (a *Auth) Connected() bool {
 	return a.state == StateConnected
 }
 
+// Snapshot is the state and, while an account is linked, its username, as
+// Integration has them (/members' summary).
+func (a *Auth) Snapshot() (State, *string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.linkedLocked() {
+		return a.state, nil
+	}
+	username := a.username
+	return a.state, &username
+}
+
 // Load reads the stored connection. Every method loads it first when it
 // hasn't been, so a Load that fails at startup is tried again. Tokens that
 // don't decrypt (another SECRET_KEY) mean reauth, until a restart with the

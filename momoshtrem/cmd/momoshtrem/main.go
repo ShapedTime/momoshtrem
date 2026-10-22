@@ -530,6 +530,9 @@ func main() {
 		traktSync.Start()
 		apiOpts.TraktNudge = traktSync // reading Up next syncs when the last check is 5 min old
 	}
+	// Household members (#241): /members, and the member each API request
+	// is for (the X-Momoshtrem-Member header's, else the lowest id).
+	wireMembers(db, traktAuth, &apiOpts)
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
 	apiOpts.TMDB = cachedTMDB
