@@ -21,7 +21,7 @@
 4. **Torrent search you control.** Structured release info, filters, sorting, pagination and a smart "best match", with no layout breakage on small screens.
 5. **A login that password managers understand** (username + password).
 
-**Non-goals (this round):** multi-user accounts; writing to Trakt (Infuse already scrobbles); an in-browser player; automatically grabbing new episodes (see backlog, §10).
+**Non-goals (this round):** separate logins per person (household members share one, D7); writing to Trakt (Infuse already scrobbles); an in-browser player; automatically grabbing new episodes (see backlog, §10).
 
 ## 2. Decisions
 
@@ -33,7 +33,7 @@
 | D4 | AI recommendations are **nightly shelves plus an on-demand "Ask momoshtrem"** | Shelves are precomputed into Postgres so pages load instantly. |
 | D5 | AI, Trakt and Jackett logic live in the **Go backend** | One home for secrets, DB access, scheduling and cost tracking. Next.js stays a thin BFF: auth, proxying, streaming pass-through, TMDB browsing. |
 | D6 | Models: classifier `claude-haiku-5-5`; recommendation agent `claude-opus-5-5` by default, configurable (e.g. `claude-sonnet-5-5`) | Uses the Go SDK `github.com/anthropics/anthropic-sdk-go`. Haiku can't use the `_20260209` web search/fetch tools, so the agent runs on Opus or Sonnet. **Load the `claude-api` skill before writing any Claude API code.** |
-| D7 | Single user | `APP_USERNAME` and `APP_PASSWORD` env vars; no users table. |
+| D7 | One shared login; up to six household **members** (#239) | `APP_USERNAME` and `APP_PASSWORD` env vars; no users table. A picker ("Who's watching?") chooses the member, and the web sends `X-Momoshtrem-Member`. Each member has their own Trakt account, For You, picks, feedback and Ask threads; the library, downloads, Activity, settings and watched state are the household's (§6 "Household members (#239)"). "Member" in the DB, code and API, since "profile" is the taste profile's. |
 | D8 | Specials are stored as season 0 | Shown as "Specials" in the UI. On WebDAV: a `Season 00` folder with `S00Exx` file names (the Infuse/Plex convention; verify on device). |
 | D9 | The database is **Postgres** (already true) | Docs and `config.yaml.example` said SQLite until G2 fixed them. Migrations live in `momoshtrem/internal/library/migrations/` (embedded). |
 
@@ -133,6 +133,7 @@ Based on a code audit and a live audit on 2026-10-11. Screenshots of the current
    auth (username+password, JWT cookie) · TMDB browse/discover/search
    thin /api/* proxy to the backend · SSE pass-through for Ask
                           │ X-Momoshtrem-Token (shared secret)
+                          │ + X-Momoshtrem-Member (the picker's member)
                           ▼
                  momoshtrem: Go (:4444)
   library · assignment jobs · classifier (rules → Haiku resolver)
@@ -169,7 +170,7 @@ momoshtrem reads these settings and the other secrets and service URLs (`DATABAS
 Migration numbers are reserved per task so parallel branches don't collide.
 
 **`002_app_settings.sql` (G2)**
-- `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults, Trakt's settings, stored pauses (`torrents`) and the storage settings (`storage`, `010` below).
+- `app_settings(key text pk, value jsonb, updated_at)`. Holds the quality profile, AI settings and classifier defaults, Trakt's settings (until `012` moves them to `members`), stored pauses (`torrents`) and the storage settings (`storage`, `010` below).
   - Key `ai`: one document shaped like `GET/PUT /settings/ai` (`{rec_enabled, rec_model, rec_schedule, monthly_budget_usd, classifier_enabled, classifier_model, auto_apply_high_confidence}`; §6 "Recommendations (R1–R3)"). A missing field takes its default; the assignment jobs (B2) read `classifier_enabled` (true), `classifier_model` (`claude-haiku-5-5`; `claude-sonnet-5-5` and `claude-opus-5-5` are priced too) and `auto_apply_high_confidence` (true), and every AI feature `monthly_budget_usd` (15 when the document doesn't have it; an explicit `null` is no cap; once every AI feature's spend this month reaches it, AI calls are skipped). `library.SettingsRepository.AISettings` reads the classifier's share; #9 serves the endpoints (#154), and `PUT` writes with one jsonb `||` statement.
   - Key `quality_profile`: one document shaped like `GET/PUT /settings/quality-profile` (§6 "Search"; #6). A missing field takes its default.
 
@@ -209,7 +210,7 @@ Migration numbers are reserved per task so parallel branches don't collide.
 - `ai_cache(key text pk, feature, payload jsonb, created_at, expires_at)`, indexed on `expires_at`. Shared by AI features; the classifier keys it by a hash of `(info_hash, show_id, metadata_updated_at, hint, scope)` plus the model and its prompt version, for 30 days.
 
 **`005_trakt.sql` (B5)**
-Every table is Trakt's: a disconnect purges them all in one transaction, and the settings (`app_settings` key `trakt`) stay. Movies and shows without a TMDB id are skipped on import, so every row maps to TMDB.
+Every table is Trakt's: a disconnect purges them all in one transaction, and the settings (`app_settings` key `trakt`) stay. Movies and shows without a TMDB id are skipped on import, so every row maps to TMDB. **Per member since `012`** (below): every table has a `member_id`, `trakt_auth` is keyed by it with `user_slug` unique, a disconnect purges that member's rows, and the settings move to `members.trakt_settings`.
 - `trakt_auth`, the one connection (`id smallint` CHECK `id = 1`):
   - `username`, `user_slug`;
   - `access_token_enc`, `refresh_token_enc` (`bytea`, AES-GCM with `SECRET_KEY`), `token_created_at` (Trakt's `created_at`), `expires_at` (`created_at + expires_in`);
@@ -227,7 +228,7 @@ Every table is Trakt's: a disconnect purges them all in one transaction, and the
 - Rollback: nothing else reads these tables, so an older binary ignores them.
 
 **`006_recommendations.sql` (R1, #153)**
-New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendations (R1–R3)".
+New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendations (R1–R3)". **Per member since `013` and `014`** (below): one active run and one streaming turn per member.
 - `taste_profiles(id, created_at, counts jsonb, profile jsonb)`: R1's profile, one row per build.
   - `counts` (`{loved, completed, dropped, rated, plays}`) drives `no_history` (fewer than 5 loved or completed titles).
   - `profile` stays within about 16 KB (≤ 4k tokens). Rows no run references are pruned once they're a day old (each new build prunes; the day lets a run reference the one it just built).
@@ -312,13 +313,42 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
   - `PUT` writes with one jsonb statement, nested objects merged (`library/settings_storage.go`). A document that doesn't decode reads as the defaults, and the next PUT replaces it.
 - Rollback: an older binary ignores the tables and the document, so pinned data becomes ordinary cache. It goes back to `global_cache_size`: 4 GiB once the VM's line is deleted (P2), and its first trim then evicts everything past that.
 
+**`011_members.sql`–`014_member_ask.sql` (household members, #239)**
+One migration per slice, each landing with the code that writes its columns, so `main` stays deployable. They're idempotent like 006. Backfills go to `(SELECT min(id) FROM members)`, never the literal 1 (member 1 may be gone by the next deploy). No `member_id` has a default, so a writer that forgets the member fails. Wire shapes: §6 "Household members (#239)".
+- `011_members.sql` (B1, #241): `members(id bigserial, name, color, created_at, updated_at)`.
+  - `name` is 1–32 characters (a CHECK), with a unique index on `lower(name)`. `color` is a palette key, checked in Go (`member.Colors`).
+  - It seeds member 1 with `trakt_auth.username` (cut to 32), else "Me", colour `teal`.
+- `012_member_trakt.sql` (B2a, #243):
+  - `members.trakt_settings jsonb` (default `{}`) takes `app_settings` key `trakt`, which is deleted. It's read over the defaults and updated with one jsonb `||` statement, as before.
+  - Every `trakt_*` table gets `member_id NOT NULL`, an FK to `members` `ON DELETE CASCADE`.
+  - `trakt_auth`: PK `member_id` (the `id` column and its CHECK go), and a unique index on `user_slug`: an account connects to one member.
+  - The PKs lead with the member: `trakt_sync_state (member_id, key)`, `trakt_history (member_id, id)`, `trakt_ratings` and `trakt_watchlist (member_id, media_type, trakt_id)`, `trakt_show_progress (member_id, show_trakt_id)`, `trakt_hidden (member_id, section, trakt_id)`, `trakt_calendar (member_id, show_trakt_id, season, episode)`.
+  - The watched tables lead with the title, for household reads: `trakt_watched_movies (tmdb_id, member_id)` and `trakt_watched_episodes (show_tmdb_id, season, episode, member_id)`, each with an index on `member_id`.
+  - The personal reads' indexes become member-first: history by time and by title, ratings and the watchlist by title, the watchlist by `listed_at`, the calendar by `first_aired`. The by-title indexes on progress, hidden and the calendar's show stay, for household lookups.
+- `013_member_picks.sql` (B3a, #245): `member_id` on `taste_profiles`, `rec_runs` and `rec_feedback`.
+  - `rec_runs_one_active` becomes one active run per member, and `rec_feedback`'s PK `(member_id, media_type, tmdb_id)`.
+  - Indexes for a member's newest runs and for the oldest queued run.
+  - Shelves, items and hero picks don't change: they belong to their run.
+- `014_member_ask.sql` (B3b, #246): `member_id` on `ask_threads` and `ask_turns`.
+  - A composite FK, `ask_turns (thread_id, member_id)` → `ask_threads (id, member_id)`, keeps a turn's member its thread's.
+  - `ask_turns_one_streaming` becomes one streaming turn per member, and the daily limit's and the thread list's indexes become member-first.
+  - `ask_messages` doesn't change.
+- Unchanged: the library tables, `downloads`, `local_watches`, `ai_cache`, the other `app_settings` keys, and `ai_usage` (a member's spend joins through `ref_id`, its run or turn).
+- Rollback: `011` is a new table, so an older binary ignores it. An older binary can't run on `012`–`014`: roll back from the pg_dump (ops PLAN §6).
+
 ## 6. API contract (backend, under `/api`)
 
 **Conventions**
 - JSON throughout. Errors are `{error: {code, message}}` (implemented in G2 for every route: `internal/api/errors.go` derives `code` from the status: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `rate_limited`, `unavailable`, `timeout`, `internal_error`; `errorCodeResponse` sets a specific one). Paginated lists (`/library`, `/me/history`, `/search/torrents`) are `{items, total, page, page_size}`; short lists (up next, watchlist, threads, episode groups, torrent files, `/torrents`) are `{items}`.
 - Long operations return `202 {job_id | run_id}` and are polled.
 - Every route requires `X-Momoshtrem-Token` when `BACKEND_API_TOKEN` is set; otherwise `401 {error: {code: "unauthorized"}}` (G2). The web client maps a backend 401/403 to `502 backend_auth`, so a token mismatch never looks like an expired session.
-- CORS is an allowlist (`CORS_ALLOWED_ORIGINS`), empty by default, so no CORS headers are sent. Allowed origins may use `GET, POST, PUT, PATCH, DELETE, OPTIONS` and the `Content-Type`, `Authorization`, `X-Momoshtrem-Token` headers.
+- **The member** (#239). Every route but `/members*` is for one household member, named by `X-Momoshtrem-Member: <id>`. The web's proxy adds it from the picker's cookie.
+  - Without it, the request is the lowest-id member's (the CLI, scripts, an older web).
+  - A value that isn't a positive integer is `400 bad_request`, on `/status` too.
+  - An id no member has is `400 unknown_member` (the web forgets its choice and opens the picker). `/status` is the exception: it answers without a member, with `trakt.connected: false`.
+  - `/members*` never reads the header.
+  - What's personal and what's the household's: §6 "Household members (#239)".
+- CORS is an allowlist (`CORS_ALLOWED_ORIGINS`), empty by default, so no CORS headers are sent. Allowed origins may use `GET, POST, PUT, PATCH, DELETE, OPTIONS` and the `Content-Type`, `Authorization`, `X-Momoshtrem-Token`, `X-Momoshtrem-Member` headers.
 - The web app exposes the same paths under its own session-checked `/api/*` routes. A catch-all `web/src/app/api/[...path]` forwards any path whose first segment is in `BACKEND_PREFIXES` (`web/src/lib/api/backend-proxy.ts`), adding the token and streaming the response (SSE included); explicit web routes take precedence. Typed browser calls and TanStack Query factories for every endpoint live in `web/src/lib/api/endpoints/`, and MSW fixtures in `web/src/mocks/` (F1).
 
 ### Titles and library (B1)
@@ -407,7 +437,7 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
   - An episode is `needs_review` when one of those files targets it and it has no file, aired or not: a file (`ready`, `downloading`) or a play (`watched`) wins. `SeasonSummary.needs_review` counts those episodes, and they don't count as `missing` or `upcoming` there, or in `EpisodeRange.missing`.
   - The frontier is about files: an aired episode under review is still part of it.
   - Cost: one more query for a title page or a season; `/library` reads it in its one query.
-- **Watch state rules** (B5, #133). They read what the Trakt sync imported (§5 `005_trakt.sql`); without Trakt every `watch_state` is null and nothing is `watched`.
+- **Watch state rules** (B5, #133). They read what the Trakt sync imported (§5 `005_trakt.sql`); without Trakt every `watch_state` is null and nothing is `watched`. With household members they read every member's plays; `rating` is the viewer's, and `progress` and `next_episode` are those of the member who played the show last (§6 "Household members (#239)").
   - **Matching** a Trakt episode to a library episode: `episodes.tmdb_episode_id` against Trakt's `episode_tmdb_id` first; season and number only when either id is missing, so an episode TMDB numbers differently never borrows another's watched state. One rule, everywhere.
   - **`watch_state`** is null when Trakt knows nothing about the title (no play, rating or progress). A movie: `watched_at` (its last play), `plays`, `rating`; no `progress` or `next_episode`. A show: `watched_at` (its last watched episode), `plays` (the sum of its episodes' plays), `rating` (the show's), `progress` (Trakt's, regular episodes; left out until the import's `progress` step brings it) and `next_episode` (always there, maybe null).
   - **`next_episode`** is the episode Up next names for the show (§6 "Trakt (B5)"), whether or not Up next lists the show (dropped, hidden and idle shows keep theirs); null when there's none. Watchlist starts don't count: a show nobody has started has no watch state. It's in the library's numbering when the library lists it, so it drives `default_season` and the page's next-up highlight, with the frontier (`missing`) as the fallback.
@@ -442,7 +472,7 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
                 missing: MissingRun | null,          // shows: the first frontier run, as TitleLibraryState.missing
                 streaming }                          // a streaming session plays it (a show: any episode); an in-memory overlay (#99)
   ```
-  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above. `episodes_watched` counts a show's regular episodes with a play, and `last_watched_at` is the movie's last play or the show's last watched episode (the watch state rules; 0 and null without Trakt). `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`; `watching` is shows with `0 < episodes_watched < episodes_total` that aren't dropped or hidden on Trakt (`trakt_hidden`), and `counts.watching` counts them. `sort=last_watched` is `last_watched_at DESC NULLS LAST, created_at DESC, media_type, id`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
+  `id` is the library id. `size_bytes` sums the assigned files. `needs_review` follows the review rules above. `episodes_watched` counts a show's regular episodes with a play, and `last_watched_at` is the movie's last play or the show's last watched episode (the watch state rules; 0 and null without Trakt). `status=ready` is `availability_stage` ready; `incomplete` is everything else (needs a torrent, or downloading); `needs_review` is `needs_review > 0`; `watching` is shows with `0 < episodes_watched < episodes_total` that some member with a play of the show hasn't dropped or hidden on Trakt (`trakt_hidden`), and `counts.watching` counts them. `sort=last_watched` is `last_watched_at DESC NULLS LAST, created_at DESC, media_type, id`. Unknown `type`, `status` or `sort` values are `400 bad_request`.
   `ids=movie:603,tv:1399` looks titles up by TMDB id (Discover, Search and the palette mark library titles with it): comma-separated `media_type:tmdb_id`, at most 200, ANDed with the other filters; the answer is page 1 of all of them (`page_size` = the number of distinct ids; `page` and `page_size` are ignored). Malformed, or more than 200, is `400 bad_request`.
   Cost: one query, whatever the params, including an empty page (it still carries `counts` and `summary`).
 - `PATCH /shows/{id}` with `{episode_ordering, episode_group_id, include_specials, classifier_mode}` → the updated `ShowTitle`. `422 validation_error` for `episode_group` ordering without a valid group id.
@@ -811,7 +841,7 @@ QualityProfile {
 - There's no preview endpoint (in place of HANDOFF §6's `/settings/quality-profile/preview`): "Best match would prefer…" is a client-side function of the profile.
 
 ### Trakt (B5)
-Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written to Trakt. Served by `internal/trakt` (#131 connect, #132 sync) and `internal/me` (#133); the web mocks are a state machine (`web/src/mocks/fixtures/trakt.ts`).
+Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written to Trakt. Served by `internal/trakt` (#131 connect, #132 sync) and `internal/me` (#133); the web mocks are a state machine (`web/src/mocks/fixtures/trakt.ts`). Every route here is the viewer's, the header's member (§6 "Household members (#239)"): their connection, sync and settings, and `/me/*` from what their account imported.
 
 - **`GET /integrations/trakt`** → `200 TraktIntegration`:
   ```
@@ -821,7 +851,7 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
     connected,                         // state = connected
     username,                          // while an account is linked: connected, reauth, or a code pending from reauth
     pending: {user_code, verification_url, expires_at, interval} | null,   // the live device code while pending
-    connect_error: expired | denied | failed | null,   // why the last code didn't connect; the next connect clears it
+    connect_error: expired | denied | failed | account_in_use | null,   // why the last code didn't connect; the next connect clears it
     reauth_reason,                     // for the user, while reauth
     last_sync_at,                      // the last sync that finished without an error
     next_sync_at,                      // the next scheduled check; null unless connected
@@ -840,10 +870,10 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
   - **States.** `off` → `pending` (a device code) → `connected` ↔ `reauth`. `reauth` means Trakt stopped accepting the tokens (a refresh failed, a second 401, or a `SECRET_KEY` that can't decrypt them). The imported data stays and `/me` keeps answering from it; connecting again goes through `pending`. Without `configured` the state is `off`.
   - **The initial import** after a connect is a reconcile with `kind: initial`; its steps run in order, `history`, `ratings`, `watchlist`, `progress` (shows and the calendar) and `details` (artwork), and each section of `/me` fills as its step finishes.
   - **A sync cut short by the connection** isn't a sync error: one ended by reauth (a second 401) is `idle` with its `kind`, `step` and `error` null, and `reauth_reason` says why; a disconnect puts `sync` back to never synced. Either way `last_sync_at` stays the last sync that finished. The last run is stored (`trakt_sync_state` key `last_run`), so `sync` survives a restart.
-- **`POST /integrations/trakt/connect`** → `200 TraktConnect` (`{user_code, verification_url, expires_at, interval}`), from `off` or `reauth`: the device-code flow. While a code is live the same one comes back. The backend polls Trakt every `interval` seconds; the client polls `GET /integrations/trakt`. `409 conflict` while connected; `503 unavailable` without `configured`; `502 trakt_unavailable` when Trakt's device-code endpoint fails.
-  - **Outcomes.** Approved: `connected`, and the initial import starts. Expired: `connect_error: expired`. Denied: `denied` (free Trakt accounts can connect only 2 apps; the UI says so). Anything else: `failed`. A code that doesn't connect goes back to `off` (`reauth` when it came from there).
-- **`DELETE /integrations/trakt`** → `204`, idempotent. While `pending` it cancels the code only (back to `off`, or to `reauth` while an account is linked). Otherwise it disconnects: it stops the sync (waiting at most 10 s), purges every trakt table in one transaction, then revokes the token (best effort, 5 s), so a failed purge leaves a working connection rather than a revoked one. The settings stay.
-- **`PUT /integrations/trakt/settings`** with any of `{use_ratings, show_watchlist, include_paused}` → `200 TraktSettings` (all three), in any state. Fields left out keep their value and unknown ones are ignored; a value that isn't a boolean is `400 bad_request`. Stored in `app_settings` key `trakt` (§5) and kept across a disconnect.
+- **`POST /integrations/trakt/connect`** → `200 TraktConnect` (`{user_code, verification_url, expires_at, interval}`), from `off` or `reauth`: the device-code flow. While a code is live the same one comes back. The backend polls Trakt every `interval` seconds; the client polls `GET /integrations/trakt`. `409 conflict` while this member is connected; `503 unavailable` without `configured`; `502 trakt_unavailable` when Trakt's device-code endpoint fails.
+  - **Outcomes.** Approved: `connected`, and the initial import starts. Expired: `connect_error: expired`. Denied: `denied` (free Trakt accounts can connect only 2 apps; the UI says so). An account another member has connected: `account_in_use` (§6 "Household members (#239)"). Anything else: `failed`. A code that doesn't connect goes back to `off` (`reauth` when it came from there).
+- **`DELETE /integrations/trakt`** → `204`, idempotent. While `pending` it cancels the code only (back to `off`, or to `reauth` while an account is linked). Otherwise it disconnects: it stops the sync (waiting at most 10 s), purges the member's rows from every trakt table in one transaction, then revokes the token (best effort, 5 s), so a failed purge leaves a working connection rather than a revoked one. The settings stay.
+- **`PUT /integrations/trakt/settings`** with any of `{use_ratings, show_watchlist, include_paused}` → `200 TraktSettings` (all three), in any state. Fields left out keep their value and unknown ones are ignored; a value that isn't a boolean is `400 bad_request`. They're the member's: stored in `members.trakt_settings` (§5 `012`), kept across a disconnect and deleted with the member.
   - `use_ratings` (default on): recommendations (#9) weigh Trakt ratings. `show_watchlist` (on): the watchlist row on For You, and Up next's watchlist starts. `include_paused` (off): Up next keeps shows idle for over 180 days.
 - **`POST /integrations/trakt/sync`** → `202 TraktIntegration`, its `sync` running: a sync now (incremental, or a reconcile when the last one is over 24 h old; a failed initial import or reconcile picks up again at the step that failed, with the `last_activities` snapshot it started with, until a restart), or the running one, joined, with exactly one more queued behind it (any trigger during a sync queues one). `409 conflict` unless connected.
 - **`GET /me/up-next`** → `{items: [UpNextItem]}`, at most 40:
@@ -869,7 +899,7 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
   - **Watchlist starts**, only with `show_watchlist`: S01E01 of a watchlisted library show with no plays, once it has aired (the library lists it, by its air date); at most 3, newest listed first. A show with Trakt progress, or dropped or hidden, is no start.
   - **Availability**, first match: the episode has a file → `ready`, or `downloading` while a download wants it ("Availability rules", #77); a mapping job wants it → `needs_review` (the review rules); it hasn't aired → `airs_on`; the show is in the library → `needs_torrent` (an episode the library doesn't list yet too); else `not_in_library`. It reads the file and review facts, never `watched`.
   - **Order**: the shows that aren't `airs_on` by `last_watched_at`, newest first; then watchlist starts; then `airs_on` by `airs_at` (unknown last).
-  - Reading it starts an incremental sync in the background when the last check is over 5 minutes old (#132; `api.Options.TraktNudge`).
+  - Reading it starts an incremental sync of the viewer's account in the background when its last check is over 5 minutes old (#132; `api.Options.TraktNudge`).
   - No `backdrop_dominant_color` (HANDOFF §6 lists one for up-next): the hero loads the title, which has it.
   - Cost: at most 4 queries (the settings, the candidates, their episodes in the library). New episodes 3, the watchlist 2, the history 1.
 - **`GET /me/new-episodes?days=7`** → `{items: [NewEpisodeItem]}`, at most 30, newest first (HANDOFF §6's "New episodes" row):
@@ -881,16 +911,16 @@ Types: `web/src/lib/api/contract/trakt.ts`. Read-only: nothing is ever written t
     webdav_path, webdav_url, download, review_job_id   // as Up next's
   }
   ```
-  - Regular episodes that aired in the last `days` days (1–30, default 7; anything else is `400 bad_request`) and haven't been watched: the library shows' episodes plus the Trakt calendar's, once each. Dropped and hidden shows never show. The window runs from 00:00 UTC `days` days before today until now, by `aired_at`; a calendar entry the library lists (the matching rule) is that episode, aired when the calendar says.
+  - Regular episodes that aired in the last `days` days (1–30, default 7; anything else is `400 bad_request`) and the viewer hasn't watched: the library shows' episodes plus the Trakt calendar's, once each. Dropped and hidden shows never show. The window runs from 00:00 UTC `days` days before today until now, by `aired_at`; a calendar entry the library lists (the matching rule) is that episode, aired when the calendar says.
   - Trakt's calendar also covers watchlisted shows, so a calendar entry counts only for a show you've started (a `trakt_show_progress` row) or one in the library.
 - **`GET /me/watchlist?type=movie|tv`** → `{items: [WatchlistItem]}`, newest listed first: `{media_type, tmdb_id, title, year, poster_path, listed_at, library}`, where `library` is `SimilarTitle.library` (`{library_id, availability_stage, episodes_total, episodes_ready} | null`) from one batch lookup. Another `type` is `400 bad_request`.
 - **`GET /me/history?page=&page_size=`** → `Paginated<HistoryItem>`, 50 a page by default (at most 200; otherwise `400 bad_request`), newest first (`watched_at DESC, id DESC`): `{id, media_type, tmdb_id, title, year, season, episode, episode_name, watched_at}`. `id` is Trakt's history event id and `tmdb_id` the movie's or the show's; `season`, `episode` and `episode_name` are null for movies.
-- **Without Trakt** (nothing imported: `off`, or `pending` before the first import) every `/me/*` answers `200` with no items, except new episodes, where the library's shows still count. In `reauth` they answer what was imported.
+- **Without Trakt** (nothing imported for the viewer: `off`, or `pending` before the first import) every `/me/*` answers `200` with no items, except new episodes, where the library's shows still count. In `reauth` they answer what was imported.
 - **Watch state** in `/titles`, seasons and `/library`: "Watch state rules" under "Titles and library (B1)".
 - **The web app** polls `GET /integrations/trakt` every 3 s while `state` is `pending` or `sync.status` is `syncing` (never in a hidden tab), and when a sync stops it refetches `/me`, the title pages and the library (`web/src/hooks/useTraktIntegration.ts`).
 
 ### Recommendations (R1–R3)
-Types: `web/src/lib/api/contract/recommendations.ts` and `settings.ts`; Go wire structs in `internal/recommend/types.go`. Served by `internal/recommend` (R1 #153, R2 #157, R3 #158) on the AI core (#154: the Claude client, our tool loop, pricing, the budget and `/settings/ai`). Routes: `internal/api/{recommendations,ask,ai_settings}_routes.go`, behind four interfaces (`Options.Recommendations`, `RecFeedback`, `Ask`, `AISettings`), each answering 503 until its service is wired (`cmd/momoshtrem/wire_{ai,recs,ask}.go`). The handlers answer every list as `[]`, never `null`. The web mocks are a state machine (`web/src/mocks/fixtures/recommendations.ts`; scenarios `recs-*`, `ask-*`, `ai-off`).
+Types: `web/src/lib/api/contract/recommendations.ts` and `settings.ts`; Go wire structs in `internal/recommend/types.go`. Served by `internal/recommend` (R1 #153, R2 #157, R3 #158) on the AI core (#154: the Claude client, our tool loop, pricing, the budget and `/settings/ai`). Routes: `internal/api/{recommendations,ask,ai_settings}_routes.go`, behind four interfaces (`Options.Recommendations`, `RecFeedback`, `Ask`, `AISettings`), each answering 503 until its service is wired (`cmd/momoshtrem/wire_{ai,recs,ask}.go`). The handlers answer every list as `[]`, never `null`. The web mocks are a state machine (`web/src/mocks/fixtures/recommendations.ts`; scenarios `recs-*`, `ask-*`, `ai-off`). Picks, runs, feedback and Ask's threads are the viewer's, and another member's run or thread is `404`; the AI settings and the budget are the household's (§6 "Household members (#239)").
 
 - **What needs what.** Every AI call needs `ANTHROPIC_API_KEY` (*configured*). Picks (shelves, hero picks, runs and the title page's reason) also need `rec_enabled`, the master switch (on by default): off, `/home` is empty and no run is queued. Ask depends on the key only. Feedback, threads and the AI settings read and write in any state.
 - **The budget.** `monthly_budget_usd` ($15 on a fresh install; `null`: no cap) is shared by every AI feature. Once this month's spend (`ai_usage`) reaches it, runs are skipped, Ask and refresh answer `429 budget_exceeded`, and the classifier runs on rules. It's checked before each run, turn and classifier AI run, so one in flight can overshoot it by its own cost.
@@ -937,11 +967,11 @@ RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides
   - **Feedback** is applied at read time: a title with `dislike`, `not_interested` or `seen` is left out of every shelf and the hero picks; `like` shows as `feedback: 'like'`.
   - **Hero picks:** three a server-local day, the same all day. A run writes 3–9 in order; on the n-th day since it finished (0 on its own day) `/home` takes them from position `3n mod count`, wrapping, skipping negative feedback, so a weekly run shows new picks each day. Fewer than three only when fewer are left; none means For You's own deterministic picks (#135).
   - Cost: the newest run, its shelves and items, the hero picks, then one batch each for feedback, library state and the watchlist.
-- **`POST /recommendations/refresh`** → `202 {run_id}`: a `manual` run, or the active one (queued or running), joined. Checked in this order: `503 unavailable` without a key; `409 recs_disabled` while `rec_enabled` is off; the active run (`202`); `429 budget_exceeded` with `resets_at` (the 1st of next month) once the budget is spent; `409 no_history` without Trakt connected or with fewer than 5 loved titles (R1's `counts.loved`, which counts completed titles too, but never one rated 4 or less or disliked; `profile.Builder.CheckHistory`).
-- **Runs are queued** by the schedule (`scheduled`: `rec_schedule`, 03:00 server-local, weekly on Sunday), by refresh (`manual`), and by the end of Trakt's initial import when there's no succeeded run yet (`first_sync`; For You's "Writing your shelves" step). One at a time. A scheduled or first-sync run that meets the budget or the history check is stored `skipped` with its `skip_reason`, never `failed`; none is queued with `rec_enabled` off or without a key. A missed slot is caught up: when the server was down at the last scheduled time and no run has been queued since (but one was before: a fresh install has missed nothing), one `scheduled` run starts shortly after startup (about a minute, so startup isn't slowed). The first-sync run is queued before the import reports `idle`, so For You finds it as `active_run`.
-- **What's never picked:** watched titles (a movie with a play; a show you've started: a Trakt progress row or a play), titles you rated on Trakt (the title's own rating, whatever `use_ratings` says: you've seen it), titles with negative feedback, and shows hidden or dropped on Trakt (`trakt_hidden`). R1 leaves them out of the candidate pool and R2 drops them when it validates a run's items, both through one rule (`candidates.Exclusion` on `library.TitleState`; `TasteRepository.TitleStates` looks titles up in one query). Library titles can be picked: a card shows their state ("Ready").
+- **`POST /recommendations/refresh`** → `202 {run_id}`: a `manual` run for the viewer, or the viewer's active one (queued or running), joined. Checked in this order: `503 unavailable` without a key; `409 recs_disabled` while `rec_enabled` is off; the active run (`202`); `429 budget_exceeded` with `resets_at` (the 1st of next month) once the budget is spent; `409 no_history` without the viewer's Trakt connected or with fewer than 5 loved titles (R1's `counts.loved`, which counts completed titles too, but never one rated 4 or less or disliked; `profile.Builder.CheckHistory`).
+- **Runs are queued** by the schedule (`scheduled`: `rec_schedule`, 03:00 server-local, weekly on Sunday), by refresh (`manual`), and by the end of Trakt's initial import when there's no succeeded run yet (`first_sync`; For You's "Writing your shelves" step). One runs at a time, and each is one member's (§6 "Household members (#239)"). A scheduled or first-sync run that meets the budget or the history check is stored `skipped` with its `skip_reason`, never `failed`; none is queued with `rec_enabled` off or without a key. A missed slot is caught up: when the server was down at the last scheduled time and no run has been queued since (but one was before: a fresh install has missed nothing), the slot's `scheduled` runs are queued shortly after startup (about a minute, so startup isn't slowed). The first-sync run is queued before the import reports `idle`, so For You finds it as `active_run`.
+- **What's never picked** is the viewer's own, not the household's: watched titles (a movie with a play; a show you've started: a Trakt progress row or a play), titles you rated on Trakt (the title's own rating, whatever `use_ratings` says: you've seen it), titles with negative feedback, and shows hidden or dropped on Trakt (`trakt_hidden`). R1 leaves them out of the candidate pool and R2 drops them when it validates a run's items, both through one rule (`candidates.Exclusion` on `library.TitleState`; `TasteRepository.TitleStates` looks titles up in one query). Library titles can be picked: a card shows their state ("Ready").
 - **`GET /recommendations/runs?limit=`** → `{items: [RunSummary]}`, newest first (`id DESC`); `limit` 1–50, default 10, anything else `400 bad_request`.
-- **`GET /recommendations/runs/{id}`** → `RunDetail`; `404 not_found` for an unknown run. Poll every 2 s while it's queued or running.
+- **`GET /recommendations/runs/{id}`** → `RunDetail`; `404 not_found` for an unknown run or another member's. Poll every 2 s while it's queued or running.
 
 **Feedback**
 - **`POST /recommendations/feedback`** with `{media_type, tmdb_id, signal: like|dislike|not_interested|seen, source: shelf|hero|ask|title}` → `204`, an upsert: the newest signal wins (`created_at` kept, `updated_at` set). Any other body is `400 bad_request`.
@@ -952,7 +982,7 @@ RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides
 
 **Ask momoshtrem**
 - **`GET /recommendations/threads`** → `{items: [AskThreadSummary]}`, the newest `updated_at` first, at most 50: `{id, title, created_at, updated_at, turn_count}`.
-- **`GET /recommendations/threads/{id}`** → `AskThread`; `404 not_found` for an unknown one:
+- **`GET /recommendations/threads/{id}`** → `AskThread`; `404 not_found` for an unknown one or another member's:
   ```
   AskThread = AskThreadSummary + { model, turns: [AskTurn] }   // model: the thread's, kept for its life
   AskTurn { id, message, status: streaming|done|error|cancelled,
@@ -964,7 +994,7 @@ RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides
   ```
   A turn's view is written when it ends: a streaming turn has only its message; a cancelled or failed one keeps what it got to. An ended turn has no `active` step: the step still active when it failed or was cancelled is dropped from its view (it never finished, and an old failed turn must never show a spinner), as a finished run has none either. Library, watchlist and feedback are joined at read time, and items with negative feedback are left out, as on `/home`.
 - **`POST /recommendations/ask`** with `{thread_id?, message}`: `message` is 1–500 characters once trimmed, counted in code points (Go's runes; the web counts with `Array.from`, so an emoji is one). Without `thread_id` a thread starts, titled by this rule, in code points: the trimmed message with its first character upper-cased (Go's `unicode.ToUpper` on the first rune); if it's over 60 characters, take its first 60, cut them back to their last space when that space's index (0-based) is over 30 (otherwise keep all 60: a hard cut), trim trailing whitespace, and append `…`.
-  - **JSON errors before the stream**, checked in this order: `400 bad_request` (the body); `503 unavailable` (no key); `404 not_found` (unknown thread); `409 thread_full` (20 turns); `409 ask_busy` (a turn is streaming, in any thread: one at a time); `429 ask_limit` (30 turns started this server-local day, cancelled and failed ones included) and `429 budget_exceeded`, both with `resets_at` (the next local midnight; the 1st of next month).
+  - **JSON errors before the stream**, checked in this order: `400 bad_request` (the body); `503 unavailable` (no key); `404 not_found` (unknown thread, or another member's); `409 thread_full` (20 turns); `409 ask_busy` (one of the viewer's turns is streaming, in any thread: one at a time per member); `429 ask_limit` (30 turns the viewer started this server-local day, cancelled and failed ones included) and `429 budget_exceeded`, both with `resets_at` (the next local midnight; the 1st of next month).
   - **Then `200 text/event-stream`** (`Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`), headers flushed at once:
 
     | Event | Data |
@@ -1003,15 +1033,17 @@ RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides
     month, resets_at,                             // "2026-10", and the 1st of next month 00:00, server-local
     total_usd, budget_usd | null, budget_reached, // this month, every feature; budget_reached: total ≥ budget
     by_feature: [{feature: recs|ask|classifier, cost_usd, requests}],   // always all three, in this order; requests: API calls
-    recs: { last_run: RunSummary | null,          // the newest finished run: succeeded, failed or skipped
-            active_run: RunProgress | null,
-            next_run_at | null },                 // the schedule's next run; null when manual, off or not configured
-    estimates: { run_usd: {claude-opus-5-5: n | null, claude-sonnet-5-5: n | null},   // the mean of each model's last 5 succeeded runs
-                 ask_usd: n | null },                                                // the mean of the last 20 done turns
-    asks_today, ask_daily_limit                   // 30
+    by_member: [{member_id, name, cost_usd, requests}],   // #239: picks and Ask this month, every current member in id order, zeros included
+    recs: { last_run: RunSummary | null,          // the viewer's newest finished run: succeeded, failed or skipped
+            active_run: RunProgress | null,       // the viewer's
+            next_run_at | null },                 // the schedule's next run; null when manual, off, not configured, or the viewer has no Trakt connected
+    estimates: { run_usd: {claude-opus-5-5: n | null, claude-sonnet-5-5: n | null},   // the mean of each model's last 5 succeeded runs, any member's
+                 ask_usd: n | null },                                                // the mean of the last 20 done turns, any member's
+    asks_today, ask_daily_limit                   // the viewer's turns today; 30, per member
   }
   ```
-- **Title pages:** `recommendation_reason` (§6 "Titles and library") is the newest succeeded run's reason for the title (a shelf item's, else a hero pick's); null without one, while picks are off, and after negative feedback.
+  `by_member` doesn't split the classifier's spend (it's the household's), and a removed member has no row: their spend counts only in `total_usd` and `by_feature`.
+- **Title pages:** `recommendation_reason` (§6 "Titles and library") is the viewer's newest succeeded run's reason for the title (a shelf item's, else a hero pick's); null without one, while picks are off, and after negative feedback.
 - **Dropped from earlier drafts:** `in_library` on rec items (replaced by `library`, as on similar titles); `backdrop_dominant_color` on rec items (HANDOFF §6 lists one: the hero loads the title, which has it, as Up next does); the thread's `messages` (replaced by `turns`, the saved views).
 
 ### Torrents and activity (B6)
@@ -1259,7 +1291,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
   - **The streaming reserve** that the governor sets on every pass is `min(reserve_bytes, effective_bytes)`, so without pins the trims are as before. The governor steps down only over bytes a trim can evict, so pins holding the fill above the cap cause no per-minute churn.
   - **A storage PUT and a Keep run one at a time:** the PUT holds the downloads' commit lock from reading `committed_kept_bytes` until its settings are stored.
   - A PATCH or DELETE with a malformed id is `400`, as on every route.
-- **Watched** means a Trakt play or a `local_watches` row (§5 `010`, written when a local session reaches 90%) with a time after the download's `created_at`. Smart picks also count a later episode of the same show streaming.
+- **Watched** means any member's Trakt play (§6 "Household members (#239)") or a `local_watches` row (§5 `010`, written when a local session reaches 90%) with a time after the download's `created_at`. Smart picks also count a later episode of the same show streaming.
 - **Releases are soft** (§5 `010`): a released row stays, with `released_at` and a `release_reason` (`deleted`, `expired`, `watched`). Only active rows are listed, planned or shown as `keep`, so keeping the same thing again makes a new row.
   - Releasing unpins the data. It stays as ordinary cache and plays until the LRU evicts it.
   - The pieces of watched episodes are the first to be evicted (`Demote`).
@@ -1273,7 +1305,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
 
     So a kept airing show stays kept, and next week's episode downloads.
 - **Smart picks** (P5) are the next `smart.episodes_ahead` episodes, with torrent files, of the shows being watched:
-  - Trakt's Up next shows watched in the last 21 days (`smart_source: up_next`);
+  - Trakt's Up next shows watched in the last 21 days (`smart_source: up_next`), from every member's Up next. A show two members watch anchors once, at the next episode of the member who watched it last. Episodes anyone watched are passed over (the windows below), so the slower member's next episode may not download ahead;
   - the episodes after the one streaming now (`streaming`), which works without Trakt.
   - They're episodes only, with `until_watched: true` and `expires_at` 14 days after `created_at`. They never evict anything kept.
   - **Re-picks:**
@@ -1283,7 +1315,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
     - A pick released early as `expired`, because it stopped being a candidate (its window moved, `episodes_ahead` went down, its file went, the show aged out of Up next, Trakt was disconnected, or a stream needed its room), can be picked again at once.
   - A Keep on a smart pick turns it kept (`POST /downloads` below).
 - **The smart picks' details** (P5 #203, `internal/downloads/smart.go`), where the rules above leave room:
-  - **When:** a pass every 5 minutes, after every Trakt sync that ends well, after a storage PUT, and when an episode starts streaming (the manager's 5 s session poll). While `smart.enabled` is off a pass does nothing: it neither picks nor releases. After a storage PUT the pass refreshes the manager's plan before it fits picks, so they fit the new caps.
+  - **When:** a pass every 5 minutes, after every Trakt sync that ends well (any member's), after a storage PUT, and when an episode starts streaming (the manager's 5 s session poll). While `smart.enabled` is off a pass does nothing: it neither picks nor releases. After a storage PUT the pass refreshes the manager's plan before it fits picks, so they fit the new caps.
   - **The windows:** Up next's counts from the episode it names, that one included; a stream's from the episode after the one streaming. Specials anchor nothing. `episodes_ahead` counts episodes in regular seasons whose active assignment is a torrent file.
     - A watched episode and a dismissed one are passed over, not counted: with E5 dismissed and two ahead, E4's stream picks E6 and E7.
     - An episode held back after its lifetime keeps its slot without being picked. So on day 14, when Up next's E3 and E4 expire and nobody has played the show since, nothing new is picked for it until a play.
@@ -1456,6 +1488,58 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
   - from a lower limit, in the save bar: "Kept downloads need X. Stop keeping some, or set a limit that leaves room for them.";
   - when the PUT sent `kept.max_bytes` (the kept cap moves only with the limit and that cap), on the kept cap's field, with focus there: "Kept downloads need X. Enter at least that here, or stop keeping some."
 
+### Household members (#239)
+Several people share one login (D7). Each is a household **member** with their own Trakt, For You, picks, feedback and Ask threads; the library, downloads, Activity and settings are the household's. A request names its member with `X-Momoshtrem-Member` (Conventions). Types: `web/src/lib/api/contract/members.ts`. Served by `internal/member` (B1 #241: the members, the middleware and `/members`), with Trakt per member in B2a #243 and B2b #244, picks in B3a #245, and Ask and the usage split in B3b #246. UI: "Who's watching?", the account menu's switcher and the Trakt note (W1 #242); Settings › Household and the usage split (W2 #247).
+
+```
+GET /members → 200 {items: [Member]}     // by id, never empty; the first is the default member (no header)
+Member {
+  id, name, created_at,
+  color,                                 // rose|orchid|periwinkle|teal|lime|sand (the web maps it to a --member-* token)
+  trakt: {state: off|pending|connected|reauth, username | null}   // as this member's GET /integrations/trakt, which has the rest
+}
+```
+- **`POST /members`** with `{name, color?}` → `201 Member`, with Trakt `off` and nothing personal yet.
+  - `name` is 1–32 characters once trimmed, counted in code points, and unique case-insensitively.
+  - `color` defaults to the first key, in the order above, that no member uses. Member 1 is seeded `teal` (§5 `011`).
+  - Checks, in order: `400` for a body that isn't a JSON object; `422 validation_error` with `error.field` (`name` or `color`); `409 member_limit` with 6 members; `409 member_name_taken`.
+- **`PATCH /members/{id}`** with any of `{name, color}` → `200 Member`, by the same rules; fields left out keep their value. `404`; `400` for a body that isn't a JSON object; `422 validation_error`; `409 member_name_taken`.
+- **`DELETE /members/{id}`** → `204`; `404`; `409 last_member` (the household always has one).
+  - It disconnects the member's Trakt as `DELETE /integrations/trakt` does (the sync stopped, their rows purged, the token revoked, best effort 5 s) and cancels their picks run and Ask turns in flight. Then the member goes, and with them their Trakt settings, taste profiles, runs, feedback and threads.
+  - The household's data stays: the library, downloads, local watches, and the member's AI spend, which still counts in the month's total and the budget.
+  - A request that still names them is `400 unknown_member`, including one that races the delete.
+  - When the delete fails after the disconnect, the member stays, with Trakt `off`.
+- **Personal** (the header's member):
+  - `/integrations/trakt*`: to connect someone's account, switch to them first;
+  - `/me/*`;
+  - `/recommendations/*`: home, refresh, runs, feedback, Ask's threads and turns, debug;
+  - a title's `recommendation_reason` and `watch_state.rating`;
+  - `/settings/ai/usage`'s `recs` and `asks_today`;
+  - `/status`'s `trakt.connected`.
+- **The household's** (the same for every member): everything else. That's titles, seasons and `/library` (watched included, below), mapping jobs, subtitles, search, downloads and smart picks, torrents and Activity, the AI settings and the one budget (`by_member` splits its spend), storage and the quality profile. Streaming sessions and the local watches they write aren't attributed to a member.
+- **Watched is the household's** on title pages, seasons, `/library` and downloads: a movie or an episode is watched when any member has a Trakt play of it (downloads also count a local watch, "Downloads (#77)").
+  - `watch_state.watched_at` is the latest play by anyone, and `plays` the sum of everyone's.
+  - `progress` and `next_episode` are those of the member who played the show last (the newest `last_watched_at` of their Trakt progress; the lower id on a tie).
+  - `rating` is the viewer's. `watch_state` is null when no member has a play or progress of the title and the viewer hasn't rated it.
+  - `/me/*` and picks stay personal: they read only the viewer's Trakt ("Trakt (B5)", "What's never picked"), so a title another member watched can still be picked.
+- **Trakt per member.**
+  - Each member connects their own account, and an account connects to one member: approving a code for an account another member has connected ends the flow with `connect_error: account_in_use`. That's known only once the code is approved, so `POST /integrations/trakt/connect` never answers it.
+  - Each member's sync keeps its own schedule (their first checks are staggered at startup) and writes only their rows. Disconnects and the settings are the member's ("Trakt (B5)").
+- **Picks per member.**
+  - Each `rec_schedule` slot queues one `scheduled` run for every member with Trakt connected, in an order that rotates each slot (by the slot's day; weekly, by its week), so a budget that runs out late in the month doesn't always skip the same member. A missed slot catches up every one of them.
+  - One worker runs them all, oldest queued first, one at a time.
+  - A member has at most one active run.
+  - `first_sync` follows each member's initial import while that member has no succeeded run.
+  - The budget and the AI settings are shared, so two members on a nightly schedule spend about twice as much.
+- **Ask per member.** Threads are private, and `ask_busy` and `ask_limit` count the viewer's turns ("Ask momoshtrem" above), so two members can ask at once. The budget is shared, and the system prompt is the same for everyone.
+- **The web** (W1 #242):
+  - The `momoshtrem_member` cookie names the member. It's a plain cookie (not httpOnly), kept for a year and across sign-out.
+  - The proxy and the web's `/api/status` send it as the header; a malformed cookie sends none.
+  - With one member it's chosen automatically. With two or more and no valid cookie, "Who's watching?" shows before anything personal loads.
+  - `400 unknown_member` clears the cookie and reloads once. Switching writes the cookie, clears the query cache and loads `/`.
+  - A backend without `/members` (`404`) gives the single-member app, as before.
+- **Until the slices land,** a second member isn't safe: Trakt's connection and sync stay the lowest member's until #244, picks until #245, Ask until #246. So Settings › Household (#247) merges after #246, and a second member is added only then.
+
 ### System
 - `GET /status[?refresh=1]` (G2) returns:
   ```
@@ -1466,7 +1550,7 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
     jackett: { configured, reachable, latency_ms?, error?,
                indexers?: [{name, status: ok|timeout|error|unknown, ms: number|null, since: Timestamp|null, error?}] },   // #6
     tmdb: { configured, reachable, latency_ms?, error? },
-    trakt: { configured, connected },             // configured: Trakt's client id and secret and a valid SECRET_KEY; connected: state is connected (B5)
+    trakt: { configured, connected },             // configured: Trakt's client id and secret and a valid SECRET_KEY; connected: the viewer's state is connected (B5; false for an unknown member, #239)
     ai: { configured, mtd_cost_usd },             // mtd_cost_usd: every AI feature's spend this month (ai_usage); null when it can't be read
     opensubtitles: { configured },
     hdrezka: { configured, reachable, latency_ms?, error? }   // #63
@@ -2111,7 +2195,8 @@ F tasks start against the MSW mocks and switch to the real backend as each B or 
 - Quality upgrades, e.g. replacing 720p with 1080p when it becomes available.
 - An "Open in Infuse" deep link on iOS (verify Infuse's URL scheme).
 - PWA push notifications for new episodes and "ready" events.
-- Writing to Trakt (adding to the watchlist), and multi-user support.
+- Writing to Trakt (adding to the watchlist).
+- "Watch together" picks for two members (a follow-up of #239).
 
 ## 11. Agent brief template
 
