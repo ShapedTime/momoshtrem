@@ -49,7 +49,7 @@ func memberMiddleware(members Members) gin.HandlerFunc {
 			// Status still answers, with no one's Trakt connected, and
 			// reports a database it can't read itself.
 		case errors.Is(err, member.ErrUnknown):
-			errorCodeResponse(c, http.StatusBadRequest, CodeUnknownMember, "Nobody in the household has that id: choose who's watching again.")
+			unknownMemberResponse(c)
 			c.Abort()
 			return
 		case errors.Is(err, context.Canceled):
@@ -64,6 +64,12 @@ func memberMiddleware(members Members) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// unknownMemberResponse is 400 unknown_member: the header names an id no
+// member has, or one removed while the request ran.
+func unknownMemberResponse(c *gin.Context) {
+	errorCodeResponse(c, http.StatusBadRequest, CodeUnknownMember, "Nobody in the household has that id: choose who's watching again.")
 }
 
 const statusPath = "/api/status"

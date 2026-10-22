@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/shapedtime/momoshtrem/internal/me"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // fakeMe records what each /me route asked for and answers with err, or
@@ -39,9 +41,28 @@ func (f *fakeMe) History(_ context.Context, page, pageSize int) (*me.HistoryPage
 	return &me.HistoryPage{Items: []me.HistoryItem{}, Page: page, PageSize: pageSize}, nil
 }
 
-type fakeNudger struct{ n int }
+// fakeNudger counts nudges, recording the member of each.
+type fakeNudger struct {
+	n       int
+	members []int64
+}
 
-func (f *fakeNudger) Nudge() { f.n++ }
+func (f *fakeNudger) Nudge(ctx context.Context) {
+	f.n++
+	id, _ := member.IDFrom(ctx)
+	f.members = append(f.members, id)
+}
+
+// GET /me/up-next nudges the sync of the request's member.
+func TestMeRoutes_NudgeIsTheMembers(t *testing.T) {
+	nudge := &fakeNudger{}
+	s := newTestServer(Options{Me: &fakeMe{}, TraktNudge: nudge, Members: &fakeMembers{ids: []int64{1, 2}}})
+	do(t, s, "GET", "/api/me/up-next", map[string]string{MemberHeader: "2"})
+	do(t, s, "GET", "/api/me/up-next", nil)
+	if !slices.Equal(nudge.members, []int64{2, 1}) {
+		t.Errorf("nudged members %v, want [2 1]", nudge.members)
+	}
+}
 
 func TestMeRoutes(t *testing.T) {
 	f, nudge := &fakeMe{}, &fakeNudger{}

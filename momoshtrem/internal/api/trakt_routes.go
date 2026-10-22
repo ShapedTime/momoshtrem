@@ -12,14 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
 // CodeTraktUnavailable is a 502: Trakt's device-code endpoint failed.
 const CodeTraktUnavailable = "trakt_unavailable"
 
-// Trakt is the Trakt integration (PLAN §6 "Trakt (B5)"). *trakt.Auth
-// implements it.
+// Trakt is the Trakt integration (PLAN §6 "Trakt (B5)"), the context's
+// member's. *trakt.Registry implements it.
 type Trakt interface {
 	Integration(ctx context.Context) (trakt.Integration, error)
 	Connect(ctx context.Context) (trakt.DeviceCode, error)
@@ -28,7 +29,7 @@ type Trakt interface {
 	UpdateSettings(ctx context.Context, patch library.TraktSettingsPatch) (library.TraktSettings, error)
 }
 
-var _ Trakt = (*trakt.Auth)(nil)
+var _ Trakt = (*trakt.Registry)(nil)
 
 // registerTraktRoutes adds /integrations/trakt. Without Options.Trakt they
 // answer 503.
@@ -154,9 +155,12 @@ func parseTraktSettingsPatch(raw []byte) (library.TraktSettingsPatch, bool) {
 }
 
 // traktErrorResponse maps the integration's errors. Nothing maps to 401 or
-// 403: the web proxy reads those as a bad backend token.
+// 403: the web proxy reads those as a bad backend token. A member removed
+// while their request ran is unknown_member, as the middleware answers.
 func traktErrorResponse(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, member.ErrUnknown), errors.Is(err, member.ErrNotFound):
+		unknownMemberResponse(c)
 	case errors.Is(err, trakt.ErrNotConfigured):
 		errorResponse(c, http.StatusServiceUnavailable, "Trakt isn’t set up: set TRAKT_CLIENT_ID and SECRET_KEY.")
 	case errors.Is(err, trakt.ErrSyncUnavailable):

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -533,6 +534,43 @@ func TestAuth_Disconnect(t *testing.T) {
 	}
 	if err := e.auth.Disconnect(e.ctx); err != nil || len(e.srv.Revoked()) != 1 {
 		t.Errorf("a second disconnect = %v (revoked %v)", err, e.srv.Revoked())
+	}
+}
+
+// Forget (a member removed) goes past a pending code: from reauth with a
+// code pending, it cancels the code, stops the sync, purges and revokes,
+// where Disconnect only cancels the code.
+func TestAuth_Forget(t *testing.T) {
+	e := newEnv(t)
+	var stopped atomic.Int32
+	e.auth.SetHooks(Hooks{StopSync: func(context.Context) { stopped.Add(1) }})
+	e.connect(e.auth)
+	access, _ := e.storedTokens()
+	e.srv.RevokeAll()
+	e.clock.Advance(6*24*time.Hour + time.Hour)
+	if _, err := e.auth.Token(e.ctx); !errors.Is(err, ErrReauth) {
+		t.Fatalf("Token = %v, want ErrReauth", err)
+	}
+	e.clock.Block(true) // the code is never polled
+	if _, err := e.auth.Connect(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.auth.Forget(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if in := e.integration(e.auth); in.State != StateOff || in.Pending != nil || in.Username != nil {
+		t.Errorf("after Forget = %+v", in)
+	}
+	if row, err := e.store.Get(e.ctx); row != nil || err != nil {
+		t.Errorf("stored connection = %+v, %v", row, err)
+	}
+	if stopped.Load() != 1 || !slices.Equal(e.srv.Revoked(), []string{access}) {
+		t.Errorf("StopSync ran %d times, revoked %v; want once and [%s]", stopped.Load(), e.srv.Revoked(), access)
+	}
+	// Off already: again changes nothing but the (empty) purge.
+	if err := e.auth.Forget(e.ctx); err != nil || len(e.srv.Revoked()) != 1 {
+		t.Errorf("a second Forget = %v (revoked %v)", err, e.srv.Revoked())
 	}
 }
 

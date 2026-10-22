@@ -1,6 +1,7 @@
 package downloads_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,11 +102,15 @@ func (s *streams) set(list ...sessions.Session) {
 	s.list = list
 }
 
-// upNext is Up next as main adapts it (wire_smart.go): the seeded member's.
-type upNext struct{ me *me.Service }
+// upNext is Up next as main adapts it (wire_smart.go) for one member: the
+// seeded member's by default.
+type upNext struct {
+	me     *me.Service
+	member int64
+}
 
 func (u upNext) UpNextShows(ctx context.Context) ([]downloads.UpNextShow, error) {
-	eps, err := u.me.UpNextEpisodes(member.WithID(ctx, 1))
+	eps, err := u.me.UpNextEpisodes(member.WithID(ctx, cmp.Or(u.member, 1)))
 	out := make([]downloads.UpNextShow, len(eps))
 	for i, e := range eps {
 		out[i] = downloads.UpNextShow{ShowID: e.ShowID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber,
@@ -183,17 +188,26 @@ func (a *account) serve(clock *testClock) {
 
 // watched has Trakt hold plays of the first n episodes, the last at at, and
 // name episode n+1 next.
-func (a *account) watched(n int, at time.Time) {
+func (a *account) watched(n int, at time.Time) { a.watchedBy("", n, at) }
+
+// watchedBy is watched for the user with slug only (every user's for "").
+func (a *account) watchedBy(slug string, n int, at time.Time) {
+	list := a.srv.List
+	if slug != "" {
+		list = func(path string, items any) { a.srv.ListFor(slug, path, items) }
+	}
 	var plays []obj
 	for e := n; e >= 1; e-- {
 		plays = append(plays, play(1000+e, e, at.Add(-time.Duration(n-e)*time.Hour)))
 	}
-	a.srv.List("/sync/history/episodes", plays)
-	a.srv.List("/sync/progress/watched", []obj{{"show": breakingBad, "progress": obj{
+	list("/sync/history/episodes", plays)
+	list("/sync/progress/watched", []obj{{"show": breakingBad, "progress": obj{
 		"aired": 7, "completed": n, "last_watched_at": at.Format(time.RFC3339), "reset_at": nil,
 		"next_episode": traktEpisode(n + 1), "last_episode": traktEpisode(n), "stats": obj{"play_count": n}}}})
 	a.mu.Lock()
-	a.episodesAt = at
+	if at.After(a.episodesAt) {
+		a.episodesAt = at
+	}
 	a.mu.Unlock()
 }
 
@@ -224,10 +238,22 @@ func pickRows(t *testing.T, db *library.DB) []pickRow {
 	return out
 }
 
-// Up next makes the picks; a watch releases one and the next joins; a
-// dismissed pick isn't picked again; with Trakt disconnected, Up next's
-// picks expire and the streaming signal alone picks.
-func TestSmart_UpNextFromTrakt(t *testing.T) {
+// smartWorld is Breaking Bad's first season in the library, every episode
+// a file of one torrent, smart downloads on (2 episodes ahead), and the
+// download manager over a real piece cache and governor.
+type smartWorld struct {
+	ctx   context.Context
+	db    *library.DB
+	clock *testClock
+	repo  *library.DownloadsRepository
+	svc   *downloads.Service
+	live  *streams
+	show  int64
+	hash  string
+}
+
+func newSmartWorld(t *testing.T) *smartWorld {
+	t.Helper()
 	ctx := context.Background()
 	db := openSchemaDB(t)
 	clock := &testClock{now: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
@@ -275,6 +301,48 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 	svc := downloads.New(downloads.Deps{Store: repo, Limits: gov, Cache: cache, Client: idleClient{},
 		Sessions: live, Clock: clock, Location: time.UTC})
 	gov.SetDownloads(svc)
+	return &smartWorld{ctx: ctx, db: db, clock: clock, repo: repo, svc: svc, live: live, show: show, hash: hash}
+}
+
+// run is a smart pass, then a manager pass.
+func (w *smartWorld) run(t *testing.T, picker *downloads.SmartPicker) {
+	t.Helper()
+	if err := picker.Run(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.svc.Refresh(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (w *smartWorld) want(t *testing.T, when string, rows ...pickRow) {
+	t.Helper()
+	if got := pickRows(t, w.db); !reflect.DeepEqual(got, rows) {
+		t.Errorf("%s: picks = %v, want %v", when, got, rows)
+	}
+}
+
+// traktClient is a client of the fake Trakt on clock.
+func traktClient(srv *trakttest.Server, clock trakt.Clock) *trakt.Client {
+	return trakt.NewClient(trakttest.ClientID, trakttest.ClientSecret, "test",
+		trakt.WithBaseURLs(srv.URL, srv.URL), trakt.WithClock(clock), trakt.WithLimiters(nil, nil))
+}
+
+func traktBox(t *testing.T) *secret.Box {
+	t.Helper()
+	box, err := secret.New(strings.Repeat("0f", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return box
+}
+
+// Up next makes the picks; a watch releases one and the next joins; a
+// dismissed pick isn't picked again; with Trakt disconnected, Up next's
+// picks expire and the streaming signal alone picks.
+func TestSmart_UpNextFromTrakt(t *testing.T) {
+	w := newSmartWorld(t)
+	ctx, db, clock, repo, svc, live, show, hash := w.ctx, w.db, w.clock, w.repo, w.svc, w.live, w.show, w.hash
 
 	// Trakt, connected through the device code; each sync tells.
 	srv := trakttest.New(t)
@@ -282,14 +350,9 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 	acct := &account{srv: srv}
 	acct.serve(clock)
 	acct.watched(2, clock.Now().Add(-48*time.Hour))
-	box, err := secret.New(strings.Repeat("0f", 32))
-	if err != nil {
-		t.Fatal(err)
-	}
 	auth := trakt.NewAuth(trakt.AuthDeps{
-		Client: trakt.NewClient(trakttest.ClientID, trakttest.ClientSecret, "test",
-			trakt.WithBaseURLs(srv.URL, srv.URL), trakt.WithClock(clock), trakt.WithLimiters(nil, nil)),
-		Box: box, Store: library.NewTraktAuthRepository(db).ForMember(1), Settings: library.NewMemberRepository(db).TraktSettingsFor(1),
+		Client: traktClient(srv, clock), Box: traktBox(t),
+		Store: library.NewTraktAuthRepository(db).ForMember(1), Settings: library.NewMemberRepository(db).TraktSettingsFor(1),
 		Clock: clock,
 	})
 	t.Cleanup(auth.Close)
@@ -307,22 +370,15 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 		}
 	}
 
-	picker := downloads.NewSmartPicker(svc, downloads.SmartDeps{Store: repo, UpNext: upNext{me.New(me.Deps{
+	picker := downloads.NewSmartPicker(svc, downloads.SmartDeps{Store: repo, UpNext: upNext{me: me.New(me.Deps{
 		Store: library.NewCatalogRepository(db), Settings: library.NewMemberRepository(db), Now: clock.Now})}})
 	run := func() {
 		t.Helper()
-		if err := picker.Run(ctx); err != nil {
-			t.Fatal(err)
-		}
-		if err := svc.Refresh(ctx); err != nil {
-			t.Fatal(err)
-		}
+		w.run(t, picker)
 	}
 	want := func(when string, rows ...pickRow) {
 		t.Helper()
-		if got := pickRows(t, db); !reflect.DeepEqual(got, rows) {
-			t.Errorf("%s: picks = %v, want %v", when, got, rows)
-		}
+		w.want(t, when, rows...)
 	}
 
 	run()
@@ -387,4 +443,113 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 		pickRow{3, library.SmartUpNext, library.ReleaseWatched}, pickRow{4, library.SmartUpNext, library.ReleaseExpired},
 		pickRow{5, library.SmartUpNext, library.ReleaseDeleted}, pickRow{6, library.SmartUpNext, library.ReleaseExpired},
 		pickRow{6, library.SmartStreaming, ""}, pickRow{7, library.SmartStreaming, ""})
+}
+
+// pollClock is testClock for a registry, whose syncs run a schedule: a
+// wait of a minute or more (a schedule's) lasts until its context ends;
+// a shorter one (the device code's poll) ends at once.
+type pollClock struct{ *testClock }
+
+func (c pollClock) Sleep(ctx context.Context, d time.Duration) error {
+	if d >= time.Minute {
+		<-ctx.Done()
+	}
+	return ctx.Err()
+}
+
+// householdUpNext is Up next as main adapts it with several members
+// (wire_smart.go): every member's, by member id.
+type householdUpNext struct {
+	me  *me.Service
+	ids []int64
+}
+
+func (u householdUpNext) UpNextShows(ctx context.Context) ([]downloads.UpNextShow, error) {
+	var out []downloads.UpNextShow
+	for _, id := range u.ids {
+		shows, err := upNext{me: u.me, member: id}.UpNextShows(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, shows...)
+	}
+	return out, nil
+}
+
+// Two members watch Breaking Bad, each on their own Trakt account (#244):
+// the picks read both Up nexts, and the show anchors once, at the next
+// episode of whoever watched it last. Episodes anyone watched are passed
+// over. A member's disconnect takes their Up next and their plays with it.
+func TestSmart_UpNextFromTwoMembers(t *testing.T) {
+	w := newSmartWorld(t)
+	ctx, clock := w.ctx, w.clock
+	members := library.NewMemberRepository(w.db)
+	bob, err := members.Create(ctx, "Bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ann := int64(1)
+
+	// Ann watched E1–E2 two days ago, Bob E1–E4 yesterday.
+	srv := trakttest.New(t)
+	srv.SetClock(clock.Now)
+	acct := &account{srv: srv}
+	acct.serve(clock)
+	acct.watchedBy("ann", 2, clock.Now().Add(-48*time.Hour))
+	acct.watchedBy("bob", 4, clock.Now().Add(-24*time.Hour))
+	auths, syncs := library.NewTraktAuthRepository(w.db), library.NewTraktSyncStore(w.db)
+	reg := trakt.NewRegistry(trakt.RegistryDeps{
+		Client: traktClient(srv, pollClock{clock}), Box: traktBox(t), Clock: pollClock{clock},
+		Auths:    func(id int64) trakt.Store { return auths.ForMember(id) },
+		Syncs:    func(id int64) trakt.SyncStore { return syncs.ForMember(id) },
+		Settings: func(id int64) trakt.Settings { return members.TraktSettingsFor(id) },
+	})
+	t.Cleanup(reg.Stop)
+	reg.Start(ctx, []int64{ann, bob.ID})
+	synced := make(chan struct{}, 8)
+	reg.SetOnSynced(func() { synced <- struct{}{} })
+	waitSynced := func(what string) {
+		t.Helper()
+		select {
+		case <-synced:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s never ended", what)
+		}
+	}
+	connect := func(id int64, username, slug string) {
+		t.Helper()
+		srv.SetUser(username, slug)
+		if _, err := reg.Connect(member.WithID(ctx, id)); err != nil {
+			t.Fatal(err)
+		}
+		waitSynced(username + "'s import")
+	}
+	connect(ann, "Ann", "ann")
+	connect(bob.ID, "Bob", "bob")
+
+	picker := downloads.NewSmartPicker(w.svc, downloads.SmartDeps{Store: w.repo, UpNext: householdUpNext{
+		me:  me.New(me.Deps{Store: library.NewCatalogRepository(w.db), Settings: members, Now: clock.Now}),
+		ids: []int64{ann, bob.ID}}})
+	w.run(t, picker)
+	w.want(t, "Bob watched last: from his E5", pickRow{5, library.SmartUpNext, ""}, pickRow{6, library.SmartUpNext, ""})
+
+	// Ann catches up to E3 now: she watched last, and her next, E4, Bob
+	// watched, so the window still starts at E5.
+	clock.advance(time.Hour)
+	acct.watchedBy("ann", 3, clock.Now().Add(-time.Minute))
+	if _, err := reg.SyncNow(member.WithID(ctx, ann)); err != nil {
+		t.Fatal(err)
+	}
+	waitSynced("Ann's sync")
+	w.run(t, picker)
+	w.want(t, "Ann watched last, E4 watched by Bob", pickRow{5, library.SmartUpNext, ""}, pickRow{6, library.SmartUpNext, ""})
+
+	// Bob disconnects: his plays go, and Ann's Up next alone picks from
+	// her E4.
+	if err := reg.Disconnect(member.WithID(ctx, bob.ID)); err != nil {
+		t.Fatal(err)
+	}
+	w.run(t, picker)
+	w.want(t, "Bob disconnected",
+		pickRow{5, library.SmartUpNext, ""}, pickRow{6, library.SmartUpNext, library.ReleaseExpired}, pickRow{4, library.SmartUpNext, ""})
 }

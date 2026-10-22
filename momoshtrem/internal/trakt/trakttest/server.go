@@ -4,6 +4,11 @@
 // paginated lists, scripted replies (429 with or without Retry-After, 5xx)
 // and a log of every request.
 //
+// Each token belongs to the user SetUser named when it was granted (a
+// refresh keeps the user), so several accounts can be connected at once:
+// /users/settings answers the token's user, and ListFor serves a list to
+// one user only.
+//
 // Like Trakt it refuses requests without a User-Agent or without the app's
 // trakt-api-key and trakt-api-version headers (403), and authed API paths
 // answer 401 for a token that isn't current: replaced by a refresh,
@@ -62,18 +67,22 @@ type Server struct {
 	deviceAnswers []int
 	deviceUsed    bool
 	lifetime      time.Duration
-	username      string
-	slug          string
+	user          user // SetUser's: the next grants'
 	seq           int
 	access        map[string]time.Time // current access tokens and when they expire
 	refresh       map[string]bool      // issued refresh tokens: true until used or revoked
 	pairs         map[string]string
+	owners        map[string]user // every token granted, access and refresh, and its user
 	revoked       []string
 	queued        map[string][]Reply
 	lists         map[string][]json.RawMessage
+	userLists     map[string]map[string][]json.RawMessage // ListFor's: slug → path → items
 	handlers      map[string]http.HandlerFunc
 	log           []Request
 }
+
+// user is a Trakt account.
+type user struct{ username, slug string }
 
 // New starts a fake Trakt, closed when the test ends.
 func New(t testing.TB) *Server {
@@ -83,13 +92,14 @@ func New(t testing.TB) *Server {
 		expiresIn:     600,
 		deviceAnswers: []int{http.StatusOK},
 		lifetime:      7 * 24 * time.Hour,
-		username:      "Teymur",
-		slug:          "teymur",
+		user:          user{username: "Teymur", slug: "teymur"},
 		access:        map[string]time.Time{},
 		refresh:       map[string]bool{},
 		pairs:         map[string]string{},
+		owners:        map[string]user{},
 		queued:        map[string][]Reply{},
 		lists:         map[string][]json.RawMessage{},
+		userLists:     map[string]map[string][]json.RawMessage{},
 		handlers:      map[string]http.HandlerFunc{},
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
@@ -122,11 +132,21 @@ func (s *Server) SetDeviceAnswers(statuses ...int) {
 	s.deviceUsed = false
 }
 
-// SetUser sets the account the tokens belong to.
+// SetUser sets the account the tokens granted from now on belong to (the
+// user who approves the device code); tokens granted before keep theirs.
 func (s *Server) SetUser(username, slug string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.username, s.slug = username, slug
+	s.user = user{username: username, slug: slug}
+}
+
+// ResetDevice makes the device code new again: unused, and approved on the
+// first poll, so another device flow can run after SetDeviceAnswers.
+func (s *Server) ResetDevice() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deviceAnswers = []int{http.StatusOK}
+	s.deviceUsed = false
 }
 
 // SetTokenLifetime sets the expires_in of the tokens granted from now on.
@@ -136,11 +156,11 @@ func (s *Server) SetTokenLifetime(d time.Duration) {
 	s.lifetime = d
 }
 
-// Grant issues a token pair without the device flow.
+// Grant issues a token pair without the device flow, to SetUser's user.
 func (s *Server) Grant() (access, refresh string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	set := s.grantLocked()
+	set := s.grantLocked(s.user)
 	return set["access_token"].(string), set["refresh_token"].(string)
 }
 
@@ -179,8 +199,27 @@ func (s *Server) Queue(path string, replies ...Reply) {
 }
 
 // List serves items (a slice) at path as an authed, paginated list: page
-// and limit (default 10, at most 250) with the X-Pagination headers.
+// and limit (default 10, at most 250) with the X-Pagination headers. It's
+// every user's list, but for a user ListFor gave their own.
 func (s *Server) List(path string, items any) {
+	raw := marshalItems(items)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lists[path] = raw
+}
+
+// ListFor serves items at path as List does, to the user with slug only.
+func (s *Server) ListFor(slug, path string, items any) {
+	raw := marshalItems(items)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.userLists[slug] == nil {
+		s.userLists[slug] = map[string][]json.RawMessage{}
+	}
+	s.userLists[slug][path] = raw
+}
+
+func marshalItems(items any) []json.RawMessage {
 	v := reflect.ValueOf(items)
 	raw := make([]json.RawMessage, v.Len())
 	for i := range raw {
@@ -190,9 +229,7 @@ func (s *Server) List(path string, items any) {
 		}
 		raw[i] = b
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lists[path] = raw
+	return raw
 }
 
 // Handle serves path with h once the token checks out.
@@ -310,7 +347,7 @@ func (s *Server) deviceToken(w http.ResponseWriter, body map[string]string) {
 		return
 	}
 	s.deviceUsed = true
-	writeJSON(w, http.StatusOK, s.grantLocked())
+	writeJSON(w, http.StatusOK, s.grantLocked(s.user))
 }
 
 func (s *Server) refreshToken(w http.ResponseWriter, body map[string]string) {
@@ -328,7 +365,7 @@ func (s *Server) refreshToken(w http.ResponseWriter, body map[string]string) {
 	// Single-use: the old pair is dead from here on.
 	s.refresh[old] = false
 	delete(s.access, s.pairs[old])
-	writeJSON(w, http.StatusOK, s.grantLocked())
+	writeJSON(w, http.StatusOK, s.grantLocked(s.owners[old]))
 }
 
 func (s *Server) revoke(w http.ResponseWriter, body map[string]string) {
@@ -348,13 +385,14 @@ func (s *Server) revoke(w http.ResponseWriter, body map[string]string) {
 	reply(w, http.StatusOK, "{}")
 }
 
-// grantLocked issues a new pair.
-func (s *Server) grantLocked() map[string]any {
+// grantLocked issues a new pair to u.
+func (s *Server) grantLocked(u user) map[string]any {
 	s.seq++
 	access, refresh := fmt.Sprintf("access-%d", s.seq), fmt.Sprintf("refresh-%d", s.seq)
 	s.access[access] = s.now().Add(s.lifetime)
 	s.refresh[refresh] = true
 	s.pairs[refresh] = access
+	s.owners[access], s.owners[refresh] = u, u
 	return map[string]any{
 		"access_token": access, "token_type": "bearer", "expires_in": int64(s.lifetime / time.Second),
 		"refresh_token": refresh, "scope": "public", "created_at": s.now().Unix(),
@@ -366,8 +404,11 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	expires, ok := s.access[token]
 	valid := ok && s.now().Before(expires)
-	username, slug := s.username, s.slug
-	items, isList := s.lists[r.URL.Path]
+	owner := s.owners[token]
+	items, isList := s.userLists[owner.slug][r.URL.Path]
+	if !isList {
+		items, isList = s.lists[r.URL.Path]
+	}
 	handler := s.handlers[r.URL.Path]
 	s.mu.Unlock()
 
@@ -383,8 +424,8 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/users/settings":
 		writeJSON(w, http.StatusOK, map[string]any{
 			"user": map[string]any{
-				"username": username, "private": false, "name": username, "vip": false, "vip_ep": false,
-				"ids": map[string]any{"slug": slug},
+				"username": owner.username, "private": false, "name": owner.username, "vip": false, "vip_ep": false,
+				"ids": map[string]any{"slug": owner.slug},
 			},
 			"account": map[string]any{"timezone": "Europe/Berlin", "time_24hr": true},
 		})

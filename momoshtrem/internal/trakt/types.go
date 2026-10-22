@@ -68,6 +68,9 @@ const (
 	ConnectExpired ConnectError = "expired"
 	ConnectDenied  ConnectError = "denied" // free accounts can connect only 2 apps
 	ConnectFailed  ConnectError = "failed"
+	// ConnectAccountInUse: another household member has connected the
+	// account (an account connects to one member).
+	ConnectAccountInUse ConnectError = "account_in_use"
 )
 
 // DeviceCode is the live device code for the user (TraktConnect).

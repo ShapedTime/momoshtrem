@@ -31,7 +31,6 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/metrics"
 	"github.com/shapedtime/momoshtrem/internal/opensubtitles"
 	"github.com/shapedtime/momoshtrem/internal/search"
-	"github.com/shapedtime/momoshtrem/internal/secret"
 	"github.com/shapedtime/momoshtrem/internal/service"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/status"
@@ -40,7 +39,6 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/torrent"
 	"github.com/shapedtime/momoshtrem/internal/torznab"
-	"github.com/shapedtime/momoshtrem/internal/trakt"
 	"github.com/shapedtime/momoshtrem/internal/vfs"
 	"github.com/shapedtime/momoshtrem/internal/webdav"
 )
@@ -173,11 +171,10 @@ func main() {
 	}
 	api.ValidateOptions(apiOpts)
 
-	// Household members (#241), read before anything starts. Trakt's rows
-	// are each member's (#243), but until each member has their own
-	// connection (#244) the one there is, its sync, smart downloads' Up
-	// next and the picks are the lowest member's at startup.
-	members, traktMember, err := newMembers(db)
+	// Household members (#241), read before anything starts. Each has
+	// their own Trakt connection and sync (#244, wireTrakt below), but the
+	// picks stay the lowest member's at startup until #245.
+	members, picksMember, err := newMembers(db)
 	if err != nil {
 		slog.Error("Failed to read the household's members", "error", err)
 		os.Exit(1)
@@ -493,56 +490,16 @@ func main() {
 		apiOpts.Releases = searchService
 		slog.Info("Torrent search configured")
 	}
-	// Trakt (B5, read-only): the device-code connect and its tokens,
-	// sealed with SECRET_KEY. It's configured with TRAKT_CLIENT_ID and a
-	// SECRET_KEY of 64 hex characters (or at least 32); TRAKT_CLIENT_SECRET
-	// is optional (Trakt no longer issues one to new apps). Without them the
-	// state is off and connect answers 503.
-	var traktClient *trakt.Client
-	var traktBox *secret.Box
-	if cfg.Trakt.ClientID != "" {
-		if box, err := secret.New(cfg.Security.SecretKey); err != nil {
-			slog.Warn("Trakt disabled: SECRET_KEY can't encrypt its tokens", "error", err)
-		} else {
-			traktClient = trakt.NewClient(cfg.Trakt.ClientID, cfg.Trakt.ClientSecret, version)
-			traktBox = box
-		}
-	}
-	traktAuth := trakt.NewAuth(trakt.AuthDeps{
-		Client:   traktClient,
-		Box:      traktBox,
-		Store:    library.NewTraktAuthRepository(db).ForMember(traktMember),
-		Settings: library.NewMemberRepository(db).TraktSettingsFor(traktMember),
-	})
-	if err := traktAuth.Load(context.Background()); err != nil {
-		slog.Error("Failed to read the Trakt connection; trying again on first use", "error", err)
-	}
-	statusOpts.TraktConfigured = traktAuth.Configured()
-	statusOpts.TraktConnected = traktAuth.Connected
-	apiOpts.Trakt = traktAuth
-	if traktAuth.Configured() {
-		slog.Info("Trakt configured", "connected", traktAuth.Connected())
-	}
-	// The Trakt sync (#132): the initial import after a connect, a
-	// last_activities check every 30 minutes and a nightly reconcile.
-	// Artwork for titles outside the library comes through the TMDB cache.
-	var traktArtwork trakt.Artwork
-	if cfg.TMDB.APIKey != "" {
-		traktArtwork = cachedTMDB
-	}
-	traktSync := trakt.NewSyncer(trakt.SyncDeps{
-		Auth:    traktAuth,
-		Store:   library.NewTraktSyncStore(db).ForMember(traktMember),
-		Artwork: traktArtwork,
-	})
-	traktAuth.SetHooks(traktSync.Hooks())
-	if traktAuth.Configured() {
-		traktSync.Start()
-		apiOpts.TraktNudge = traktSync // reading Up next syncs when the last check is 5 min old
+	// Trakt, one connection and sync per household member (#244,
+	// wire_trakt.go).
+	traktRegistry, err := wireTrakt(cfg, db, members, cachedTMDB, &statusOpts, &apiOpts)
+	if err != nil {
+		slog.Error("Failed to set up Trakt", "error", err)
+		os.Exit(1)
 	}
 	// Household members (#241): /members, and the member each API request
 	// is for (the X-Momoshtrem-Member header's, else the lowest id).
-	wireMembers(members, traktMember, traktAuth, &apiOpts)
+	wireMembers(members, traktRegistry, &apiOpts)
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
 	apiOpts.TMDB = cachedTMDB
@@ -661,13 +618,14 @@ func main() {
 	apiOpts.Me = meService
 
 	// Smart downloads (#77): the next episodes of the shows being watched,
-	// from Trakt's Up next and what streams now, while smart.enabled is on.
+	// from every member's Trakt Up next and what streams now, while
+	// smart.enabled is on.
 	smartPicker := wireSmart(smartDeps{
 		db:        db,
 		downloads: downloadsService,
 		me:        meService,
-		member:    traktMember,
-		traktSync: traktSync,
+		members:   members,
+		trakt:     traktRegistry,
 	})
 	smartPicker.Start()
 
@@ -676,15 +634,14 @@ func main() {
 	// its own wire_*.go. Their times (the 03:00 schedule, the hero's day,
 	// Ask's daily limit, the budget month) are server-local: TZ.
 	aiFeatures := aiDeps{
-		cfg:       cfg,
-		db:        db,
-		settings:  settingsRepo,
-		aiStore:   aiStore,
-		tmdb:      cachedTMDB,
-		member:    traktMember,
-		catalog:   catalogService,
-		traktAuth: traktAuth,
-		traktSync: traktSync,
+		cfg:      cfg,
+		db:       db,
+		settings: settingsRepo,
+		aiStore:  aiStore,
+		tmdb:     cachedTMDB,
+		member:   picksMember,
+		catalog:  catalogService,
+		trakt:    traktRegistry,
 	}
 	aiCoreService := wireAI(aiFeatures, &apiOpts)
 	recs := wireRecs(aiFeatures, aiCoreService, &apiOpts)
@@ -802,9 +759,9 @@ func main() {
 	recs.Close()
 	aiCoreService.Close()
 
-	// Stop the Trakt sync (at most 10 s), then polling a pending device code
-	traktSync.Stop()
-	traktAuth.Close()
+	// Stop every member's Trakt sync, all at once (at most 10 s), then
+	// polling their pending device codes
+	traktRegistry.Stop()
 
 	// Stop the smart picks and the download manager (loads in flight end
 	// with the client), then the storage governor; a trim stops between two

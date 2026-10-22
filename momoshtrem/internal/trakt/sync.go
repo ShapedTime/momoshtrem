@@ -70,6 +70,12 @@ type SyncDeps struct {
 	Store   SyncStore
 	Artwork Artwork // nil: no details step
 	Clock   Clock   // nil: real time
+	// FirstDelay is how long after Start the first check runs; 0: a
+	// minute. The registry staggers its members' with it.
+	FirstDelay time.Duration
+	// Member is whose sync it is (the stores are bound to them), for the
+	// logs only; 0 leaves it out.
+	Member int64
 }
 
 // Syncer imports the Trakt account (PLAN §6 "Trakt (B5)", #132): the
@@ -78,11 +84,12 @@ type SyncDeps struct {
 // one is a day old. One sync runs at a time; a trigger during one queues
 // exactly one more. It is safe for concurrent use.
 type Syncer struct {
-	auth  SyncAuth
-	store SyncStore
-	art   Artwork
-	clock Clock
-	log   *slog.Logger
+	auth       SyncAuth
+	store      SyncStore
+	art        Artwork
+	clock      Clock
+	firstDelay time.Duration
+	log        *slog.Logger
 
 	wg sync.WaitGroup
 
@@ -126,9 +133,13 @@ func (s *Syncer) SetOnSynced(fn func()) {
 // NewSyncer creates the sync. Plug it in with Auth.SetHooks(s.Hooks()),
 // then Start it.
 func NewSyncer(d SyncDeps) *Syncer {
-	s := &Syncer{auth: d.Auth, store: d.Store, art: d.Artwork, clock: d.Clock, log: slog.With("component", "trakt-sync")}
+	s := &Syncer{auth: d.Auth, store: d.Store, art: d.Artwork, clock: d.Clock, firstDelay: d.FirstDelay,
+		log: memberLog("trakt-sync", d.Member)}
 	if s.clock == nil {
 		s.clock = realClock{}
+	}
+	if s.firstDelay <= 0 {
+		s.firstDelay = firstSyncDelay
 	}
 	return s
 }
@@ -145,8 +156,9 @@ func (s *Syncer) Hooks() Hooks {
 	}
 }
 
-// Start runs the schedule: a check a minute after startup, then every 30
-// minutes, each a reconcile once the last one is over a day old.
+// Start runs the schedule: a check a minute after startup (FirstDelay),
+// then every 30 minutes, each a reconcile once the last one is over a day
+// old.
 func (s *Syncer) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
@@ -164,7 +176,7 @@ func (s *Syncer) Start() {
 }
 
 func (s *Syncer) loop(ctx context.Context) {
-	wait := firstSyncDelay
+	wait := s.firstDelay
 	for {
 		s.mu.Lock()
 		s.nextAt = s.clock.Now().Add(wait)

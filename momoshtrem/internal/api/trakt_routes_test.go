@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
@@ -127,10 +128,13 @@ func TestTraktRoutes_Errors(t *testing.T) {
 		{"POST", "/api/integrations/trakt/sync", trakt.ErrNotConnected, 409, CodeConflict},
 		{"GET", "/api/integrations/trakt", errors.New("connection refused"), 500, CodeInternalError},
 		{"DELETE", "/api/integrations/trakt", errors.New("connection refused"), 500, CodeInternalError},
+		// The member was removed while the request ran.
+		{"GET", "/api/integrations/trakt", member.ErrUnknown, 400, CodeUnknownMember},
+		{"PUT", "/api/integrations/trakt/settings", fmt.Errorf("wrapped: %w", member.ErrNotFound), 400, CodeUnknownMember},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path+" "+tt.err.Error(), func(t *testing.T) {
-			rec := doTrakt(t, newTestServer(Options{Trakt: &fakeTrakt{err: tt.err}}), tt.method, tt.path, "")
+			rec := doTrakt(t, newTestServer(Options{Trakt: &fakeTrakt{err: tt.err}}), tt.method, tt.path, "{}")
 			if rec.Code != tt.status || decodeError(t, rec).Code != tt.code {
 				t.Errorf("= %d %s, want %d %s", rec.Code, rec.Body, tt.status, tt.code)
 			}

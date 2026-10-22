@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/shapedtime/momoshtrem/internal/me"
+	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
 // MeLists serves the user's lists (PLAN §6 "Trakt (B5)"). *me.Service
@@ -23,12 +24,15 @@ type MeLists interface {
 
 var _ MeLists = (*me.Service)(nil)
 
-// TraktNudger starts an incremental Trakt sync in the background when the
-// last check is over 5 minutes old, and returns at once (#132). Reading Up
-// next nudges it.
+// TraktNudger starts an incremental Trakt sync of the context's member in
+// the background when their last check is over 5 minutes old, and returns
+// at once (#132). Reading Up next nudges it. *trakt.Registry implements
+// it.
 type TraktNudger interface {
-	Nudge()
+	Nudge(ctx context.Context)
 }
+
+var _ TraktNudger = (*trakt.Registry)(nil)
 
 // registerMeRoutes adds /me. Every route answers 503 without Options.Me.
 func (s *Server) registerMeRoutes(api *gin.RouterGroup) {
@@ -53,7 +57,7 @@ func (s *Server) getUpNext(c *gin.Context) {
 		return
 	}
 	if s.opts.TraktNudge != nil {
-		s.opts.TraktNudge.Nudge()
+		s.opts.TraktNudge.Nudge(c.Request.Context())
 	}
 	items, err := s.opts.Me.UpNext(c.Request.Context())
 	if err != nil {
