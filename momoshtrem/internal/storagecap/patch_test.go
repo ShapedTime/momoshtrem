@@ -201,10 +201,25 @@ func fieldIs(err *FieldError, field string) bool {
 	return err != nil && err.Field == field
 }
 
-func TestFormatGB(t *testing.T) {
-	for n, want := range map[int64]string{MinBytes: "4 GB", gib(2.5): "2.5 GB", gib(147.6): "148 GB", 0: "0 GB"} {
-		if got := formatGB(n); got != want {
-			t.Errorf("formatGB(%d) = %q, want %q", n, got, want)
+// The web's formatBytes gives the same strings (web/src/lib/title/format.ts).
+func TestFormatBytes(t *testing.T) {
+	for n, want := range map[int64]string{
+		MinBytes:   "4.3 GB",
+		4e9:        "4.0 GB",
+		gib(2.5):   "2.7 GB",
+		gib(147.6): "158 GB",
+		99.96e9:    "100.0 GB",
+		1.5e12:     "1.5 TB",
+		512:        "512 B",
+		0:          "0 B",
+		-1:         "0 B",
+		// toFixed's ties: an exact one goes up, a near one by its binary value.
+		2.25e9:  "2.3 GB",
+		158.5e9: "159 GB",
+		2.15e9:  "2.1 GB",
+	} {
+		if got := formatBytes(n); got != want {
+			t.Errorf("formatBytes(%d) = %q, want %q", n, got, want)
 		}
 	}
 }

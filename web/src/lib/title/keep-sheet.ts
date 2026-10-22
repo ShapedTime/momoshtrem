@@ -101,6 +101,14 @@ export type KeepSubjectResult =
  */
 export const downloadsAvailable = (holder: { keep?: Keep | null } | null | undefined): boolean => holder?.keep !== undefined;
 
+/**
+ * The episode sheet has a keep section (and the row's options name it): once something keeps the
+ * episode, or with a torrent file (HDRezka streams from the CDN, so a Keep would be refused).
+ * Nothing while the backend has no downloads.
+ */
+export const episodeKeepOffered = (episode: Pick<EpisodeSummary, 'keep' | 'webdav_path' | 'source'>): boolean =>
+  downloadsAvailable(episode) && (keepOf(episode.keep) !== null || (episode.webdav_path !== null && episode.source !== 'hdrezka'));
+
 /** The library target for `context`, and its download, from the title and (season and episode scopes) the season. */
 export function keepSubject(context: KeepContext, title: Title, season: SeasonDetail | undefined): KeepSubjectResult {
   const libraryId = title.library.library_id;
@@ -164,7 +172,7 @@ export function heldByCopy(heldBy: Keep, seasonNumber: number): string | null {
   return `${what} ${how}, so this episode is too.`;
 }
 
-// ---- Toasts and the Stop keeping confirmation --------------------------------------
+// ---- Toasts (Stop keeping's are `stopKeepingCopy` in keep.ts, shared with Activity) ---
 
 /** After a Keep: what it is now ("Kept until watched · by Nov 16"), and whether it downloads. */
 export function keptToast(download: Pick<Download, 'reason' | 'state' | 'until_watched' | 'expires_at'>, name: string, now: Date = new Date()) {
@@ -183,19 +191,3 @@ export const changedToast = (download: Pick<Download, 'reason' | 'until_watched'
   title: `Changed how long ${name} is kept`,
   body: keepExpiryLabel(download, now),
 });
-
-const STAYS = 'What’s downloaded stays as cache and plays until it’s cleared to make room.';
-
-/** The confirmation: what goes (the hold) and what stays (the data, as cache). A smart pick isn't picked again. */
-export function stopKeepingConfirm(keep: Pick<Keep, 'reason'>, name: string) {
-  return keep.reason === 'smart'
-    ? { title: `Dismiss the smart pick for ${name}?`, description: `It won’t be downloaded ahead again. ${STAYS}`, confirmLabel: 'Dismiss' }
-    : { title: `Stop keeping ${name}?`, description: `It’s no longer held on disk. ${STAYS}`, confirmLabel: 'Stop keeping' };
-}
-
-export function stoppedToast(keep: Pick<Keep, 'reason'>, name: string) {
-  return {
-    title: keep.reason === 'smart' ? `Dismissed the smart pick for ${name}` : `Stopped keeping ${name}`,
-    body: 'What’s downloaded stays as cache until it’s cleared to make room.',
-  };
-}

@@ -92,6 +92,25 @@ docker compose exec -T postgres pg_restore -U momoshtrem -d momoshtrem --no-owne
 
 Then, on the Mac, run `ops/deploy/deploy.sh momoshtrem-v2 <older sha>`.
 
+**Rolling back past the storage and downloads commits (#77).**
+- **Past ec50458 (#211).** Older code reads a missing `torrent.global_cache_size` as 4 GiB and trims the cache down to that. Before you deploy it, put the line back in `/mnt/data/momoshtrem/config/config.yaml`. The VM keeps the file from before the line was deleted, as `config.yaml.bak-20261017-pre-auto` in the same folder.
+  1. **See what differs:**
+     ```bash
+     ssh momoshtrem-v2 diff /mnt/data/momoshtrem/config/config.yaml.bak-20261017-pre-auto /mnt/data/momoshtrem/config/config.yaml
+     ```
+     If that line is the only difference, copy the backup back over `config.yaml` (`cp`), then go on to step 3.
+  2. **Otherwise, add the line by hand, under `torrent:`.** A line at the top level is ignored without a warning, and the 4 GiB trim happens anyway:
+     ```yaml
+     torrent:
+       global_cache_size: 53760   # MiB
+     ```
+  3. **Choose the value.** It's in MiB. The backup's 53760 MiB is 52.5 GiB, which Settings › Storage shows as "56.4 GB". The older code trims the cache down to it, and today's cache can hold more than that.
+     - To keep what's cached, write the limit the cache runs at now, in MiB: `limit_effective_bytes / 1048576` from `GET /api/settings/storage`. A 147.2 GiB limit is 150732.
+     - Don't write more than that: the older code has no free-space floor.
+
+  To deploy past #211 again, delete the line **before** that deploy. `config.yaml` is read only at startup, so a line deleted afterwards still sets the limit (`source: config`) until the next restart.
+- **Past ac55f90 (#224).** Migration 010 adds the `downloads` and `local_watches` tables. An older binary ignores them and logs a warning that the database has a migration it doesn't know (version 10). Kept and smart downloads stop, and their data becomes ordinary cache that can be evicted. Deploy forward again, with the tables still there, and they resume: the pins are rebuilt from the table at startup, and anything evicted in the meantime is fetched again. If you restored a dump from before #224, the Keeps are gone and have to be made again.
+
 ## 3. First deploy on a fresh VM, from a copy of the old state
 
 The VM is built from [`VM.md`](VM.md) and converged by the playbook ([`HOST.md`](HOST.md)). The copy holds the PLAN §5 state, for example in `~/restore/` on the VM:

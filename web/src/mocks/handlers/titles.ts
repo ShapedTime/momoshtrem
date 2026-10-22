@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { AddTitleResult, ClassifierMode, EpisodeGroup, EpisodeOrdering, ShowSettingsPatch } from '@/lib/api/contract';
+import type { AddTitleResult, ClassifierMode, EpisodeGroup, EpisodeOrdering, Keep, SeasonDetail, ShowSettingsPatch, Title } from '@/lib/api/contract';
 import { findTitle } from '../fixtures/catalog';
 import { onEpisodeFile, onMovieFile, onTitleRemoved } from '../fixtures/downloads';
 import {
@@ -13,6 +13,7 @@ import {
   type MockLibrary,
   seedLibrary,
 } from '../fixtures/titles';
+import { scenario } from '../scenario';
 import { apiError, isRecord, jsonBody, latency, noContent, notFound } from './util';
 
 /** This page's library: adds, removes, unassigns and settings stick until a reload. */
@@ -51,6 +52,28 @@ const MEDIA = [
 const ORDERINGS: EpisodeOrdering[] = ['aired', 'absolute', 'episode_group'];
 const CLASSIFIER_MODES: ClassifierMode[] = ['auto', 'rules_only', 'ai_always'];
 
+/**
+ * `downloads-absent`: a backend before #77's P4 and P6 sends no `keep` on titles, seasons or
+ * episodes (title pages then offer no Keep), and no download ETA: `eta_seconds` was always null.
+ */
+function withoutKeep<T extends { keep: Keep | null }>(holder: T): T {
+  const old: Partial<T> = { ...holder };
+  delete old.keep;
+  return old as T;
+}
+
+function titleAnswer(title: Title): Title {
+  if (scenario() !== 'downloads-absent') return title;
+  const library = withoutKeep(title.library);
+  if (library.download) library.download = { ...library.download, eta_seconds: null };
+  return { ...title, library };
+}
+
+function seasonAnswer(season: SeasonDetail): SeasonDetail {
+  if (scenario() !== 'downloads-absent') return season;
+  return { ...withoutKeep(season), episodes: season.episodes.map(withoutKeep) };
+}
+
 const isAddRequest = (body: unknown): body is { tmdb_id: number } => isRecord(body) && typeof body.tmdb_id === 'number';
 
 function isSettingsPatch(body: unknown): body is ShowSettingsPatch {
@@ -68,7 +91,7 @@ export const titlesHandlers = [
     await latency();
     const mediaType = params.mediaType === 'movie' || params.mediaType === 'tv' ? params.mediaType : null;
     const title = mediaType && buildTitle(mediaType, Number(params.tmdbId), library);
-    return title ? HttpResponse.json(title) : notFound('No such title');
+    return title ? HttpResponse.json(titleAnswer(title)) : notFound('No such title');
   }),
   http.get('*/api/titles/tv/:tmdbId/seasons/:season', async ({ params }) => {
     await latency();
@@ -76,7 +99,7 @@ export const titlesHandlers = [
     if (!findTitle('tv', tmdbId)) return notFound('No such show');
     if (!library.has(libraryKey('tv', tmdbId))) return apiError(404, 'not_in_library', 'Add the show to see its episodes.');
     const season = buildSeason(tmdbId, Number(params.season), library);
-    return season ? HttpResponse.json(season) : notFound('No such season');
+    return season ? HttpResponse.json(seasonAnswer(season)) : notFound('No such season');
   }),
   ...MEDIA.flatMap(([mediaType, path]) => [
     http.post(`*/api/${path}`, async ({ request }) => {
@@ -145,7 +168,8 @@ export const titlesHandlers = [
       return apiError(422, 'validation_error', 'Pick an episode group for this ordering.');
     }
     found.row.settings = settings;
-    return HttpResponse.json(buildTitle('tv', found.entry.tmdb_id, library));
+    const title = buildTitle('tv', found.entry.tmdb_id, library);
+    return title ? HttpResponse.json(titleAnswer(title)) : notFound('No such show');
   }),
   http.get('*/api/shows/:id/episode-groups', async () => {
     await latency();

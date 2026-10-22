@@ -12,6 +12,7 @@ import {
   keepRowPill,
   keepStateLabel,
   keepWantsBytes,
+  stopKeepingCopy,
   storageFullLead,
 } from '@/lib/title/keep';
 
@@ -103,6 +104,34 @@ describe('keep state rules', () => {
   it('changes the duration of kept downloads only', () => {
     expect(canChangeDuration(keep())).toBe(true);
     expect(canChangeDuration(keep({ reason: 'smart' }))).toBe(false);
+  });
+});
+
+describe('Stop keeping', () => {
+  it('confirms and toasts in one set of words: what goes and what stays', () => {
+    expect(stopKeepingCopy('kept', 'Interstellar')).toEqual({
+      action: 'Stop keeping',
+      confirm: {
+        title: 'Stop keeping Interstellar?',
+        description: 'It’s no longer held on disk. What’s downloaded stays as cache and plays until it’s cleared to make room.',
+        confirmLabel: 'Stop keeping',
+      },
+      title: 'Stopped keeping Interstellar',
+      body: 'What’s downloaded stays as cache and plays until it’s cleared to make room.',
+      failed: 'Couldn’t stop keeping Interstellar',
+    });
+  });
+
+  it('dismisses a smart pick, which isn’t picked again', () => {
+    const copy = stopKeepingCopy('smart', 'Frieren · S01E27');
+    expect(copy).toMatchObject({
+      action: 'Dismiss',
+      confirm: { title: 'Dismiss the smart pick for Frieren · S01E27?', confirmLabel: 'Dismiss' },
+      title: 'Dismissed the smart pick for Frieren · S01E27',
+      failed: 'Couldn’t dismiss the smart pick for Frieren · S01E27',
+    });
+    expect(copy.body).toBe('It won’t be downloaded ahead again. What’s downloaded stays as cache and plays until it’s cleared to make room.');
+    expect(copy.confirm.description).toBe(copy.body);
   });
 });
 

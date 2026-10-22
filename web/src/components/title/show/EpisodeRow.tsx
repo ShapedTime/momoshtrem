@@ -7,6 +7,7 @@ import type { EpisodeOrdering, EpisodeSummary } from '@/lib/api/contract';
 import { episodeCode, episodeLabel } from '@/lib/title/episodes';
 import { formatShortDate } from '@/lib/title/format';
 import { keepRowPill } from '@/lib/title/keep';
+import { episodeKeepOffered } from '@/lib/title/keep-sheet';
 import { cx } from '@/lib/utils/cx';
 
 export interface EpisodeRowProps {
@@ -81,7 +82,8 @@ export function EpisodeRow({ episode, ordering, isNext = false, reviewHref, onFi
     action = <span className="w-9 shrink-0" aria-hidden="true" />;
   } else {
     // Watched wins the state (B5), so a watched row may or may not have a file
-    const options = episode.webdav_path ? 'how to play, subtitles, keep, replace, remove' : 'find a torrent';
+    // "keep" only when the sheet has a keep section (`episodeKeepOffered`)
+    const options = episode.webdav_path ? `how to play, subtitles, ${episodeKeepOffered(episode) ? 'keep, ' : ''}replace, remove` : 'find a torrent';
     action = (
       <IconButton size="sm" aria-label={`${code} options: ${options}`} onClick={() => onOpen(episode)}>
         <EllipsisVertical size={17} aria-hidden="true" />

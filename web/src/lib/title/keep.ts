@@ -74,6 +74,45 @@ export function keepRowPill(keep: Keep | null | undefined): { status: StatusKey;
 /** A kept download's duration can change; a smart pick has to be kept first. */
 export const canChangeDuration = (keep: Pick<Keep, 'reason'>): boolean => keep.reason === 'kept';
 
+// ---- Stop keeping ------------------------------------------------------------------
+
+export interface StopKeepingCopy {
+  /** The button: "Stop keeping", or "Dismiss" on a smart pick. */
+  action: string;
+  /** Title pages confirm first. */
+  confirm: { title: string; description: string; confirmLabel: string };
+  /** The toast once it's released (Activity's, with a 10 s Undo), and the one when it can't be. */
+  title: string;
+  body: string;
+  failed: string;
+}
+
+const STAYS = 'What’s downloaded stays as cache and plays until it’s cleared to make room.';
+
+/**
+ * Stop keeping, in the same words on title pages (a confirmation) and Activity (an Undo): what
+ * goes, the hold, and what stays, the data as cache. A smart pick is dismissed, and isn't picked again.
+ */
+export function stopKeepingCopy(reason: DownloadReason, name: string): StopKeepingCopy {
+  if (reason === 'smart') {
+    const body = `It won’t be downloaded ahead again. ${STAYS}`;
+    return {
+      action: 'Dismiss',
+      confirm: { title: `Dismiss the smart pick for ${name}?`, description: body, confirmLabel: 'Dismiss' },
+      title: `Dismissed the smart pick for ${name}`,
+      body,
+      failed: `Couldn’t dismiss the smart pick for ${name}`,
+    };
+  }
+  return {
+    action: 'Stop keeping',
+    confirm: { title: `Stop keeping ${name}?`, description: `It’s no longer held on disk. ${STAYS}`, confirmLabel: 'Stop keeping' },
+    title: `Stopped keeping ${name}`,
+    body: STAYS,
+    failed: `Couldn’t stop keeping ${name}`,
+  };
+}
+
 // ---- The Keep sheet ---------------------------------------------------------------
 
 export type KeepChoice = 'until_watched' | 'days_7' | 'days_30' | 'days_90' | 'until_removed';

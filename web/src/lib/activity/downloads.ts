@@ -148,18 +148,6 @@ export function downloadName(download: Pick<Download, 'scope' | 'item'>): string
   return item.title;
 }
 
-/**
- * Stop keeping, from the list (a 10 s Undo, then DELETE /downloads/{id}), in the
- * title pages' words (#206): a smart pick is dismissed, and isn't picked again.
- */
-export function stopKeepingCopy(download: Pick<Download, 'reason' | 'scope' | 'item'>): { action: string; title: string; body: string; failed: string } {
-  const name = downloadName(download);
-  const body = 'What’s downloaded stays as cache until it’s cleared to make room.';
-  return download.reason === 'smart'
-    ? { action: 'Dismiss', title: `Dismissed the smart pick for ${name}`, body: `It won’t be downloaded ahead again. ${body}`, failed: `Couldn’t dismiss the smart pick for ${name}` }
-    : { action: 'Stop keeping', title: `Stopped keeping ${name}`, body, failed: `Couldn’t stop keeping ${name}` };
-}
-
 /** 0–100 of what it wants; floored, 100 only when done. */
 export function downloadPct(download: Pick<Download, 'state' | 'wanted_bytes' | 'done_bytes'>): number {
   return wantedPct({ state: download.state === 'done' ? 'done' : 'queued', bytes: download.wanted_bytes, done_bytes: download.done_bytes });

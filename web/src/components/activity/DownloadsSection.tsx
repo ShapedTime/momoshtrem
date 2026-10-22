@@ -9,10 +9,10 @@ import { useUndoableRemoval } from '@/hooks/useUndoableRemoval';
 import { apiKeepalive, isApiError } from '@/lib/api/client';
 import type { Download, DownloadList, DownloadsPausedReason } from '@/lib/api/contract';
 import { downloadKeys, downloadPath, downloadsApi, libraryKeys, settingsKeys, titleKeys, torrentKeys } from '@/lib/api/endpoints';
-import { downloadName, downloadRemovalKey, downloadRow, downloadsUsageLine, pausedBanner, stopKeepingCopy } from '@/lib/activity/downloads';
+import { downloadName, downloadRemovalKey, downloadRow, downloadsUsageLine, pausedBanner } from '@/lib/activity/downloads';
 import { formatTimeOfDay } from '@/lib/activity/format';
 import { formatNumber } from '@/lib/title/format';
-import { STORAGE_SETTINGS_HREF } from '@/lib/title/keep';
+import { STORAGE_SETTINGS_HREF, stopKeepingCopy } from '@/lib/title/keep';
 import { cx } from '@/lib/utils/cx';
 
 /** What Stop keeping changes: the list, the torrents' holds, the titles' `keep`, and the storage usage. */
@@ -25,10 +25,11 @@ function useStopKeeping() {
   const removeLater = useUndoableRemoval();
   return useCallback(
     (download: Download) => {
-      const copy = stopKeepingCopy(download);
+      const name = downloadName(download);
+      const copy = stopKeepingCopy(download.reason, name);
       removeLater({
         key: downloadRemovalKey(download.id),
-        label: downloadName(download),
+        label: name,
         payload: download,
         commit: () =>
           downloadsApi.remove(download.id).catch((error: unknown) => {
@@ -45,8 +46,8 @@ function useStopKeeping() {
 
 function DownloadRowItem({ download, onStop }: { download: Download; onStop: (download: Download) => void }) {
   const row = downloadRow(download);
-  const copy = stopKeepingCopy(download);
   const name = downloadName(download);
+  const copy = stopKeepingCopy(download.reason, name);
   const meta = [row.size, row.files, row.retry].filter(Boolean).join(' · ');
   const ReasonIcon = download.reason === 'smart' ? Sparkles : Pin;
   return (

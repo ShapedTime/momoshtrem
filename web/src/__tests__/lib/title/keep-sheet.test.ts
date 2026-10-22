@@ -3,6 +3,7 @@ import {
   changedToast,
   downloadsAvailable,
   episodeKeepContext,
+  episodeKeepOffered,
   heldByAction,
   heldByContext,
   heldByCopy,
@@ -13,8 +14,6 @@ import {
   keepSubject,
   keepTargetName,
   keptToast,
-  stopKeepingConfirm,
-  stoppedToast,
 } from '@/lib/title/keep-sheet';
 import { buildSeason, buildTitle, seedLibrary } from '@/mocks/fixtures/titles';
 
@@ -117,6 +116,17 @@ describe('keepSubject', () => {
     expect(downloadsAvailable({})).toBe(false);
     expect(downloadsAvailable(undefined)).toBe(false);
   });
+
+  it('offers an episode’s keep once something keeps it, or with a torrent file', () => {
+    const file = { webdav_path: '/Shows/Bluey/S03E01.mkv', source: 'torrent' as const };
+    expect(episodeKeepOffered({ ...file, keep: null })).toBe(true);
+    expect(episodeKeepOffered({ ...file, source: 'hdrezka', keep: null })).toBe(false);
+    expect(episodeKeepOffered({ ...file, source: 'hdrezka', keep: keep() })).toBe(true);
+    expect(episodeKeepOffered({ webdav_path: null, source: null, keep: null })).toBe(false);
+    expect(episodeKeepOffered({ webdav_path: null, source: null, keep: keep({ state: 'no_file' }) })).toBe(true);
+    // A backend without downloads
+    expect(episodeKeepOffered({ ...file, keep: undefined as unknown as null })).toBe(false);
+  });
 });
 
 describe('the sheet’s mode and copy', () => {
@@ -170,14 +180,4 @@ describe('the sheet’s mode and copy', () => {
     });
   });
 
-  it('confirms Stop keeping with what goes and what stays; a smart pick is dismissed', () => {
-    expect(stopKeepingConfirm({ reason: 'kept' }, 'Interstellar')).toEqual({
-      title: 'Stop keeping Interstellar?',
-      description: 'It’s no longer held on disk. What’s downloaded stays as cache and plays until it’s cleared to make room.',
-      confirmLabel: 'Stop keeping',
-    });
-    expect(stopKeepingConfirm({ reason: 'smart' }, 'Frieren · S01E27')).toMatchObject({ title: 'Dismiss the smart pick for Frieren · S01E27?', confirmLabel: 'Dismiss' });
-    expect(stoppedToast({ reason: 'kept' }, 'Interstellar').title).toBe('Stopped keeping Interstellar');
-    expect(stoppedToast({ reason: 'smart' }, 'Frieren · S01E27').title).toBe('Dismissed the smart pick for Frieren · S01E27');
-  });
 });

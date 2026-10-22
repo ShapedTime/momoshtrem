@@ -358,11 +358,13 @@ func (h *harness) torrent(name string, stored bool, sizes ...int64) testTorrent 
 	return tt
 }
 
+// assign writes an active assignment at the harness's time, as admission
+// orders files by it (the database's now() would follow the wall clock).
 func (h *harness) assign(itemType library.ItemType, id int64, tt testTorrent, file int) {
 	h.t.Helper()
 	span, _ := tt.pm.File(tt.path(file))
-	h.exec(`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6, TRUE)`, itemType, id, tt.hash, tt.magnet(), tt.path(file), span.Length)
+	h.exec(`INSERT INTO torrent_assignments (item_type, item_id, info_hash, magnet_uri, file_path, file_size, is_active, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)`, itemType, id, tt.hash, tt.magnet(), tt.path(file), span.Length, h.clock.Now())
 }
 
 // fill writes the torrent's pieces to the cache, complete, as a download
