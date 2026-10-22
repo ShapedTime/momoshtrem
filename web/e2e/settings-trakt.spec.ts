@@ -88,10 +88,10 @@ test.describe('Settings › Trakt', () => {
     await expect(paused).toBeChecked();
     await expect(paused).toHaveAccessibleDescription('Shows you haven’t touched in 6 months are hidden.');
 
-    // Disconnect is quiet and confirmed
+    // Disconnect is quiet and confirmed, and names whose Trakt it is (the mock household has two people, #239)
     await page.getByRole('button', { name: 'Disconnect' }).click();
-    const dialog = page.getByRole('alertdialog', { name: 'Disconnect Trakt?' });
-    await expect(dialog).toContainText('Your imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt.');
+    const dialog = page.getByRole('alertdialog', { name: 'Disconnect Teymur’s Trakt?' });
+    await expect(dialog).toContainText('Teymur’s imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt.');
     await dialog.getByRole('button', { name: 'Disconnect' }).click();
     await expect(toast(page, 'Trakt disconnected')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Connect Trakt' })).toBeFocused();
@@ -181,6 +181,18 @@ test.describe('Settings › Trakt', () => {
     await expect(codeScreen(page)).toBeVisible();
     const banner = page.getByRole('status').filter({ hasText: 'Trakt didn’t let momoshtrem in' });
     await expect(banner).toContainText('Free Trakt accounts can connect only 2 apps', { timeout: 15_000 });
+    await expect(connectButton(page)).toBeVisible();
+    await expectAccessibleAndContained(page);
+  });
+
+  test('account in use: the account is another member’s, so a warning on the off screen (#239)', async ({ page }) => {
+    await scenario(page, 'trakt-account-in-use');
+    await signIn(page, SECTION);
+    await expect(page.getByText('This is Teymur’s Trakt.')).toBeVisible();
+    await connectButton(page).click();
+    await expect(codeScreen(page)).toBeVisible();
+    const banner = page.getByRole('status').filter({ hasText: 'That Trakt account is already connected' });
+    await expect(banner).toContainText('Someone else in this household connected it. Each person connects their own', { timeout: 15_000 });
     await expect(connectButton(page)).toBeVisible();
     await expectAccessibleAndContained(page);
   });

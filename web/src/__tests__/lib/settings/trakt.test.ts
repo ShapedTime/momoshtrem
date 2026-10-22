@@ -2,6 +2,7 @@ import type { TraktIntegration, TraktSync } from '@/lib/api/contract';
 import {
   CODE_LIFETIME_SECONDS,
   connectErrorCopy,
+  disconnectConfirmCopy,
   displayCode,
   displayUrl,
   expiryPct,
@@ -183,6 +184,25 @@ describe('copy', () => {
     expect(connectErrorCopy('denied')).toMatchObject({ tone: 'warning', body: expect.stringContaining('Free Trakt accounts can connect only 2 apps') });
     expect(connectErrorCopy('expired')).toMatchObject({ tone: 'neutral', title: 'That code expired' });
     expect(connectErrorCopy('failed').body).toMatch(/Connect again/);
+  });
+
+  it('an account another member connected says each person connects their own (#239)', () => {
+    expect(connectErrorCopy('account_in_use')).toEqual({
+      tone: 'warning',
+      title: 'That Trakt account is already connected',
+      body: 'Someone else in this household connected it. Each person connects their own: sign in to trakt.tv with your account, then connect again.',
+    });
+  });
+
+  it('the disconnect confirm names whose Trakt it is when there are two or more people', () => {
+    expect(disconnectConfirmCopy(null)).toEqual({
+      title: 'Disconnect Trakt?',
+      description: 'Your imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt. Personal picks fall back to trending.',
+    });
+    expect(disconnectConfirmCopy('Teymur')).toEqual({
+      title: 'Disconnect Teymur’s Trakt?',
+      description: 'Teymur’s imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt. Teymur’s picks fall back to trending.',
+    });
   });
 
   it('reauth says the server’s reason, or what stays', () => {

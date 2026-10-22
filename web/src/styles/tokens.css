@@ -59,6 +59,16 @@
   --st-error: #ff6f6f;        --st-error-bg: rgb(255 111 111 / 0.13);   --st-error-line: rgb(255 111 111 / 0.34);
   --st-info: var(--st-upcoming);
 
+  /* ---- Household members (#239): identity colours, never status --------
+     Always shown with the member's initial and name. They sit between the
+     status hues and stay clear of the accent's solid amber. */
+  --member-rose: #f19ab9;
+  --member-orchid: #d8a2ee;
+  --member-periwinkle: #9eaef5;
+  --member-teal: #6fd3cf;
+  --member-lime: #b9da78;
+  --member-sand: #e3c99b;
+
   /* ---- Scrims over artwork --------------------------------------------- */
   --scrim-bottom: linear-gradient(180deg, rgb(11 13 18 / 0) 0%, rgb(11 13 18 / 0.55) 45%, var(--ink-1) 100%);
   --scrim-left: linear-gradient(90deg, rgb(11 13 18 / 0.92) 0%, rgb(11 13 18 / 0.6) 38%, rgb(11 13 18 / 0) 70%);

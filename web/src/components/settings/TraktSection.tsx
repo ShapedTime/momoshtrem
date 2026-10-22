@@ -3,14 +3,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link2, RefreshCw } from 'lucide-react';
+import { useMembers } from '@/components/members/MembersGate';
 import { Banner, Button, LoadingRegion, Skeleton, useConfirm, useToast } from '@/components/ui';
 import { usePendingTraktSettings, useTraktConnect, useTraktDisconnect, useTraktSettings, useTraktSync } from '@/hooks/useTraktActions';
 import { useTraktIntegration } from '@/hooks/useTraktIntegration';
 import type { TraktConnect, TraktIntegration, TraktSettings } from '@/lib/api/contract';
 import { systemKeys } from '@/lib/api/endpoints';
-import { CONNECTED_TOAST, connectErrorCopy, DISCONNECTED_TOAST, syncedToast, traktEvent, traktScreen, type TraktScreen } from '@/lib/settings/trakt';
+import {
+  CONNECTED_TOAST,
+  connectErrorCopy,
+  disconnectConfirmCopy,
+  DISCONNECTED_TOAST,
+  syncedToast,
+  traktEvent,
+  traktScreen,
+  type TraktScreen,
+} from '@/lib/settings/trakt';
 import { TraktConnected } from './trakt/TraktConnected';
 import { TraktDeviceCode } from './trakt/TraktDeviceCode';
+import { TraktMemberNote } from './trakt/TraktMemberNote';
 import { TraktOff } from './trakt/TraktOff';
 import { TraktWaiting } from './trakt/TraktWaiting';
 
@@ -76,10 +87,12 @@ function useScreenFocus(screen: TraktScreen | null) {
  * Settings › Trakt (screens/settings/trakt-*, flow 3): connect with a device
  * code, wait for the approval, then the account, its sync and what
  * momoshtrem uses. The integration (PLAN §6 "Trakt (B5)") polls while a
- * code waits or a sync runs.
+ * code waits or a sync runs. It's the current member's Trakt (#239): with two
+ * or more people a note says whose, and the disconnect names them.
  */
 export function TraktSection() {
   const query = useTraktIntegration();
+  const members = useMembers();
   const { toast } = useToast();
   const confirm = useConfirm();
   const connect = useTraktConnect();
@@ -130,12 +143,8 @@ export function TraktSection() {
       }
     );
   const disconnectTrakt = async () => {
-    const confirmed = await confirm({
-      title: 'Disconnect Trakt?',
-      description: 'Your imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt. Personal picks fall back to trending.',
-      confirmLabel: 'Disconnect',
-      tone: 'danger',
-    });
+    const named = members.current && members.members.length >= 2 ? members.current.name : null;
+    const confirmed = await confirm({ ...disconnectConfirmCopy(named), confirmLabel: 'Disconnect', tone: 'danger' });
     if (!confirmed) return;
     disconnect.mutate(undefined, {
       onSuccess: () => toast({ tone: 'info', icon: Link2, ...DISCONNECTED_TOAST }),
@@ -155,6 +164,7 @@ export function TraktSection() {
 
   return (
     <div ref={container} className="flex flex-col gap-4 lg:gap-5">
+      <TraktMemberNote />
       {connectProblem && (
         <Banner tone={connectProblem.tone} role={connectProblem.tone === 'error' ? 'alert' : 'status'} title={connectProblem.title}>
           {connectProblem.body}

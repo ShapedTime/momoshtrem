@@ -56,7 +56,8 @@ test.describe('app shell', () => {
     await signIn(page, '/library');
     const scope = testInfo.project.name === 'desktop' ? page.locator('header.topbar') : page.locator('header.phone-bar');
     await scope.getByRole('button', { name: /Account menu/ }).click();
-    await page.getByText('Signed in').waitFor();
+    // Who's watching, and Switch to Sam (#239): the dropdown at 1440, the sheet at 390
+    await page.getByText('Trakt · teymur').waitFor();
     await page.waitForTimeout(400);
     await shoot(page, testInfo, 'shell/menu');
   });
@@ -460,7 +461,7 @@ test.describe('search', () => {
   const phone = (testInfo: TestInfo) => testInfo.project.name === 'mobile';
   const recent = (page: Page) =>
     page.addInitScript(() =>
-      window.localStorage.setItem('momoshtrem:recent-searches', JSON.stringify(['frieren', 'severance s02', 'past lives', 'wim wenders', 'one piece egghead']))
+      window.localStorage.setItem('momoshtrem:recent-searches:1', JSON.stringify(['frieren', 'severance s02', 'past lives', 'wim wenders', 'one piece egghead']))
     );
   const settle = async (page: Page) => {
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -853,5 +854,72 @@ test.describe('Download & keep (#206)', () => {
     await page.getByRole('region', { name: 'Kept', exact: true }).waitFor();
     await settle(page);
     await shoot(page, testInfo, 'keep/episode');
+  });
+});
+
+test.describe('household members (#239)', () => {
+  const scenario = (page: Page, name: string) => page.addInitScript((value) => window.localStorage.setItem('msw:scenario', value), name);
+  const settle = async (page: Page) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.waitForTimeout(600);
+  };
+
+  test('who’s watching', async ({ page }, testInfo) => {
+    await signIn(page, '/', { member: null });
+    await page.getByRole('button', { name: 'Sam' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'members/picker');
+  });
+
+  test('who’s watching: six people', async ({ page }, testInfo) => {
+    await scenario(page, 'members-full');
+    await signIn(page, '/', { member: null });
+    await page.getByRole('button', { name: 'Riley' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'members/picker-full');
+  });
+
+  test('who’s watching: a tile in focus', async ({ page }, testInfo) => {
+    await signIn(page, '/', { member: null });
+    await page.getByRole('button', { name: 'Teymur' }).waitFor();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Sam' })).toBeFocused();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'members/picker-focus');
+  });
+
+  test('who’s watching: it didn’t load', async ({ page }, testInfo) => {
+    await scenario(page, 'members-error');
+    await signIn(page, '/', { member: null });
+    await page.getByRole('alert').filter({ hasText: 'Couldn’t load who’s watching' }).waitFor({ timeout: 20_000 });
+    await settle(page);
+    await shoot(page, testInfo, 'members/picker-error');
+  });
+
+  test('the switcher over For You’s hero', async ({ page }, testInfo) => {
+    await signIn(page, '/');
+    await page.getByRole('region', { name: 'Because you loved Severance' }).waitFor();
+    const scope = testInfo.project.name === 'desktop' ? page.locator('header.topbar') : page.locator('header.phone-bar');
+    await scope.getByRole('button', { name: /^Account menu, Teymur/ }).click();
+    await page.getByText('Switch to Sam').waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'members/menu');
+  });
+
+  test('Settings › Trakt: whose it is', async ({ page }, testInfo) => {
+    await signIn(page, '/settings?section=trakt');
+    await page.getByText('This is Teymur’s Trakt.').waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'members/trakt-note');
+  });
+
+  test('Settings › Trakt: the account is someone else’s', async ({ page }, testInfo) => {
+    await scenario(page, 'trakt-account-in-use');
+    await signIn(page, '/settings?section=trakt');
+    await page.getByRole('button', { name: 'Connect Trakt' }).click();
+    await page.getByText('That Trakt account is already connected').waitFor({ timeout: 15_000 });
+    await settle(page);
+    await shoot(page, testInfo, 'members/trakt-in-use');
   });
 });

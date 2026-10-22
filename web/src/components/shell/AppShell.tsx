@@ -22,7 +22,7 @@ function isTyping(target: EventTarget | null): boolean {
  * bar on phone and tablet, ⌘K palette, URL-driven sheets and page
  * transitions around every protected page.
  */
-export function AppShell({ username, children }: { username: string; children: ReactNode }) {
+export function AppShell({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [overArt, setOverArt] = useState(false);
   const activeCount = useActiveTorrentCount();
@@ -52,9 +52,9 @@ export function AppShell({ username, children }: { username: string; children: R
       <a href="#main" className="skip">
         Skip to content
       </a>
-      <TopBar username={username} overArt={overArt} activeCount={activeCount} />
+      <TopBar overArt={overArt} activeCount={activeCount} />
       {/* Hero pages draw their own phone bar (Back, More) over the artwork */}
-      {!overArt && <PhoneBar username={username} />}
+      {!overArt && <PhoneBar />}
       <main id="main" tabIndex={-1} className={cx('main outline-none', overArt && 'has-hero')}>
         <ConnectionBanner />
         <PageTransition>{children}</PageTransition>

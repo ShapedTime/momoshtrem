@@ -31,6 +31,19 @@ describe('getWebStatus', () => {
     expect(result.ok && result.status.web?.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
+  it('names the household member when given one (#239), and none otherwise', async () => {
+    const members: Array<string | null> = [];
+    server.use(
+      http.get(`${BACKEND}/api/status`, ({ request }) => {
+        members.push(request.headers.get('x-momoshtrem-member'));
+        return HttpResponse.json(systemStatus());
+      })
+    );
+    await getWebStatus(false, 2);
+    await getWebStatus(false);
+    expect(members).toEqual(['2', null]);
+  });
+
   it('asks the backend to re-check on refresh', async () => {
     let url = '';
     server.use(

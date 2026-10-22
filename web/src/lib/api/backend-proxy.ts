@@ -1,31 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { MOMOSHTREM_CONFIG } from '@/config/momoshtrem';
 import { getSession } from '@/lib/auth/session';
-import { BACKEND_AUTH_CODE, BACKEND_AUTH_MESSAGE, TOKEN_HEADER } from './momoshtrem';
+import { backendHeaders, requestMemberId } from './backend-headers';
+import { BACKEND_PREFIXES } from './backend-prefixes';
+import { BACKEND_AUTH_CODE, BACKEND_AUTH_MESSAGE } from './momoshtrem';
 
-/**
- * Top-level path segments of the PLAN §6 contract that the browser may reach
- * through /api/*. Anything else 404s here. The allowlist is by first segment
- * only, so older backend routes under these prefixes are reachable too (still
- * behind the session check).
- */
-export const BACKEND_PREFIXES = new Set([
-  'titles',
-  'library',
-  'shows',
-  'movies',
-  'episodes',
-  'assignment-jobs',
-  'torrents',
-  'downloads',
-  'search',
-  'settings',
-  'integrations',
-  'me',
-  'recommendations',
-  'status',
-  'hdrezka',
-]);
+export { BACKEND_PREFIXES };
 
 /** Response headers worth passing back to the browser. */
 const PASS_HEADERS = ['content-type', 'cache-control', 'retry-after', 'etag', 'last-modified'];
@@ -36,7 +16,8 @@ function error(status: number, code: string, message: string): NextResponse {
 
 /**
  * Forward a session-checked /api/* request to the backend's /api/*, adding
- * the shared-secret header. Bodies are forwarded as-is and responses stream
+ * the shared-secret header and the household member from the
+ * `momoshtrem_member` cookie. Bodies are forwarded as-is and responses stream
  * back unbuffered (Server-Sent Events for Ask work as-is). Cookies never
  * leave the web app.
  *
@@ -56,11 +37,11 @@ export async function proxyToBackend(request: NextRequest, segments: string[]): 
   const target = new URL(`/api/${segments.map(encodeURIComponent).join('/')}`, MOMOSHTREM_CONFIG.baseUrl);
   target.search = request.nextUrl.search;
 
-  const headers = new Headers({ Accept: request.headers.get('accept') ?? 'application/json' });
+  // Built from scratch: a member header the browser sends is never forwarded, only the cookie's member
+  const base: Record<string, string> = { Accept: request.headers.get('accept') ?? 'application/json' };
   const contentType = request.headers.get('content-type');
-  if (contentType) headers.set('Content-Type', contentType);
-  const token = process.env.BACKEND_API_TOKEN;
-  if (token) headers.set(TOKEN_HEADER, token);
+  if (contentType) base['Content-Type'] = contentType;
+  const headers = new Headers(backendHeaders(requestMemberId(request), base));
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   const body = hasBody ? await request.arrayBuffer() : undefined;

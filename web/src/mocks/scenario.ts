@@ -92,6 +92,20 @@
  *   cancels the turn.
  * - `ask-working`: an ask holds like the design's working frame (screens/ask/working-*): the history and the web
  *   read, TMDB being checked, the first pick in; it never finishes.
+ * - `members-one`: the household is just Teymur, so "Who's watching?" never shows.
+ * - `members-fresh`: Sam hasn't connected Trakt yet (his For You offers Connect Trakt; no picks or threads).
+ * - `members-full`: six people, every colour taken (Add is disabled at the cap).
+ * - `members-absent`: a backend before household members: /members answers 404 and the header is ignored
+ *   (everyone is member 1), so the web behaves as it did with one user.
+ * - `members-error`: /members answers 500 (the picker's error state, when there's no member cookie).
+ * - `trakt-account-in-use`: Trakt off, and the device code ends on the second read after a connect with
+ *   `connect_error: account_in_use` (that Trakt account is another member's).
+ *
+ * The household (#239, fixtures/members.ts) is Teymur (1) and Sam (2) by default, kept in localStorage
+ * (`msw:members`) because switching reloads the page. The `momoshtrem_member` cookie says who's asking; a
+ * member nobody has gets 400 `unknown_member` on personal routes. Each member has their own Trakt account,
+ * picks, feedback and Ask threads; the scenarios above describe member 1's, and the ones before Trakt start
+ * everyone off.
  *
  * Without a scenario the recommendations mock is a state machine (fixtures/recommendations.ts): Refresh walks
  * a run through its steps, one per read of /home or the run, then /home serves the new picks; feedback hides
@@ -161,7 +175,13 @@ export type MockScenario =
   | 'ask-limit'
   | 'ask-error'
   | 'ask-hold'
-  | 'ask-working';
+  | 'ask-working'
+  | 'members-one'
+  | 'members-fresh'
+  | 'members-full'
+  | 'members-absent'
+  | 'members-error'
+  | 'trakt-account-in-use';
 
 let override: MockScenario | null = null;
 

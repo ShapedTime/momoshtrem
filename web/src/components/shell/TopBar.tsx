@@ -31,7 +31,7 @@ function useScrolledPast(offset: number, enabled: boolean): boolean {
  * (with an Anthropic key), account. Over a hero it starts transparent and
  * turns solid after 120 px of scroll.
  */
-export function TopBar({ username, overArt, activeCount }: { username: string; overArt: boolean; activeCount: number }) {
+export function TopBar({ overArt, activeCount }: { overArt: boolean; activeCount: number }) {
   const pathname = usePathname();
   const { openPalette } = useShell();
   const scrolled = useScrolledPast(120, overArt);
@@ -67,7 +67,7 @@ export function TopBar({ username, overArt, activeCount }: { username: string; o
           Ask momoshtrem
         </Link>
       )}
-      <UserMenu username={username} />
+      <UserMenu />
     </header>
   );
 }

@@ -1,7 +1,8 @@
 import { MOMOSHTREM_CONFIG } from '@/config/momoshtrem';
 import packageJson from '../../../package.json';
 import type { SystemStatus } from './contract';
-import { BACKEND_AUTH_CODE, BACKEND_AUTH_MESSAGE, TOKEN_HEADER } from './momoshtrem';
+import { backendHeaders } from './backend-headers';
+import { BACKEND_AUTH_CODE, BACKEND_AUTH_MESSAGE } from './momoshtrem';
 
 export const WEB_VERSION: string = packageJson.version;
 
@@ -35,12 +36,12 @@ export type WebStatusResult =
 /**
  * GET /status from the backend, plus the web app's own version. When the
  * backend can't be reached, say whether WebDAV still answers, so the offline
- * page can tell the truth about Infuse.
+ * page can tell the truth about Infuse. `memberId`: whose Trakt `trakt.connected`
+ * is (the backend ignores a member it doesn't know here).
  */
-export async function getWebStatus(refresh: boolean): Promise<WebStatusResult> {
+export async function getWebStatus(refresh: boolean, memberId: number | null = null): Promise<WebStatusResult> {
   const url = new URL(`/api/status${refresh ? '?refresh=1' : ''}`, MOMOSHTREM_CONFIG.baseUrl);
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (process.env.BACKEND_API_TOKEN) headers[TOKEN_HEADER] = process.env.BACKEND_API_TOKEN;
+  const headers = backendHeaders(memberId, { Accept: 'application/json' });
   const web = { version: WEB_VERSION };
 
   let response: Response;

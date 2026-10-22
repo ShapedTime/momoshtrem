@@ -20,6 +20,7 @@ import type {
   TitleLibraryState,
   TitleStream,
   TitleTorrent,
+  TraktSyncStep,
   WatchState,
 } from '@/lib/api/contract';
 import { type EpisodeFile, type MockReview, NO_REVIEW, seededReview } from './assignment';
@@ -53,7 +54,7 @@ import {
 } from './title-seeds';
 // recommendations.ts builds titles for its cards: functions only, so the cycle is safe
 import { recommendationReason } from './recommendations';
-import { traktImported } from './trakt';
+import { traktPlayed, traktRated } from './trakt';
 
 /**
  * Title and season answers built from the seeds (title-seeds.ts) and the
@@ -226,15 +227,17 @@ function fileState(seed: SeasonSeed['episodes'][number], id: number, row: MockLi
  * A seed's watch state, as far as Trakt's import has come (PLAN §6 "Watch
  * state rules"): null before its history; the rating with the ratings; a
  * show's progress and next episode with the progress step (next_episode is
- * then always there, maybe null).
+ * then always there, maybe null). Plays and progress are the household's
+ * (any member who watched it), the rating the viewer's (#239).
  */
-function watchState(seed: TitleSeed | ShowSeed): WatchState | null {
+function watchState(entry: CatalogEntry, seed: TitleSeed | ShowSeed): WatchState | null {
   const state = seed.watch_state;
-  if (!state || !traktImported('history')) return null;
+  const imported = (step: TraktSyncStep) => traktPlayed(entry.media_type, entry.tmdb_id, step);
+  if (!state || !imported('history')) return null;
   const { progress, ...plays } = state;
-  const base: WatchState = { ...plays, rating: traktImported('ratings') ? plays.rating : null };
+  const base: WatchState = { ...plays, rating: traktRated(entry.media_type, entry.tmdb_id) ? plays.rating : null };
   if (!('seasons' in seed)) return base;
-  if (!traktImported('progress')) return { ...base, next_episode: null };
+  if (!imported('progress')) return { ...base, next_episode: null };
   return { ...base, ...(progress ? { progress } : {}), next_episode: seed.next_up ? nextEpisodeOf(seed, seed.next_up) : null };
 }
 
@@ -267,7 +270,7 @@ interface BuiltSeason {
 function buildSeasons(entry: CatalogEntry, show: ShowSeed, row: MockLibraryEntry | undefined): BuiltSeason[] {
   const includeSpecials = row?.settings.include_specials ?? true;
   const absolute = absoluteNumbers(show);
-  const plays = traktImported('history');
+  const plays = traktPlayed('tv', entry.tmdb_id, 'history');
   const holds = row ? mockHolds() : [];
   return show.seasons
     .map((season) => {
@@ -547,7 +550,7 @@ function base(entry: CatalogEntry, seed: TitleSeed, library: MockLibrary) {
     trailer_youtube_key: seed.trailer_youtube_key,
     similar: similarTitles(seed, library),
     library: libraryState(entry, library),
-    watch_state: watchState(seed),
+    watch_state: watchState(entry, seed),
     recommendation_reason: recommendationReason(entry.media_type, entry.tmdb_id),
   };
 }
