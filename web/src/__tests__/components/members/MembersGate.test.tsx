@@ -191,6 +191,8 @@ describe('MembersGate', () => {
   });
 
   it('removing yourself (the page leaving): a list without you keeps the app as it was; calling it off hands back to the list', async () => {
+    // TanStack tells its observers on the next tick: let the gate render what the list says
+    const tick = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     document.cookie = 'momoshtrem_member=1; Path=/';
     stubFetch({ status: 200, body: { items: TWO } });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -201,15 +203,24 @@ describe('MembersGate', () => {
     leavePage();
     stubFetch({ status: 200, body: { items: TWO.slice(1) } });
     await act(() => client.refetchQueries({ queryKey: ['members'] }));
-    // TanStack tells its observers on the next tick: let the gate render the new list
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await tick();
     expect(client.getQueryData(['members'])).toEqual({ items: TWO.slice(1) });
     expect(screen.getByText('App for Teymur; others: Sam')).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
     expect(document.cookie).toContain('momoshtrem_member=1');
 
-    // It failed after all: the list's word stands, so the stale cookie is handled as ever (Sam is the only one)
-    act(() => stayOnPage());
+    // It failed: the sheet puts the list back as the DELETE found it, then calls the leave off. Teymur stays
+    act(() => {
+      client.setQueryData(['members'], { items: TWO });
+      stayOnPage();
+    });
+    await tick();
+    expect(screen.getByText('App for Teymur; others: Sam')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
+
+    // A fresh list decides. One that still lacks him (it went through, only the answer was lost): the stale path
+    await act(() => client.refetchQueries({ queryKey: ['members'] }));
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(document.cookie).toContain('momoshtrem_member=2');
   });

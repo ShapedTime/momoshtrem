@@ -39,6 +39,11 @@ export interface SheetProps {
    * the removed person's Edit, or Add someone once the household is full). By default focus returns to the opener.
    */
   returnFocus?: () => HTMLElement | null;
+  /**
+   * false while the sheet can't close (Household's DELETE on its way): a bottom sheet then can't be dragged
+   * away, which `onOpenChange` refusing alone would leave stuck off-screen. True by default.
+   */
+  dismissible?: boolean;
   /** Extra sticky head content: search field, chips. */
   head?: ReactNode;
   /** Sticky foot with the primary action (glass, includes the safe area). */
@@ -145,11 +150,28 @@ function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description
   );
 }
 
-function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, returnFocus, head, footer, className, children }: SheetProps) {
+function DrawerSheet({
+  open,
+  onOpenChange,
+  title,
+  kicker,
+  closeLabel,
+  description,
+  titleAction,
+  bodyLabel,
+  size,
+  nested,
+  returnFocus,
+  dismissible = true,
+  head,
+  footer,
+  className,
+  children,
+}: SheetProps) {
   const focus = useRestoreFocus({ focusContainer: true, fallback: returnFocus });
   const Root = nested ? Drawer.NestedRoot : Drawer.Root;
   return (
-    <Root open={open} onOpenChange={onOpenChange} handleOnly={size === 'full'} repositionInputs={false}>
+    <Root open={open} onOpenChange={onOpenChange} handleOnly={size === 'full'} dismissible={dismissible} repositionInputs={false}>
       <Drawer.Portal>
         <Drawer.Overlay className="scrim" />
         <Drawer.Content

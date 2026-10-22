@@ -47,6 +47,8 @@ interface RemoveTarget {
   id: number;
   name: string;
   self: boolean;
+  /** Removing yourself: the list as the DELETE started, put back if it fails (a refetch meanwhile left you out). */
+  before?: MembersList;
 }
 
 /**
@@ -112,9 +114,15 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId, re
     mutationFn: ({ id }: RemoveTarget) => membersApi.remove(id),
     onSuccess: (_, target) => removed(target),
     onError: (error, target) => {
-      if (alreadyRemoved(error)) removed(target);
-      // Still here: the page isn't leaving after all
-      else if (target.self) stayOnPage();
+      if (alreadyRemoved(error)) {
+        removed(target);
+      } else if (target.self) {
+        // Still here: the list as it was (a refetch during the DELETE left you out, which would read as
+        // a stale cookie), then the page isn't leaving after all, then a fresh list decides
+        if (target.before) queryClient.setQueryData(memberKeys.all, target.before);
+        stayOnPage();
+        void queryClient.invalidateQueries({ queryKey: memberKeys.all });
+      }
     },
   });
 
@@ -158,7 +166,7 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId, re
     // Removing yourself: the server stops knowing you as the DELETE starts, so a poll meanwhile meets
     // `unknown_member`. This page is leaving, so apiFetch doesn't reload it over the DELETE
     if (self) leavePage();
-    remove.mutate({ id: member.id, name: member.name, self });
+    remove.mutate({ id: member.id, name: member.name, self, before: self ? queryClient.getQueryData<MembersList>(memberKeys.all) : undefined });
   };
 
   const name = draft.name.trim();
@@ -171,6 +179,7 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId, re
       description={member ? undefined : 'Once they’re added, switch to them to connect their Trakt.'}
       size="narrow"
       returnFocus={returnFocus}
+      dismissible={!remove.isPending}
       footer={
         <>
           <Button className="grow" disabled={remove.isPending} onClick={() => setOpen(false)}>

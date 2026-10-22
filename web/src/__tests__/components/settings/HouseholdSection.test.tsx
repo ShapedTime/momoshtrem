@@ -316,6 +316,50 @@ describe('HouseholdSection', () => {
     expect(document.cookie).toContain('momoshtrem_member=1');
   });
 
+  it('removing yourself fails after a refetch left you out: the list is put back, you stay, and the banner says why', async () => {
+    let fail: () => void = () => undefined;
+    let phase: 'before' | 'deleting' | 'failed' = 'before';
+    // After the failure the fresh list is slow, so the gate first renders with what the cache holds
+    let answerFresh: () => void = () => undefined;
+    renderSection([TEYMUR, SAM], (call) => {
+      if (call.method === 'DELETE') {
+        phase = 'deleting';
+        return new Promise<Response>((resolve) => {
+          fail = () => {
+            phase = 'failed';
+            resolve(error(504, 'gateway_timeout'));
+          };
+        });
+      }
+      if (call.method !== 'GET' || call.url !== '/api/members' || phase === 'before') return undefined;
+      // The server leaves Teymur out while the delete runs, and lists him again once it didn't happen
+      if (phase === 'deleting') return answer(200, { items: [SAM] });
+      return new Promise<Response>((resolve) => (answerFresh = () => resolve(answer(200, { items: [TEYMUR, SAM] }))));
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Teymur' }));
+    const dialog = await sheet('Edit Teymur');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Teymur' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove Teymur' }));
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Remove Teymur' })).toHaveAttribute('aria-busy', 'true'));
+    await act(() => queryClient.refetchQueries({ queryKey: ['members'] }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit Teymur', hidden: true })).not.toBeInTheDocument());
+
+    fail();
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Couldn’t remove Teymur. Check your connection and try again.');
+    // The list as the DELETE found it is back before the fresh one answers: Teymur's row, and no stale reload
+    expect(await screen.findByRole('button', { name: 'Edit Teymur', hidden: true })).toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(reload).not.toHaveBeenCalled();
+    answerFresh();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(screen.getByRole('button', { name: 'Edit Teymur', hidden: true })).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
+    expect(document.cookie).not.toContain('momoshtrem_member=2');
+    expect(leavingPage()).toBe(false);
+  });
+
   it('the last person can’t be removed', async () => {
     renderSection([TEYMUR]);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit Teymur' }));
