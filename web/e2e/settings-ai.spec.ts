@@ -12,15 +12,17 @@ import { expectNoA11yViolations, expectNoHorizontalOverflow } from './helpers/a1
  */
 
 /**
- * axe and no sideways scrolling at this width and at 320 px. The top bar's search field is left out: with
- * a field scrolled to the middle, the chosen model card's amber edge sits under the glass bar, and axe
- * blends it in without the blur (other specs check the field with nothing beneath it).
+ * axe and no sideways scrolling at this width and at 320 px. axe runs from the top of the page: a card
+ * scrolled under the glass top bar takes the search field's placeholder just under 4.5:1, which isn't
+ * this section's to fix (the placeholder's contrast has its own issue). The checks that a field is in
+ * view run before this.
  */
 async function expectAccessibleAndContained(page: Page) {
   await page.waitForFunction(() =>
     document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity)
   );
-  await expectNoA11yViolations(page, { exclude: ['.topbar .search-trigger'] });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expectNoA11yViolations(page);
   await expectNoHorizontalOverflow(page);
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 320, height: 640 });

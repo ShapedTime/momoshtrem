@@ -145,6 +145,8 @@ test.describe('Settings › Household', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Sam was removed from the household' })).toBeVisible();
     await expect(people(page).getByRole('listitem')).toHaveCount(1);
     await expect(row(page, 'Sam')).toHaveCount(0);
+    // His Edit went with the row: focus lands on Add someone
+    await expect(people(page).getByRole('button', { name: 'Add someone' })).toBeFocused();
   });
 
   test('members-one: the last person can’t be removed', async ({ page }) => {

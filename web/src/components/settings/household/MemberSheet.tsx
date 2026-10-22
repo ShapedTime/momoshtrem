@@ -4,10 +4,12 @@ import { type FormEvent, useId, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserMinus, UserPlus } from 'lucide-react';
 import { Banner, Button, Input, MemberAvatar, Sheet, useConfirm, useToast } from '@/components/ui';
+import { isApiError } from '@/lib/api/client';
 import type { Member, MembersList } from '@/lib/api/contract';
 import { memberKeys, membersApi } from '@/lib/api/endpoints/members';
 import { settingsKeys } from '@/lib/api/endpoints/settings';
 import { memberTraktLine } from '@/lib/members/display';
+import { leavePage, stayOnPage } from '@/lib/members/page';
 import { leaveHousehold, useSwitchMember } from '@/lib/members/switch';
 import {
   addedToast,
@@ -36,6 +38,15 @@ interface MemberSheetProps {
   members: Member[];
   /** Who's watching on this device: removing them leaves the household. */
   currentId: number | null;
+  /** Where focus lands on close when the opener is gone (a removed person's Edit) or disabled (Add, once full). */
+  returnFocus: () => HTMLElement | null;
+}
+
+/** Who a Remove is for, and whether it's this device's member. */
+interface RemoveTarget {
+  id: number;
+  name: string;
+  self: boolean;
 }
 
 /**
@@ -44,7 +55,7 @@ interface MemberSheetProps {
  * what goes and what stays, and has no Undo: the server deletes their data
  * at once. Removing yourself forgets who's watching and goes to `/`.
  */
-export function MemberSheet({ open, onOpenChange, member, members, currentId }: MemberSheetProps) {
+export function MemberSheet({ open, onOpenChange, member, members, currentId, returnFocus }: MemberSheetProps) {
   const formId = useId();
   const lastId = useId();
   const nameInput = useRef<HTMLInputElement>(null);
@@ -78,11 +89,34 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId }: 
       }
     },
     onError: (error) => {
+      // The list was stale: the household is full, or this person was removed elsewhere
+      if (isApiError(error) && (error.code === 'member_limit' || error.status === 404)) void queryClient.invalidateQueries({ queryKey: memberKeys.all });
       if (saveProblem(error, draft.name, members, member).field === 'name') nameInput.current?.focus();
     },
   });
 
-  const remove = useMutation({ mutationFn: (id: number) => membersApi.remove(id) });
+  /** Gone (a 204, or a 404 when someone removed them already): yourself starts over at `/`, anyone else leaves the list. */
+  const removed = ({ id, name, self }: RemoveTarget) => {
+    if (self) {
+      // Nobody is chosen on this device any more: the picker (or the only person left) follows
+      leaveHousehold(() => queryClient.clear());
+      return;
+    }
+    refresh((items) => items.filter((m) => m.id !== id));
+    onOpenChange(false);
+    toast({ tone: 'info', icon: UserMinus, ...removedToast(name) });
+  };
+
+  // The handling lives on the mutation, not on mutate(), so it runs even if the sheet goes meanwhile
+  const remove = useMutation({
+    mutationFn: ({ id }: RemoveTarget) => membersApi.remove(id),
+    onSuccess: (_, target) => removed(target),
+    onError: (error, target) => {
+      if (alreadyRemoved(error)) removed(target);
+      // Still here: the page isn't leaving after all
+      else if (target.self) stayOnPage();
+    },
+  });
 
   const problem = save.error ? saveProblem(save.error, draft.name, members, member) : null;
   const removeError = remove.error && !alreadyRemoved(remove.error) && member ? removeProblem(remove.error, member.name) : null;
@@ -90,6 +124,12 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId }: 
   // Too long shows as it's typed; empty once Add or Save was pressed; the server's answer over both
   const nameMessage = problem?.field === 'name' ? problem.message : typed === NAME_ERRORS.tooLong || submitted ? typed : null;
   const banner = removeError ?? (problem?.field === null ? problem.message : null);
+
+  // The sheet stays while a DELETE is out: what it brings back (yourself gone, an error) is shown here
+  const setOpen = (next: boolean) => {
+    if (!next && remove.isPending) return;
+    onOpenChange(next);
+  };
 
   const change = (next: Partial<MemberDraft>) => {
     setDraft((previous) => ({ ...previous, ...next }));
@@ -115,22 +155,10 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId }: 
     if (!member) return;
     const self = member.id === currentId;
     if (!(await confirm({ ...removeConfirmCopy(member, self, members), tone: 'danger' }))) return;
-    const removed = () => {
-      if (self) {
-        // Nobody is chosen on this device any more: the picker (or the only person left) follows
-        leaveHousehold(() => queryClient.clear());
-        return;
-      }
-      refresh((items) => items.filter((m) => m.id !== member.id));
-      onOpenChange(false);
-      toast({ tone: 'info', icon: UserMinus, ...removedToast(member.name) });
-    };
-    remove.mutate(member.id, {
-      onSuccess: removed,
-      onError: (error) => {
-        if (alreadyRemoved(error)) removed();
-      },
-    });
+    // Removing yourself: the server stops knowing you as the DELETE starts, so a poll meanwhile meets
+    // `unknown_member`. This page is leaving, so apiFetch doesn't reload it over the DELETE
+    if (self) leavePage();
+    remove.mutate({ id: member.id, name: member.name, self });
   };
 
   const name = draft.name.trim();
@@ -138,13 +166,14 @@ export function MemberSheet({ open, onOpenChange, member, members, currentId }: 
   return (
     <Sheet
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={setOpen}
       title={memberSheetTitle(member)}
       description={member ? undefined : 'Once they’re added, switch to them to connect their Trakt.'}
       size="narrow"
+      returnFocus={returnFocus}
       footer={
         <>
-          <Button className="grow" onClick={() => onOpenChange(false)}>
+          <Button className="grow" disabled={remove.isPending} onClick={() => setOpen(false)}>
             Cancel
           </Button>
           <Button variant="primary" className="grow" type="submit" form={formId} loading={save.isPending} disabled={remove.isPending}>

@@ -56,6 +56,14 @@ export function leavePage(): void {
 
 export const leavingPage = (): boolean => leaving;
 
+/**
+ * A leave that didn't happen (#247: removing yourself failed): this page stays as it is, and a later cookie
+ * change or `unknown_member` is someone else's doing again.
+ */
+export function stayOnPage(): void {
+  leaving = false;
+}
+
 /** A page restored from the back/forward cache is live again: whatever the cookie says now is someone else's doing. */
 export function pageRestored(): void {
   leaving = false;

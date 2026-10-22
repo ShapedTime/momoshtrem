@@ -34,6 +34,11 @@ export interface SheetProps {
   size?: 'default' | 'narrow' | 'full';
   /** Stacked on another sheet (filters, inspect, pickers). Esc closes only the top one. */
   nested?: boolean;
+  /**
+   * Where focus lands on close when what opened the sheet is gone or disabled by then (Settings › Household:
+   * the removed person's Edit, or Add someone once the household is full). By default focus returns to the opener.
+   */
+  returnFocus?: () => HTMLElement | null;
   /** Extra sticky head content: search field, chips. */
   head?: ReactNode;
   /** Sticky foot with the primary action (glass, includes the safe area). */
@@ -107,8 +112,8 @@ function SheetBody({ label, children }: { label?: string; children: ReactNode })
   );
 }
 
-function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, head, footer, className, children }: SheetProps) {
-  const focus = useRestoreFocus({ focusContainer: true });
+function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, returnFocus, head, footer, className, children }: SheetProps) {
+  const focus = useRestoreFocus({ focusContainer: true, fallback: returnFocus });
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -140,8 +145,8 @@ function PanelSheet({ open, onOpenChange, title, kicker, closeLabel, description
   );
 }
 
-function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, head, footer, className, children }: SheetProps) {
-  const focus = useRestoreFocus({ focusContainer: true });
+function DrawerSheet({ open, onOpenChange, title, kicker, closeLabel, description, titleAction, bodyLabel, size, nested, returnFocus, head, footer, className, children }: SheetProps) {
+  const focus = useRestoreFocus({ focusContainer: true, fallback: returnFocus });
   const Root = nested ? Drawer.NestedRoot : Drawer.Root;
   return (
     <Root open={open} onOpenChange={onOpenChange} handleOnly={size === 'full'} repositionInputs={false}>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCw, UserPlus } from 'lucide-react';
 import { useMembers } from '@/components/members/MembersGate';
@@ -12,6 +12,8 @@ import { canAddMember, HOUSEHOLD_ABSENT, HOUSEHOLD_FULL, HOUSEHOLD_NOTE } from '
 import { MemberRow } from './household/MemberRow';
 import { MemberSheet } from './household/MemberSheet';
 import { SettingsCard } from './SettingsCard';
+
+const CARD_ID = 'household-people';
 
 function HouseholdSkeleton() {
   return (
@@ -35,6 +37,12 @@ export function HouseholdSection() {
   // The sheet stays mounted while it closes; each open starts a fresh form (a new key)
   const [sheet, setSheet] = useState<{ member: Member | null; key: number } | null>(null);
   const [open, setOpen] = useState(false);
+  const addButton = useRef<HTMLButtonElement>(null);
+  // The sheet closes after a removal (its Edit is gone) or an Add that filled the household (Add is off): land here
+  const landing = useCallback((): HTMLElement | null => {
+    const add = addButton.current;
+    return add && !add.disabled ? add : document.getElementById(`${CARD_ID}-h`);
+  }, []);
 
   if (query.isPending) return <HouseholdSkeleton />;
 
@@ -68,11 +76,12 @@ export function HouseholdSection() {
   return (
     <div className="flex flex-col gap-4 lg:gap-5">
       <SettingsCard
-        id="household-people"
+        id={CARD_ID}
         title="People"
         description={full ? HOUSEHOLD_FULL : undefined}
+        focusableTitle
         aside={
-          <Button size="sm" disabled={full} onClick={() => openSheet(null)}>
+          <Button ref={addButton} size="sm" disabled={full} onClick={() => openSheet(null)}>
             <UserPlus size={15} aria-hidden="true" /> Add someone
           </Button>
         }
@@ -86,7 +95,17 @@ export function HouseholdSection() {
 
       <p className="t-small px-1 text-fg-3">{HOUSEHOLD_NOTE}</p>
 
-      {sheet && <MemberSheet key={sheet.key} open={open} onOpenChange={setOpen} member={sheet.member} members={members} currentId={current?.id ?? null} />}
+      {sheet && (
+        <MemberSheet
+          key={sheet.key}
+          open={open}
+          onOpenChange={setOpen}
+          member={sheet.member}
+          members={members}
+          currentId={current?.id ?? null}
+          returnFocus={landing}
+        />
+      )}
     </div>
   );
 }

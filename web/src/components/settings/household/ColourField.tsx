@@ -8,7 +8,6 @@ import { MEMBER_COLOR_LABELS } from '@/lib/members/display';
 interface ColourFieldProps {
   value: MemberColor;
   onChange: (color: MemberColor) => void;
-  disabled?: boolean;
 }
 
 /**
@@ -16,7 +15,7 @@ interface ColourFieldProps {
  * 32 px disc in a 44 px hit area each. The chosen one is ringed and ticked,
  * and its name shows beside the label, so it never rests on colour alone.
  */
-export function ColourField({ value, onChange, disabled }: ColourFieldProps) {
+export function ColourField({ value, onChange }: ColourFieldProps) {
   const id = useId();
   return (
     <div className="field">
@@ -31,7 +30,7 @@ export function ColourField({ value, onChange, disabled }: ColourFieldProps) {
       <div role="radiogroup" aria-labelledby={`${id}-label`} className="set-swatches">
         {MEMBER_COLORS.map((color) => (
           <label key={color} className="set-swatch" data-color={color}>
-            <input type="radio" name={`${id}-colour`} value={color} checked={value === color} disabled={disabled} onChange={() => onChange(color)} />
+            <input type="radio" name={`${id}-colour`} value={color} checked={value === color} onChange={() => onChange(color)} />
             <span className="disc" aria-hidden="true">
               <Check size={18} strokeWidth={2.75} />
             </span>

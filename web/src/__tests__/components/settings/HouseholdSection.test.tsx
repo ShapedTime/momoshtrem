@@ -3,8 +3,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MembersGate } from '@/components/members/MembersGate';
 import { HouseholdSection } from '@/components/settings/HouseholdSection';
 import { ConfirmProvider, ToastProvider } from '@/components/ui';
+import { apiJson } from '@/lib/api/client';
 import type { Member, MemberColor } from '@/lib/api/contract';
-import { page, resetPage } from '@/lib/members/page';
+import { leavingPage, page, resetPage } from '@/lib/members/page';
 
 /** Settings › Household (#247): the list, Add and Edit in the sheet, and Remove with its confirm. */
 
@@ -33,7 +34,9 @@ interface Call {
  * A small household backend: GET, POST, PATCH and DELETE on /api/members, by
  * the contract's rules that matter here. `override` answers a call first.
  */
-function stubBackend(initial: Member[], override?: (call: Call) => Response | undefined) {
+type Override = (call: Call) => Response | Promise<Response> | undefined;
+
+function stubBackend(initial: Member[], override?: Override) {
   let items = [...initial];
   const calls: Call[] = [];
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -64,7 +67,7 @@ function stubBackend(initial: Member[], override?: (call: Call) => Response | un
   return calls;
 }
 
-function renderSection(members: Member[], override?: (call: Call) => Response | undefined) {
+function renderSection(members: Member[], override?: Override) {
   document.cookie = 'momoshtrem_member=1; Path=/';
   const calls = stubBackend(members, override);
   render(
@@ -85,11 +88,12 @@ const sheet = (name: string) => screen.findByRole('dialog', { name });
 const nameField = (dialog: HTMLElement) => within(dialog).getByRole('textbox', { name: 'Name' });
 
 let assign: jest.SpyInstance;
+let reload: jest.SpyInstance;
 beforeEach(() => {
   // Where the section lives, so going to For You is a navigation, not a reload of this page
   window.history.pushState({}, '', '/settings?section=household');
   assign = jest.spyOn(page, 'assign').mockImplementation(() => undefined);
-  jest.spyOn(page, 'reload').mockImplementation(() => undefined);
+  reload = jest.spyOn(page, 'reload').mockImplementation(() => undefined);
 });
 afterEach(() => {
   window.history.pushState({}, '', '/');
@@ -177,7 +181,10 @@ describe('HouseholdSection', () => {
 
   it('Remove is confirmed with what goes and what stays, then the row goes (no Undo)', async () => {
     const calls = renderSection([TEYMUR, SAM]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit Sam' }));
+    const edit = await screen.findByRole('button', { name: 'Edit Sam' });
+    // As a click in a browser would: the opener has focus
+    edit.focus();
+    fireEvent.click(edit);
     fireEvent.click(within(await sheet('Edit Sam')).getByRole('button', { name: 'Remove Sam' }));
     const confirm = await screen.findByRole('alertdialog', { name: 'Remove Sam from the household?' });
     expect(confirm).toHaveTextContent(
@@ -188,6 +195,40 @@ describe('HouseholdSection', () => {
     expect(calls).toEqual([{ method: 'DELETE', url: '/api/members/2', body: undefined }]);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit Sam' })).not.toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+    // Sam's Edit went with his row: focus lands on Add someone, not on the page
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add someone' })).toHaveFocus());
+  });
+
+  it('an Add that fills the household lands focus on the People heading (Add is off)', async () => {
+    renderSection([TEYMUR, SAM, person(3, 'Alex', 'periwinkle'), person(4, 'Mina', 'lime'), person(5, 'Jo', 'orchid')]);
+    const add = await screen.findByRole('button', { name: 'Add someone' });
+    add.focus();
+    fireEvent.click(add);
+    const dialog = await sheet('Add someone');
+    fireEvent.change(nameField(dialog), { target: { value: 'Riley' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('Riley was added')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add someone' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'People' })).toHaveFocus());
+  });
+
+  it('member_limit (the list was stale): the cap in the sheet, and the list catches up', async () => {
+    const six = [TEYMUR, SAM, person(3, 'Alex', 'periwinkle'), person(4, 'Mina', 'lime'), person(5, 'Jo', 'orchid'), person(6, 'Riley', 'sand')];
+    let full = false;
+    renderSection([TEYMUR, SAM], (call) => {
+      if (call.method === 'POST') {
+        // Someone else filled it meanwhile
+        full = true;
+        return error(409, 'member_limit');
+      }
+      return call.method === 'GET' && full ? answer(200, { items: six }) : undefined;
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add someone' }));
+    const dialog = await sheet('Add someone');
+    fireEvent.change(nameField(dialog), { target: { value: 'Kai' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('A household can have up to six people.');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add someone', hidden: true })).toBeDisabled());
   });
 
   it('removing yourself forgets who’s watching and starts over at For You', async () => {
@@ -199,6 +240,43 @@ describe('HouseholdSection', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Remove Teymur' }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
     expect(document.cookie).not.toContain('momoshtrem_member=1');
+  });
+
+  it('removing yourself: a poll meeting unknown_member while the DELETE runs doesn’t reload over it', async () => {
+    let finish: (response: Response) => void = () => undefined;
+    renderSection([TEYMUR, SAM], (call) => {
+      if (call.method === 'DELETE') return new Promise<Response>((resolve) => (finish = resolve));
+      // The server stops knowing Teymur as the delete starts
+      return call.url === '/api/torrents/summary' ? error(400, 'unknown_member') : undefined;
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Teymur' }));
+    const dialog = await sheet('Edit Teymur');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Teymur' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove Teymur' }));
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Remove Teymur' })).toHaveAttribute('aria-busy', 'true'));
+    // While it's out, the sheet stays
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+
+    await expect(apiJson('/api/torrents/summary')).rejects.toMatchObject({ code: 'unknown_member' });
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
+
+    finish(answer(204));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).not.toContain('momoshtrem_member=1');
+  });
+
+  it('removing yourself fails: the page stays, and is no longer leaving', async () => {
+    renderSection([TEYMUR, SAM], (call) => (call.method === 'DELETE' ? error(500, 'internal_error') : undefined));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Teymur' }));
+    const dialog = await sheet('Edit Teymur');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Teymur' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove Teymur' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Couldn’t remove Teymur. Check your connection and try again.');
+    expect(leavingPage()).toBe(false);
+    expect(assign).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
   });
 
   it('the last person can’t be removed', async () => {

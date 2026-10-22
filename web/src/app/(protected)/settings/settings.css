@@ -121,7 +121,6 @@
   .set-swatch input:checked + .disc { box-shadow: 0 0 0 2px var(--ink-2), 0 0 0 4px var(--member); }
   .set-swatch input:checked + .disc svg { opacity: 1; }
   .set-swatch input:focus-visible + .disc { box-shadow: var(--focus-ring); }
-  .set-swatch input:disabled, .set-swatch:has(input:disabled) { cursor: not-allowed; }
   .set-swatch[data-color="rose"] { --member: var(--member-rose); }
   .set-swatch[data-color="orchid"] { --member: var(--member-orchid); }
   .set-swatch[data-color="periwinkle"] { --member: var(--member-periwinkle); }

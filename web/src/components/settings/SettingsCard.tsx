@@ -9,15 +9,17 @@ interface SettingsCardProps {
   description?: ReactNode;
   /** A quiet action beside the title, e.g. AI & picks' "Run now". */
   aside?: ReactNode;
+  /** The title can take focus (`tabIndex={-1}`): where focus lands when what had it goes (a removed person's Edit). */
+  focusableTitle?: boolean;
   children: ReactNode;
 }
 
 /** A titled settings card (screens/settings): rows or free content below the title. */
-export function SettingsCard({ id, title, description, aside, children }: SettingsCardProps) {
+export function SettingsCard({ id, title, description, aside, focusableTitle, children }: SettingsCardProps) {
   return (
     <Panel as="section" aria-labelledby={`${id}-h`} className="set-card">
       <header className="set-card-head">
-        <h3 id={`${id}-h`} className="t-title-3">
+        <h3 id={`${id}-h`} className="t-title-3" tabIndex={focusableTitle ? -1 : undefined}>
           {title}
         </h3>
         {aside}
