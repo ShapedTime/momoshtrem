@@ -314,13 +314,13 @@ New tables only. Wire shapes: §6 "Downloads (#77)".
 - Rollback: an older binary ignores the tables and the document, so pinned data becomes ordinary cache. It goes back to `global_cache_size`: 4 GiB once the VM's line is deleted (P2), and its first trim then evicts everything past that.
 
 **`011_members.sql`–`014_member_ask.sql` (household members, #239)**
-One migration per slice, each landing with the code that writes its columns, so `main` stays deployable. They're idempotent like 006. Backfills go to `(SELECT min(id) FROM members)`, never the literal 1 (member 1 may be gone by the next deploy). No `member_id` has a default, so a writer that forgets the member fails. Wire shapes: §6 "Household members (#239)".
+One migration per slice, each landing with the code that writes its columns, so `main` stays deployable. They're idempotent like 006. Backfills go to `(SELECT min(id) FROM members)`, never the literal 1 (member 1 may be gone by the next deploy). Every `member_id` below (012, 013 and 014) is `NOT NULL` with an FK to `members` `ON DELETE CASCADE` (`ask_turns`' goes through its thread, below), which is how `DELETE /members/{id}` removes a member's data. None has a default, so a writer that forgets the member fails. Wire shapes: §6 "Household members (#239)".
 - `011_members.sql` (B1, #241): `members(id bigserial, name, color, created_at, updated_at)`.
   - `name` is 1–32 characters (a CHECK), with a unique index on `lower(name)`. `color` is a palette key, checked in Go (`member.Colors`).
   - It seeds member 1 with `trakt_auth.username` (cut to 32), else "Me", colour `teal`.
 - `012_member_trakt.sql` (B2a, #243):
   - `members.trakt_settings jsonb` (default `{}`) takes `app_settings` key `trakt`, which is deleted. It's read over the defaults and updated with one jsonb `||` statement, as before.
-  - Every `trakt_*` table gets `member_id NOT NULL`, an FK to `members` `ON DELETE CASCADE`.
+  - Every `trakt_*` table gets a `member_id`.
   - `trakt_auth`: PK `member_id` (the `id` column and its CHECK go), and a unique index on `user_slug`: an account connects to one member.
   - The PKs lead with the member: `trakt_sync_state (member_id, key)`, `trakt_history (member_id, id)`, `trakt_ratings` and `trakt_watchlist (member_id, media_type, trakt_id)`, `trakt_show_progress (member_id, show_trakt_id)`, `trakt_hidden (member_id, section, trakt_id)`, `trakt_calendar (member_id, show_trakt_id, season, episode)`.
   - The watched tables lead with the title, for household reads: `trakt_watched_movies (tmdb_id, member_id)` and `trakt_watched_episodes (show_tmdb_id, season, episode, member_id)`, each with an index on `member_id`.
@@ -329,9 +329,11 @@ One migration per slice, each landing with the code that writes its columns, so 
   - `rec_runs_one_active` becomes one active run per member, and `rec_feedback`'s PK `(member_id, media_type, tmdb_id)`.
   - Indexes for a member's newest runs and for the oldest queued run.
   - Shelves, items and hero picks don't change: they belong to their run.
+  - The prune (`PruneRecRuns`) keeps each member's 30 newest runs and their newest succeeded one, and it never deletes a run created in the current budget month (`MonthBounds` in `TZ`), so `by_member` still finds the month's spend.
 - `014_member_ask.sql` (B3b, #246): `member_id` on `ask_threads` and `ask_turns`.
-  - A composite FK, `ask_turns (thread_id, member_id)` → `ask_threads (id, member_id)`, keeps a turn's member its thread's.
-  - `ask_turns_one_streaming` becomes one streaming turn per member, and the daily limit's and the thread list's indexes become member-first.
+  - A composite FK, `ask_turns (thread_id, member_id)` → `ask_threads (id, member_id)` `ON DELETE CASCADE`, keeps a turn's member its thread's.
+  - `ask_turns_one_streaming` becomes one streaming turn per member, and the daily limit's index becomes `(member_id, created_at)`.
+  - A new index, `ask_threads (member_id, updated_at DESC, id DESC)`, serves the thread list.
   - `ask_messages` doesn't change.
 - Unchanged: the library tables, `downloads`, `local_watches`, `ai_cache`, the other `app_settings` keys, and `ai_usage` (a member's spend joins through `ref_id`, its run or turn).
 - Rollback: `011` is a new table, so an older binary ignores it. An older binary can't run on `012`–`014`: roll back from the pg_dump (ops PLAN §6).
@@ -343,7 +345,7 @@ One migration per slice, each landing with the code that writes its columns, so 
 - Long operations return `202 {job_id | run_id}` and are polled.
 - Every route requires `X-Momoshtrem-Token` when `BACKEND_API_TOKEN` is set; otherwise `401 {error: {code: "unauthorized"}}` (G2). The web client maps a backend 401/403 to `502 backend_auth`, so a token mismatch never looks like an expired session.
 - **The member** (#239). Every route but `/members*` is for one household member, named by `X-Momoshtrem-Member: <id>`. The web's proxy adds it from the picker's cookie.
-  - Without it, the request is the lowest-id member's (the CLI, scripts, an older web).
+  - Without it, the request is the lowest-id member's (curl, scripts, an older web).
   - A value that isn't a positive integer is `400 bad_request`, on `/status` too.
   - An id no member has is `400 unknown_member` (the web forgets its choice and opens the picker). `/status` is the exception: it answers without a member, with `trakt.connected: false`.
   - `/members*` never reads the header.
@@ -1042,7 +1044,7 @@ RecommendationsHome { configured,       // ANTHROPIC_API_KEY is set: false hides
     asks_today, ask_daily_limit                   // the viewer's turns today; 30, per member
   }
   ```
-  `by_member` doesn't split the classifier's spend (it's the household's), and a removed member has no row: their spend counts only in `total_usd` and `by_feature`.
+  `by_member` doesn't split the classifier's spend (it's the household's). A member's spend is found through its `ai_usage` row's run or turn, so spend whose run or turn no longer exists (a removed member's) counts only in `total_usd` and `by_feature`; a removed member has no row. The prune keeps the month's runs for this (§5 `013`).
 - **Title pages:** `recommendation_reason` (§6 "Titles and library") is the viewer's newest succeeded run's reason for the title (a shelf item's, else a hero pick's); null without one, while picks are off, and after negative feedback.
 - **Dropped from earlier drafts:** `in_library` on rec items (replaced by `library`, as on similar titles); `backdrop_dominant_color` on rec items (HANDOFF §6 lists one: the hero loads the title, which has it, as Up next does); the thread's `messages` (replaced by `turns`, the saved views).
 
@@ -1312,7 +1314,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
     - A watched episode is never a candidate.
     - An episode whose smart row was released `deleted` (dismissed) is never picked again.
     - After a pick ran its whole lifetime (released `expired` at its `expires_at`, 14 days after `created_at`), it's picked again only if there's a play of the show after `released_at`.
-    - A pick released early as `expired`, because it stopped being a candidate (its window moved, `episodes_ahead` went down, its file went, the show aged out of Up next, Trakt was disconnected, or a stream needed its room), can be picked again at once.
+    - A pick released early as `expired`, because it stopped being a candidate (its window moved; `episodes_ahead` went down; its file went; Up next no longer names it, because the show aged out or its member disconnected Trakt; or a stream needed its room), can be picked again at once.
   - A Keep on a smart pick turns it kept (`POST /downloads` below).
 - **The smart picks' details** (P5 #203, `internal/downloads/smart.go`), where the rules above leave room:
   - **When:** a pass every 5 minutes, after every Trakt sync that ends well (any member's), after a storage PUT, and when an episode starts streaming (the manager's 5 s session poll). While `smart.enabled` is off a pass does nothing: it neither picks nor releases. After a storage PUT the pass refreshes the manager's plan before it fits picks, so they fit the new caps.
@@ -1329,7 +1331,7 @@ A **download** is a Keep (`reason: kept`) or a smart pick (`reason: smart`) on a
     - It never releases a pick all on disk of a show watched within the last 7 days to make room, nor a pick of any show streaming now.
     - Only a pick whose file smart pays for, and no other download wants, counts: releasing one whose file a Keep or another pick has frees nothing.
     - Up next's released picks then wait: they don't fit while the stream's hold the room.
-  - **Releases (`expired`):** a pick that's no longer a candidate, when its show streams now (the window moved, or `episodes_ahead` went down), when Up next picked it (the show left the 21 days, or Trakt was disconnected), or when its episode lost its torrent file. A streaming pick whose stream ended (or paused: a session ends 30 s after its last read) stays until it's watched or its 14 days end, at most `episodes_ahead` + 1 of them per show in episode order: the episode that streamed and the ones after it, so resuming finds them picked. The episode streaming now stays picked.
+  - **Releases (`expired`):** a pick that's no longer a candidate, when its show streams now (the window moved, or `episodes_ahead` went down), when Up next picked it and no longer names it (the show left the 21 days, or its member disconnected Trakt), or when its episode lost its torrent file. A streaming pick whose stream ended (or paused: a session ends 30 s after its last read) stays until it's watched or its 14 days end, at most `episodes_ahead` + 1 of them per show in episode order: the episode that streamed and the ones after it, so resuming finds them picked. The episode streaming now stays picked.
   - **Watched picks** are the manager's (`watched`), a later episode streaming included. A pick watched before it was made (a play that synced late, which "after `created_at`" never counts) is released `watched` by the smart pass, and its pieces are demoted.
   - **Order:** there's no score. Smart picks are admitted by creation, then episode order, and a pass makes its picks in its signals' order: the episodes streaming now, then Up next by last watched, newest first. So a pick made earlier keeps its room, and a new signal never unpins what's on disk, but for the stream's room above. Stale picks leave on their own: Up next's after 21 days without a play, a stream's within its 14 days.
 ```
@@ -1489,7 +1491,7 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
   - when the PUT sent `kept.max_bytes` (the kept cap moves only with the limit and that cap), on the kept cap's field, with focus there: "Kept downloads need X. Enter at least that here, or stop keeping some."
 
 ### Household members (#239)
-Several people share one login (D7). Each is a household **member** with their own Trakt, For You, picks, feedback and Ask threads; the library, downloads, Activity and settings are the household's. A request names its member with `X-Momoshtrem-Member` (Conventions). Types: `web/src/lib/api/contract/members.ts`. Served by `internal/member` (B1 #241: the members, the middleware and `/members`), with Trakt per member in B2a #243 and B2b #244, picks in B3a #245, and Ask and the usage split in B3b #246. UI: "Who's watching?", the account menu's switcher and the Trakt note (W1 #242); Settings › Household and the usage split (W2 #247).
+Several people share one login (D7). Each is a household **member** with their own Trakt, For You, picks, feedback and Ask threads; the library, downloads, Activity and settings are the household's. A request names its member with `X-Momoshtrem-Member` (Conventions). Types: `web/src/lib/api/contract/members.ts`. B1 #241 serves it: the context helpers and the service in `internal/member`, the store in `library/member_repo.go`, the middleware and the `/members` routes in `internal/api`. Then come Trakt per member in B2a #243 and B2b #244, picks in B3a #245, and Ask and the usage split in B3b #246. UI: "Who's watching?", the account menu's switcher and the Trakt note (W1 #242); Settings › Household and the usage split (W2 #247).
 
 ```
 GET /members → 200 {items: [Member]}     // by id, never empty; the first is the default member (no header)
@@ -1502,10 +1504,15 @@ Member {
 - **`POST /members`** with `{name, color?}` → `201 Member`, with Trakt `off` and nothing personal yet.
   - `name` is 1–32 characters once trimmed, counted in code points, and unique case-insensitively.
   - `color` defaults to the first key, in the order above, that no member uses. Member 1 is seeded `teal` (§5 `011`).
-  - Checks, in order: `400` for a body that isn't a JSON object; `422 validation_error` with `error.field` (`name` or `color`); `409 member_limit` with 6 members; `409 member_name_taken`.
-- **`PATCH /members/{id}`** with any of `{name, color}` → `200 Member`, by the same rules; fields left out keep their value. `404`; `400` for a body that isn't a JSON object; `422 validation_error`; `409 member_name_taken`.
+  - Checks, in order:
+    - `400 bad_request` for a body that isn't a JSON object, or a field of the wrong JSON type, `null` included (`{"name": 5}`), as the quality profile does;
+    - `422 validation_error` with `error.field` (`name` or `color`) for a bad value: a name out of range, an unknown colour key;
+    - `409 member_limit` with 6 members;
+    - `409 member_name_taken`.
+- **`PATCH /members/{id}`** with any of `{name, color}` → `200 Member`, by the same rules; fields left out keep their value and unknown ones are ignored. Checks, in order: `400 bad_request` (as POST); `422 validation_error`; `404`; `409 member_name_taken`.
 - **`DELETE /members/{id}`** → `204`; `404`; `409 last_member` (the household always has one).
-  - It disconnects the member's Trakt as `DELETE /integrations/trakt` does (the sync stopped, their rows purged, the token revoked, best effort 5 s) and cancels their picks run and Ask turns in flight. Then the member goes, and with them their Trakt settings, taste profiles, runs, feedback and threads.
+  - It disconnects the member's Trakt in any state: a pending code is cancelled, then the sync stops (waiting at most 10 s), their rows are purged and the token is revoked (best effort, 5 s). `DELETE /integrations/trakt`, by contrast, stops at cancelling a pending code.
+  - It cancels their picks run and Ask turns in flight. Then the member goes, and with them their Trakt settings, taste profiles, runs, feedback and threads (the FKs cascade, §5).
   - The household's data stays: the library, downloads, local watches, and the member's AI spend, which still counts in the month's total and the budget.
   - A request that still names them is `400 unknown_member`, including one that races the delete.
   - When the delete fails after the disconnect, the member stays, with Trakt `off`.
@@ -1516,7 +1523,7 @@ Member {
   - a title's `recommendation_reason` and `watch_state.rating`;
   - `/settings/ai/usage`'s `recs` and `asks_today`;
   - `/status`'s `trakt.connected`.
-- **The household's** (the same for every member): everything else. That's titles, seasons and `/library` (watched included, below), mapping jobs, subtitles, search, downloads and smart picks, torrents and Activity, the AI settings and the one budget (`by_member` splits its spend), storage and the quality profile. Streaming sessions and the local watches they write aren't attributed to a member.
+- **The household's** (the same for every member): everything else. That's titles, seasons and `/library` (watched included, below), mapping jobs, subtitles, search, downloads and smart picks, torrents and Activity, the AI settings and the one budget (`by_member` splits its picks and Ask spend only), storage and the quality profile. Streaming sessions and the local watches they write aren't attributed to a member.
 - **Watched is the household's** on title pages, seasons, `/library` and downloads: a movie or an episode is watched when any member has a Trakt play of it (downloads also count a local watch, "Downloads (#77)").
   - `watch_state.watched_at` is the latest play by anyone, and `plays` the sum of everyone's.
   - `progress` and `next_episode` are those of the member who played the show last (the newest `last_watched_at` of their Trakt progress; the lower id on a tie).
@@ -1528,7 +1535,7 @@ Member {
 - **Picks per member.**
   - Each `rec_schedule` slot queues one `scheduled` run for every member with Trakt connected, in an order that rotates each slot (by the slot's day; weekly, by its week), so a budget that runs out late in the month doesn't always skip the same member. A missed slot catches up every one of them.
   - One worker runs them all, oldest queued first, one at a time.
-  - A member has at most one active run.
+  - A member has at most one active run. There's no household-wide limit, so `recommend-run -member <id>` (another process) can run beside the server's run for another member; the worker leaves a run another process is running to it, as today.
   - `first_sync` follows each member's initial import while that member has no succeeded run.
   - The budget and the AI settings are shared, so two members on a nightly schedule spend about twice as much.
 - **Ask per member.** Threads are private, and `ask_busy` and `ask_limit` count the viewer's turns ("Ask momoshtrem" above), so two members can ask at once. The budget is shared, and the system prompt is the same for everyone.

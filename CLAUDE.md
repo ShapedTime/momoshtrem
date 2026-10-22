@@ -165,7 +165,7 @@ GET|PUT /api/settings/ai                   # rec_enabled, rec_model, rec_schedul
 GET  /api/settings/ai/usage                # The month's AI spend by feature (recs, ask, classifier) against the budget, the last, active and next run, estimates, asks today
 GET|POST /api/members, PATCH|DELETE /api/members/{id}   # Household members (#239): {id, name, color, trakt}, by id; at most 6, never none (409 member_limit|member_name_taken|last_member, 422 names the field); DELETE disconnects their Trakt and deletes their picks, feedback and threads
 ```
-Personal routes (`/integrations/trakt*`, `/me/*`, `/recommendations/*`) answer for the member named by `X-Momoshtrem-Member` (the web's proxy sends it; without it, the lowest-id member; an unknown id is `400 unknown_member`). Everything else is the household's.
+Personal routes (`/integrations/trakt*`, `/me/*`, `/recommendations/*`) answer for the member named by `X-Momoshtrem-Member` (the web's proxy sends it; without it, the lowest-id member; an unknown id is `400 unknown_member`, but `/status` ignores it). Everything else is the household's, except a few personal fields: a title's `recommendation_reason` and `watch_state.rating`, `/settings/ai/usage`'s `recs` and `asks_today`, and `/status`'s `trakt.connected` (PLAN.md §6 "Household members (#239)").
 
 Full list: `momoshtrem/internal/api/router.go`. v2 endpoints: PLAN.md §6 (mapping jobs: "Assignment"; torrent search: "Search"; torrents: "Torrents and activity (B6)"; Trakt, `/me` and watch state: "Trakt (B5)" and "Watch state rules"; picks, Ask and the AI settings: "Recommendations (R1–R3)"; members and the header: "Household members (#239)").
 
