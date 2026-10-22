@@ -217,20 +217,22 @@ func (s *Syncer) Stop() {
 }
 
 // StopSync cancels the running sync and anything queued, and waits for it
-// until ctx ends (a disconnect, which purges next). What the sync reports
-// goes back to never synced.
+// until ctx ends (a disconnect, which purges next). After Stop it doesn't
+// wait again: Stop did. What the sync reports goes back to never synced.
 func (s *Syncer) StopSync(ctx context.Context) {
 	s.mu.Lock()
 	s.queued, s.initial, s.resume = false, false, nil
 	s.seq++
-	cancel, done := s.cancel, s.done
+	cancel, done, stopped := s.cancel, s.done, s.stopped
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			s.log.Warn("The Trakt sync didn't stop in time; its writes are refused after the purge")
+		if !stopped {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				s.log.Warn("The Trakt sync didn't stop in time; its writes are refused after the purge")
+			}
 		}
 	}
 	s.mu.Lock()

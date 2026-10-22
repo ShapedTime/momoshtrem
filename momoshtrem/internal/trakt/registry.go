@@ -197,72 +197,72 @@ func (r *Registry) get(id int64) *memberTrakt {
 	return r.members[id]
 }
 
-// of is the context's member's connection and sync: member.ErrNoMember
-// without one, member.ErrUnknown for a member it doesn't hold.
-func (r *Registry) of(ctx context.Context) (*memberTrakt, error) {
+// of is the context's member and their connection and sync:
+// member.ErrNoMember without one, member.ErrUnknown for a member it
+// doesn't hold.
+func (r *Registry) of(ctx context.Context) (int64, *memberTrakt, error) {
 	id, err := member.Require(ctx)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if m := r.get(id); m != nil {
-		return m, nil
+		return id, m, nil
 	}
-	return nil, member.ErrUnknown
+	return 0, nil, member.ErrUnknown
+}
+
+// forMember runs fn on the context's member's connection and sync. When
+// fn fails and the member was forgotten meanwhile (a request racing their
+// removal: Forget closed what fn used), the error is member.ErrUnknown,
+// as the next request's would be.
+func forMember[T any](ctx context.Context, r *Registry, fn func(m *memberTrakt) (T, error)) (T, error) {
+	id, m, err := r.of(ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	out, err := fn(m)
+	if err != nil && r.get(id) != m {
+		var zero T
+		return zero, member.ErrUnknown
+	}
+	return out, err
 }
 
 // Integration is the context's member's GET /integrations/trakt
 // (Auth.Integration).
 func (r *Registry) Integration(ctx context.Context) (Integration, error) {
-	m, err := r.of(ctx)
-	if err != nil {
-		return Integration{}, err
-	}
-	return m.auth.Integration(ctx)
+	return forMember(ctx, r, func(m *memberTrakt) (Integration, error) { return m.auth.Integration(ctx) })
 }
 
 // Connect starts the context's member's device-code flow (Auth.Connect).
 func (r *Registry) Connect(ctx context.Context) (DeviceCode, error) {
-	m, err := r.of(ctx)
-	if err != nil {
-		return DeviceCode{}, err
-	}
-	return m.auth.Connect(ctx)
+	return forMember(ctx, r, func(m *memberTrakt) (DeviceCode, error) { return m.auth.Connect(ctx) })
 }
 
 // Disconnect is the context's member's DELETE /integrations/trakt
 // (Auth.Disconnect).
 func (r *Registry) Disconnect(ctx context.Context) error {
-	m, err := r.of(ctx)
-	if err != nil {
-		return err
-	}
-	return m.auth.Disconnect(ctx)
+	_, err := forMember(ctx, r, func(m *memberTrakt) (struct{}, error) { return struct{}{}, m.auth.Disconnect(ctx) })
+	return err
 }
 
 // SyncNow starts the context's member's sync or joins it (Auth.SyncNow).
 func (r *Registry) SyncNow(ctx context.Context) (Integration, error) {
-	m, err := r.of(ctx)
-	if err != nil {
-		return Integration{}, err
-	}
-	return m.auth.SyncNow(ctx)
+	return forMember(ctx, r, func(m *memberTrakt) (Integration, error) { return m.auth.SyncNow(ctx) })
 }
 
 // UpdateSettings stores the context's member's settings patch
 // (Auth.UpdateSettings).
 func (r *Registry) UpdateSettings(ctx context.Context, patch library.TraktSettingsPatch) (library.TraktSettings, error) {
-	m, err := r.of(ctx)
-	if err != nil {
-		return library.TraktSettings{}, err
-	}
-	return m.auth.UpdateSettings(ctx, patch)
+	return forMember(ctx, r, func(m *memberTrakt) (library.TraktSettings, error) { return m.auth.UpdateSettings(ctx, patch) })
 }
 
 // Nudge syncs the context's member in the background when their last
 // check is over 5 minutes old (GET /me/up-next, Syncer.Nudge). Nothing
 // for a member it doesn't hold.
 func (r *Registry) Nudge(ctx context.Context) {
-	if m, err := r.of(ctx); err == nil && r.Configured() {
+	if _, m, err := r.of(ctx); err == nil && r.Configured() {
 		m.sync.Nudge()
 	}
 }

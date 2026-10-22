@@ -140,15 +140,6 @@ func (s *Server) SetUser(username, slug string) {
 	s.user = user{username: username, slug: slug}
 }
 
-// ResetDevice makes the device code new again: unused, and approved on the
-// first poll, so another device flow can run after SetDeviceAnswers.
-func (s *Server) ResetDevice() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.deviceAnswers = []int{http.StatusOK}
-	s.deviceUsed = false
-}
-
 // SetTokenLifetime sets the expires_in of the tokens granted from now on.
 func (s *Server) SetTokenLifetime(d time.Duration) {
 	s.mu.Lock()

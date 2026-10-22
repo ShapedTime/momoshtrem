@@ -351,13 +351,76 @@ func TestRegistry_Forget(t *testing.T) {
 	}
 }
 
-// Removing a member while their sync is in the middle of a write: the
-// registry's OnRemoving stops the sync and purges before the member's row
-// goes, so the delete's cascade never meets the write (which holds the
-// connection's row, then needs the member's for the FK: a deadlock
-// Postgres would end by aborting one of them).
-func TestRegistry_MemberDeletedMidWrite(t *testing.T) {
+// A request racing the member's removal: what fails because Forget closed
+// it meanwhile is member.ErrUnknown (400 unknown_member), not the closed
+// Auth's error (a Connect's would be ErrUnavailable, a 502).
+func TestRegistry_RequestRacingForget(t *testing.T) {
 	e := newRegEnv(t, 2, nil)
+	e.start()
+	ann, bob := e.ids[0], e.ids[1]
+	e.connect(ann, "Ann", "ann")
+
+	_, err := forMember(e.as(bob), e.reg, func(m *memberTrakt) (DeviceCode, error) {
+		e.reg.Forget(e.ctx, bob) // as the delete runs, the request holding Bob's Auth
+		code, err := m.auth.Connect(e.as(bob))
+		if !errors.Is(err, ErrUnavailable) {
+			t.Errorf("the closed Auth's Connect = %v, want ErrUnavailable", err)
+		}
+		return code, err
+	})
+	if !errors.Is(err, member.ErrUnknown) {
+		t.Errorf("a Connect racing the removal = %v, want member.ErrUnknown", err)
+	}
+	// A member still held keeps their own errors.
+	if _, err := e.reg.Connect(e.as(ann)); !errors.Is(err, ErrConnected) {
+		t.Errorf("Ann's Connect = %v, want ErrConnected", err)
+	}
+}
+
+// stubbornHistory is a sync store whose history writes ignore
+// cancellation, as a write that outlasts Syncer.Stop goes on. It records
+// how each ended.
+type stubbornHistory struct {
+	SyncStore
+	ended *writeResults
+}
+
+type writeResults struct {
+	mu   sync.Mutex
+	errs []error
+}
+
+func (w *writeResults) add(err error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.errs = append(w.errs, err)
+	return err
+}
+
+func (w *writeResults) all() []error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.errs)
+}
+
+func (s stubbornHistory) ReplaceHistory(ctx context.Context, gen time.Time, plays []library.TraktPlayRow) error {
+	return s.ended.add(s.SyncStore.ReplaceHistory(context.WithoutCancel(ctx), gen, plays))
+}
+
+func (s stubbornHistory) UpsertHistory(ctx context.Context, gen time.Time, plays []library.TraktPlayRow) error {
+	return s.ended.add(s.SyncStore.UpsertHistory(context.WithoutCancel(ctx), gen, plays))
+}
+
+// Removing a member while their sync is in the middle of a write that
+// cancelling doesn't end. The write holds the connection's row and then
+// needs the member's (the FK); the delete would hold the member's row and
+// its cascade need the connection's, a deadlock Postgres ends by aborting
+// one of them. The registry's OnRemoving stops the sync and purges before
+// the member's row goes, and the purge waits for the write, so the delete
+// only runs once the write is done: both end well.
+func TestRegistry_MemberDeletedMidWrite(t *testing.T) {
+	writes := &writeResults{}
+	e := newRegEnv(t, 2, func(_ int64, s SyncStore) SyncStore { return stubbornHistory{SyncStore: s, ended: writes} })
 	e.serveTwoAccounts()
 	e.start()
 	members := member.NewService(library.NewMemberRepository(e.db))
@@ -397,7 +460,11 @@ func TestRegistry_MemberDeletedMidWrite(t *testing.T) {
 
 	deleted := make(chan error, 1)
 	go func() { deleted <- members.Delete(e.ctx, bob) }()
-	time.Sleep(300 * time.Millisecond) // the delete meets the write still waiting
+	select {
+	case err := <-deleted:
+		t.Fatalf("Delete = %v while Bob's write still waits", err)
+	case <-time.After(time.Second): // the delete waits for the write
+	}
 	if _, err := lock.ExecContext(e.ctx, `SELECT pg_advisory_unlock(4244)`); err != nil {
 		t.Fatal(err)
 	}
@@ -408,6 +475,11 @@ func TestRegistry_MemberDeletedMidWrite(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("the delete never finished")
+	}
+	// Ann's import and Bob's held write, each committed: not a deadlock's
+	// victim.
+	if got := writes.all(); len(got) != 2 || got[0] != nil || got[1] != nil {
+		t.Errorf("history writes ended %v, want two, both well", got)
 	}
 
 	if ids, err := members.IDs(e.ctx); err != nil || !slices.Equal(ids, []int64{ann}) {
