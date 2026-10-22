@@ -10,9 +10,11 @@ import {
   formatBudgetInput,
   formatDuration,
   hasChanges,
+  memberSpend,
   nextRunPhrase,
   parseBudget,
   picksHelp,
+  picksMemberNote,
   runEstimate,
   runNowProblem,
   runProgressLine,
@@ -325,5 +327,35 @@ describe('episode mapping and the nav', () => {
     expect(aiNavSummary({ ...SETTINGS, rec_enabled: false }, usage()).text).toBe('Picks off · $3.12 of $15.00');
     expect(aiNavSummary(SETTINGS, usage({ total_usd: 15, budget_reached: true }))).toEqual({ text: 'Nightly · $15.00 of $15.00', attention: true });
     expect(aiNavSummary(SETTINGS, usage({ configured: false }))).toEqual({ text: 'No Anthropic key' });
+  });
+});
+
+describe('household members (#239)', () => {
+  const rows = [
+    { member_id: 1, name: 'Teymur', cost_usd: 2.03, requests: 48 },
+    { member_id: 2, name: 'Sam', cost_usd: 0.68, requests: 16 },
+    { member_id: 7, name: 'Jo', cost_usd: 0, requests: 0 },
+  ];
+
+  it('splits picks and Ask by person, with each one’s colour, only with two or more', () => {
+    const members = [
+      { id: 1, color: 'teal' as const },
+      { id: 2, color: 'rose' as const },
+    ];
+    expect(memberSpend(usage({ by_member: rows }), members)).toEqual([
+      { memberId: 1, name: 'Teymur', color: 'teal', cost: 2.03 },
+      { memberId: 2, name: 'Sam', color: 'rose', cost: 0.68 },
+      // Not in this page's list yet: a neutral avatar, and still a row
+      { memberId: 7, name: 'Jo', color: null, cost: 0 },
+    ]);
+    expect(memberSpend(usage({ by_member: rows.slice(0, 1) }), members)).toBeNull();
+    // A backend from before household members
+    expect(memberSpend(usage(), members)).toBeNull();
+  });
+
+  it('says whose runs these are once there are two people', () => {
+    expect(picksMemberNote({ name: 'Teymur' }, 2)).toBe('Runs and Run now are Teymur’s. The schedule, model and budget are shared.');
+    expect(picksMemberNote({ name: 'Teymur' }, 1)).toBeNull();
+    expect(picksMemberNote(null, 2)).toBeNull();
   });
 });

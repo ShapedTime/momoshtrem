@@ -1,6 +1,7 @@
 /* ==========================================================================
    Settings (screens/settings): cards and rows, Trakt's screens (connect,
-   device code, waiting, connected), AI & picks' model cards and spend,
+   device code, waiting, connected), Household's people and colours (#247,
+   no design screen: built from the same parts), AI & picks' model cards and spend,
    the quality profile's preview, range and tags, Storage's disk bar, size
    inputs and download windows, the indexer list and the save bar. Ported from
    docs/redesign/design-cinematic/css/screens/settings.css. The React parts
@@ -95,6 +96,40 @@
   .set-quiet-zone { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-4) var(--sp-1); flex-wrap: wrap; }
   .set-quiet-zone > div { flex: 1 1 260px; min-width: 0; }
 
+  /* ---- Household (#247): people, and the member sheet's preview and colours -- */
+  .set-member { display: flex; align-items: center; gap: var(--sp-3); min-height: 72px; padding: var(--sp-3) var(--sp-4); }
+  .set-member + .set-member { border-top: 1px solid var(--line-1); }
+  @media (min-width: 640px) { .set-member { gap: var(--sp-4); padding: var(--sp-3) var(--sp-5); } }
+  .set-member-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+  .set-member-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--sp-2); min-width: 0; }
+  .set-member-name strong { font-weight: var(--w-semibold); color: var(--text-1); overflow-wrap: anywhere; min-width: 0; }
+  .set-member-preview { display: flex; align-items: center; gap: var(--sp-4); }
+  .set-member-remove { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); padding-top: var(--sp-4); border-top: 1px solid var(--line-1); }
+
+  .set-swatches { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-inline: -6px; }
+  .set-swatch { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; }
+  /* Above the disc, which the hover scale lifts into its own layer */
+  .set-swatch input { position: absolute; z-index: 1; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .set-swatch .disc {
+    display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+    background: var(--member); color: var(--ink-0); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.18);
+    transition: box-shadow var(--d-fast), transform var(--d-fast) var(--ease-out);
+  }
+  .set-swatch .disc svg { opacity: 0; transition: opacity var(--d-fast); }
+  .set-swatch:hover .disc { transform: scale(1.06); }
+  /* Chosen: a ring in its own colour and a tick, so it never rests on colour alone */
+  .set-swatch input:checked + .disc { box-shadow: 0 0 0 2px var(--ink-2), 0 0 0 4px var(--member); }
+  .set-swatch input:checked + .disc svg { opacity: 1; }
+  .set-swatch input:focus-visible + .disc { box-shadow: var(--focus-ring); }
+  .set-swatch input:disabled, .set-swatch:has(input:disabled) { cursor: not-allowed; }
+  .set-swatch[data-color="rose"] { --member: var(--member-rose); }
+  .set-swatch[data-color="orchid"] { --member: var(--member-orchid); }
+  .set-swatch[data-color="periwinkle"] { --member: var(--member-periwinkle); }
+  .set-swatch[data-color="teal"] { --member: var(--member-teal); }
+  .set-swatch[data-color="lime"] { --member: var(--member-lime); }
+  .set-swatch[data-color="sand"] { --member: var(--member-sand); }
+  @media (prefers-reduced-motion: reduce) { .set-swatch:hover .disc { transform: none; } }
+
   /* ---- AI & picks: the run, the model cards, the spend ----------------------- */
   .set-run { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--accent-line); background: var(--surface-2); }
 
@@ -130,6 +165,11 @@
   .set-spend-legend li, .set-disk-legend li { display: inline-flex; align-items: center; gap: 6px; }
   .set-spend-legend i, .set-disk-legend i { width: 10px; height: 10px; border-radius: 2px; }
   .set-spend-legend span, .set-disk-legend span { color: var(--text-1); font-weight: var(--w-medium); }
+  /* Picks and Ask by person (#239): the legend's look with an avatar for a key; one line at 1440, stacked on phone */
+  .set-spend-people { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .set-spend-people li { min-width: 0; overflow-wrap: anywhere; }
+  .set-spend-people .member-avatar { font-weight: var(--w-semibold); }
+  @media (max-width: 639px) { .set-spend-people .set-spend-legend { flex-direction: column; } }
 
   /* ---- Storage: the disk bar, size inputs, download windows ------------------ */
   /* The disk's colours, shared with Activity (#221): the piece cache's parts in the one accent

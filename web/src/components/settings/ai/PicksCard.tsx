@@ -34,6 +34,8 @@ interface PicksCardProps {
   starting: boolean;
   problem: RunNowProblem | null;
   onRunNow: () => void;
+  /** With two or more people (#239): whose runs these are, and what's shared. */
+  memberNote: string | null;
 }
 
 /** The run's named steps while it works (HANDOFF §4.3), with its model and cost so far. */
@@ -54,14 +56,16 @@ function RunStatus({ run }: { run: RunProgress }) {
  * Personal picks (screens/settings/ai-*): the master switch, the schedule,
  * the model, and Run now. The design's "Write picks automatically" is the
  * master switch (`rec_enabled`), so it reads "Write personal picks": off
- * means no shelves and no runs at all, while the schedule says when.
+ * means no shelves and no runs at all, while the schedule says when. The
+ * runs are the viewer's and the settings the household's (#239).
  */
-export function PicksCard({ draft, saved, usage, configured, now, onChange, errorFor, run, starting, problem, onRunNow }: PicksCardProps) {
+export function PicksCard({ draft, saved, usage, configured, now, onChange, errorFor, run, starting, problem, onRunNow, memberNote }: PicksCardProps) {
   const off = !configured;
   return (
     <SettingsCard
       id="ai-picks"
       title="Personal picks"
+      description={memberNote}
       aside={
         <Button variant="ghost" size="sm" loading={starting} disabled={off || run !== null} onClick={onRunNow}>
           <Play size={15} aria-hidden="true" /> Run now

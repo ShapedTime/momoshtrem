@@ -1,17 +1,18 @@
-import { HardDrive, Link2, type LucideIcon, Server, SlidersHorizontal, Sparkles, Tv } from 'lucide-react';
+import { HardDrive, Link2, type LucideIcon, Server, SlidersHorizontal, Sparkles, Tv, Users } from 'lucide-react';
 
-export type SectionId = 'trakt' | 'ai' | 'quality' | 'playback' | 'storage' | 'status';
+export type SectionId = 'household' | 'trakt' | 'ai' | 'quality' | 'playback' | 'storage' | 'status';
 
 export interface SettingsSection {
   id: SectionId;
   label: string;
-  group: 'Integrations' | 'Preferences' | 'Playback' | 'System';
+  group: 'Account' | 'Integrations' | 'Preferences' | 'Playback' | 'System';
   icon: LucideIcon;
   description: string;
 }
 
-/** Settings sections (screens/settings). */
+/** Settings sections (screens/settings). Household (#247) has no design screen: it follows the others. */
 export const SECTIONS: SettingsSection[] = [
+  { id: 'household', label: 'Household', group: 'Account', icon: Users, description: 'Who watches here. Each person has their own Trakt, For You and Ask.' },
   { id: 'trakt', label: 'Trakt', group: 'Integrations', icon: Link2, description: 'Your watch history powers Up next and personal picks.' },
   { id: 'ai', label: 'AI & picks', group: 'Preferences', icon: Sparkles, description: 'When Noir writes your picks, which model it uses, and what it may spend.' },
   { id: 'quality', label: 'Quality profile', group: 'Preferences', icon: SlidersHorizontal, description: 'What “Best match” means when you search for a torrent.' },

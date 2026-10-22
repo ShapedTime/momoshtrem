@@ -922,4 +922,49 @@ test.describe('household members (#239)', () => {
     await settle(page);
     await shoot(page, testInfo, 'members/trakt-in-use');
   });
+
+  // Settings › Household and the usage split (#247)
+  const household = async (page: Page) => {
+    await signIn(page, '/settings?section=household');
+    await page.getByRole('button', { name: 'Edit Sam' }).waitFor();
+  };
+
+  test('Settings › Household', async ({ page }, testInfo) => {
+    await household(page);
+    await settle(page);
+    await shoot(page, testInfo, 'members/household');
+  });
+
+  test('Settings › Household: add someone', async ({ page }, testInfo) => {
+    await household(page);
+    await page.getByRole('button', { name: 'Add someone' }).click();
+    await page.getByRole('dialog', { name: 'Add someone' }).getByRole('textbox', { name: 'Name' }).fill('Alex');
+    await settle(page);
+    await shoot(page, testInfo, 'members/household-add');
+  });
+
+  test('Settings › Household: edit someone', async ({ page }, testInfo) => {
+    await household(page);
+    await page.getByRole('button', { name: 'Edit Sam' }).click();
+    await page.getByRole('dialog', { name: 'Edit Sam' }).getByRole('button', { name: 'Remove Sam' }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'members/household-edit');
+  });
+
+  test('Settings › Household: the remove confirm', async ({ page }, testInfo) => {
+    await household(page);
+    await page.getByRole('button', { name: 'Edit Sam' }).click();
+    await page.getByRole('dialog', { name: 'Edit Sam' }).getByRole('button', { name: 'Remove Sam' }).click();
+    await page.getByRole('alertdialog', { name: 'Remove Sam from the household?' }).waitFor();
+    await page.waitForTimeout(600);
+    await shoot(page, testInfo, 'members/household-remove');
+  });
+
+  test('AI & picks: whose runs, and picks and Ask by person', async ({ page }, testInfo) => {
+    await signIn(page, '/settings?section=ai');
+    await page.getByRole('list', { name: 'Picks and Ask by person' }).waitFor();
+    await page.getByText('Runs and Run now are Teymur’s.', { exact: false }).waitFor();
+    await settle(page);
+    await shoot(page, testInfo, 'members/ai-split', { fullPage: true });
+  });
 });

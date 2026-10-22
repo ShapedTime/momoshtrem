@@ -6,17 +6,20 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useSignOut } from '@/components/shell/signOut';
 import { useHydrated } from '@/hooks/useHydrated';
+import { membersQuery } from '@/lib/api/endpoints/members';
 import { qualityProfileQuery } from '@/lib/api/endpoints/search';
 import { aiSettingsQuery, aiUsageQuery, storageSettingsQuery } from '@/lib/api/endpoints/settings';
 import { statusQuery } from '@/lib/api/endpoints/system';
 import { traktIntegrationQuery } from '@/lib/api/endpoints/trakt';
-import type { AiSettings, AiUsage, QualityProfile, StorageSettings, SystemStatus, TraktIntegration } from '@/lib/api/contract';
+import type { AiSettings, AiUsage, Member, QualityProfile, StorageSettings, SystemStatus, TraktIntegration } from '@/lib/api/contract';
 import { aiNavSummary } from '@/lib/settings/ai';
+import { householdNavSummary } from '@/lib/settings/household';
 import { qualitySummary } from '@/lib/settings/quality';
 import { storageNavSummary } from '@/lib/settings/storage';
 import { traktNavSummary } from '@/lib/settings/trakt';
 import { cx } from '@/lib/utils/cx';
 import { AiSection } from './AiSection';
+import { HouseholdSection } from './HouseholdSection';
 import { PlaybackSection } from './PlaybackSection';
 import { QualitySection } from './QualitySection';
 import { DEFAULT_SECTION, isSectionId, SECTIONS, type SectionId } from './sections';
@@ -25,9 +28,10 @@ import { StorageSection } from './StorageSection';
 import { serviceRows, summarize, versionLabel } from './status-model';
 import { TraktSection } from './TraktSection';
 
-const GROUPS = ['Integrations', 'Preferences', 'Playback', 'System'] as const;
+const GROUPS = ['Account', 'Integrations', 'Preferences', 'Playback', 'System'] as const;
 
 interface NavData {
+  members: Member[] | undefined;
   status: SystemStatus | undefined;
   statusFailed: boolean;
   quality: QualityProfile | undefined;
@@ -37,9 +41,10 @@ interface NavData {
   hydrated: boolean;
 }
 
-function navSummary(id: SectionId, { status, statusFailed, quality, trakt, ai, storage, hydrated }: NavData): { text: string; attention?: boolean } {
+function navSummary(id: SectionId, { members, status, statusFailed, quality, trakt, ai, storage, hydrated }: NavData): { text: string; attention?: boolean } {
   if (id === 'quality') return { text: quality ? qualitySummary(quality) : '' };
   // Not before hydration: the server's HTML has no summary (#148)
+  if (id === 'household') return hydrated ? householdNavSummary(members) : { text: '' };
   if (id === 'ai') return hydrated ? aiNavSummary(ai.settings, ai.usage) : { text: '' };
   if (id === 'storage') return hydrated ? storageNavSummary(storage) : { text: '' };
   if (id === 'trakt') return traktNavSummary(trakt);
@@ -72,6 +77,8 @@ export function SettingsView() {
   const { data: aiSettings } = useQuery(aiSettingsQuery());
   const { data: aiUsage } = useQuery({ ...aiUsageQuery(), refetchInterval: false });
   const { data: storage } = useQuery(storageSettingsQuery());
+  // The gate's list: the nav reads along
+  const { data: household } = useQuery(membersQuery());
   const hydrated = useHydrated();
 
   return (
@@ -86,7 +93,16 @@ export function SettingsView() {
               <ul className="overflow-hidden rounded-lg border border-line-1 bg-surface-1 max-lg:divide-y max-lg:divide-line-1 lg:border-0 lg:bg-transparent">
                 {SECTIONS.filter((s) => s.group === group).map((s) => {
                   const Icon = s.icon;
-                  const summary = navSummary(s.id, { status, statusFailed: isError, quality, trakt, ai: { settings: aiSettings, usage: aiUsage }, storage, hydrated });
+                  const summary = navSummary(s.id, {
+                    members: household?.items,
+                    status,
+                    statusFailed: isError,
+                    quality,
+                    trakt,
+                    ai: { settings: aiSettings, usage: aiUsage },
+                    storage,
+                    hydrated,
+                  });
                   const isActive = s.id === active;
                   return (
                     <li key={s.id}>
@@ -143,7 +159,9 @@ export function SettingsView() {
             </h2>
             <p className="text-fg-2">{current.description}</p>
           </header>
-          {active === 'trakt' ? (
+          {active === 'household' ? (
+            <HouseholdSection />
+          ) : active === 'trakt' ? (
             <TraktSection />
           ) : active === 'playback' ? (
             <PlaybackSection />

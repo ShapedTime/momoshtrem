@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { leavingPage, loadPage, resetPage } from '@/lib/members/page';
-import { currentUrl, switchMember } from '@/lib/members/switch';
+import { currentUrl, leaveHousehold, switchMember } from '@/lib/members/switch';
 
 /** Switching who's watching (#239): cookie, then the cache, then a full navigation. */
 
@@ -44,6 +44,16 @@ describe('switchMember', () => {
     stubPage('/activity#act-dl-h');
     switchMember(1, () => steps.push('clear'), currentUrl());
     expect(steps).toEqual(['cookie momoshtrem_member=1', 'clear', 'reload']);
+  });
+});
+
+describe('leaveHousehold', () => {
+  it('removing yourself marks the page as leaving, forgets who’s watching, drops the cache, then starts over at For You', () => {
+    stubPage('/settings?section=household');
+    leaveHousehold(() => steps.push('clear'));
+    expect(steps).toEqual(['cookie momoshtrem_member=', 'clear', 'go /']);
+    // The gate mustn't reload over the navigation when it sees the cookie gone
+    expect(leavingPage()).toBe(true);
   });
 });
 

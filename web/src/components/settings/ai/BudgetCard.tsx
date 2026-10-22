@@ -1,13 +1,15 @@
 import { RefreshCw } from 'lucide-react';
-import { Banner, Button } from '@/components/ui';
+import { Banner, Button, MemberAvatar } from '@/components/ui';
 import type { AiUsage } from '@/lib/api/contract';
-import { budgetMonth, spendBar, spendLine, spendProjection, usd } from '@/lib/settings/ai';
+import { budgetMonth, type MemberSpend, spendBar, spendLine, spendProjection, usd } from '@/lib/settings/ai';
 import { cx } from '@/lib/utils/cx';
 import { rowDescribedBy, SettingRow, SettingsCard } from '../SettingsCard';
 
 interface BudgetCardProps {
   /** Undefined when it didn't load (the section waits for it first). */
   usage: AiUsage | undefined;
+  /** Picks and Ask by person (#239); null hides it (one person, or no split from the server). */
+  people: MemberSpend[] | null;
   onRetryUsage: () => void;
   now: number;
   /** The budget input's text. */
@@ -17,8 +19,28 @@ interface BudgetCardProps {
   error: string | null;
 }
 
-/** This month's spend: the total of the budget, the bar by feature with its legend, and where the pace leads. */
-function Spend({ usage, now }: { usage: AiUsage; now: number }) {
+/** What each person's picks and Ask spent (#239): legend-style, wrapping on one line at 1440 and stacked at 390. */
+function SpendByPerson({ people }: { people: MemberSpend[] }) {
+  return (
+    <div className="set-spend-people">
+      <span id="ai-spend-people-h" className="t-micro text-fg-3">
+        Picks and Ask by person
+      </span>
+      <ul className="set-spend-legend" aria-labelledby="ai-spend-people-h">
+        {people.map((person) => (
+          <li key={person.memberId}>
+            <MemberAvatar name={person.name} color={person.color ?? ''} size="xs" />
+            {person.name}
+            <span className="tabular-nums">{usd(person.cost)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** This month's spend: the total of the budget, the bar by feature with its legend, by person, and where the pace leads. */
+function Spend({ usage, people, now }: { usage: AiUsage; people: MemberSpend[] | null; now: number }) {
   const { spent, of } = spendLine(usage);
   const bar = spendBar(usage);
   const projection = spendProjection(usage, now);
@@ -44,6 +66,7 @@ function Spend({ usage, now }: { usage: AiUsage; now: number }) {
           </li>
         ))}
       </ul>
+      {people && <SpendByPerson people={people} />}
       <p className={cx('t-small', projection.warn ? 'text-warning' : 'text-fg-3')}>{projection.text}</p>
     </div>
   );
@@ -52,13 +75,14 @@ function Spend({ usage, now }: { usage: AiUsage; now: number }) {
 /**
  * Monthly budget (screens/settings/ai-*): what every AI feature spent this
  * server-local month (GET /settings/ai/usage), and the cap they share. An
- * empty budget is no cap.
+ * empty budget is no cap. With two or more people, picks and Ask split by
+ * person; the classifier is the household's.
  */
-export function BudgetCard({ usage, onRetryUsage, now, budget, onBudget, error }: BudgetCardProps) {
+export function BudgetCard({ usage, people, onRetryUsage, now, budget, onBudget, error }: BudgetCardProps) {
   return (
     <SettingsCard id="ai-budget-card" title="Monthly budget">
       {usage ? (
-        <Spend usage={usage} now={now} />
+        <Spend usage={usage} people={people} now={now} />
       ) : (
         <div className="set-card-note">
           <Banner
