@@ -1,14 +1,16 @@
 'use client';
 
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useReducer, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader, LoadingRegion } from '@/components/ui';
 import type { Member } from '@/lib/api/contract';
 import { membersQuery } from '@/lib/api/endpoints';
 import { clearMemberCookie, writeMemberCookie } from '@/lib/members/cookie';
-import { gateState, type MembersStatus, membersStatus } from '@/lib/members/gate';
-import { leavePage, leavingPage, memberChangedUnderPage, page, pageRestored, setPageMember } from '@/lib/members/page';
+import { type GateState, gateState, type MembersStatus, membersStatus } from '@/lib/members/gate';
+import { leavePage, leavingPage, memberChangedUnderPage, onStayOnPage, page, pageRestored, setPageMember } from '@/lib/members/page';
 import { WhoIsWatching } from './WhoIsWatching';
+
+const NO_MEMBERS: Member[] = [];
 
 export interface MembersContextValue {
   status: MembersStatus;
@@ -81,14 +83,27 @@ function Waiting() {
  * render matches the server's (#148): with a cookie the app renders at once,
  * without one nothing personal mounts (the shell's own queries included)
  * until someone is chosen. One member is chosen automatically; a cookie that
- * names nobody, or changed in another tab, reloads the page. A backend
- * without household members (404) gets the app as before.
+ * names nobody, or changed in another tab, reloads the page (except while
+ * this page is leaving: removing yourself keeps the app until it navigates).
+ * A backend without household members (404) gets the app as before.
  */
 export function MembersGate({ initialMemberId, children }: { initialMemberId: number | null; children: ReactNode }) {
   const query = useQuery(membersQuery());
   const [cookieId, setCookieId] = useState(initialMemberId);
   const status = membersStatus(query);
-  const state = gateState(cookieId, status, query.data?.items);
+  const live = gateState(cookieId, status, query.data?.items);
+  // The app as it was last shown: who for, and the list it had
+  const [shown, setShown] = useState<{ member: Member | null; items: Member[] } | null>(null);
+  const items = query.data?.items ?? NO_MEMBERS;
+  if (live.kind === 'app' && (shown === null || shown.member !== live.member || shown.items !== items)) setShown({ member: live.member, items });
+  // Removing yourself (#247): the list stops having you as the DELETE starts. While the page is leaving, the app
+  // stays as it was (no stale reload) until leaveHousehold() navigates, or stayOnPage() calls the leave off and
+  // this renders again with what the list says. Read when the list's answer renders, not subscribed to: a
+  // switch marks the page leaving too, and re-rendering over its navigation would only flash
+  const [, staying] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => onStayOnPage(staying), []);
+  const holding = leavingPage() && shown !== null && live.kind !== 'app';
+  const state: GateState = holding ? { kind: 'app', member: shown.member } : live;
   // Who this page renders for, before any child's first request (client only; the same value on every render)
   if (typeof window !== 'undefined') setPageMember(cookieId);
 
@@ -114,10 +129,11 @@ export function MembersGate({ initialMemberId, children }: { initialMemberId: nu
   useReloadWhenCookieChanges(cookieId);
 
   const current = state.kind === 'app' ? state.member : null;
-  const value = useMemo<MembersContextValue>(() => {
-    const members = query.data?.items ?? [];
-    return { status, members, current, others: current ? members.filter((m) => m.id !== current.id) : [] };
-  }, [status, query.data, current]);
+  const members = holding ? shown.items : items;
+  const value = useMemo<MembersContextValue>(
+    () => ({ status, members, current, others: current ? members.filter((m) => m.id !== current.id) : [] }),
+    [status, members, current]
+  );
 
   switch (state.kind) {
     case 'app':

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MembersGate } from '@/components/members/MembersGate';
 import { HouseholdSection } from '@/components/settings/HouseholdSection';
@@ -67,11 +67,15 @@ function stubBackend(initial: Member[], override?: Override) {
   return calls;
 }
 
+/** The last render's client, for a test to refetch through (as focus or a poll would). */
+let queryClient: QueryClient;
+
 function renderSection(members: Member[], override?: Override) {
   document.cookie = 'momoshtrem_member=1; Path=/';
   const calls = stubBackend(members, override);
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <ConfirmProvider>
           <MembersGate initialMemberId={1}>
@@ -260,6 +264,39 @@ describe('HouseholdSection', () => {
     await expect(apiJson('/api/torrents/summary')).rejects.toMatchObject({ code: 'unknown_member' });
     expect(reload).not.toHaveBeenCalled();
     expect(document.cookie).toContain('momoshtrem_member=1');
+
+    finish(answer(204));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).not.toContain('momoshtrem_member=1');
+  });
+
+  it('removing yourself: the list refetched during the DELETE no longer has you, yet nothing reloads, and the 204 goes to For You', async () => {
+    let finish: (response: Response) => void = () => undefined;
+    let deleting = false;
+    renderSection([TEYMUR, SAM], (call) => {
+      if (call.method === 'DELETE') {
+        deleting = true;
+        return new Promise<Response>((resolve) => (finish = resolve));
+      }
+      // The server stops listing Teymur as the delete starts
+      return call.method === 'GET' && call.url === '/api/members' && deleting ? answer(200, { items: [SAM] }) : undefined;
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Teymur' }));
+    const dialog = await sheet('Edit Teymur');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Teymur' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove Teymur' }));
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Remove Teymur' })).toHaveAttribute('aria-busy', 'true'));
+
+    // A refetch (focus, or the gate's own) while the DELETE is out: the gate keeps the app, with no stale reload
+    await act(() => queryClient.refetchQueries({ queryKey: ['members'] }));
+    // The list has rendered without Teymur (his row went)…
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit Teymur', hidden: true })).not.toBeInTheDocument());
+    // …and the gate with it, holding the app
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
+    expect(screen.getByRole('heading', { name: 'People', hidden: true })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Remove Teymur' })).toBeInTheDocument();
 
     finish(answer(204));
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
