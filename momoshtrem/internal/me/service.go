@@ -17,11 +17,11 @@ import (
 
 // Store is the database. *library.CatalogRepository implements it.
 type Store interface {
-	UpNextCandidates(ctx context.Context, member int64, today string) ([]library.UpNextCandidate, error)
-	NewEpisodeCandidates(ctx context.Context, member int64, from, now time.Time, fromDate, today string) ([]library.NewEpisodeCandidate, error)
+	UpNextCandidates(ctx context.Context, memberID int64, today string) ([]library.UpNextCandidate, error)
+	NewEpisodeCandidates(ctx context.Context, memberID int64, from, now time.Time, fromDate, today string) ([]library.NewEpisodeCandidate, error)
 	EpisodesByKeys(ctx context.Context, keys []library.TraktEpisodeKey) ([]library.KeyedEpisode, error)
-	TraktWatchlist(ctx context.Context, member int64, mediaType string) ([]library.TraktWatchlistItem, error)
-	TraktHistory(ctx context.Context, member int64, limit, offset int) ([]library.TraktPlay, int, error)
+	TraktWatchlist(ctx context.Context, memberID int64, mediaType string) ([]library.TraktWatchlistItem, error)
+	TraktHistory(ctx context.Context, memberID int64, limit, offset int) ([]library.TraktPlay, int, error)
 }
 
 var _ Store = (*library.CatalogRepository)(nil)
@@ -29,7 +29,7 @@ var _ Store = (*library.CatalogRepository)(nil)
 // Settings reads a member's Trakt settings. *library.MemberRepository
 // implements it.
 type Settings interface {
-	TraktSettings(ctx context.Context, member int64) (library.TraktSettings, error)
+	TraktSettings(ctx context.Context, memberID int64) (library.TraktSettings, error)
 }
 
 var _ Settings = (*library.MemberRepository)(nil)

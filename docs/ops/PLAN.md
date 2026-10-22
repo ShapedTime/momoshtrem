@@ -67,7 +67,7 @@ Taken read-only on 2026-10-14. #33 records the full setup as it is today in `doc
 - **`momoshtrem/` has no `.dockerignore`**, so local torrent data ends up in the build context.
 - **Jackett and pgAdmin images use `latest`.**
 - **momoshtrem has no healthcheck.** `/api/status` requires the backend token, so it can't serve as one. The build already stamps a version (`-X main.version`), which `/api/status` reports.
-- **Migrations are embedded and run at startup, forward only.** An old binary on a newer schema only logs a warning.
+- **Migrations are embedded and run at startup, forward only.** An old binary on a newer schema logs a warning, and past some migrations it can't run on it ([`DEPLOY.md`](DEPLOY.md) §2).
 - **Moving from `e063821` to `main`** means:
   - the `web` service replaces `prettytvcatalog`;
   - new env vars: `BACKEND_API_TOKEN`, `SECRET_KEY`, `APP_USERNAME`, `TRUSTED_PROXY_HOPS`, the Trakt and Anthropic keys, and `TZ` (the AI features' zone; DEPLOY.md §1);
@@ -129,7 +129,7 @@ From least to most effort:
 | Layer | When | How |
 |---|---|---|
 | **App** | A deploy misbehaves | Deploy the previous commit: `ops/deploy/deploy.sh <host> <sha>`. Images are immutable, and the VM keeps the previous ones. |
-| **Data** | The rollback crosses a migration, or the data went bad | Also restore the dump that deploy took beforehand. Migrations only go forward, and an old binary on a newer schema only warns. |
+| **Data** | The rollback crosses a migration, or the data went bad | Also restore the dump that deploy took beforehand. Migrations only go forward. An old binary on a newer schema usually only warns, but not past a migration that changed what it reads or writes ([`DEPLOY.md`](DEPLOY.md) §2 lists them, from 012 on): those need the dump. |
 | **Machine** | An OS or Ansible change broke the host | Revert to the Proxmox snapshot taken before the change (D5). Without one, rebuild as in the next row. |
 | **Disaster** | The VM or its disk is gone | Create a VM from [`VM.md`](VM.md), run Ansible ([`HOST.md`](HOST.md)), restore from B2 (including `.env`), then deploy the last good commit in the order of [`DEPLOY.md`](DEPLOY.md) §3. #42 does this once with the old VM's data. |
 

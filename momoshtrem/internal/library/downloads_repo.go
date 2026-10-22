@@ -756,9 +756,13 @@ func (r *DownloadsRepository) EpisodeIDByNumber(ctx context.Context, showID int6
 	return id, nil
 }
 
-func isUniqueViolation(err error) bool {
+func isUniqueViolation(err error) bool { return isUniqueViolationOn(err, "") }
+
+// isUniqueViolationOn reports a unique violation of constraint (or unique
+// index); any one's when constraint is "".
+func isUniqueViolationOn(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && (constraint == "" || pgErr.ConstraintName == constraint)
 }
 
 func isForeignKeyViolation(err error) bool {

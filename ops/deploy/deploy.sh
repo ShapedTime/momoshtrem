@@ -148,8 +148,8 @@ if [ "$known" = yes ]; then
 		echo "Migrations crossed:"
 		git diff --name-status "$current" "$sha" -- momoshtrem/internal/library/migrations/ | sed 's/^/  /'
 		if [ "$direction" = rollback ]; then
-			echo "  WARNING: migrations only go forward. To roll the data back too, restore"
-			echo "  the dump taken before the newer deploy (docs/ops/DEPLOY.md §2)."
+			echo "  WARNING: migrations only go forward. Some (012 on) break the older code until"
+			echo "  the dump taken before the newer deploy is restored; check docs/ops/DEPLOY.md §2."
 		fi
 	fi
 

@@ -78,7 +78,7 @@ ops/deploy/deploy.sh momoshtrem-v2 <previous sha>
 ```
 
 **Migrations only go forward** (PLAN §6). The plan says whether one lies between the two commits.
-- **Without data.** The older code runs on the newer schema and only logs a warning.
+- **Without data.** The older code usually runs on the newer schema and only logs a warning. It doesn't past a migration that changed what it reads or writes; those are listed below, and they need the dump restored.
 - **With the data too.** First restore the dump taken before the newer deploy: it's named after the commit that was running then. Then deploy the older commit.
 
 On the VM, in `/opt/momoshtrem`:
@@ -110,6 +110,14 @@ Then, on the Mac, run `ops/deploy/deploy.sh momoshtrem-v2 <older sha>`.
 
   To deploy past #211 again, delete the line **before** that deploy. `config.yaml` is read only at startup, so a line deleted afterwards still sets the limit (`source: config`) until the next restart.
 - **Past ac55f90 (#224).** Migration 010 adds the `downloads` and `local_watches` tables. An older binary ignores them and logs a warning that the database has a migration it doesn't know (version 10). Kept and smart downloads stop, and their data becomes ordinary cache that can be evicted. Deploy forward again, with the tables still there, and they resume: the pins are rebuilt from the table at startup, and anything evicted in the meantime is fetched again. If you restored a dump from before #224, the Keeps are gone and have to be made again.
+
+**Rolling back past the household members commits (#239).**
+- **Past #243 (migration 012).** `012_member_trakt.sql` changes the Trakt tables under the older code, so an older binary doesn't work on them:
+  - it reads and writes `trakt_auth WHERE id = 1`, and 012 drops that column;
+  - its inserts into every `trakt_*` table leave out `member_id`, which is `NOT NULL` with no default;
+  - its Trakt settings (`app_settings` key `trakt`) are gone, moved to `members.trakt_settings`.
+
+  So restore the dump taken before the #243 deploy, then deploy the older commit (above). The Trakt data synced since then comes back with the next sync, and any members added since are lost. `013_member_picks.sql` (#245) and `014_member_ask.sql` (#246) work the same way: rolling back past either needs the dump taken before it. `011_members.sql` (#241) only adds a table, so an older binary just logs a warning.
 
 ## 3. First deploy on a fresh VM, from a copy of the old state
 

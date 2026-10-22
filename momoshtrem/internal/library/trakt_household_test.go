@@ -213,7 +213,8 @@ func TestHousehold_Downloads(t *testing.T) {
 	a, b := twoMembers(t, f.db)
 	a.watchedMovie(f.movie.TMDBID, 1, householdDay(2))
 	b.watchedMovie(f.movie.TMDBID, 1, householdDay(4))
-	// S1E1 (TMDB 9011) is watched by B only, as Trakt numbers it S9E9.
+	// S1E1 (TMDB 9011, which Trakt numbers S9E9) is watched by both, B
+	// last.
 	b.watched(f.show.TMDBID, 9, 9, 9011, 1, householdDay(3))
 	a.watched(f.show.TMDBID, 9, 9, 9011, 1, householdDay(1))
 
@@ -270,9 +271,9 @@ func TestHousehold_PersonalReads(t *testing.T) {
 	a.watchlist("tv", 21, unstarted.TMDBID, "Unstarted", day(1))
 	b.watched(unstarted.TMDBID, 1, 1, 0, 1, day(4))
 
-	upNext := func(member int64) []string {
+	upNext := func(memberID int64) []string {
 		t.Helper()
-		candidates, err := repo.UpNextCandidates(ctx, member, today)
+		candidates, err := repo.UpNextCandidates(ctx, memberID, today)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -307,9 +308,10 @@ func TestHousehold_PersonalReads(t *testing.T) {
 	b.hidden("progress_watched", 31, lima.TMDBID)
 	a.progress(progressRow{traktID: 41, tmdbID: 8101, title: "Calendar show", aired: 1, lastWatched: now})
 	a.calendar(41, 8101, 1, 1, 0, "Aired", time.Date(2026, 10, 13, 2, 0, 0, 0, time.UTC))
-	newEpisodes := func(member int64) []string {
+	b.watched(8101, 1, 1, 0, 1, now) // A hasn't watched it
+	newEpisodes := func(memberID int64) []string {
 		t.Helper()
-		candidates, err := repo.NewEpisodeCandidates(ctx, member, from, now, "2026-10-07", "2026-10-14")
+		candidates, err := repo.NewEpisodeCandidates(ctx, memberID, from, now, "2026-10-07", "2026-10-14")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -376,7 +378,7 @@ func TestHousehold_PersonalReads(t *testing.T) {
 	if got, want := shows(tasteA), []int{kilo.TMDBID, 8001, 8101}; !slices.Equal(got, sorted(want)) {
 		t.Errorf("A's watched shows = %v, want %v", got, sorted(want))
 	}
-	if got, want := shows(tasteB), []int{unstarted.TMDBID, kilo.TMDBID, 8002}; !slices.Equal(got, sorted(want)) {
+	if got, want := shows(tasteB), []int{unstarted.TMDBID, kilo.TMDBID, 8002, 8101}; !slices.Equal(got, sorted(want)) {
 		t.Errorf("B's watched shows = %v, want %v", got, sorted(want))
 	}
 	if r, err := tasteA.TasteRatings(ctx); err != nil || len(r) != 1 || r[0].TMDBID != 603 || r[0].Rating != 9 {
@@ -427,9 +429,9 @@ func TestHousehold_TraktConnections(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO trakt_ratings (member_id, media_type, trakt_id, tmdb_id, rating, rated_at) VALUES (2, 'movie', 482, 604, 5, NOW())`); err != nil {
 		t.Fatal(err)
 	}
-	seeded := func(member int64) map[string]int {
+	seeded := func(memberID int64) map[string]int {
 		want := map[string]int{"trakt_watchlist": 2, "trakt_ratings": 1}
-		if member == 2 {
+		if memberID == 2 {
 			want["trakt_ratings"] = 2
 		}
 		for _, table := range traktTables {
@@ -439,11 +441,11 @@ func TestHousehold_TraktConnections(t *testing.T) {
 		}
 		return want
 	}
-	assertRows := func(what string, member int64, want map[string]int) {
+	assertRows := func(what string, memberID int64, want map[string]int) {
 		t.Helper()
-		for table, n := range rowCounts(t, db, member) {
+		for table, n := range rowCounts(t, db, memberID) {
 			if n != want[table] {
-				t.Errorf("%s: member %d's %s has %d rows, want %d", what, member, table, n, want[table])
+				t.Errorf("%s: member %d's %s has %d rows, want %d", what, memberID, table, n, want[table])
 			}
 		}
 	}
@@ -548,6 +550,132 @@ func TestHousehold_TraktConnections(t *testing.T) {
 	}
 	if err := NewTraktSyncStore(db).SaveRun(ctx, genA, []byte(`{}`)); !errors.Is(err, errUnbound) {
 		t.Errorf("an unbound write = %v, want errUnbound", err)
+	}
+}
+
+// Every sync write is the member's: A's replaces, upserts, artwork and
+// cursors leave B's rows as they were, though both have the same Trakt
+// and TMDB ids.
+func TestHousehold_SyncWritesAreTheMembers(t *testing.T) {
+	db := openSchemaDB(t)
+	ctx := context.Background()
+	twoMembers(t, db)
+	authA, authB := NewTraktAuthRepository(db).ForMember(1), NewTraktAuthRepository(db).ForMember(2)
+	syncA := NewTraktSyncStore(db).ForMember(1)
+	genA, err := authA.Connect(ctx, traktAuthRow("teymur"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authB.Connect(ctx, traktAuthRow("sam")); err != nil {
+		t.Fatal(err)
+	}
+	seedTraktData(t, db, 1)
+	seedTraktData(t, db, 2)
+	// Both progress rows name S9E1 next, the calendar's episode, without a
+	// still: SetArtwork's still updates have a row of B's to miss.
+	if _, err := db.Exec(`UPDATE trakt_show_progress SET next_season = 9, next_episode = 1`); err != nil {
+		t.Fatal(err)
+	}
+	// The Matrix is in the library: one of B's two watchlist titles.
+	seedMovieTMDB(t, db, 603, "The Matrix")
+
+	// rowsOf is every row of member's in every Trakt table, as JSON.
+	rowsOf := func(memberID int64) map[string][]string {
+		t.Helper()
+		out := map[string][]string{}
+		for _, table := range traktTables {
+			out[table] = queryStrings(t, db, fmt.Sprintf(
+				`SELECT row_to_json(x)::text FROM %s x WHERE member_id = %d ORDER BY 1`, table, memberID))
+		}
+		return out
+	}
+	counts := func() TraktCounts {
+		t.Helper()
+		c, err := authB.Counts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	before, beforeCounts := rowsOf(2), counts()
+	if beforeCounts != (TraktCounts{History: 1, Ratings: 1, Watchlist: 2, WatchlistInLibrary: 1}) {
+		t.Fatalf("B's counts = %+v", beforeCounts)
+	}
+
+	all := []string{"movie", "show", "season", "episode"}
+	for _, w := range []struct {
+		name  string
+		write func() error
+	}{
+		{"ReplaceHistory, empty", func() error { return syncA.ReplaceHistory(ctx, genA, nil) }},
+		{"UpsertHistory, B's event id", func() error {
+			return syncA.UpsertHistory(ctx, genA, []TraktPlayRow{moviePlay(9001, 604, "2026-10-10T20:00:00Z")})
+		}},
+		{"ReplaceRatings, empty", func() error { return syncA.ReplaceRatings(ctx, genA, all, nil) }},
+		{"ReplaceRatings, B's Trakt id", func() error {
+			return syncA.ReplaceRatings(ctx, genA, all, []TraktRatingRow{{MediaType: "movie", TraktID: 481, TMDBID: 604, Rating: 2, RatedAt: at("2026-10-10T20:00:00Z")}})
+		}},
+		{"ReplaceWatchlist, empty", func() error { return syncA.ReplaceWatchlist(ctx, genA, nil) }},
+		{"ReplaceWatchlist, B's Trakt id", func() error {
+			return syncA.ReplaceWatchlist(ctx, genA, []TraktWatchlistRow{{MediaType: "movie", TraktID: 481, TMDBID: 604, Title: "Other", ListedAt: at("2026-10-10T20:00:00Z")}})
+		}},
+		{"ReplaceHidden, empty", func() error { return syncA.ReplaceHidden(ctx, genA, nil) }},
+		{"ReplaceHidden, B's Trakt id", func() error {
+			return syncA.ReplaceHidden(ctx, genA, []TraktHiddenRow{{Section: "progress_watched", TraktID: 1390, TMDBID: 1399}})
+		}},
+		{"ReplaceShowProgress, empty", func() error { return syncA.ReplaceShowProgress(ctx, genA, nil) }},
+		{"ReplaceShowProgress, B's Trakt id", func() error {
+			return syncA.ReplaceShowProgress(ctx, genA, []TraktShowProgressRow{{ShowTraktID: 1390, ShowTMDBID: 1399, Title: "Other", Aired: 73, Completed: 9}})
+		}},
+		{"ReplaceCalendar, empty", func() error { return syncA.ReplaceCalendar(ctx, genA, nil, at("2026-10-17T12:00:00Z")) }},
+		{"ReplaceCalendar, B's episode", func() error {
+			return syncA.ReplaceCalendar(ctx, genA, []TraktCalendarRow{{ShowTraktID: 1390, Season: 9, Episode: 1, ShowTMDBID: 1399,
+				ShowTitle: "Other", FirstAired: at("2026-10-18T12:00:00Z")}}, at("2026-10-17T12:00:00Z"))
+		}},
+		{"ReplaceShowProgress, S9E1 next again", func() error {
+			s9, e1 := 9, 1
+			return syncA.ReplaceShowProgress(ctx, genA, []TraktShowProgressRow{{ShowTraktID: 1390, ShowTMDBID: 1399, Title: "Other",
+				Aired: 73, Completed: 9, NextSeason: &s9, NextEpisode: &e1}})
+		}},
+		{"SetArtwork, B's titles and episode", func() error {
+			return syncA.SetArtwork(ctx, genA, TraktArtwork{
+				Movies: map[int]TraktImages{603: {Poster: "/a.jpg", Backdrop: "/a-bg.jpg"}},
+				Shows:  map[int]TraktImages{1399: {Poster: "/a.jpg", Backdrop: "/a-bg.jpg"}},
+				Stills: map[TraktStillKey]string{{1399, 9, 1}: "/a-still.jpg"},
+			})
+		}},
+		{"FinishSync", func() error {
+			return syncA.FinishSync(ctx, genA, TraktSyncDone{Activities: []byte(`{"all": "x"}`), At: at("2026-10-17T12:00:00Z"),
+				Reconcile: true, Run: []byte(`{"status": "idle"}`)})
+		}},
+		{"SaveRun", func() error { return syncA.SaveRun(ctx, genA, []byte(`{"status": "error"}`)) }},
+	} {
+		if err := w.write(); err != nil {
+			t.Fatalf("%s: %v", w.name, err)
+		}
+		for table, rows := range rowsOf(2) {
+			if !slices.Equal(rows, before[table]) {
+				t.Errorf("after A's %s, B's %s = %q\nwant %q", w.name, table, rows, before[table])
+			}
+		}
+		if c := counts(); c != beforeCounts {
+			t.Errorf("after A's %s, B's counts = %+v, want %+v", w.name, c, beforeCounts)
+		}
+	}
+	// A's own rows did change, so the writes did run.
+	if got := queryStrings(t, db, `SELECT show_tmdb_id, poster_path, next_still_path FROM trakt_show_progress WHERE member_id = 1`); !slices.Equal(got, []string{"1399 /a.jpg /a-still.jpg"}) {
+		t.Errorf("A's progress = %q", got)
+	}
+	if c, err := authA.Counts(ctx); err != nil || c != (TraktCounts{History: 1, Ratings: 1, Watchlist: 1}) {
+		t.Errorf("A's counts = %+v, %v", c, err)
+	}
+}
+
+// seedMovieTMDB adds a library movie with that TMDB id.
+func seedMovieTMDB(t *testing.T, db *DB, tmdbID int, title string) {
+	t.Helper()
+	if err := NewMovieRepository(db).Create(&Movie{TMDBID: tmdbID, Title: title, Year: 1999}); err != nil {
+		t.Fatal(err)
 	}
 }
 

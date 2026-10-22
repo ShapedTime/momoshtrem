@@ -81,7 +81,7 @@ type WatchedMovie struct {
 
 // WatchedMovies lists every movie with a play. One query.
 func (r *TasteRepository) WatchedMovies(ctx context.Context) ([]WatchedMovie, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (r *TasteRepository) WatchedMovies(ctx context.Context) ([]WatchedMovie, er
 		) h ON TRUE
 		WHERE wm.member_id = $1
 		ORDER BY wm.last_watched_at DESC, wm.tmdb_id
-	`, member)
+	`, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list watched movies: %w", err)
 	}
@@ -136,7 +136,7 @@ type WatchedShow struct {
 
 // WatchedShows lists every show you started. One query.
 func (r *TasteRepository) WatchedShows(ctx context.Context) ([]WatchedShow, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (r *TasteRepository) WatchedShows(ctx context.Context) ([]WatchedShow, erro
 			ORDER BY watched_at DESC, id DESC LIMIT 1
 		) h ON TRUE
 		ORDER BY 9 DESC NULLS LAST, 1
-	`, member)
+	`, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list watched shows: %w", err)
 	}
@@ -200,7 +200,7 @@ type TasteRating struct {
 // TasteRatings lists every rated movie and show, with the name the
 // database knows it by. One query.
 func (r *TasteRepository) TasteRatings(ctx context.Context) ([]TasteRating, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func (r *TasteRepository) TasteRatings(ctx context.Context) ([]TasteRating, erro
 		FROM rated x
 		`+knownTitleLateral("x.media_type", "x.tmdb_id")+`
 		ORDER BY x.rated_at DESC, x.media_type, x.tmdb_id
-	`, member)
+	`, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list ratings: %w", err)
 	}
@@ -257,14 +257,14 @@ type HiddenShow struct {
 
 // HiddenShows lists the shows dropped or hidden on Trakt. One query.
 func (r *TasteRepository) HiddenShows(ctx context.Context) ([]HiddenShow, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT tmdb_id, bool_or(section = 'dropped'), bool_or(section = 'progress_watched')
 		FROM trakt_hidden WHERE member_id = $1 GROUP BY tmdb_id ORDER BY tmdb_id
-	`, member)
+	`, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list hidden shows: %w", err)
 	}
@@ -287,13 +287,13 @@ func (r *TasteRepository) HiddenShows(ctx context.Context) ([]HiddenShow, error)
 // WatchlistRefs lists the titles on the Trakt watchlist, newest listed
 // first. One query.
 func (r *TasteRepository) WatchlistRefs(ctx context.Context) ([]TitleRef, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT media_type, tmdb_id FROM trakt_watchlist WHERE member_id = $1 ORDER BY listed_at DESC, media_type, trakt_id
-	`, member)
+	`, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the watchlist: %w", err)
 	}
@@ -435,7 +435,7 @@ func (r *TasteRepository) TitleStates(ctx context.Context, refs []TitleRef) ([]T
 	if len(refs) == 0 {
 		return nil, nil
 	}
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +482,7 @@ func (r *TasteRepository) TitleStates(ctx context.Context, refs []TitleRef) ([]T
 		) p ON TRUE
 		LEFT JOIN rec_feedback f ON f.media_type = k.media_type AND f.tmdb_id = k.tmdb_id
 		ORDER BY k.n
-	`, types, ids, member)
+	`, types, ids, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to look up titles: %w", err)
 	}

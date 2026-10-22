@@ -401,11 +401,11 @@ type TraktNextEpisode struct {
 	FromCalendar bool
 }
 
-// UpNextCandidates lists member's Up next candidates: every Trakt
+// UpNextCandidates lists memberID's Up next candidates: every Trakt
 // progress row of theirs with its next episode, and the library shows on
 // their watchlist they haven't started, with their aired regular episodes
 // as of today (YYYY-MM-DD). Hidden is theirs. One query.
-func (r *CatalogRepository) UpNextCandidates(ctx context.Context, member int64, today string) ([]UpNextCandidate, error) {
+func (r *CatalogRepository) UpNextCandidates(ctx context.Context, memberID int64, today string) ([]UpNextCandidate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		WITH `+traktNextCTE(`p.member_id = $2`)+`
 		SELECT 'progress', n.show_tmdb_id, n.title, COALESCE(n.poster_path, ''), COALESCE(n.backdrop_path, ''),
@@ -424,7 +424,7 @@ func (r *CatalogRepository) UpNextCandidates(ctx context.Context, member int64, 
 		FROM trakt_watchlist w JOIN shows s ON s.tmdb_id = w.tmdb_id
 		WHERE w.member_id = $2 AND w.media_type = 'tv'
 		  AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes we WHERE we.show_tmdb_id = w.tmdb_id AND we.member_id = $2)
-	`, today, member)
+	`, today, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Up next candidates: %w", err)
 	}
@@ -474,12 +474,12 @@ type NewEpisodeCandidate struct {
 
 // NewEpisodeCandidates lists the regular episodes that aired from from
 // (midnight UTC; fromDate is its date) until now (today is its date) that
-// member hasn't played: the library shows' by air date and member's
+// memberID hasn't played: the library shows' by air date and their
 // calendar's by first airing. The calendar also lists watchlisted shows,
 // so its entries count only for shows the member started (a progress row)
 // or the library has. Shows the member dropped or hid on Trakt are left
 // out. One query.
-func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, member int64, from, now time.Time, fromDate, today string) ([]NewEpisodeCandidate, error) {
+func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, memberID int64, from, now time.Time, fromDate, today string) ([]NewEpisodeCandidate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT FALSE, s.tmdb_id, sn.season_number, e.episode_number, COALESCE(e.tmdb_episode_id, 0),
 		       '', '', '', '', '', NULL::timestamptz, e.air_date
@@ -501,7 +501,7 @@ func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, member int
 		  AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes w
 		                  WHERE w.show_tmdb_id = c.show_tmdb_id AND w.member_id = $5
 		                    AND `+sameEpisode(traktEpisode("w"), traktEpisode("c"))+`)
-	`, from, now, fromDate, today, member)
+	`, from, now, fromDate, today, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list new episodes: %w", err)
 	}
@@ -534,15 +534,15 @@ type TraktWatchlistItem struct {
 	ListedAt   time.Time
 }
 
-// TraktWatchlist lists member's watchlist, newest listed first: mediaType
+// TraktWatchlist lists memberID's watchlist, newest listed first: mediaType
 // "movie" or "tv", or "" for both. One query.
-func (r *CatalogRepository) TraktWatchlist(ctx context.Context, member int64, mediaType string) ([]TraktWatchlistItem, error) {
+func (r *CatalogRepository) TraktWatchlist(ctx context.Context, memberID int64, mediaType string) ([]TraktWatchlistItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT media_type, tmdb_id, title, COALESCE(year, 0), COALESCE(poster_path, ''), listed_at
 		FROM trakt_watchlist
 		WHERE member_id = $2 AND ($1 = '' OR media_type = $1)
 		ORDER BY listed_at DESC, media_type, trakt_id
-	`, mediaType, member)
+	`, mediaType, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the watchlist: %w", err)
 	}
@@ -576,9 +576,9 @@ type TraktPlay struct {
 	WatchedAt    time.Time
 }
 
-// TraktHistory returns a page of member's plays, newest first, and how
+// TraktHistory returns a page of memberID's plays, newest first, and how
 // many there are in all. One query.
-func (r *CatalogRepository) TraktHistory(ctx context.Context, member int64, limit, offset int) ([]TraktPlay, int, error) {
+func (r *CatalogRepository) TraktHistory(ctx context.Context, memberID int64, limit, offset int) ([]TraktPlay, int, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		WITH page AS (
 			SELECT * FROM trakt_history WHERE member_id = $3 ORDER BY watched_at DESC, id DESC LIMIT $1 OFFSET $2
@@ -587,7 +587,7 @@ func (r *CatalogRepository) TraktHistory(ctx context.Context, member int64, limi
 		       p.season, p.episode, p.episode_title, p.watched_at
 		FROM (VALUES (1)) one(x) LEFT JOIN page p ON TRUE
 		ORDER BY p.watched_at DESC, p.id DESC
-	`, limit, offset, member)
+	`, limit, offset, memberID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list the history: %w", err)
 	}

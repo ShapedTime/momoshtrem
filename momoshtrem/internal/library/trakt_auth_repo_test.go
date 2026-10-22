@@ -17,9 +17,9 @@ func traktAuthRow(slug string) TraktAuth {
 	}
 }
 
-// seedTraktData puts a row of member's in every Trakt table but
+// seedTraktData puts a row of memberID's in every Trakt table but
 // trakt_auth (two in the watchlist).
-func seedTraktData(t *testing.T, db *DB, member int64) {
+func seedTraktData(t *testing.T, db *DB, memberID int64) {
 	t.Helper()
 	for _, q := range []string{
 		`INSERT INTO trakt_sync_state (member_id, key, value) VALUES ($1, 'last_sync_at', '"2026-10-16T08:00:00Z"')`,
@@ -32,15 +32,15 @@ func seedTraktData(t *testing.T, db *DB, member int64) {
 		`INSERT INTO trakt_hidden (member_id, section, trakt_id, tmdb_id) VALUES ($1, 'dropped', 1390, 1399)`,
 		`INSERT INTO trakt_calendar (member_id, show_trakt_id, season, episode, show_tmdb_id, show_title, first_aired) VALUES ($1, 1390, 9, 1, 1399, 'Game of Thrones', NOW())`,
 	} {
-		if _, err := db.Exec(q, member); err != nil {
+		if _, err := db.Exec(q, memberID); err != nil {
 			t.Fatalf("%.50s…: %v", q, err)
 		}
 	}
 }
 
-// rowCounts counts member's rows of every table the schema has whose name
+// rowCounts counts memberID's rows of every table the schema has whose name
 // starts with trakt_, so a table added later without Purge knowing fails.
-func rowCounts(t *testing.T, db *DB, member int64) map[string]int {
+func rowCounts(t *testing.T, db *DB, memberID int64) map[string]int {
 	t.Helper()
 	rows, err := db.Query(`SELECT table_name FROM information_schema.tables
 		WHERE table_schema = current_schema() AND table_name LIKE 'trakt\_%'`)
@@ -62,7 +62,7 @@ func rowCounts(t *testing.T, db *DB, member int64) map[string]int {
 	counts := map[string]int{}
 	for _, table := range tables {
 		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE member_id = $1`, member).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE member_id = $1`, memberID).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		counts[table] = n

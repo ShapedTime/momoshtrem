@@ -180,11 +180,11 @@ func (s *TraktSyncStore) ForMember(id int64) *TraktSyncStore {
 
 // State reads the sync's cursors.
 func (s *TraktSyncStore) State(ctx context.Context) (TraktSyncState, error) {
-	member, err := s.member.id()
+	memberID, err := s.member.id()
 	if err != nil {
 		return TraktSyncState{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM trakt_sync_state WHERE member_id = $1`, member)
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM trakt_sync_state WHERE member_id = $1`, memberID)
 	if err != nil {
 		return TraktSyncState{}, fmt.Errorf("failed to read the Trakt sync state: %w", err)
 	}
@@ -224,7 +224,7 @@ func (s *TraktSyncStore) State(ctx context.Context) (TraktSyncState, error) {
 // LatestPlays answers the newest stored play of each kind; zero when
 // there's none.
 func (s *TraktSyncStore) LatestPlays(ctx context.Context) (movie, episode time.Time, err error) {
-	member, err := s.member.id()
+	memberID, err := s.member.id()
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
@@ -232,7 +232,7 @@ func (s *TraktSyncStore) LatestPlays(ctx context.Context) (movie, episode time.T
 	err = s.db.QueryRowContext(ctx, `
 		SELECT MAX(watched_at) FILTER (WHERE media_type = 'movie'), MAX(watched_at) FILTER (WHERE media_type = 'episode')
 		FROM trakt_history WHERE member_id = $1
-	`, member).Scan(&m, &e)
+	`, memberID).Scan(&m, &e)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("failed to read the latest Trakt plays: %w", err)
 	}
@@ -256,24 +256,24 @@ const historyUpsert = `
 // ReplaceHistory replaces every play, and rebuilds trakt_watched_movies and
 // trakt_watched_episodes from them.
 func (s *TraktSyncStore) ReplaceHistory(ctx context.Context, gen time.Time, plays []TraktPlayRow) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM trakt_history WHERE member_id = $1`, member); err != nil {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM trakt_history WHERE member_id = $1`, memberID); err != nil {
 			return fmt.Errorf("failed to clear the Trakt history: %w", err)
 		}
-		return writeHistory(ctx, tx, member, plays)
+		return writeHistory(ctx, tx, memberID, plays)
 	})
 }
 
 // UpsertHistory adds plays by their event id (an overlap lands on the same
 // rows), and rebuilds the watched tables.
 func (s *TraktSyncStore) UpsertHistory(ctx context.Context, gen time.Time, plays []TraktPlayRow) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error { return writeHistory(ctx, tx, member, plays) })
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error { return writeHistory(ctx, tx, memberID, plays) })
 }
 
-// writeHistory upserts member's plays and rebuilds their rows of the
+// writeHistory upserts memberID's plays and rebuilds their rows of the
 // watched tables.
-func writeHistory(ctx context.Context, tx *sql.Tx, member int64, plays []TraktPlayRow) error {
-	if err := execRows(ctx, tx, historyUpsert, plays, member); err != nil {
+func writeHistory(ctx context.Context, tx *sql.Tx, memberID int64, plays []TraktPlayRow) error {
+	if err := execRows(ctx, tx, historyUpsert, plays, memberID); err != nil {
 		return fmt.Errorf("failed to store the Trakt history: %w", err)
 	}
 	for _, q := range []string{
@@ -286,7 +286,7 @@ func writeHistory(ctx context.Context, tx *sql.Tx, member int64, plays []TraktPl
 		 SELECT tmdb_id, season, episode, member_id, MAX(episode_tmdb_id), COUNT(*), MAX(watched_at) FROM trakt_history
 		 WHERE member_id = $1 AND media_type = 'episode' GROUP BY tmdb_id, season, episode, member_id`,
 	} {
-		if _, err := tx.ExecContext(ctx, q, member); err != nil {
+		if _, err := tx.ExecContext(ctx, q, memberID); err != nil {
 			return fmt.Errorf("failed to rebuild the Trakt watched tables: %w", err)
 		}
 	}
@@ -295,9 +295,9 @@ func writeHistory(ctx context.Context, tx *sql.Tx, member int64, plays []TraktPl
 
 // ReplaceRatings replaces the ratings of the given media types.
 func (s *TraktSyncStore) ReplaceRatings(ctx context.Context, gen time.Time, types []string, ratings []TraktRatingRow) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM trakt_ratings WHERE member_id = $1 AND media_type = ANY($2::text[])`,
-			member, types); err != nil {
+			memberID, types); err != nil {
 			return fmt.Errorf("failed to clear the Trakt ratings: %w", err)
 		}
 		err := execRows(ctx, tx, `
@@ -307,7 +307,7 @@ func (s *TraktSyncStore) ReplaceRatings(ctx context.Context, gen time.Time, type
 			FROM jsonb_to_recordset($1::jsonb) AS r(media_type text, trakt_id bigint, tmdb_id int, show_tmdb_id int,
 			     season int, episode int, rating int, rated_at timestamptz)
 			WHERE media_type = ANY($2::text[])
-		`, ratings, types, member)
+		`, ratings, types, memberID)
 		if err != nil {
 			return fmt.Errorf("failed to store the Trakt ratings: %w", err)
 		}
@@ -318,12 +318,12 @@ func (s *TraktSyncStore) ReplaceRatings(ctx context.Context, gen time.Time, type
 // ReplaceWatchlist replaces the watchlist. A title that stays keeps the
 // artwork the details step found for it.
 func (s *TraktSyncStore) ReplaceWatchlist(ctx context.Context, gen time.Time, items []TraktWatchlistRow) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
 		err := execRows(ctx, tx, `
 			DELETE FROM trakt_watchlist w WHERE w.member_id = $2 AND NOT EXISTS (
 				SELECT 1 FROM jsonb_to_recordset($1::jsonb) AS r(media_type text, trakt_id bigint)
 				WHERE r.media_type = w.media_type AND r.trakt_id = w.trakt_id)
-		`, items, member)
+		`, items, memberID)
 		if err == nil {
 			err = execRows(ctx, tx, `
 				INSERT INTO trakt_watchlist AS w (member_id, media_type, trakt_id, tmdb_id, title, year, rank, listed_at)
@@ -336,7 +336,7 @@ func (s *TraktSyncStore) ReplaceWatchlist(ctx context.Context, gen time.Time, it
 					rank = EXCLUDED.rank, listed_at = EXCLUDED.listed_at,
 					poster_path = CASE WHEN w.tmdb_id = EXCLUDED.tmdb_id THEN w.poster_path END,
 					backdrop_path = CASE WHEN w.tmdb_id = EXCLUDED.tmdb_id THEN w.backdrop_path END
-			`, items, member)
+			`, items, memberID)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to store the Trakt watchlist: %w", err)
@@ -347,15 +347,15 @@ func (s *TraktSyncStore) ReplaceWatchlist(ctx context.Context, gen time.Time, it
 
 // ReplaceHidden replaces the dropped and hidden shows.
 func (s *TraktSyncStore) ReplaceHidden(ctx context.Context, gen time.Time, shows []TraktHiddenRow) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM trakt_hidden WHERE member_id = $1`, member); err != nil {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM trakt_hidden WHERE member_id = $1`, memberID); err != nil {
 			return fmt.Errorf("failed to clear the Trakt hidden shows: %w", err)
 		}
 		err := execRows(ctx, tx, `
 			INSERT INTO trakt_hidden (member_id, section, trakt_id, tmdb_id)
 			SELECT DISTINCT ON (section, trakt_id) $2::bigint, section, trakt_id, tmdb_id
 			FROM jsonb_to_recordset($1::jsonb) AS r(section text, trakt_id bigint, tmdb_id int)
-		`, shows, member)
+		`, shows, memberID)
 		if err != nil {
 			return fmt.Errorf("failed to store the Trakt hidden shows: %w", err)
 		}
@@ -367,11 +367,11 @@ func (s *TraktSyncStore) ReplaceHidden(ctx context.Context, gen time.Time, shows
 // poster and backdrop, and its next episode's still while it's the same
 // episode.
 func (s *TraktSyncStore) ReplaceShowProgress(ctx context.Context, gen time.Time, shows []TraktShowProgressRow) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
 		err := execRows(ctx, tx, `
 			DELETE FROM trakt_show_progress p WHERE p.member_id = $2 AND NOT EXISTS (
 				SELECT 1 FROM jsonb_to_recordset($1::jsonb) AS r(show_trakt_id bigint) WHERE r.show_trakt_id = p.show_trakt_id)
-		`, shows, member)
+		`, shows, memberID)
 		if err == nil {
 			err = execRows(ctx, tx, `
 				INSERT INTO trakt_show_progress AS p (member_id, show_trakt_id, show_tmdb_id, title, year, aired, completed,
@@ -396,7 +396,7 @@ func (s *TraktSyncStore) ReplaceShowProgress(ctx context.Context, gen time.Time,
 					next_still_path = CASE WHEN p.show_tmdb_id = EXCLUDED.show_tmdb_id
 						AND p.next_season IS NOT DISTINCT FROM EXCLUDED.next_season
 						AND p.next_episode IS NOT DISTINCT FROM EXCLUDED.next_episode THEN p.next_still_path END
-			`, shows, member)
+			`, shows, memberID)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to store the Trakt show progress: %w", err)
@@ -408,12 +408,12 @@ func (s *TraktSyncStore) ReplaceShowProgress(ctx context.Context, gen time.Time,
 // ReplaceCalendar replaces the calendar and records when it was fetched.
 // An episode that stays keeps its artwork.
 func (s *TraktSyncStore) ReplaceCalendar(ctx context.Context, gen time.Time, entries []TraktCalendarRow, fetchedAt time.Time) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
 		err := execRows(ctx, tx, `
 			DELETE FROM trakt_calendar c WHERE c.member_id = $2 AND NOT EXISTS (
 				SELECT 1 FROM jsonb_to_recordset($1::jsonb) AS r(show_trakt_id bigint, season int, episode int)
 				WHERE r.show_trakt_id = c.show_trakt_id AND r.season = c.season AND r.episode = c.episode)
-		`, entries, member)
+		`, entries, memberID)
 		if err == nil {
 			err = execRows(ctx, tx, `
 				INSERT INTO trakt_calendar AS c (member_id, show_trakt_id, season, episode, show_tmdb_id, episode_tmdb_id,
@@ -429,12 +429,12 @@ func (s *TraktSyncStore) ReplaceCalendar(ctx context.Context, gen time.Time, ent
 					still_path = CASE WHEN c.show_tmdb_id = EXCLUDED.show_tmdb_id THEN c.still_path END,
 					poster_path = CASE WHEN c.show_tmdb_id = EXCLUDED.show_tmdb_id THEN c.poster_path END,
 					backdrop_path = CASE WHEN c.show_tmdb_id = EXCLUDED.show_tmdb_id THEN c.backdrop_path END
-			`, entries, member)
+			`, entries, memberID)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to store the Trakt calendar: %w", err)
 		}
-		return setTraktState(ctx, tx, member, traktKeyCalendarAt, fetchedAt)
+		return setTraktState(ctx, tx, memberID, traktKeyCalendarAt, fetchedAt)
 	})
 }
 
@@ -444,7 +444,7 @@ func (s *TraktSyncStore) ReplaceCalendar(ctx context.Context, gen time.Time, ent
 // calendar's episodes (stills). The library's own titles have their
 // artwork.
 func (s *TraktSyncStore) ArtworkWants(ctx context.Context) (TraktArtworkWants, error) {
-	member, err := s.member.id()
+	memberID, err := s.member.id()
 	if err != nil {
 		return TraktArtworkWants{}, err
 	}
@@ -453,7 +453,7 @@ func (s *TraktSyncStore) ArtworkWants(ctx context.Context) (TraktArtworkWants, e
 		SELECT DISTINCT tmdb_id FROM trakt_watchlist t
 		WHERE member_id = $1 AND media_type = 'movie' AND (poster_path IS NULL OR backdrop_path IS NULL)
 		  AND NOT EXISTS (SELECT 1 FROM movies m WHERE m.tmdb_id = t.tmdb_id)
-		ORDER BY 1`, member)
+		ORDER BY 1`, memberID)
 	if err == nil {
 		err = scanInts(ctx, s.db, &w.Shows, `
 			SELECT tmdb_id FROM (
@@ -465,7 +465,7 @@ func (s *TraktSyncStore) ArtworkWants(ctx context.Context) (TraktArtworkWants, e
 				WHERE member_id = $1 AND (poster_path IS NULL OR backdrop_path IS NULL)
 			) t(tmdb_id)
 			WHERE NOT EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = t.tmdb_id)
-			ORDER BY 1`, member)
+			ORDER BY 1`, memberID)
 	}
 	if err != nil {
 		return TraktArtworkWants{}, err
@@ -477,7 +477,7 @@ func (s *TraktSyncStore) ArtworkWants(ctx context.Context) (TraktArtworkWants, e
 			UNION SELECT show_tmdb_id, season, episode FROM trakt_calendar WHERE member_id = $1 AND still_path IS NULL
 		) t(show_tmdb_id, season, episode)
 		WHERE NOT EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = t.show_tmdb_id)
-		ORDER BY 1, 2, 3`, member)
+		ORDER BY 1, 2, 3`, memberID)
 	if err != nil {
 		return TraktArtworkWants{}, fmt.Errorf("failed to list the Trakt episodes without stills: %w", err)
 	}
@@ -524,7 +524,7 @@ func (s *TraktSyncStore) SetArtwork(ctx context.Context, gen time.Time, a TraktA
 	const fill = `poster_path = COALESCE(t.poster_path, NULLIF(a.poster, '')),
 	              backdrop_path = COALESCE(t.backdrop_path, NULLIF(a.backdrop, ''))`
 	const stillsFrom = `jsonb_to_recordset($1::jsonb) AS a(show_tmdb_id int, season int, episode int, still text)`
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
 		for _, u := range []struct {
 			rows  any
 			query string
@@ -544,7 +544,7 @@ func (s *TraktSyncStore) SetArtwork(ctx context.Context, gen time.Time, a TraktA
 				FROM ` + stillsFrom + `
 				WHERE t.member_id = $2 AND t.show_tmdb_id = a.show_tmdb_id AND t.season = a.season AND t.episode = a.episode`},
 		} {
-			if err := execRows(ctx, tx, u.query, u.rows, member); err != nil {
+			if err := execRows(ctx, tx, u.query, u.rows, memberID); err != nil {
 				return fmt.Errorf("failed to store the Trakt artwork: %w", err)
 			}
 		}
@@ -555,26 +555,26 @@ func (s *TraktSyncStore) SetArtwork(ctx context.Context, gen time.Time, a TraktA
 // FinishSync stores what a finished sync leaves: the last_activities
 // snapshot, last_sync_at, last_reconcile_at for a reconcile, and the run.
 func (s *TraktSyncStore) FinishSync(ctx context.Context, gen time.Time, d TraktSyncDone) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
-		if err := setTraktState(ctx, tx, member, traktKeyActivities, d.Activities); err != nil {
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
+		if err := setTraktState(ctx, tx, memberID, traktKeyActivities, d.Activities); err != nil {
 			return err
 		}
-		if err := setTraktState(ctx, tx, member, traktKeySyncAt, d.At); err != nil {
+		if err := setTraktState(ctx, tx, memberID, traktKeySyncAt, d.At); err != nil {
 			return err
 		}
 		if d.Reconcile {
-			if err := setTraktState(ctx, tx, member, traktKeyReconcileAt, d.At); err != nil {
+			if err := setTraktState(ctx, tx, memberID, traktKeyReconcileAt, d.At); err != nil {
 				return err
 			}
 		}
-		return setTraktState(ctx, tx, member, traktKeyLastRun, d.Run)
+		return setTraktState(ctx, tx, memberID, traktKeyLastRun, d.Run)
 	})
 }
 
 // SaveRun stores the last run, for a sync that ended without finishing.
 func (s *TraktSyncStore) SaveRun(ctx context.Context, gen time.Time, run json.RawMessage) error {
-	return s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
-		return setTraktState(ctx, tx, member, traktKeyLastRun, run)
+	return s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
+		return setTraktState(ctx, tx, memberID, traktKeyLastRun, run)
 	})
 }
 
@@ -583,8 +583,8 @@ func (s *TraktSyncStore) SaveRun(ctx context.Context, gen time.Time, run json.Ra
 // commit, so a purge (TraktAuthRepository.Purge locks it first) either
 // waits for the commit and deletes what it wrote, or runs first and the
 // check fails.
-func (s *TraktSyncStore) write(ctx context.Context, gen time.Time, fn func(tx *sql.Tx, member int64) error) error {
-	member, err := s.member.id()
+func (s *TraktSyncStore) write(ctx context.Context, gen time.Time, fn func(tx *sql.Tx, memberID int64) error) error {
+	memberID, err := s.member.id()
 	if err != nil {
 		return err
 	}
@@ -594,14 +594,14 @@ func (s *TraktSyncStore) write(ctx context.Context, gen time.Time, fn func(tx *s
 	}
 	defer tx.Rollback()
 	var connectedAt time.Time
-	err = tx.QueryRowContext(ctx, `SELECT connected_at FROM trakt_auth WHERE member_id = $1 FOR SHARE`, member).Scan(&connectedAt)
+	err = tx.QueryRowContext(ctx, `SELECT connected_at FROM trakt_auth WHERE member_id = $1 FOR SHARE`, memberID).Scan(&connectedAt)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !connectedAt.Equal(gen)) {
 		return ErrTraktConnectionReplaced
 	}
 	if err != nil {
 		return fmt.Errorf("failed to read the Trakt connection: %w", err)
 	}
-	if err := fn(tx, member); err != nil {
+	if err := fn(tx, memberID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -624,7 +624,7 @@ func execRows(ctx context.Context, tx *sql.Tx, query string, rows any, args ...a
 	return err
 }
 
-func setTraktState(ctx context.Context, tx *sql.Tx, member int64, key string, value any) error {
+func setTraktState(ctx context.Context, tx *sql.Tx, memberID int64, key string, value any) error {
 	raw, ok := value.(json.RawMessage)
 	if ok && len(raw) == 0 {
 		raw = json.RawMessage("null")
@@ -637,7 +637,7 @@ func setTraktState(ctx context.Context, tx *sql.Tx, member int64, key string, va
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO trakt_sync_state (member_id, key, value, updated_at) VALUES ($1, $2, $3::jsonb, NOW())
 		ON CONFLICT (member_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, member, key, string(raw))
+	`, memberID, key, string(raw))
 	if err != nil {
 		return fmt.Errorf("failed to store the Trakt sync state %q: %w", key, err)
 	}

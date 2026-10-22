@@ -158,8 +158,8 @@ func TestTraktSyncStore_PurgeWaitsForAWrite(t *testing.T) {
 	written, release := make(chan struct{}), make(chan struct{})
 	errs := make(chan error, 1)
 	go func() {
-		errs <- s.write(ctx, gen, func(tx *sql.Tx, member int64) error {
-			if err := writeHistory(ctx, tx, member, []TraktPlayRow{moviePlay(1, 603, "2026-10-10T20:00:00Z")}); err != nil {
+		errs <- s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
+			if err := writeHistory(ctx, tx, memberID, []TraktPlayRow{moviePlay(1, 603, "2026-10-10T20:00:00Z")}); err != nil {
 				return err
 			}
 			close(written)

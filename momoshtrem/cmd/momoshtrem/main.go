@@ -173,6 +173,16 @@ func main() {
 	}
 	api.ValidateOptions(apiOpts)
 
+	// Household members (#241), read before anything starts. Trakt's rows
+	// are each member's (#243), but until each member has their own
+	// connection (#244) the one there is, its sync, smart downloads' Up
+	// next and the picks are the lowest member's at startup.
+	members, traktMember, err := newMembers(db)
+	if err != nil {
+		slog.Error("Failed to read the household's members", "error", err)
+		os.Exit(1)
+	}
+
 	// Ensure required directories exist
 	if err := cfg.EnsureDirectories(); err != nil {
 		slog.Error("Failed to create directories", "error", err)
@@ -498,16 +508,6 @@ func main() {
 			traktBox = box
 		}
 	}
-	// Household members (#241). Trakt's rows are each member's (#243), but
-	// until each member has their own connection (#244) the one there is,
-	// its sync, smart downloads' Up next and the picks are the lowest
-	// member's at startup.
-	members := newMembers(db)
-	traktMember, err := members.Default(context.Background())
-	if err != nil {
-		slog.Error("Failed to read the household's members", "error", err)
-		os.Exit(1)
-	}
 	traktAuth := trakt.NewAuth(trakt.AuthDeps{
 		Client:   traktClient,
 		Box:      traktBox,
@@ -542,7 +542,7 @@ func main() {
 	}
 	// Household members (#241): /members, and the member each API request
 	// is for (the X-Momoshtrem-Member header's, else the lowest id).
-	wireMembers(members, traktAuth, &apiOpts)
+	wireMembers(members, traktMember, traktAuth, &apiOpts)
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
 	apiOpts.TMDB = cachedTMDB

@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -18,21 +16,7 @@ var (
 	// ErrTraktAccountInUse means another member has connected the Trakt
 	// account (an account connects to one member: trakt_auth_user_slug_key).
 	ErrTraktAccountInUse = errors.New("another member has connected that Trakt account")
-	// errUnbound means a member's repository was used before ForMember.
-	errUnbound = errors.New("the repository isn't bound to a household member (ForMember)")
 )
-
-// boundMember is the member a repository reads and writes for (ForMember);
-// 0 until it's bound.
-type boundMember int64
-
-// id is the member, or errUnbound.
-func (m boundMember) id() (int64, error) {
-	if m <= 0 {
-		return 0, errUnbound
-	}
-	return int64(m), nil
-}
 
 // traktTables are every table of migration 005: a disconnect empties them
 // of the member's rows. The settings (members.trakt_settings) aren't among
@@ -97,7 +81,7 @@ func (r *TraktAuthRepository) ForMember(id int64) *TraktAuthRepository {
 
 // Get returns the member's stored connection; nil when there's none.
 func (r *TraktAuthRepository) Get(ctx context.Context) (*TraktAuth, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +91,7 @@ func (r *TraktAuthRepository) Get(ctx context.Context) (*TraktAuth, error) {
 		SELECT username, user_slug, access_token_enc, refresh_token_enc, token_created_at, expires_at,
 		       needs_reauth, reauth_reason, connected_at
 		FROM trakt_auth WHERE member_id = $1
-	`, member).Scan(&a.Username, &a.UserSlug, &a.AccessTokenEnc, &a.RefreshTokenEnc, &a.TokenCreatedAt, &a.ExpiresAt,
+	`, memberID).Scan(&a.Username, &a.UserSlug, &a.AccessTokenEnc, &a.RefreshTokenEnc, &a.TokenCreatedAt, &a.ExpiresAt,
 		&a.NeedsReauth, &reason, &a.ConnectedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -126,7 +110,7 @@ func (r *TraktAuthRepository) Get(ctx context.Context) (*TraktAuth, error) {
 // generation is new and reauth is cleared. ErrTraktAccountInUse, with
 // nothing changed, when another member has connected the account.
 func (r *TraktAuthRepository) Connect(ctx context.Context, a TraktAuth) (time.Time, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -137,12 +121,12 @@ func (r *TraktAuthRepository) Connect(ctx context.Context, a TraktAuth) (time.Ti
 	defer tx.Rollback()
 
 	var slug string
-	err = tx.QueryRowContext(ctx, `SELECT user_slug FROM trakt_auth WHERE member_id = $1 FOR UPDATE`, member).Scan(&slug)
+	err = tx.QueryRowContext(ctx, `SELECT user_slug FROM trakt_auth WHERE member_id = $1 FOR UPDATE`, memberID).Scan(&slug)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, fmt.Errorf("failed to read the Trakt connection: %w", err)
 	}
 	if errors.Is(err, sql.ErrNoRows) || slug != a.UserSlug {
-		if err := purgeTrakt(ctx, tx, member); err != nil {
+		if err := purgeTrakt(ctx, tx, memberID); err != nil {
 			return time.Time{}, err
 		}
 	}
@@ -158,7 +142,7 @@ func (r *TraktAuthRepository) Connect(ctx context.Context, a TraktAuth) (time.Ti
 			token_created_at = EXCLUDED.token_created_at, expires_at = EXCLUDED.expires_at,
 			needs_reauth = FALSE, reauth_reason = NULL, connected_at = NOW(), updated_at = NOW()
 		RETURNING connected_at
-	`, member, a.Username, a.UserSlug, a.AccessTokenEnc, a.RefreshTokenEnc, a.TokenCreatedAt, a.ExpiresAt).Scan(&connectedAt)
+	`, memberID, a.Username, a.UserSlug, a.AccessTokenEnc, a.RefreshTokenEnc, a.TokenCreatedAt, a.ExpiresAt).Scan(&connectedAt)
 	if isUniqueViolationOn(err, "trakt_auth_user_slug_key") {
 		return time.Time{}, ErrTraktAccountInUse
 	}
@@ -175,14 +159,14 @@ func (r *TraktAuthRepository) Connect(ctx context.Context, a TraktAuth) (time.Ti
 // in one statement: refresh tokens are single-use, so the pair is stored
 // before either is used. ErrTraktConnectionReplaced when it isn't stored.
 func (r *TraktAuthRepository) UpdateTokens(ctx context.Context, connectedAt time.Time, t TraktTokens) error {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return err
 	}
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE trakt_auth SET access_token_enc = $3, refresh_token_enc = $4, token_created_at = $5, expires_at = $6, updated_at = NOW()
 		WHERE member_id = $1 AND connected_at = $2
-	`, member, connectedAt, t.AccessTokenEnc, t.RefreshTokenEnc, t.CreatedAt, t.ExpiresAt)
+	`, memberID, connectedAt, t.AccessTokenEnc, t.RefreshTokenEnc, t.CreatedAt, t.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("failed to store the Trakt tokens: %w", err)
 	}
@@ -192,14 +176,14 @@ func (r *TraktAuthRepository) UpdateTokens(ctx context.Context, connectedAt time
 // SetReauth records that Trakt stopped accepting the connection's tokens,
 // and why (for the user).
 func (r *TraktAuthRepository) SetReauth(ctx context.Context, connectedAt time.Time, reason string) error {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return err
 	}
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE trakt_auth SET needs_reauth = TRUE, reauth_reason = $3, updated_at = NOW()
 		WHERE member_id = $1 AND connected_at = $2
-	`, member, connectedAt, reason)
+	`, memberID, connectedAt, reason)
 	if err != nil {
 		return fmt.Errorf("failed to store the Trakt reauth: %w", err)
 	}
@@ -210,7 +194,7 @@ func (r *TraktAuthRepository) SetReauth(ctx context.Context, connectedAt time.Ti
 // their rows of every Trakt table, in one transaction. The settings and
 // the other members' rows stay.
 func (r *TraktAuthRepository) Purge(ctx context.Context) error {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return err
 	}
@@ -221,10 +205,10 @@ func (r *TraktAuthRepository) Purge(ctx context.Context) error {
 	defer tx.Rollback()
 	// The connection's row first, as a sync write takes it
 	// (TraktSyncStore): a write in flight finishes before the purge.
-	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM trakt_auth WHERE member_id = $1 FOR UPDATE`, member); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM trakt_auth WHERE member_id = $1 FOR UPDATE`, memberID); err != nil {
 		return fmt.Errorf("failed to lock the Trakt connection: %w", err)
 	}
-	if err := purgeTrakt(ctx, tx, member); err != nil {
+	if err := purgeTrakt(ctx, tx, memberID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -235,7 +219,7 @@ func (r *TraktAuthRepository) Purge(ctx context.Context) error {
 
 // Counts reads what's imported for the member.
 func (r *TraktAuthRepository) Counts(ctx context.Context) (TraktCounts, error) {
-	member, err := r.member.id()
+	memberID, err := r.member.id()
 	if err != nil {
 		return TraktCounts{}, err
 	}
@@ -249,17 +233,17 @@ func (r *TraktAuthRepository) Counts(ctx context.Context) (TraktCounts, error) {
 			 WHERE w.member_id = $1
 			   AND ((w.media_type = 'movie' AND EXISTS (SELECT 1 FROM movies m WHERE m.tmdb_id = w.tmdb_id))
 			     OR (w.media_type = 'tv' AND EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = w.tmdb_id))))
-	`, member).Scan(&c.History, &c.Ratings, &c.Watchlist, &c.WatchlistInLibrary)
+	`, memberID).Scan(&c.History, &c.Ratings, &c.Watchlist, &c.WatchlistInLibrary)
 	if err != nil {
 		return TraktCounts{}, fmt.Errorf("failed to count the Trakt data: %w", err)
 	}
 	return c, nil
 }
 
-// purgeTrakt deletes member's rows of every Trakt table.
-func purgeTrakt(ctx context.Context, tx *sql.Tx, member int64) error {
+// purgeTrakt deletes memberID's rows of every Trakt table.
+func purgeTrakt(ctx context.Context, tx *sql.Tx, memberID int64) error {
 	for _, table := range traktTables {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE member_id = $1`, member); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE member_id = $1`, memberID); err != nil {
 			return fmt.Errorf("failed to purge %s: %w", table, err)
 		}
 	}
@@ -275,11 +259,4 @@ func requireConnection(res sql.Result) error {
 		return ErrTraktConnectionReplaced
 	}
 	return nil
-}
-
-// isUniqueViolationOn reports a unique violation of constraint (or unique
-// index).
-func isUniqueViolationOn(err error, constraint string) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
