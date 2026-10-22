@@ -144,6 +144,11 @@ describe('proxyToBackend', () => {
       }
     );
 
+    it('reads duplicate member cookies as the browser does: the first (a nested Path’s) wins, undecoded', async () => {
+      await proxyToBackend(withCookie('/api/me/up-next', 'momoshtrem_member=2; momoshtrem_member=1'), ['me', 'up-next']);
+      expect(seen[0].headers.get('x-momoshtrem-member')).toBe('2');
+    });
+
     it('sends no member without the cookie', async () => {
       await proxyToBackend(request('/api/me/up-next'), ['me', 'up-next']);
       expect(seen[0].headers.get('x-momoshtrem-member')).toBeNull();

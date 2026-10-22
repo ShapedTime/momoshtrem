@@ -110,8 +110,8 @@ export const membersHandlers = [
 /** Routes that ignore a member nobody has: the picker's list and health. */
 const IGNORES_MEMBER = new Set(['members', 'status']);
 
-/** The web's own legacy routes (app/api/library/{movies,shows}): their server calls send no member. */
-const LEGACY = /^\/api\/library\/(movies|shows)(\/|$)/;
+/** The web's own legacy routes (app/api/library/{movies,shows}[/{id}]): their server calls send no member. */
+const LEGACY = /^\/api\/library\/(movies|shows)(\/\d+)?$/;
 
 /**
  * Placed first: a backend route asked for a member nobody has answers 400

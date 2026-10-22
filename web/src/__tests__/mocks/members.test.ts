@@ -130,6 +130,7 @@ describe('who’s asking', () => {
     expect((await fetch('/api/library/shows')).status).toBe(200);
     expect((await fetch('/api/library/movies')).status).toBe(200);
     expect((await fetch('/api/library?page_size=1')).status).toBe(400);
+    expect((await fetch('/api/library/shows/1/files')).status).toBe(400);
   });
 
   it('each member has their own Trakt: connecting as someone new leaves Teymur’s alone', async () => {

@@ -128,6 +128,29 @@ describe('MembersGate', () => {
     window.history.replaceState(null, '', '/');
   });
 
+  it('back/forward cache restores a page that was leaving, with the cookie its own member’s again: it reloads anyway', async () => {
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    stubFetch({ status: 200, body: { items: TWO } });
+    window.history.replaceState(null, '', '/library');
+    renderGate(1);
+    await screen.findByText('App for Teymur; others: Sam');
+    switchMember(2, () => undefined);
+    // Switched back to Teymur elsewhere; the requests this page held back while leaving would never settle
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    act(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    expect(reload).toHaveBeenCalledTimes(1);
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('a page restored from back/forward cache that wasn’t leaving, its member unchanged: no reload', async () => {
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    stubFetch({ status: 200, body: { items: TWO } });
+    renderGate(1);
+    await screen.findByText('App for Teymur; others: Sam');
+    act(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it('a switch between the server’s render and hydration reloads on mount, before anything is sent as the wrong person', async () => {
     document.cookie = 'momoshtrem_member=2; Path=/';
     stubFetch({ status: 200, body: { items: TWO } });

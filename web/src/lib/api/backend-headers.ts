@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server';
-import { MEMBER_COOKIE, parseMemberId } from '@/lib/members/cookie';
+import { readMemberCookie } from '@/lib/members/cookie';
 
 /** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
 export const TOKEN_HEADER = 'X-Momoshtrem-Token';
@@ -21,5 +21,10 @@ export function backendHeaders(memberId: number | null, base: Record<string, str
   return headers;
 }
 
-/** The request's member, from its cookie; a malformed cookie is no member (never a malformed header). */
-export const requestMemberId = (request: NextRequest): number | null => parseMemberId(request.cookies.get(MEMBER_COOKIE)?.value);
+/**
+ * The request's member, from its cookie; a malformed cookie is no member (never a malformed header).
+ * Parsed as the browser's own code reads it (the first of duplicates, not decoded), never with
+ * `request.cookies`, which keeps the last: two `momoshtrem_member` cookies (one at a nested Path) would
+ * otherwise name different people on the server and in the page.
+ */
+export const requestMemberId = (request: NextRequest): number | null => readMemberCookie(request.headers.get('cookie') ?? '');

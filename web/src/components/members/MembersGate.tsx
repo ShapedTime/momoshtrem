@@ -43,9 +43,11 @@ function useReloadWhenCookieChanges(renderedFor: number | null) {
     };
     const onPageShow = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
-      // Restored from the back/forward cache: the switch it started is over, and the cookie may be someone else's
+      // Restored from the back/forward cache. One that was leaving (it switched) reloads whatever the cookie says:
+      // the requests it held back while leaving never settle. Otherwise only when the cookie is someone else's
+      const wasLeaving = leavingPage();
       pageRestored();
-      check();
+      if (wasLeaving || memberChangedUnderPage()) page.reload();
     };
     const onVisibility = () => {
       if (document.visibilityState === 'visible') check();

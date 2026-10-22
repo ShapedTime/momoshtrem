@@ -51,6 +51,11 @@ describe('readMemberCookie', () => {
     expect(readMemberCookie(`${MEMBER_COOKIE}=7`)).toBe(7);
   });
 
+  it('takes the first of duplicates, as document.cookie lists a nested Path’s first; values aren’t decoded', () => {
+    expect(readMemberCookie(`${MEMBER_COOKIE}=2; ${MEMBER_COOKIE}=1`)).toBe(2);
+    expect(readMemberCookie(`${MEMBER_COOKIE}=%32`)).toBeNull();
+  });
+
   it('is null when absent or malformed', () => {
     expect(readMemberCookie('momoshtrem_session=abc')).toBeNull();
     expect(readMemberCookie(`${MEMBER_COOKIE}=abc`)).toBeNull();
