@@ -23,6 +23,8 @@ type fakeStore struct {
 	calls     []string
 	created   []string // name/color as Create got them
 	deleteCtx context.Context
+	listGate  chan struct{} // the next List waits on it (gateList)
+	listRead  chan struct{}
 }
 
 func newFakeStore(names ...string) *fakeStore {
@@ -40,12 +42,29 @@ func (f *fakeStore) record(call string) {
 
 func (f *fakeStore) List(context.Context) ([]Member, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.lists++
-	if f.listErr != nil {
-		return nil, f.listErr
+	list, err := slices.Clone(f.members), f.listErr
+	gate, read := f.listGate, f.listRead
+	f.listGate = nil // only the next List waits
+	f.mu.Unlock()
+	if gate != nil {
+		close(read)
+		<-gate // read, but not answered yet
 	}
-	return slices.Clone(f.members), nil
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// gateList makes the next List wait, once it has read the members, until
+// the returned func is called; read is closed once it has.
+func (f *fakeStore) gateList() (read <-chan struct{}, release func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listGate, f.listRead = make(chan struct{}), make(chan struct{})
+	gate := f.listGate
+	return f.listRead, func() { close(gate) }
 }
 
 func (f *fakeStore) Create(_ context.Context, name, color string) (Member, error) {
@@ -386,6 +405,96 @@ func TestService_Delete(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A member being removed is gone for Resolve, Default and IDs while the
+// listeners run (they take seconds), and comes back if the row stays.
+func TestService_DeleteHidesTheMember(t *testing.T) {
+	ctx := context.Background()
+	for _, fails := range []bool{false, true} {
+		store := newFakeStore("Teymur", "Sam")
+		if fails {
+			store.deleteErr = errors.New("db down")
+		}
+		s := NewService(store)
+		var reads int
+		s.OnRemoving(func(context.Context, int64) {
+			reads = store.listCount()
+			if _, err := s.Resolve(ctx, "1"); !errors.Is(err, ErrUnknown) {
+				t.Errorf(`Resolve("1") while removing = %v, want ErrUnknown`, err)
+			}
+			if id, err := s.Default(ctx); err != nil || id != 2 {
+				t.Errorf("Default while removing 1 = %d, %v, want 2", id, err)
+			}
+			if ids, err := s.IDs(ctx); err != nil || !slices.Equal(ids, []int64{2}) {
+				t.Errorf("IDs while removing = %v, %v", ids, err)
+			}
+			if store.listCount() != reads {
+				t.Errorf("the member being removed cost %d reads", store.listCount()-reads)
+			}
+		})
+		err := s.Delete(ctx, 1)
+		id, rerr := s.Resolve(ctx, "1")
+		def, _ := s.Default(ctx)
+		switch {
+		case fails && (err == nil || rerr != nil || id != 1 || def != 1):
+			t.Errorf("a failed delete = %v; then Resolve = %d, %v, Default %d, want member 1 back", err, id, rerr, def)
+		case !fails && (err != nil || !errors.Is(rerr, ErrUnknown) || def != 2):
+			t.Errorf("a delete = %v; then Resolve = %v, Default %d", err, rerr, def)
+		}
+	}
+}
+
+// A read of the list that started before a delete never replaces the one
+// read after it (GET /members racing DELETE).
+func TestService_ReadsKeepTheirOrder(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore("Teymur", "Sam")
+	s := NewService(store)
+	if err := s.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	read, release := store.gateList()
+	listed := make(chan struct{})
+	go func() {
+		defer close(listed)
+		_, _ = s.List(ctx) // reads [1 2], then waits
+	}()
+	<-read
+	deleted := make(chan error, 1)
+	go func() { deleted <- s.Delete(ctx, 2) }()
+	// The delete waits for the read in flight. Were it not to, it would
+	// finish here and the read would then put member 2 back.
+	select {
+	case err := <-deleted:
+		deleted <- err
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	<-listed
+	if err := <-deleted; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resolve(ctx, "2"); !errors.Is(err, ErrUnknown) {
+		t.Errorf(`Resolve("2") after the delete = %v, want ErrUnknown`, err)
+	}
+	if ids, err := s.IDs(ctx); err != nil || !slices.Equal(ids, []int64{1}) {
+		t.Errorf("IDs after the delete = %v, %v, want [1]", ids, err)
+	}
+}
+
+// The OnAdded listeners hear of a new member even when the client went
+// away.
+func TestService_CreateTellsWithoutCancel(t *testing.T) {
+	s := NewService(newFakeStore("Teymur"))
+	got := errors.New("not told")
+	s.OnAdded(func(ctx context.Context, _ int64) { got = ctx.Err() })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.Create(ctx, "Sam", nil); err != nil || got != nil {
+		t.Errorf("Create = %v, the listener's context %v", err, got)
+	}
 }
 
 func TestService_View(t *testing.T) {

@@ -174,6 +174,13 @@ func TestMemberMiddleware(t *testing.T) {
 		if rec.Code != 500 || decodeError(t, rec).Code != CodeInternalError {
 			t.Errorf("= %d %s, want 500", rec.Code, rec.Body)
 		}
+		// Status gives its own report (a 503 for the database), without a
+		// member.
+		rec = httptest.NewRecorder()
+		memberEngine(f).ServeHTTP(rec, httptest.NewRequest("GET", "/api/status", nil))
+		if rec.Code != 200 || rec.Body.String() != `{"member":0}` {
+			t.Errorf("status = %d %s, want it to go on without a member", rec.Code, rec.Body)
+		}
 	})
 	if memberMiddleware(nil) != nil {
 		t.Error("memberMiddleware(nil) isn't nil")

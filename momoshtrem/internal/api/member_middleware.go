@@ -23,8 +23,9 @@ const CodeUnknownMember = "unknown_member"
 // memberMiddleware puts the request's member in its context (member.WithID)
 // for every /api route but /members, which never reads the header: the
 // header's id, or the lowest without one. A value that isn't a positive
-// integer is 400 bad_request, an id no member has 400 unknown_member;
-// /status then goes on without a member. With nil members it returns nil.
+// integer is 400 bad_request, an id no member has 400 unknown_member.
+// /status goes on without a member on any error but the first, so it gives
+// its own report. With nil members it returns nil.
 func memberMiddleware(members Members) gin.HandlerFunc {
 	if members == nil {
 		return nil
@@ -40,12 +41,13 @@ func memberMiddleware(members Members) gin.HandlerFunc {
 		switch {
 		case err == nil:
 			c.Request = c.Request.WithContext(member.WithID(ctx, id))
-		case errors.Is(err, member.ErrUnknown) && path == statusPath:
-			// Status still answers, with no one's Trakt connected.
 		case errors.Is(err, member.ErrMalformed):
 			errorResponse(c, http.StatusBadRequest, MemberHeader+" must be a member's id.")
 			c.Abort()
 			return
+		case path == statusPath:
+			// Status still answers, with no one's Trakt connected, and
+			// reports a database it can't read itself.
 		case errors.Is(err, member.ErrUnknown):
 			errorCodeResponse(c, http.StatusBadRequest, CodeUnknownMember, "Nobody in the household has that id: choose who's watching again.")
 			c.Abort()
