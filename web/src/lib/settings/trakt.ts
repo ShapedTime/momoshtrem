@@ -1,4 +1,5 @@
 import type { TraktConnectError, TraktIntegration, TraktSync, TraktSyncStep } from '@/lib/api/contract';
+import { possessive } from '@/lib/members/display';
 import { formatNumber, plural } from '@/lib/title/format';
 
 /**
@@ -199,9 +200,33 @@ export function connectErrorCopy(error: TraktConnectError): { tone: 'neutral' | 
         title: 'Trakt didn’t let momoshtrem in',
         body: 'The code was declined. Free Trakt accounts can connect only 2 apps: if yours is at the limit, disconnect one in Trakt’s settings, then connect again.',
       };
+    case 'account_in_use':
+      return {
+        tone: 'warning',
+        title: 'That Trakt account is already connected',
+        body: 'Someone else in this household connected it. Each person connects their own: sign in to trakt.tv with your account, then connect again.',
+      };
     default:
       return { tone: 'warning', title: 'Couldn’t connect to Trakt', body: 'Something went wrong while Trakt checked the code. Connect again to get a new one.' };
   }
+}
+
+/**
+ * Disconnect's confirm. With two or more people it names whose Trakt goes (`memberName`); with one, or
+ * without household members (null), it reads as before.
+ */
+export function disconnectConfirmCopy(memberName: string | null): { title: string; description: string } {
+  if (memberName === null) {
+    return {
+      title: 'Disconnect Trakt?',
+      description: 'Your imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt. Personal picks fall back to trending.',
+    };
+  }
+  const whose = possessive(memberName);
+  return {
+    title: `Disconnect ${whose} Trakt?`,
+    description: `${whose} imported history, ratings and watchlist will be deleted from momoshtrem. Nothing changes on Trakt. ${whose} picks fall back to trending.`,
+  };
 }
 
 export const REAUTH_TITLE = 'Trakt needs you to sign in again';

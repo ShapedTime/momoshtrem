@@ -3,6 +3,7 @@ import {
   clearRecentSearches,
   MAX_RECENT_SEARCHES,
   RECENT_SEARCHES_KEY,
+  recentSearchesKey,
   recentSearches,
   removeRecentSearch,
   resetRecentSearchesCache,
@@ -89,5 +90,45 @@ describe('recent searches', () => {
     // Not kept, but the page's list still updates
     expect(recentSearches()).toEqual(['frieren']);
     expect(() => clearRecentSearches()).not.toThrow();
+  });
+});
+
+describe('recent searches per household member (#239)', () => {
+  afterEach(() => {
+    document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+  });
+
+  it('each member keeps their own list, under a key with their id', () => {
+    document.cookie = 'momoshtrem_member=2; Path=/';
+    expect(recentSearchesKey()).toBe('momoshtrem:recent-searches:2');
+    addRecentSearch('the bear');
+    expect(JSON.parse(window.localStorage.getItem('momoshtrem:recent-searches:2') ?? 'null')).toEqual(['the bear']);
+    expect(window.localStorage.getItem(RECENT_SEARCHES_KEY)).toBeNull();
+
+    // Switching reloads the page, which starts a fresh cache
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    resetRecentSearchesCache();
+    expect(recentSearches()).toEqual([]);
+  });
+
+  it('never hands the old shared list to a member; it’s read only without one', () => {
+    window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(['from before households']));
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    expect(recentSearches()).toEqual([]);
+    document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+    resetRecentSearchesCache();
+    expect(recentSearchesKey()).toBe(RECENT_SEARCHES_KEY);
+    expect(recentSearches()).toEqual(['from before households']);
+  });
+
+  it('hears other tabs only for this member’s key', () => {
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    const listener = jest.fn();
+    const unsubscribe = subscribeRecentSearches(listener);
+    window.dispatchEvent(new StorageEvent('storage', { key: 'momoshtrem:recent-searches:2' }));
+    expect(listener).not.toHaveBeenCalled();
+    window.dispatchEvent(new StorageEvent('storage', { key: 'momoshtrem:recent-searches:1' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 });

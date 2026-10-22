@@ -6,6 +6,7 @@ import { downloadsHandlers } from './downloads';
 import { hdrezkaHandlers, resetMockHDRezka } from './hdrezka';
 import { legacyHandlers } from './legacy';
 import { libraryHandlers } from './library';
+import { membersHandlers, resetMockMembers, setMockMember, unknownMemberGuard } from './members';
 import { recommendationsHandlers, resetMockRecs } from './recommendations';
 import { resetMockSearch, searchHandlers } from './search';
 import { resetMockSettings, settingsHandlers } from './settings';
@@ -22,6 +23,8 @@ import { resetMockTrakt, traktHandlers } from './trakt';
  * the browser's and Node's (where relative handler paths never match).
  */
 export const handlers = [
+  // First: a personal route asked for a member nobody has answers 400 unknown_member
+  unknownMemberGuard,
   ...titlesHandlers,
   ...subtitlesHandlers,
   ...libraryHandlers,
@@ -37,12 +40,13 @@ export const handlers = [
   ...discoverHandlers,
   ...titleSearchHandlers,
   ...legacyHandlers,
+  ...membersHandlers,
 ];
 
 /**
  * Tests: forget what earlier requests changed (the library, mapping jobs, AI and storage settings, the quality
- * profile, stored subtitles, torrent pauses, downloads, the Trakt account and the picks, feedback and Ask
- * threads live per page).
+ * profile, stored subtitles, torrent pauses, downloads, each member's Trakt account and picks, feedback and Ask
+ * threads live per page; the household is kept in localStorage), and who's asking.
  */
 export function resetMockState(): void {
   resetMockLibrary();
@@ -55,5 +59,7 @@ export function resetMockState(): void {
   resetMockDownloads();
   resetMockTrakt();
   resetMockRecs();
+  resetMockMembers();
+  setMockMember(null);
   setMockScenario(null);
 }

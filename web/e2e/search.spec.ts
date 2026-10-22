@@ -230,7 +230,7 @@ test.describe('command palette', () => {
   });
 
   test('before typing: recent searches, your latest titles and every action; arrows wrap', async ({ page }, testInfo) => {
-    await page.addInitScript(() => window.localStorage.setItem('momoshtrem:recent-searches', JSON.stringify(['frieren', 'past lives', 'dune'])));
+    await page.addInitScript(() => window.localStorage.setItem('momoshtrem:recent-searches:1', JSON.stringify(['frieren', 'past lives', 'dune'])));
     await signIn(page, '/library');
     await openPalette(page, testInfo);
     await expect(page.getByRole('group', { name: 'Recent' }).getByRole('option')).toHaveText([/^frieren/, /^past lives/]);

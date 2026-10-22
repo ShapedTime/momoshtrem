@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { ForYouView } from '@/components/for-you';
-import { getConfiguredUsername } from '@/lib/auth';
 import './for-you.css';
 
 export const metadata: Metadata = { title: 'For You' };
@@ -11,7 +10,7 @@ export default function ForYouPage() {
   // The hero draws its own phone bar over the artwork, account menu included
   return (
     <Suspense fallback={null}>
-      <ForYouView username={getConfiguredUsername()} />
+      <ForYouView />
     </Suspense>
   );
 }

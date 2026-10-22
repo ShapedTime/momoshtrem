@@ -49,6 +49,38 @@ describe('apiFetch', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  describe('a member nobody has (400 unknown_member, #239)', () => {
+    const cookies: string[] = [];
+    beforeEach(() => {
+      const doc = {};
+      Object.defineProperty(doc, 'cookie', { set: (value: string) => cookies.push(value), configurable: true });
+      Object.assign(globalThis, { document: doc });
+    });
+    afterEach(() => {
+      cookies.length = 0;
+      delete (globalThis as { document?: unknown }).document;
+    });
+
+    it('forgets the member cookie and loads the page again, once for a burst, then throws', async () => {
+      stubWindow('/tv/209867', '?season=2');
+      respond(400, { error: { code: 'unknown_member', message: 'No member has that id.' } });
+      const results = await Promise.allSettled([apiFetch('/api/me/up-next'), apiFetch('/api/recommendations/home'), apiFetch('/api/me/watchlist')]);
+      expect(results.every((r) => r.status === 'rejected' && (r.reason as ApiError).code === 'unknown_member')).toBe(true);
+      expect(cookies).toEqual(['momoshtrem_member=; Path=/; Max-Age=0; SameSite=Lax']);
+      expect(assign).toHaveBeenCalledTimes(1);
+      expect(assign).toHaveBeenCalledWith('/tv/209867?season=2');
+    });
+
+    it('leaves other 400s alone', async () => {
+      stubWindow('/search');
+      respond(400, { error: { code: 'bad_request', message: 'q is required' } });
+      const response = await apiFetch('/api/search/torrents');
+      expect(response.status).toBe(400);
+      expect(cookies).toEqual([]);
+      expect(assign).not.toHaveBeenCalled();
+    });
+  });
+
   it('passes other statuses through untouched', async () => {
     respond(502, { error: { code: 'backend_auth', message: 'token' } });
     const response = await apiFetch('/api/status');

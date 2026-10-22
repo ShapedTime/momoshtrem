@@ -16,7 +16,7 @@ jest.mock('@/components/shell/CommandPalette', () => ({
 const palette = () => screen.queryByRole('dialog', { name: 'Search or jump to' });
 
 function renderShell(children: ReactNode = null) {
-  render(<AppShell username="e2e">{children}</AppShell>);
+  render(<AppShell>{children}</AppShell>);
 }
 
 describe('AppShell shortcuts', () => {

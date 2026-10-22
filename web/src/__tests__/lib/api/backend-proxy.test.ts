@@ -125,6 +125,44 @@ describe('proxyToBackend', () => {
     expect(await response.json()).toMatchObject({ error: { code: 'backend_unreachable' } });
   });
 
+  describe('the household member (#239)', () => {
+    const withCookie = (path: string, cookie: string, headers?: Record<string, string>) =>
+      request(path, { headers: { cookie: `momoshtrem_session=abc; ${cookie}`, ...headers } });
+
+    it('forwards the member cookie as X-Momoshtrem-Member, and still never the cookie', async () => {
+      await proxyToBackend(withCookie('/api/me/up-next', 'momoshtrem_member=2'), ['me', 'up-next']);
+      expect(seen[0].headers.get('x-momoshtrem-member')).toBe('2');
+      expect(seen[0].headers.get('x-momoshtrem-token')).toBe('shared-secret');
+      expect(seen[0].headers.get('cookie')).toBeNull();
+    });
+
+    it.each(['momoshtrem_member=1%3Bx', 'momoshtrem_member=1.5', 'momoshtrem_member=abc', 'momoshtrem_member=0', 'momoshtrem_member=-3', 'momoshtrem_member='])(
+      'sends no member for a malformed cookie (%s), never a malformed header',
+      async (cookie) => {
+        await proxyToBackend(withCookie('/api/me/up-next', cookie), ['me', 'up-next']);
+        expect(seen[0].headers.get('x-momoshtrem-member')).toBeNull();
+      }
+    );
+
+    it('sends no member without the cookie', async () => {
+      await proxyToBackend(request('/api/me/up-next'), ['me', 'up-next']);
+      expect(seen[0].headers.get('x-momoshtrem-member')).toBeNull();
+    });
+
+    it('ignores a member header the browser sends: only the cookie counts', async () => {
+      await proxyToBackend(request('/api/me/up-next', { headers: { 'x-momoshtrem-member': '5' } }), ['me', 'up-next']);
+      expect(seen[0].headers.get('x-momoshtrem-member')).toBeNull();
+      await proxyToBackend(withCookie('/api/me/up-next', 'momoshtrem_member=2', { 'x-momoshtrem-member': '5' }), ['me', 'up-next']);
+      expect(seen[1].headers.get('x-momoshtrem-member')).toBe('2');
+    });
+
+    it('reaches /members', async () => {
+      const response = await proxyToBackend(withCookie('/api/members/2', 'momoshtrem_member=1', { 'content-type': 'application/json' }), ['members', '2']);
+      expect(response.status).toBe(200);
+      expect(seen[0].url).toBe(`${BACKEND}/api/members/2`);
+    });
+  });
+
   it('requires a session even if the proxy file is bypassed', async () => {
     const { getSession } = jest.requireMock('@/lib/auth/session') as { getSession: jest.Mock };
     getSession.mockResolvedValueOnce(null);

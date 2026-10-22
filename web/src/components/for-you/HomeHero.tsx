@@ -133,8 +133,6 @@ function HeroFeedback({ feedback, inLibrary }: { feedback: RecFeedbackControls; 
 }
 
 interface HomeHeroProps {
-  /** For the phone bar's account menu (the hero draws its own bar over the art). */
-  username: string;
   /** One to three, stable for the day (lib/for-you/hero.ts). */
   picks: ForYouPick[];
   /** Up next, so an Up next pick plays its episode. */
@@ -147,7 +145,7 @@ interface HomeHeroProps {
  * on Noir's picks, #155), and a pager. The top bar is transparent over it;
  * the backdrop drifts as you scroll.
  */
-export function HomeHero({ username, picks, upNext = [] }: HomeHeroProps) {
+export function HomeHero({ picks, upNext = [] }: HomeHeroProps) {
   const headingId = useId();
   const [index, setIndex] = useState(0);
   const pick = picks[Math.min(index, picks.length - 1)];
@@ -169,7 +167,7 @@ export function HomeHero({ username, picks, upNext = [] }: HomeHeroProps) {
 
   return (
     <section className={cx('hero home-hero', noirs && feedback.dismissed && 'is-dismissed')} style={ambient} aria-labelledby={headingId}>
-      <PhoneBar username={username} />
+      <PhoneBar />
       <div className="hero-glow" aria-hidden="true" />
       <div className="hero-bg" ref={parallax} aria-hidden="true">
         {backdrop && <Backdrop key={backdrop} src={backdrop} />}
@@ -243,12 +241,12 @@ function HeroContentSkeleton({ headingId }: { headingId: string }) {
 }
 
 /** The hero's box while For You works out its picks: the same size, so nothing jumps when they arrive. */
-export function HomeHeroSkeleton({ username }: { username: string }) {
+export function HomeHeroSkeleton() {
   const headingId = useId();
   useOverArt();
   return (
     <section className="hero home-hero" aria-labelledby={headingId}>
-      <PhoneBar username={username} />
+      <PhoneBar />
       <div className="hero-glow" aria-hidden="true" />
       <div className="hero-scrim" aria-hidden="true" />
       <div className="page">

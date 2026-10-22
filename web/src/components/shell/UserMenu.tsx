@@ -4,49 +4,85 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Command, LogOut, Settings, Tv } from 'lucide-react';
 import { CatAvatar, MarkMono } from '@/components/brand';
-import { Button, Kbd, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Sheet } from '@/components/ui';
+import { useMembers } from '@/components/members/MembersGate';
+import { Button, Kbd, MemberAvatar, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Sheet, Spinner } from '@/components/ui';
+import { useHydrated } from '@/hooks/useHydrated';
 import { DESKTOP_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
+import type { Member } from '@/lib/api/contract';
+import { memberTraktLine } from '@/lib/members/display';
+import { useSwitchMember } from '@/lib/members/switch';
 import { useShell } from './ShellContext';
 import { useSignOut } from './signOut';
 
-function MenuHeader({ username }: { username: string }) {
+/** Who's signed in: the member and their Trakt, or (without household members) the app. */
+export function AccountMenuHeader({ member }: { member: Member | null }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2">
-      <CatAvatar size={36} />
+      {member ? <MemberAvatar name={member.name} color={member.color} size="md" /> : <CatAvatar size={36} />}
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-semibold text-fg-1">{username}</span>
-        <span className="t-small text-fg-3">Signed in</span>
+        <span className="truncate font-semibold text-fg-1">{member ? member.name : 'momoshtrem'}</span>
+        <span className="t-small truncate text-fg-3">{member ? memberTraktLine(member) : 'Signed in'}</span>
       </div>
     </div>
   );
 }
 
+/** "Account menu, Teymur: switch, settings, log out"; "Account menu: settings, log out" without a member. */
+export function accountMenuLabel(member: Member | null, canSwitch: boolean): string {
+  const actions = `${canSwitch ? 'switch, ' : ''}settings, log out`;
+  return member ? `Account menu, ${member.name}: ${actions}` : `Account menu: ${actions}`;
+}
+
 /**
- * The cat menu (HANDOFF §3 Menu): Settings, Infuse setup, Command palette,
- * Log out. A popover on desktop; a sheet on phone.
+ * The account menu (HANDOFF §3 Menu): who's watching and "Switch to …" for
+ * everyone else (#239), then Settings, Infuse setup, Command palette and Log
+ * out. A popover on desktop; a sheet on phone. Switching goes to `/` as the
+ * other person, with every cached query dropped.
  */
-export function UserMenu({ username, className }: { username: string; className?: string }) {
+export function UserMenu({ className }: { className?: string }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const signOut = useSignOut();
+  const switchTo = useSwitchMember();
   const { openPalette } = useShell();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [switching, setSwitching] = useState<number | null>(null);
+  // The household comes from a client query: render it only after hydration, so the first render matches the server's (#148)
+  const hydrated = useHydrated();
+  const members = useMembers();
+  const member = hydrated ? members.current : null;
+  const others = hydrated && member ? members.others : [];
+
+  const switchMember = (id: number) => {
+    setSwitching(id);
+    switchTo(id);
+  };
 
   const triggerProps = {
     type: 'button' as const,
-    className: `avatar-btn ${className ?? ''}`,
-    'aria-label': 'Account menu: settings, log out',
+    className: `avatar-btn ${member ? 'has-member' : ''} ${className ?? ''}`,
+    'aria-label': accountMenuLabel(member, others.length > 0),
   };
-  const mark = <MarkMono size={20} fill="var(--text-2)" />;
+  const face = member ? <MemberAvatar name={member.name} color={member.color} size="md" /> : <MarkMono size={20} fill="var(--text-2)" />;
 
   if (desktop) {
     return (
       <Menu>
         <MenuTrigger asChild>
-          <button {...triggerProps}>{mark}</button>
+          <button {...triggerProps}>{face}</button>
         </MenuTrigger>
-        <MenuContent aria-label="Account">
-          <MenuHeader username={username} />
+        <MenuContent aria-label="Account" className="min-w-[260px]">
+          <AccountMenuHeader member={member} />
           <MenuSeparator />
+          {others.length > 0 && (
+            <>
+              {others.map((other) => (
+                <MenuItem key={other.id} icon={<MemberAvatar name={other.name} color={other.color} size="xs" />} onSelect={() => switchMember(other.id)}>
+                  Switch to {other.name}
+                </MenuItem>
+              ))}
+              <MenuSeparator />
+            </>
+          )}
           <MenuItem href="/settings" icon={<Settings size={18} aria-hidden="true" />}>
             Settings
           </MenuItem>
@@ -68,11 +104,26 @@ export function UserMenu({ username, className }: { username: string; className?
   return (
     <>
       <button {...triggerProps} aria-haspopup="dialog" onClick={() => setSheetOpen(true)}>
-        {mark}
+        {face}
       </button>
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="Account" size="narrow">
-        <MenuHeader username={username} />
+        <AccountMenuHeader member={member} />
         <nav aria-label="Account" className="mt-3 flex flex-col gap-1">
+          {others.map((other) => (
+            <button
+              key={other.id}
+              type="button"
+              className="list-row rounded-md text-left"
+              aria-busy={switching === other.id || undefined}
+              disabled={switching !== null}
+              onClick={() => switchMember(other.id)}
+            >
+              <MemberAvatar name={other.name} color={other.color} size="sm" />
+              <span className="grow font-medium">Switch to {other.name}</span>
+              {switching === other.id && <Spinner size={18} className="text-fg-3" />}
+            </button>
+          ))}
+          {others.length > 0 && <hr className="my-1 border-line-1" />}
           <Link href="/settings" className="list-row rounded-md" onClick={() => setSheetOpen(false)}>
             <Settings size={20} className="text-fg-3" aria-hidden="true" />
             <span className="grow font-medium">Settings</span>

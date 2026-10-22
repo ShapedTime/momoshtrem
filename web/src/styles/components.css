@@ -515,7 +515,37 @@
   .topbar .ask-trigger { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px 0 6px; border-radius: var(--r-pill); border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent-text); font-weight: var(--w-semibold); font-size: var(--t-small); white-space: nowrap; }
   .topbar .ask-trigger:hover { background: rgb(242 179 61 / 0.2); }
   .avatar-btn { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); border: 1px solid var(--line-2); flex-shrink: 0; }
+  /* With a member known, their avatar fills the button (its own ring is the border) */
+  .avatar-btn.has-member { background: none; border-color: transparent; }
   @media (min-width: 1024px) { .topbar { display: flex; } }
+
+  /* ---- Household members (#239) --------------------------------------------
+     An initial on a tint of the member's colour: identity, never status, and
+     always next to the name (so it's aria-hidden). An unknown colour key gets
+     the neutral gradient. */
+  .member-avatar {
+    --avatar-size: 40px;
+    width: var(--avatar-size); height: var(--avatar-size); flex-shrink: 0; border-radius: 50%;
+    display: inline-grid; place-items: center; line-height: 1; user-select: none;
+    font-size: calc(var(--avatar-size) * 0.45); font-weight: var(--w-semibold); color: var(--text-1);
+    background: linear-gradient(135deg, var(--surface-4), var(--surface-2)); border: 1px solid var(--line-2);
+  }
+  .member-avatar[data-color] {
+    color: var(--member);
+    background: color-mix(in oklab, var(--member) 16%, var(--surface-2));
+    border-color: color-mix(in oklab, var(--member) 36%, transparent);
+  }
+  .member-avatar[data-color="rose"] { --member: var(--member-rose); }
+  .member-avatar[data-color="orchid"] { --member: var(--member-orchid); }
+  .member-avatar[data-color="periwinkle"] { --member: var(--member-periwinkle); }
+  .member-avatar[data-color="teal"] { --member: var(--member-teal); }
+  .member-avatar[data-color="lime"] { --member: var(--member-lime); }
+  .member-avatar[data-color="sand"] { --member: var(--member-sand); }
+  .member-avatar--xs { --avatar-size: 20px; }
+  .member-avatar--sm { --avatar-size: 28px; }
+  .member-avatar--md { --avatar-size: 40px; }
+  .member-avatar--lg { --avatar-size: 64px; }
+  .member-avatar--xl { --avatar-size: 128px; }
 
   .tabbar { position: fixed; z-index: var(--z-tabbar); left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 max(8px, env(safe-area-inset-left, 0px)) env(safe-area-inset-bottom, 0px); background: var(--glass-bg-strong); backdrop-filter: blur(var(--blur-lg)) saturate(170%); border-top: 1px solid var(--line-1); }
   .tabbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; height: var(--tabbar-h); color: var(--text-3); font-size: 10.5px; font-weight: var(--w-medium); letter-spacing: 0.01em; -webkit-tap-highlight-color: transparent; position: relative; }

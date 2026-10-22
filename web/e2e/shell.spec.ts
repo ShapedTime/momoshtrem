@@ -41,6 +41,8 @@ test.describe('app shell', () => {
     await signIn(page, '/library');
     const scope = isDesktop(testInfo.project.name) ? page.locator('header.topbar') : page.locator('header.phone-bar');
     await scope.getByRole('button', { name: /Account menu/ }).click();
+    // Who's watching heads the menu (#239)
+    await expect(page.getByText('Trakt · teymur')).toBeVisible();
     if (isDesktop(testInfo.project.name)) {
       await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible();
       await page.getByRole('menuitem', { name: 'Log out' }).click();

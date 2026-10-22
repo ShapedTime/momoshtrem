@@ -36,7 +36,8 @@ import { findTitle } from './catalog';
 import { AI_SPEND, aiConfigured, mockAiSettings } from './settings';
 // titles.ts reads recommendationReason() back, and trakt.ts imports titles.ts: functions only, so the cycles are safe
 import { buildTitle, type MockLibrary } from './titles';
-import { traktImported, watchlistItems } from './trakt';
+import { mockMemberId, mockMembers } from './members';
+import { traktImported, traktSummary, watchlistItems } from './trakt';
 
 /**
  * Recommendations and Ask momoshtrem (PLAN §6 "Recommendations (R1–R3)"),
@@ -682,7 +683,7 @@ function startingRecs(from: MockScenario | null, now: number): MockRecs {
     nextTurnId: 46,
     failRuns: false,
     firstSyncPending: false,
-    spend: { recs: { cost_usd: 0, requests: 0 }, ask: { cost_usd: 0, requests: 0 }, classifier: { cost_usd: 0, requests: 0 } },
+    spend: noSpend(),
   };
   const model = mockAiSettings().rec_model;
   switch (from) {
@@ -702,21 +703,72 @@ function startingRecs(from: MockScenario | null, now: number): MockRecs {
   }
 }
 
-let state: MockRecs | undefined;
+const noSpend = (): MockRecs['spend'] => ({ recs: { cost_usd: 0, requests: 0 }, ask: { cost_usd: 0, requests: 0 }, classifier: { cost_usd: 0, requests: 0 } });
 
-function current(now = Date.now()): MockRecs {
-  const from = scenario();
-  if (!state || state.scenario !== from) {
-    state = startingRecs(from, now);
-    // Each run moves along as it's read; pin the held ones where their scenario wants them
-    for (const run of state.runs) while (run.hold !== null && run.tick < run.hold) step(state, run, now);
-  }
-  return state;
+/**
+ * Anyone but member 1 (#239): Sam's newest succeeded run is the refreshed set
+ * ("Because you loved The Bear", Pluribus first), with his own thread ids
+ * from 100 and no feedback. Someone without Trakt (anyone added, or Sam under
+ * `members-fresh`) has no runs or threads, and their first import queues the
+ * first run. The `recs-*` scenarios describe member 1.
+ */
+function memberRecs(member: number, from: MockScenario | null, now: number): MockRecs {
+  const recs: MockRecs = {
+    scenario: from,
+    runs: [],
+    feedback: new Map(),
+    threads: [],
+    nextRunId: 100 * member + 1,
+    nextThreadId: 100 * (member - 1),
+    nextTurnId: 1000 * member,
+    failRuns: false,
+    firstSyncPending: true,
+    spend: noSpend(),
+  };
+  if (member !== 2 || traktSummary(member).state === 'off') return recs;
+  const run = finishedRun(recs.nextRunId++, 'scheduled', 'succeeded', lastNight(now), 39, 'claude-opus-5-5', 0.36, REFRESHED_RESULT);
+  return { ...recs, runs: [run], firstSyncPending: false };
 }
+
+/** Each member's picks, feedback and Ask threads, by member id. */
+const states = new Map<number, MockRecs>();
+/** What removed members spent this month: it stays in the total (PLAN §6 "Household members"). */
+let removedSpend = noSpend();
+
+function stateFor(member: number, now = Date.now()): MockRecs {
+  const from = scenario();
+  let s = states.get(member);
+  if (!s || s.scenario !== from) {
+    s = member === 1 ? startingRecs(from, now) : memberRecs(member, from, now);
+    // Each run moves along as it's read; pin the held ones where their scenario wants them
+    for (const run of s.runs) while (run.hold !== null && run.tick < run.hold) step(s, run, now);
+    states.set(member, s);
+  }
+  return s;
+}
+
+/** The state of the member the request is for. */
+const current = (now = Date.now()): MockRecs => stateFor(mockMemberId(), now);
+
+/** Every current member's state (the household's spend and estimates). */
+const everyone = (now = Date.now()): MockRecs[] => mockMembers().map((m) => stateFor(m.id, now));
 
 /** Tests: back to the starting state (it's rebuilt for the scenario on the next request). */
 export function resetMockRecs(): void {
-  state = undefined;
+  states.clear();
+  removedSpend = noSpend();
+}
+
+/** DELETE /members/{id}: their picks, feedback and threads go; what they spent stays in the month's total. */
+export function forgetMockRecs(member: number): void {
+  const s = states.get(member);
+  if (s) {
+    for (const feature of FEATURES) {
+      removedSpend[feature].cost_usd += s.spend[feature].cost_usd;
+      removedSpend[feature].requests += s.spend[feature].requests;
+    }
+  }
+  states.delete(member);
 }
 
 // ---- Runs ---------------------------------------------------------------------------------
@@ -1156,14 +1208,19 @@ export function endAskTurn(turn: MockTurn, status: Exclude<AskTurnStatus, 'strea
 const FEATURES: readonly AiFeature[] = ['recs', 'ask', 'classifier'];
 const mean = (values: number[]) => (values.length === 0 ? null : round2(values.reduce((a, b) => a + b, 0) / values.length));
 
-/** GET /settings/ai/usage: this month (local), the page's runs and asks included. */
+/**
+ * GET /settings/ai/usage: this month (local), the page's runs and asks included. The spend, budget and
+ * estimates are the household's (a removed member's spend included); `recs` and `asks_today` the viewer's.
+ */
 export function aiUsage(now = Date.now()): AiUsage {
   const s = current(now);
+  const all = everyone(now);
   const settings = mockAiSettings();
+  const spent = (feature: AiFeature) => [...all.map((m) => m.spend[feature]), removedSpend[feature]];
   const byFeature = FEATURES.map((feature) => ({
     feature,
-    cost_usd: round2(AI_SPEND[feature].cost_usd + s.spend[feature].cost_usd),
-    requests: AI_SPEND[feature].requests + s.spend[feature].requests,
+    cost_usd: round2(AI_SPEND[feature].cost_usd + spent(feature).reduce((sum, row) => sum + row.cost_usd, 0)),
+    requests: AI_SPEND[feature].requests + spent(feature).reduce((sum, row) => sum + row.requests, 0),
   }));
   let total = round2(byFeature.reduce((sum, row) => sum + row.cost_usd, 0));
   const budget = settings.monthly_budget_usd;
@@ -1173,15 +1230,19 @@ export function aiUsage(now = Date.now()): AiUsage {
     total = budget;
   }
   const d = new Date(now);
-  const succeeded = (model: RecModel) => s.runs.filter((run) => run.status === 'succeeded' && run.model === model).slice(0, 5).map((run) => run.cost);
-  const doneTurns = s.threads
+  const runs = all.flatMap((m) => m.runs).sort((a, b) => (b.finished ?? Infinity) - (a.finished ?? Infinity));
+  const succeeded = (model: RecModel) => runs.filter((run) => run.status === 'succeeded' && run.model === model).slice(0, 5).map((run) => run.cost);
+  const doneTurns = all
+    .flatMap((m) => m.threads)
     .flatMap((t) => t.turns)
     .filter((turn) => turn.status === 'done')
     .sort((a, b) => b.created - a.created)
     .slice(0, 20);
   const lastFinished = s.runs.find((run) => !isActive(run));
   const active = activeRun(s);
-  const scheduled = aiConfigured() && settings.rec_enabled ? nextRunAt(settings.rec_schedule, now) : null;
+  // The schedule's, but only for a viewer whose Trakt is connected (the slots queue only theirs)
+  const eligible = traktSummary(mockMemberId()).state === 'connected';
+  const scheduled = aiConfigured() && settings.rec_enabled && eligible ? nextRunAt(settings.rec_schedule, now) : null;
   return {
     configured: aiConfigured(),
     month: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,

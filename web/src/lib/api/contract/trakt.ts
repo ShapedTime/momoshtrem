@@ -9,8 +9,11 @@ import type { NextEpisode, SimilarTitle } from './titles';
  * `connected`: syncing works. `reauth`: Trakt stopped accepting the tokens; the imported data stays.
  */
 export type TraktState = 'off' | 'pending' | 'connected' | 'reauth';
-/** Why the last device code didn't connect. */
-export type TraktConnectError = 'expired' | 'denied' | 'failed';
+/**
+ * Why the last device code didn't connect. `account_in_use`: that Trakt account is already connected to
+ * another household member, decided after the code is approved.
+ */
+export type TraktConnectError = 'expired' | 'denied' | 'failed' | 'account_in_use';
 export type TraktSyncStatus = 'idle' | 'syncing' | 'error';
 /** `initial` is the first import after connecting (a full reconcile, with progress). */
 export type TraktSyncKind = 'initial' | 'incremental' | 'reconcile';

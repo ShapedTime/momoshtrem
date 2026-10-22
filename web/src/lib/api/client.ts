@@ -5,7 +5,9 @@
  */
 
 import { LOGIN_ROUTE } from '@/config/auth';
+import { clearMemberCookie } from '@/lib/members/cookie';
 import type { ApiErrorBody } from './contract/common';
+import { UNKNOWN_MEMBER_CODE } from './contract/members';
 
 /** Error from an /api call: HTTP status plus the contract's {code, message, field?, resets_at?, …}. */
 export class ApiError extends Error {
@@ -76,19 +78,39 @@ function redirectToLogin(): void {
 }
 
 /**
+ * The cookie names a household member nobody has any more (removed on
+ * another device while this tab stayed open): forget the choice and load
+ * this page again, which opens "Who's watching?" (or picks the only member).
+ * The cookie is cleared before the reload, so it can't loop.
+ */
+function forgetMember(): void {
+  if (typeof window === 'undefined' || redirecting) return;
+  redirecting = true;
+  clearMemberCookie();
+  const { pathname, search, hash } = window.location;
+  window.location.assign(`${pathname}${search}${hash}`);
+}
+
+/**
  * Drop-in `fetch` for `/api/*`. The proxy's "session ended" answer
  * (401 `unauthorized`) sends the browser to /login and throws, so callers
  * never render a half-signed-in page. Any other 401 (an upstream service
  * rejecting a key) is returned like every other status: redirecting on it
- * would loop through /login.
+ * would loop through /login. A 400 `unknown_member` reloads the page
+ * without the member cookie (`forgetMember`) and throws.
  */
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, { credentials: 'same-origin', ...init });
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 400) {
     const body: unknown = await response.clone().json().catch(() => undefined);
-    if (parseErrorBody(body).code === 'unauthorized') {
+    const { code, message } = parseErrorBody(body);
+    if (response.status === 401 && code === 'unauthorized') {
       redirectToLogin();
       throw new ApiError(401, 'unauthorized', 'Your session has ended. Sign in again.');
+    }
+    if (response.status === 400 && code === UNKNOWN_MEMBER_CODE) {
+      forgetMember();
+      throw new ApiError(400, UNKNOWN_MEMBER_CODE, message ?? 'That person isn’t in the household any more.');
     }
   }
   return response;

@@ -55,11 +55,11 @@ function PageTitle() {
 }
 
 /** Before For You knows which page to show: the hero's box and two rails, at their final sizes, after 150 ms. */
-function ForYouLoading({ username }: { username: string }) {
+function ForYouLoading() {
   return (
     <>
       <PageTitle />
-      <HomeHeroSkeleton username={username} />
+      <HomeHeroSkeleton />
       <LoadingRegion label="Loading For You" className="page page-sections home-body">
         <div className="section">
           <Skeleton shape="line" width={160} height={20} />
@@ -92,7 +92,7 @@ function FirstTimeHome() {
 }
 
 /** Without Trakt: a trending hero, what connecting brings, new episodes of library shows, then trending. */
-function TraktOffHome({ username, traktFailed, onRetryTrakt }: { username: string; traktFailed: boolean; onRetryTrakt: () => void }) {
+function TraktOffHome({ traktFailed, onRetryTrakt }: { traktFailed: boolean; onRetryTrakt: () => void }) {
   const today = useToday();
   const { trending, rail: trendingRail } = useTrendingRail();
   const newEpisodes = useQuery(newEpisodesQuery());
@@ -103,7 +103,7 @@ function TraktOffHome({ username, traktFailed, onRetryTrakt }: { username: strin
   return (
     <>
       <PageTitle />
-      {trending.isPending ? <HomeHeroSkeleton username={username} /> : picks.length > 0 && <HomeHero username={username} picks={picks} />}
+      {trending.isPending ? <HomeHeroSkeleton /> : picks.length > 0 && <HomeHero picks={picks} />}
       <div className="page page-sections home-body">
         {traktFailed ? (
           <Banner
@@ -197,7 +197,7 @@ function useRunEnd(activeRunId: number | null) {
  * the other shelves, the watchlist, Coming soon, and the picks footer.
  * Without picks (none yet, switched off, no key) trending fills in.
  */
-function PersonalHome({ username, trakt }: { username: string; trakt: TraktIntegration }) {
+function PersonalHome({ trakt }: { trakt: TraktIntegration }) {
   const today = useToday();
   const showWatchlist = trakt.settings.show_watchlist;
   const upNext = useQuery(upNextQuery());
@@ -253,7 +253,7 @@ function PersonalHome({ username, trakt }: { username: string; trakt: TraktInteg
   return (
     <>
       <PageTitle />
-      {!settled ? <HomeHeroSkeleton username={username} /> : picks.length > 0 && <HomeHero username={username} picks={picks} upNext={upNext.data?.items} />}
+      {!settled ? <HomeHeroSkeleton /> : picks.length > 0 && <HomeHero picks={picks} upNext={upNext.data?.items} />}
       <div className="page page-sections home-body">
         {relinking && (
           <Banner
@@ -355,7 +355,7 @@ function useAfterFirstImport(importing: boolean, recs: { dataUpdatedAt: number; 
  * time, Trakt off, the first sync (then Noir's first shelves), or the
  * personal page with Noir's picks.
  */
-export function ForYouView({ username }: { username: string }) {
+export function ForYouView() {
   const integration = useTraktIntegration();
   const library = useQuery(libraryQuery({ page_size: 1 }));
   const recs = useQuery(recommendationsHomeQuery());
@@ -373,14 +373,14 @@ export function ForYouView({ username }: { username: string }) {
 
   switch (state) {
     case 'loading':
-      return <ForYouLoading username={username} />;
+      return <ForYouLoading />;
     case 'first_time':
       return <FirstTimeHome />;
     case 'trakt_off':
-      return <TraktOffHome username={username} traktFailed={trakt === null} onRetryTrakt={() => void integration.refetch()} />;
+      return <TraktOffHome traktFailed={trakt === null} onRetryTrakt={() => void integration.refetch()} />;
     case 'first_sync':
       return trakt ? <FirstSyncHome trakt={trakt} firstRun={firstRun} /> : null;
     case 'default':
-      return trakt ? <PersonalHome username={username} trakt={trakt} /> : null;
+      return trakt ? <PersonalHome trakt={trakt} /> : null;
   }
 }

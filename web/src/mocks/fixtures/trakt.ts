@@ -22,20 +22,25 @@ import type {
 } from '@/lib/api/contract';
 import { type MockScenario, scenario } from '../scenario';
 import { findTitle, iso } from './catalog';
+import { mockMemberId, mockMemberName, mockMembers, mockMemberStale } from './members';
 // titles.ts reads traktImported() back: functions only, so the cycle is safe
 import { buildSeason, buildTitle, episodeFile, libraryKey, type MockLibrary, nextEpisodeOf, webdavUrl } from './titles';
 import { type EpisodeKey, hasPlay, MOVIES, SHOWS, type ShowSeed } from './title-seeds';
 
 /**
- * The mock Trakt account (teymur) and the integration's state machine
- * (PLAN §6 "Trakt (B5)"). The account's plays are the seeds' `watched`
- * episodes and `watch_state`s (title-seeds.ts); Up next names each show's
+ * The mock Trakt accounts, one per household member (#239), and the
+ * integration's state machine (PLAN §6 "Trakt (B5)"). Teymur's (member 1)
+ * plays are the seeds' `watched` episodes and `watch_state`s
+ * (title-seeds.ts); Sam's (member 2) are his two shows' (fewer in Up next,
+ * another watchlist); someone added starts off. Up next names each show's
  * `next_up`, and every card's availability comes from the page's library,
  * so adding a show or applying a mapping job changes it.
  *
  * The state is per page, kept here rather than in handlers/trakt.ts so
  * fixtures/system.ts can read it without msw. The `trakt-*`, `first-time`,
- * `up-next-empty` and `me-error` scenarios pick the starting state.
+ * `up-next-empty` and `me-error` scenarios pick member 1's starting state;
+ * the ones before Trakt (`trakt-off`, `first-time`…) start everyone off, and
+ * `members-fresh` starts Sam off.
  */
 
 const DAY = 86_400_000;
@@ -56,22 +61,67 @@ export const DEFAULT_TRAKT_SETTINGS: TraktSettings = { use_ratings: true, show_w
 /** What `POST /integrations/trakt/connect` hands out. */
 export const DEVICE_CODE = { user_code: 'A1B2C3D4', verification_url: 'https://trakt.tv/activate', interval: 5, ttl_ms: 10 * MINUTE };
 
-// ---- The account ----------------------------------------------------------------
+// ---- The accounts ---------------------------------------------------------------
 
-/** The Trakt watchlist, newest first. */
-const WATCHLIST: Array<{ media_type: MediaType; tmdb_id: number; listed_days_ago: number }> = [
+interface WatchlistSeed {
+  media_type: MediaType;
+  tmdb_id: number;
+  listed_days_ago: number;
+}
+
+/** Teymur's Trakt watchlist, newest first. */
+const WATCHLIST: WatchlistSeed[] = [
   { media_type: 'movie', tmdb_id: 666277, listed_days_ago: 4 }, // Past Lives: not in the library
   { media_type: 'movie', tmdb_id: 1054867, listed_days_ago: 10 }, // One Battle After Another: needs a torrent
   { media_type: 'tv', tmdb_id: 82728, listed_days_ago: 20 }, // Bluey: unstarted, so Up next's watchlist start
   { media_type: 'tv', tmdb_id: 66573, listed_days_ago: 60 }, // The Good Place: not in the library
 ];
 
+/** Whose plays, Up next and watchlist an account imports. */
+export interface TraktProfile {
+  username: string;
+  /** The shows (and with them the movies) this person watched: null for every seed's (Teymur), else these shows only. */
+  shows: ReadonlySet<number> | null;
+  watchlist: readonly WatchlistSeed[];
+}
+
+const TEYMUR: TraktProfile = { username: TRAKT_USERNAME, shows: null, watchlist: WATCHLIST };
+
+/** Sam: Severance and The Studio, and a watchlist of his own. */
+const SAM: TraktProfile = {
+  username: 'sam',
+  shows: new Set([95396, 247767]),
+  watchlist: [
+    { media_type: 'movie', tmdb_id: 157336, listed_days_ago: 3 }, // Interstellar
+    { media_type: 'tv', tmdb_id: 209867, listed_days_ago: 15 }, // Frieren
+  ],
+};
+
+/** Someone added in Settings › Household: their Trakt is their lowercased name, with nothing watched yet. */
+function profileFor(member: number): TraktProfile {
+  if (member === 1) return TEYMUR;
+  if (member === 2) return SAM;
+  const name = mockMemberName(member) ?? `member${member}`;
+  return { username: name.toLowerCase().replace(/\s+/g, ''), shows: new Set(), watchlist: [] };
+}
+
+/** The person watched this title (and the seeds give it plays). */
+function follows(profile: TraktProfile, mediaType: MediaType, tmdbId: number): boolean {
+  if (profile.shows === null) return true;
+  return mediaType === 'tv' && profile.shows.has(tmdbId);
+}
+
 const showSeeds = () => Object.entries(SHOWS).map(([id, show]) => [Number(id), show] as const);
 
 /** Shows with Trakt progress: Up next's candidates. */
 const PROGRESS_SHOWS = showSeeds().filter(([, show]) => show.watch_state?.progress && show.next_up);
+const progressShows = (profile: TraktProfile) => PROGRESS_SHOWS.filter(([id]) => follows(profile, 'tv', id));
 
-const RATINGS = [...Object.values(SHOWS), ...Object.values(MOVIES)].filter((seed) => seed.watch_state?.rating != null).length;
+const ratingsOf = (profile: TraktProfile) =>
+  [
+    ...showSeeds().map(([id, seed]) => [follows(profile, 'tv', id), seed] as const),
+    ...Object.entries(MOVIES).map(([id, seed]) => [follows(profile, 'movie', Number(id)), seed] as const),
+  ].filter(([followed, seed]) => followed && seed.watch_state?.rating != null).length;
 
 /** Every play, newest first: each show's last play at its `watched_at`, the earlier ones a day apart. */
 function buildHistory(): HistoryItem[] {
@@ -110,6 +160,7 @@ function buildHistory(): HistoryItem[] {
 }
 
 const HISTORY = buildHistory();
+const historyOf = (profile: TraktProfile) => (profile.shows === null ? HISTORY : HISTORY.filter((play) => follows(profile, play.media_type, play.tmdb_id)));
 
 // ---- Lists ------------------------------------------------------------------------
 
@@ -173,12 +224,12 @@ const byLastWatched = (a: UpNextItem, b: UpNextItem) => (b.last_watched_at ?? ''
 const byAirsAt = (a: UpNextItem, b: UpNextItem) => (a.airs_at ?? '9999').localeCompare(b.airs_at ?? '9999');
 
 /** GET /me/up-next: actionable shows by last watched, then watchlist starts, then what airs next. */
-export function upNextItems(library: MockLibrary, settings: TraktSettings): UpNextItem[] {
+export function upNextItems(library: MockLibrary, settings: TraktSettings, profile: TraktProfile = currentProfile()): UpNextItem[] {
   const item = (card: Card, rest: Pick<UpNextItem, 'progress' | 'last_watched_at' | 'source'>): UpNextItem => {
     const { episode, ...fields } = card;
     return { ...fields, next_episode: episode, airs_at: card.availability === 'airs_on' ? midnight(episode.air_date) : null, ...rest };
   };
-  const fromProgress = PROGRESS_SHOWS.flatMap(([tmdbId, show]) => {
+  const fromProgress = progressShows(profile).flatMap(([tmdbId, show]) => {
     const state = show.watch_state;
     const card = show.next_up && episodeCard(library, tmdbId, show.next_up);
     if (!state?.progress || !card) return [];
@@ -188,7 +239,8 @@ export function upNextItems(library: MockLibrary, settings: TraktSettings): UpNe
   });
   const starts = !settings.show_watchlist
     ? []
-    : WATCHLIST.filter((w) => w.media_type === 'tv' && library.has(libraryKey('tv', w.tmdb_id)) && !SHOWS[w.tmdb_id]?.watch_state)
+    : profile.watchlist
+        .filter((w) => w.media_type === 'tv' && library.has(libraryKey('tv', w.tmdb_id)) && !SHOWS[w.tmdb_id]?.watch_state)
         .flatMap((w) => {
           const card = episodeCard(library, w.tmdb_id, [1, 1]);
           return card && card.availability !== 'airs_on'
@@ -206,14 +258,16 @@ export function upNextItems(library: MockLibrary, settings: TraktSettings): UpNe
  * days, of library shows and (with Trakt) the shows Trakt follows, that
  * Trakt hasn't seen watched. Newest first.
  */
-export function newEpisodeItems(library: MockLibrary, days: number, withTrakt: boolean): NewEpisodeItem[] {
+export function newEpisodeItems(library: MockLibrary, days: number, withTrakt: boolean, profile: TraktProfile = currentProfile()): NewEpisodeItem[] {
   const from = new Date(Date.parse(TODAY) - days * DAY).toISOString().slice(0, 10);
-  const shows = new Set(showSeeds().map(([id]) => id).filter((id) => library.has(libraryKey('tv', id)) || (withTrakt && SHOWS[id].watch_state)));
+  // The viewer's plays: someone else's don't make an episode old news
+  const watches = (id: number) => withTrakt && follows(profile, 'tv', id);
+  const shows = new Set(showSeeds().map(([id]) => id).filter((id) => library.has(libraryKey('tv', id)) || (watches(id) && SHOWS[id].watch_state)));
   const items: NewEpisodeItem[] = [];
   for (const tmdbId of shows) {
     for (const season of SHOWS[tmdbId].seasons.filter((s) => s.n > 0)) {
       for (const seed of season.episodes) {
-        if (!seed.air_date || seed.air_date < from || seed.air_date > TODAY || (withTrakt && hasPlay(SHOWS[tmdbId], season.n, seed))) continue;
+        if (!seed.air_date || seed.air_date < from || seed.air_date > TODAY || (watches(tmdbId) && hasPlay(SHOWS[tmdbId], season.n, seed))) continue;
         const card = episodeCard(library, tmdbId, [season.n, seed.n]);
         if (!card || card.availability === 'airs_on') continue;
         items.push({ ...card, availability: card.availability as NewEpisodeAvailability, aired_at: midnight(seed.air_date) ?? '' });
@@ -226,8 +280,8 @@ export function newEpisodeItems(library: MockLibrary, days: number, withTrakt: b
 }
 
 /** GET /me/watchlist?type=, newest first, with each title's library state. */
-export function watchlistItems(library: MockLibrary, type?: MediaType): WatchlistItem[] {
-  return WATCHLIST.filter((w) => !type || w.media_type === type).flatMap((w) => {
+export function watchlistItems(library: MockLibrary, type?: MediaType, profile: TraktProfile = currentProfile()): WatchlistItem[] {
+  return profile.watchlist.filter((w) => !type || w.media_type === type).flatMap((w) => {
     const title = buildTitle(w.media_type, w.tmdb_id, library);
     if (!title) return [];
     const state = title.library;
@@ -251,8 +305,8 @@ export function watchlistItems(library: MockLibrary, type?: MediaType): Watchlis
 export const DEFAULT_HISTORY_PAGE_SIZE = 50;
 
 /** GET /me/history: every play, newest first. */
-export function historyPage(page: number, pageSize = DEFAULT_HISTORY_PAGE_SIZE, withTrakt = true): Paginated<HistoryItem> {
-  const all = withTrakt ? HISTORY : [];
+export function historyPage(page: number, pageSize = DEFAULT_HISTORY_PAGE_SIZE, withTrakt = true, profile: TraktProfile = currentProfile()): Paginated<HistoryItem> {
+  const all = withTrakt ? historyOf(profile) : [];
   return { items: all.slice((page - 1) * pageSize, page * pageSize), total: all.length, page, page_size: pageSize };
 }
 
@@ -261,6 +315,9 @@ export function historyPage(page: number, pageSize = DEFAULT_HISTORY_PAGE_SIZE, 
 interface MockTraktAccount {
   /** The scenario it started from: another one starts over. */
   scenario: MockScenario | null;
+  /** The household member it belongs to. */
+  member: number;
+  profile: TraktProfile;
   configured: boolean;
   state: TraktState;
   /** An account is linked (connected, reauth, or a code pending from reauth): its data is kept. */
@@ -290,10 +347,17 @@ const running = (kind: TraktSyncKind, step: TraktSyncStep, now: number): MockTra
   finished_at: null,
 });
 
-function startingAccount(from: MockScenario | null, now: number): MockTraktAccount {
+const off = (): Partial<MockTraktAccount> => ({ state: 'off', linked: false, imported: new Set(), sync: neverSynced(), lastSyncAt: null });
+
+/** Scenarios from before anyone connected Trakt: every member starts off. */
+const BEFORE_TRAKT: ReadonlySet<MockScenario> = new Set(['trakt-off', 'trakt-denied', 'trakt-pending', 'first-time', 'trakt-account-in-use']);
+
+function startingAccount(member: number, from: MockScenario | null, now: number): MockTraktAccount {
   const synced = now - 4 * MINUTE;
   const account: MockTraktAccount = {
     scenario: from,
+    member,
+    profile: profileFor(member),
     configured: true,
     state: 'connected',
     linked: true,
@@ -307,15 +371,11 @@ function startingAccount(from: MockScenario | null, now: number): MockTraktAccou
     lastSyncAt: at(synced),
     settings: { ...DEFAULT_TRAKT_SETTINGS },
   };
-  const off: Partial<MockTraktAccount> = { state: 'off', linked: false, imported: new Set(), sync: neverSynced(), lastSyncAt: null };
+  if (from === 'trakt-unconfigured') return { ...account, ...off(), configured: false };
+  if (from !== null && BEFORE_TRAKT.has(from)) return { ...account, ...off() };
+  // The other scenarios describe member 1; Sam keeps his account (but `members-fresh`), and someone added starts off
+  if (member !== 1) return member === 2 && from !== 'members-fresh' ? account : { ...account, ...off() };
   switch (from) {
-    case 'trakt-off':
-    case 'trakt-denied':
-    case 'trakt-pending':
-    case 'first-time':
-      return { ...account, ...off };
-    case 'trakt-unconfigured':
-      return { ...account, ...off, configured: false };
     case 'trakt-syncing':
       return {
         ...account,
@@ -356,38 +416,77 @@ function startingAccount(from: MockScenario | null, now: number): MockTraktAccou
   }
 }
 
-let account: MockTraktAccount | undefined;
+/** Each member's account, by member id. */
+const accounts = new Map<number, MockTraktAccount>();
 
-function current(now = Date.now()): MockTraktAccount {
+function accountFor(member: number, now = Date.now()): MockTraktAccount {
   const from = scenario();
-  if (!account || account.scenario !== from) account = startingAccount(from, now);
-  return account;
+  let a = accounts.get(member);
+  if (!a || a.scenario !== from) {
+    a = startingAccount(member, from, now);
+    accounts.set(member, a);
+  }
+  return a;
 }
 
-/** Tests: back to the starting account (it's rebuilt for the scenario on the next request). */
+/** The account of the member the request is for. */
+const current = (now = Date.now()): MockTraktAccount => accountFor(mockMemberId(), now);
+const currentProfile = (): TraktProfile => current().profile;
+
+/** Tests: back to the starting accounts (each is rebuilt for the scenario on its next request). */
 export function resetMockTrakt(): void {
-  account = undefined;
+  accounts.clear();
 }
 
-/** The imported data for a step's section is there (/me reads it). */
+/** DELETE /members/{id}: their Trakt connection and imported data go. */
+export function forgetMockTrakt(member: number): void {
+  accounts.delete(member);
+}
+
+/** The viewer's imported data for a step's section is there (/me reads it). */
 export const traktImported = (step: TraktSyncStep): boolean => current().imported.has(step);
+
+/**
+ * Watched is the household's (PLAN §6 "Household members"): some member who
+ * watched the title has imported the step. Title pages and seasons read it.
+ */
+export const traktPlayed = (mediaType: MediaType, tmdbId: number, step: TraktSyncStep): boolean =>
+  mockMembers().some((m) => {
+    const a = accountFor(m.id);
+    return a.imported.has(step) && follows(a.profile, mediaType, tmdbId);
+  });
+
+/** A title's `watch_state.rating` is the viewer's: their ratings are in and they watched it. */
+export function traktRated(mediaType: MediaType, tmdbId: number): boolean {
+  const a = current();
+  return a.imported.has('ratings') && follows(a.profile, mediaType, tmdbId);
+}
 
 export const traktSettings = (): TraktSettings => current().settings;
 
-/** For GET /status. */
+/** For GET /members: a member's Trakt in brief. */
+export function traktSummary(member: number): { state: TraktState; username: string | null } {
+  const a = accountFor(member);
+  return { state: a.state, username: a.linked ? a.profile.username : null };
+}
+
+/** For GET /status: the viewer's; a member nobody has reads as not connected. */
 export function traktStatus(): SystemStatus['trakt'] {
   const a = current();
-  return { configured: a.configured, connected: a.state === 'connected' };
+  return { configured: a.configured, connected: a.state === 'connected' && !mockMemberStale() };
 }
 
 function view(a: MockTraktAccount, library: MockLibrary, now: number): TraktIntegration {
   const has = (step: TraktSyncStep) => a.imported.has(step);
-  const watchlist = has('watchlist') ? watchlistItems(library) : [];
+  const watchlist = has('watchlist') ? watchlistItems(library, undefined, a.profile) : [];
+  const plays = historyOf(a.profile).length;
+  const ratings = ratingsOf(a.profile);
+  const shows = progressShows(a.profile).length;
   return {
     configured: a.configured,
     state: a.state,
     connected: a.state === 'connected',
-    username: a.linked ? TRAKT_USERNAME : null,
+    username: a.linked ? a.profile.username : null,
     pending: a.state === 'pending' ? a.pending : null,
     connect_error: a.connectError,
     reauth_reason: a.state === 'reauth' ? a.reauthReason : null,
@@ -396,16 +495,16 @@ function view(a: MockTraktAccount, library: MockLibrary, now: number): TraktInte
     sync: {
       ...a.sync,
       progress: {
-        plays: has('history') ? HISTORY.length : 0,
-        plays_total: a.sync.kind === null ? 0 : HISTORY.length,
-        ratings: has('ratings') ? RATINGS : 0,
+        plays: has('history') ? plays : 0,
+        plays_total: a.sync.kind === null ? 0 : plays,
+        ratings: has('ratings') ? ratings : 0,
         watchlist: watchlist.length,
-        shows: has('progress') ? PROGRESS_SHOWS.length : 0,
+        shows: has('progress') ? shows : 0,
       },
     },
     counts: {
-      history: has('history') ? HISTORY.length : 0,
-      ratings: has('ratings') ? RATINGS : 0,
+      history: has('history') ? plays : 0,
+      ratings: has('ratings') ? ratings : 0,
       watchlist: watchlist.length,
       watchlist_in_library: watchlist.filter((w) => w.library !== null).length,
     },
@@ -430,10 +529,18 @@ function advance(a: MockTraktAccount, now: number): void {
   a.lastSyncAt = at(now);
 }
 
+/** Why a code ends without connecting: it expired, the scenario denies it, or the account is someone else's. */
+function refusal(a: MockTraktAccount, expired: boolean): TraktConnectError | null {
+  if (expired) return 'expired';
+  if (a.scenario === 'trakt-denied') return 'denied';
+  return a.scenario === 'trakt-account-in-use' ? 'account_in_use' : null;
+}
+
 /**
  * GET /integrations/trakt. Reading moves the machine on: the second read after
- * a connect approves the code (`trakt-denied`: denies it; `trakt-pending`:
- * never) and starts the initial import; every later read imports one step.
+ * a connect approves the code (`trakt-denied`: denies it; `trakt-account-in-use`:
+ * another member has that account; `trakt-pending`: never) and starts the
+ * initial import; every later read imports one step.
  */
 export function readTraktIntegration(library: MockLibrary, now = Date.now()): TraktIntegration {
   const a = current(now);
@@ -442,9 +549,10 @@ export function readTraktIntegration(library: MockLibrary, now = Date.now()): Tr
     // `trakt-pending`: Trakt never answers the code
     if (expired || (a.scenario !== 'trakt-pending' && ++a.reads >= 2)) {
       a.pending = null;
-      if (expired || a.scenario === 'trakt-denied') {
+      const error = refusal(a, expired);
+      if (error) {
         a.state = a.linked ? 'reauth' : 'off';
-        a.connectError = expired ? 'expired' : 'denied';
+        a.connectError = error;
       } else {
         a.state = 'connected';
         a.linked = true;
@@ -501,7 +609,8 @@ export function disconnectTrakt(): void {
     a.reads = 0;
     return;
   }
-  account = { ...startingAccount('trakt-off', Date.now()), scenario: a.scenario, configured: a.configured, settings: a.settings };
+  // The settings stay, with the scenario and whether Trakt is set up
+  accounts.set(a.member, { ...a, ...off(), pending: null, reads: 0, connectError: null, reauthReason: null, hold: null });
 }
 
 /** PUT /integrations/trakt/settings: the fields it sets; kept across a disconnect. */

@@ -13,3 +13,4 @@ export * from './downloads';
 export * from './hdrezka';
 export * from './discover';
 export * from './title-search';
+export * from './members';

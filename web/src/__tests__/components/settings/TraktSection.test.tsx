@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MembersGate } from '@/components/members/MembersGate';
 import { ConfirmProvider, ToastProvider } from '@/components/ui';
 import { TraktSection } from '@/components/settings/TraktSection';
-import type { TraktIntegration } from '@/lib/api/contract';
+import type { Member, TraktIntegration } from '@/lib/api/contract';
 
 /** Settings › Trakt (#134): the switches move on the tap and go back when the server refuses. */
 
@@ -85,5 +86,76 @@ describe('TraktSection', () => {
     expect(ratings).not.toBeChecked();
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t save that setting');
     await waitFor(() => expect(ratings).toBeChecked());
+  });
+});
+
+describe('TraktSection in a household (#239)', () => {
+  const person = (id: number, name: string): Member => ({
+    id,
+    name,
+    color: id === 1 ? 'teal' : 'rose',
+    created_at: '2026-01-01T00:00:00Z',
+    trakt: { state: 'connected', username: name.toLowerCase() },
+  });
+
+  /** /api/members answers `members`; /api/integrations/trakt answers `integration`. */
+  function renderInHousehold(members: Member[], integration: TraktIntegration = CONNECTED) {
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    global.fetch = jest.fn((input: RequestInfo | URL) =>
+      Promise.resolve(String(input) === '/api/members' ? answer(200, { items: members }) : answer(200, integration))
+    ) as typeof fetch;
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ToastProvider>
+          <ConfirmProvider>
+            <MembersGate initialMemberId={1}>
+              <TraktSection />
+            </MembersGate>
+          </ConfirmProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  afterEach(() => {
+    document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+  });
+
+  it('says whose Trakt it is, offers the other person, and names them in the disconnect', async () => {
+    renderInHousehold([person(1, 'Teymur'), person(2, 'Sam')]);
+    expect(await screen.findByText('This is Teymur’s Trakt.')).toBeInTheDocument();
+    expect(screen.getByText(/Everyone in the household connects their own\./)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch to Sam' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Disconnect Teymur’s Trakt?' });
+    expect(dialog).toHaveTextContent('Teymur’s imported history, ratings and watchlist will be deleted from momoshtrem.');
+  });
+
+  it('with three people there’s no single Switch to', async () => {
+    renderInHousehold([person(1, 'Teymur'), person(2, 'Sam'), person(3, 'Alex')]);
+    expect(await screen.findByText('This is Teymur’s Trakt.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch to/ })).not.toBeInTheDocument();
+  });
+
+  it('alone, it reads as before', async () => {
+    renderInHousehold([person(1, 'Teymur')]);
+    expect(await screen.findByRole('heading', { name: 'Trakt account teymur' })).toBeInTheDocument();
+    expect(screen.queryByText(/This is .* Trakt\./)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    expect(await screen.findByRole('alertdialog', { name: 'Disconnect Trakt?' })).toBeInTheDocument();
+  });
+
+  it('an account another member connected: the warning on the off screen', async () => {
+    renderInHousehold([person(1, 'Teymur'), person(2, 'Sam')], {
+      ...CONNECTED,
+      state: 'off',
+      connected: false,
+      username: null,
+      connect_error: 'account_in_use',
+    });
+    const banner = await screen.findByText('That Trakt account is already connected');
+    expect(banner.closest('.banner')).toHaveTextContent(
+      'Someone else in this household connected it. Each person connects their own: sign in to trakt.tv with your account, then connect again.'
+    );
   });
 });

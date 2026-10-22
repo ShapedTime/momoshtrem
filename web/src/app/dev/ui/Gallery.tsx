@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { CatAvatar, CatEyes, EmptyCat, Lockup, Mark, MarkMono, Wordmark } from '@/components/brand';
 import { LibraryPill } from '@/components/library/LibraryPill';
+import { PersonTile } from '@/components/members/WhoIsWatching';
+import { AccountMenuHeader } from '@/components/shell/UserMenu';
 import {
   ActionMenu,
   type ActionMenuItem,
@@ -39,6 +41,7 @@ import {
   Loader,
   Menu,
   MenuContent,
+  MemberAvatar,
   MenuItem,
   MenuSeparator,
   MenuTrigger,
@@ -69,7 +72,9 @@ import {
 } from '@/components/ui';
 import { PrimaryPanel } from '@/components/title';
 import { EpisodeRow } from '@/components/title/show';
+import { type Member, MEMBER_COLORS } from '@/lib/api/contract';
 import { newEpisodeCard, upNextCard } from '@/lib/for-you/episode-card';
+import { MEMBER_COLOR_LABELS } from '@/lib/members/display';
 import { STATUS, type StatusKey } from '@/lib/status';
 import { primaryActionFor } from '@/lib/title/stage-copy';
 import { buildSeason, buildTitle, seedLibrary } from '@/mocks/fixtures/titles';
@@ -97,6 +102,9 @@ function Frame({ label, children, className }: { label: string; children: ReactN
     </div>
   );
 }
+
+const GALLERY_NAMES = ['Sam', 'Jo', 'Alex', 'Teymur', 'Mina', 'Riley'];
+const GALLERY_MEMBER: Member = { id: 1, name: 'Teymur', color: 'teal', created_at: '2026-01-01T00:00:00Z', trakt: { state: 'connected', username: 'teymur' } };
 
 const SWATCHES = [
   ['--ink-0', 'ink-0'],
@@ -388,6 +396,47 @@ export function Gallery() {
             { value: '0', label: 'Specials', count: 4 },
           ]}
         />
+      </Section>
+
+      <Section
+        id="members"
+        title="Household members"
+        subtitle="MemberAvatar: an initial on a tint of the person’s colour. Identity, never status, and always beside their name. An unknown colour gets the neutral gradient."
+      >
+        <div className="flex flex-col gap-3">
+          {MEMBER_COLORS.map((color, i) => (
+            <div key={color} className="flex items-center gap-4">
+              <span className="w-24 text-xs text-fg-3">{MEMBER_COLOR_LABELS[color]}</span>
+              {(['xs', 'sm', 'md', 'lg'] as const).map((size) => (
+                <MemberAvatar key={size} name={GALLERY_NAMES[i]} color={color} size={size} />
+              ))}
+            </div>
+          ))}
+          <div className="flex items-center gap-4">
+            <span className="w-24 text-xs text-fg-3">Unknown key</span>
+            {(['xs', 'sm', 'md', 'lg'] as const).map((size) => (
+              <MemberAvatar key={size} name="Émile" color="mauve" size={size} />
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Frame label="Who’s watching? tiles: default · focus · picked (busy) · another picked">
+            <div className="flex flex-wrap gap-2">
+              <PersonTile member={{ name: 'Teymur', color: 'teal' }} />
+              <PersonTile member={{ name: 'Sam', color: 'rose' }} className="is-focused" />
+              <PersonTile member={{ name: 'Alex', color: 'periwinkle' }} busy />
+              <PersonTile member={{ name: 'Mina', color: 'lime' }} disabled />
+            </div>
+          </Frame>
+          <Frame label="Account menu header: a member · without household members">
+            <div className="menu max-w-[300px]">
+              <AccountMenuHeader member={GALLERY_MEMBER} />
+            </div>
+            <div className="menu max-w-[300px]">
+              <AccountMenuHeader member={null} />
+            </div>
+          </Frame>
+        </div>
       </Section>
 
       <Section id="status" title="Status" subtitle="One vocabulary (lib/status.ts): every surface uses these words and icons.">

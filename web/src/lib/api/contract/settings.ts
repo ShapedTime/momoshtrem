@@ -40,20 +40,27 @@ export interface AiUsage {
   budget_reached: boolean;
   /** Always all three, in this order; `requests` counts API calls. */
   by_feature: Array<{ feature: AiFeature; cost_usd: number; requests: number }>;
+  /**
+   * Picks and Ask spend this month by member: every current member in id order, zeros included. A removed
+   * member's spend counts only in total_usd (no row). The classifier is the household's (by_feature only).
+   * Missing from a backend before the members slices: hide the split.
+   */
+  by_member?: Array<{ member_id: number; name: string; cost_usd: number; requests: number }>;
+  /** The viewer's (the current member's) runs; `next_run_at` is the schedule's. */
   recs: {
-    /** The newest finished run: succeeded, failed or skipped. */
+    /** The viewer's newest finished run: succeeded, failed or skipped. */
     last_run: RunSummary | null;
     active_run: RunProgress | null;
-    /** The schedule's next run; null when manual, off or not configured. */
+    /** The schedule's next run; null when manual, off, not configured, or the viewer has no Trakt connected. */
     next_run_at: Timestamp | null;
   };
   estimates: {
-    /** The mean cost of the last 5 succeeded runs on each model; null before any. */
+    /** The mean cost of the last 5 succeeded runs on each model, any member's; null before any. */
     run_usd: Record<RecModel, number | null>;
-    /** The mean cost of the last 20 done Ask turns; null before any. */
+    /** The mean cost of the last 20 done Ask turns, any member's; null before any. */
     ask_usd: number | null;
   };
-  /** Ask turns started today (server-local), cancelled and failed ones included. */
+  /** The viewer's Ask turns started today (server-local), cancelled and failed ones included. */
   asks_today: number;
   ask_daily_limit: number;
 }

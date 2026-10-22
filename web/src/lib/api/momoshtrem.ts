@@ -2,9 +2,10 @@ import { MOMOSHTREM_CONFIG } from '@/config/momoshtrem';
 import { APIError, ValidationError } from '@/lib/errors';
 import type { LibraryMovie, LibraryShow } from '@/types/momoshtrem';
 import { parseMomoshtremError } from '@/types/momoshtrem';
+import { backendHeaders } from './backend-headers';
 
-/** Header carrying the shared secret (BACKEND_API_TOKEN) to momoshtrem. */
-export const TOKEN_HEADER = 'X-Momoshtrem-Token';
+// Re-exported for older imports; it lives with the member header (no import cycle with the proxy)
+export { TOKEN_HEADER } from './backend-headers';
 
 /** Error code for a backend that rejected the web app's API token. */
 export const BACKEND_AUTH_CODE = 'backend_auth';
@@ -53,18 +54,11 @@ class MomoshtremClient {
   }
 
   /**
-   * Request headers, including the shared secret when configured.
+   * Request headers, including the shared secret when configured. No member:
+   * these legacy routes are the library's, the same for the whole household.
    */
   private buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    // Read at call time (not module load) so runtime env changes apply.
-    const token = process.env.BACKEND_API_TOKEN;
-    if (token) {
-      headers[TOKEN_HEADER] = token;
-    }
-    return headers;
+    return backendHeaders(null, { 'Content-Type': 'application/json' });
   }
 
   /**

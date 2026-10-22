@@ -32,6 +32,8 @@ export type { ActionMenuItem } from './ActionMenu';
 export { CopyField, copyText, useCopy } from './CopyField';
 export { ReleaseName, FilePath } from './MonoText';
 export { Menu, MenuTrigger, MenuContent, MenuItem, MenuSeparator, MenuLabel } from './Menu';
+export { MemberAvatar } from './MemberAvatar';
+export type { MemberAvatarSize } from './MemberAvatar';
 export { ToastProvider, useToast } from './Toast';
 export type { ToastOptions, ToastTone } from './Toast';
 

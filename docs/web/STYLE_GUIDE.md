@@ -78,6 +78,7 @@ logo and Noir live in `src/components/brand`. See every state at `/dev/ui`.
 | Waiting | `Loader` (Noir's eyes) | Only while the user is actually waiting on a long job. |
 | Overlays | `Sheet`, `ConfirmDialog` / `useConfirm()`, `Menu`, `useToast()` | See §6. |
 | Copyable values | `CopyField` | Works on plain HTTP too (falls back from the Clipboard API). |
+| People | `MemberAvatar` | A household member's initial on a tint of their colour (`--member-*`; xs 20, sm 28, md 40, lg 64, xl the picker's). Identity, never status: always beside the member's name, so it's `aria-hidden`. An unknown colour key gets the neutral gradient. |
 
 ## 5. Status vocabulary
 
