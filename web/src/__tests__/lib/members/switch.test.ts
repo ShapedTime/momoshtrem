@@ -1,33 +1,62 @@
 /** @jest-environment node */
+import { leavingPage, loadPage, resetPage } from '@/lib/members/page';
 import { currentUrl, switchMember } from '@/lib/members/switch';
 
 /** Switching who's watching (#239): cookie, then the cache, then a full navigation. */
 
 const steps: string[] = [];
 
-beforeEach(() => {
+function stubPage(url: string) {
+  const { pathname, search, hash, href } = new URL(url, 'http://localhost');
   const doc = {};
   Object.defineProperty(doc, 'cookie', { set: (value: string) => steps.push(`cookie ${value.split(';')[0]}`), configurable: true });
   Object.assign(globalThis, {
     document: doc,
-    window: { location: { pathname: '/tv/209867', search: '?season=2', hash: '#e5', assign: (to: string) => steps.push(`go ${to}`) } },
+    window: {
+      location: {
+        href,
+        pathname,
+        search,
+        hash,
+        assign: (to: string) => steps.push(`go ${to}`),
+        reload: () => steps.push('reload'),
+      },
+    },
   });
-});
+}
 
 afterEach(() => {
   steps.length = 0;
+  resetPage();
   delete (globalThis as { document?: unknown }).document;
   delete (globalThis as { window?: unknown }).window;
 });
 
 describe('switchMember', () => {
-  it('writes the cookie, drops the cache, then goes to For You', () => {
+  it('marks the page as leaving, writes the cookie, drops the cache, then goes to For You', () => {
+    stubPage('/tv/209867?season=2#e5');
     switchMember(2, () => steps.push('clear'));
     expect(steps).toEqual(['cookie momoshtrem_member=2', 'clear', 'go /']);
+    expect(leavingPage()).toBe(true);
   });
 
-  it('goes where it’s told: the picker keeps the URL', () => {
+  it('the picker’s target is this page: a reload, since assigning it with a #… would only scroll', () => {
+    stubPage('/activity#act-dl-h');
     switchMember(1, () => steps.push('clear'), currentUrl());
-    expect(steps).toEqual(['cookie momoshtrem_member=1', 'clear', 'go /tv/209867?season=2#e5']);
+    expect(steps).toEqual(['cookie momoshtrem_member=1', 'clear', 'reload']);
+  });
+});
+
+describe('loadPage', () => {
+  it.each([
+    ['/tv/209867?season=2', '/tv/209867?season=2', 'reload'],
+    ['/activity#act-dl-h', '/activity#act-dl-h', 'reload'],
+    ['/activity#act-dl-h', '/activity', 'reload'],
+    ['/?sheet=infuse-setup', '/', 'go /'],
+    ['/library', '/', 'go /'],
+  ])('on %s, loading %s → %s', (here, to, want) => {
+    stubPage(here);
+    loadPage(to);
+    expect(steps).toEqual([want]);
   });
 });

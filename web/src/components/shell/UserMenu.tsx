@@ -53,6 +53,7 @@ export function UserMenu({ className }: { className?: string }) {
   const others = hydrated && member ? members.others : [];
 
   const switchMember = (id: number) => {
+    if (switching !== null) return;
     setSwitching(id);
     switchTo(id);
   };
@@ -115,7 +116,7 @@ export function UserMenu({ className }: { className?: string }) {
               type="button"
               className="list-row rounded-md text-left"
               aria-busy={switching === other.id || undefined}
-              disabled={switching !== null}
+              disabled={switching !== null && switching !== other.id}
               onClick={() => switchMember(other.id)}
             >
               <MemberAvatar name={other.name} color={other.color} size="sm" />

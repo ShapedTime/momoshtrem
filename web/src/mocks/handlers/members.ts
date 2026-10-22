@@ -110,13 +110,17 @@ export const membersHandlers = [
 /** Routes that ignore a member nobody has: the picker's list and health. */
 const IGNORES_MEMBER = new Set(['members', 'status']);
 
+/** The web's own legacy routes (app/api/library/{movies,shows}): their server calls send no member. */
+const LEGACY = /^\/api\/library\/(movies|shows)(\/|$)/;
+
 /**
- * Placed first: a personal route asked for a member nobody has answers 400
+ * Placed first: a backend route asked for a member nobody has answers 400
  * `unknown_member` (the web forgets the choice and reloads). Otherwise it
  * returns nothing and the request falls through to its handler.
  */
 export const unknownMemberGuard = http.all('*/api/*', ({ request }) => {
-  const segment = new URL(request.url).pathname.split('/')[2] ?? '';
-  if (!BACKEND_PREFIXES.has(segment) || IGNORES_MEMBER.has(segment) || !mockMemberStale()) return undefined;
+  const path = new URL(request.url).pathname;
+  const segment = path.split('/')[2] ?? '';
+  if (!BACKEND_PREFIXES.has(segment) || IGNORES_MEMBER.has(segment) || LEGACY.test(path) || !mockMemberStale()) return undefined;
   return apiError(400, UNKNOWN_MEMBER_CODE, 'No member has that id.');
 });

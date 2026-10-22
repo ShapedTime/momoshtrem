@@ -9,6 +9,7 @@ import {
   resetRecentSearchesCache,
   subscribeRecentSearches,
 } from '@/lib/title-search/recent';
+import { resetPage, setPageMember } from '@/lib/members/page';
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -119,6 +120,15 @@ describe('recent searches per household member (#239)', () => {
     resetRecentSearchesCache();
     expect(recentSearchesKey()).toBe(RECENT_SEARCHES_KEY);
     expect(recentSearches()).toEqual(['from before households']);
+  });
+
+  it('a page rendered for one member keeps to their list, even after another tab switched the cookie', () => {
+    setPageMember(1);
+    document.cookie = 'momoshtrem_member=2; Path=/';
+    addRecentSearch('frieren');
+    expect(JSON.parse(window.localStorage.getItem('momoshtrem:recent-searches:1') ?? 'null')).toEqual(['frieren']);
+    expect(window.localStorage.getItem('momoshtrem:recent-searches:2')).toBeNull();
+    resetPage();
   });
 
   it('hears other tabs only for this member’s key', () => {

@@ -5,7 +5,7 @@ import { ShellContext } from '@/components/shell/ShellContext';
 import { accountMenuLabel, UserMenu } from '@/components/shell/UserMenu';
 import { ToastProvider } from '@/components/ui';
 import type { Member } from '@/lib/api/contract';
-import { page } from '@/lib/members/switch';
+import { page, resetPage } from '@/lib/members/page';
 
 /** The account menu with household members (#239): who's watching, and Switch to everyone else. */
 
@@ -42,10 +42,15 @@ function renderMenu(members: { status: number; body?: unknown }, memberId: numbe
 let assign: jest.SpyInstance;
 beforeEach(() => {
   assign = jest.spyOn(page, 'assign').mockImplementation(() => undefined);
+  jest.spyOn(page, 'reload').mockImplementation(() => undefined);
+  // Not For You itself, so the switch is a navigation to `/`
+  window.history.replaceState(null, '', '/library');
 });
 afterEach(() => {
   global.fetch = originalFetch;
   document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+  resetPage();
+  window.history.replaceState(null, '', '/');
   jest.restoreAllMocks();
 });
 
@@ -72,14 +77,21 @@ describe('UserMenu', () => {
     expect(within(nav).getByRole('link', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  it('switching writes the cookie and goes to For You, the row busy meanwhile', async () => {
-    renderMenu({ status: 200, body: { items: [person(1, 'Teymur'), person(2, 'Sam')] } });
+  it('switching writes the cookie and goes to For You, the row busy meanwhile (and still focusable)', async () => {
+    renderMenu({ status: 200, body: { items: [person(1, 'Teymur'), person(2, 'Sam'), person(3, 'Alex')] } });
     fireEvent.click(await screen.findByRole('button', { name: /Account menu, Teymur/ }));
     const row = await screen.findByRole('button', { name: 'Switch to Sam' });
+    row.focus();
     fireEvent.click(row);
     expect(document.cookie).toContain('momoshtrem_member=2');
+    expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith('/');
     expect(row).toHaveAttribute('aria-busy', 'true');
+    expect(row).toBeEnabled();
+    expect(row).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Switch to Alex' })).toBeDisabled();
+    fireEvent.click(row);
+    expect(assign).toHaveBeenCalledTimes(1);
   });
 
   it('on desktop the dropdown has a Switch to item per other person', async () => {

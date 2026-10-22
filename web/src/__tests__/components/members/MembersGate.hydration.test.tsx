@@ -8,6 +8,7 @@ import { ShellContext } from '@/components/shell/ShellContext';
 import { UserMenu } from '@/components/shell/UserMenu';
 import { ToastProvider } from '@/components/ui';
 import type { Member } from '@/lib/api/contract';
+import { resetPage } from '@/lib/members/page';
 
 /**
  * #148: the gate's first render matches the server's, with or without a
@@ -65,6 +66,7 @@ afterEach(() => {
   global.fetch = originalFetch;
   document.body.innerHTML = '';
   document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+  resetPage();
 });
 
 async function hydrate(memberId: number | null) {

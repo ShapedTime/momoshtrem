@@ -126,6 +126,10 @@ describe('who’s asking', () => {
     }
     expect((await membersApi.list()).items).toHaveLength(2);
     expect((await systemApi.status()).trakt).toEqual({ configured: true, connected: false });
+    // The web's legacy library routes call the backend without a member
+    expect((await fetch('/api/library/shows')).status).toBe(200);
+    expect((await fetch('/api/library/movies')).status).toBe(200);
+    expect((await fetch('/api/library?page_size=1')).status).toBe(400);
   });
 
   it('each member has their own Trakt: connecting as someone new leaves Teymur’s alone', async () => {

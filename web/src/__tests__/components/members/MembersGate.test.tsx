@@ -4,7 +4,8 @@ import { MembersGate, useMembers } from '@/components/members/MembersGate';
 import { ToastProvider } from '@/components/ui';
 import type { Member } from '@/lib/api/contract';
 import { upNextQuery } from '@/lib/api/endpoints';
-import { page, resetSwitching } from '@/lib/members/switch';
+import { page, resetPage } from '@/lib/members/page';
+import { switchMember } from '@/lib/members/switch';
 
 /** Who's watching? (#239): nothing personal is asked before someone is chosen. */
 
@@ -79,7 +80,7 @@ afterEach(() => {
   requests.length = 0;
   cookies.length = 0;
   clearCookie();
-  resetSwitching();
+  resetPage();
   jest.restoreAllMocks();
 });
 
@@ -95,19 +96,44 @@ describe('MembersGate', () => {
     expect(requests).toEqual(['/api/members']);
   });
 
-  it('picking someone writes the cookie and reloads where you were going', async () => {
+  it('picking someone writes the cookie and reloads where you were going (a hash included)', async () => {
     stubFetch({ status: 200, body: { items: TWO } });
-    window.history.replaceState(null, '', '/tv/209867?season=2');
+    window.history.replaceState(null, '', '/activity#act-dl-h');
     renderGate(null);
     fireEvent.click(await screen.findByRole('button', { name: 'Sam' }));
     expect(document.cookie).toContain('momoshtrem_member=2');
-    expect(assign).toHaveBeenCalledWith('/tv/209867?season=2');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Sam' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('button', { name: 'Teymur' })).toBeDisabled();
-    // Its own cookie write isn't another tab's: no reload over the navigation
+    // Its own cookie write isn't another tab's: no second reload over the first
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(reload).toHaveBeenCalledTimes(1);
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('back/forward cache restores a page after its switch: it reloads as whoever the cookie names now', async () => {
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    stubFetch({ status: 200, body: { items: TWO } });
+    window.history.replaceState(null, '', '/library');
+    renderGate(1);
+    await screen.findByText('App for Teymur; others: Sam');
+    switchMember(2, () => undefined);
+    expect(assign).toHaveBeenCalledWith('/');
     act(() => window.dispatchEvent(new Event('focus')));
     expect(reload).not.toHaveBeenCalled();
+    // Back: the old page shows again, rendered for Teymur, with Sam's cookie
+    act(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    expect(reload).toHaveBeenCalledTimes(1);
     window.history.replaceState(null, '', '/');
+  });
+
+  it('a switch between the server’s render and hydration reloads on mount, before anything is sent as the wrong person', async () => {
+    document.cookie = 'momoshtrem_member=2; Path=/';
+    stubFetch({ status: 200, body: { items: TWO } });
+    renderGate(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(requests).toEqual([]);
   });
 
   it('one person: chosen automatically, the cookie first, then the app', async () => {

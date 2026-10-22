@@ -1,4 +1,5 @@
 import { readMemberCookie } from '@/lib/members/cookie';
+import { pageMember } from '@/lib/members/page';
 import { cleanQuery } from './text';
 
 /**
@@ -13,8 +14,14 @@ import { cleanQuery } from './text';
 /** The list without household members (no member cookie). Someone's cookie never reads it: it isn't theirs. */
 export const RECENT_SEARCHES_KEY = 'momoshtrem:recent-searches';
 
-/** Where this device's current member keeps theirs: `momoshtrem:recent-searches:<member id>`. */
-export function recentSearchesKey(memberId: number | null = readMemberCookie()): string {
+/** The member this page was rendered for (never another tab's newer choice), else the cookie's. */
+function viewer(): number | null {
+  const rendered = pageMember();
+  return rendered === undefined ? readMemberCookie() : rendered;
+}
+
+/** Where this page's member keeps theirs: `momoshtrem:recent-searches:<member id>`. */
+export function recentSearchesKey(memberId: number | null = viewer()): string {
   return memberId === null ? RECENT_SEARCHES_KEY : `${RECENT_SEARCHES_KEY}:${memberId}`;
 }
 export const MAX_RECENT_SEARCHES = 8;

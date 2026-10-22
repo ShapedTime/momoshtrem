@@ -6,6 +6,7 @@
 
 import { LOGIN_ROUTE } from '@/config/auth';
 import { clearMemberCookie } from '@/lib/members/cookie';
+import { leavePage, leavingPage, memberChangedUnderPage, page } from '@/lib/members/page';
 import type { ApiErrorBody } from './contract/common';
 import { UNKNOWN_MEMBER_CODE } from './contract/members';
 
@@ -74,22 +75,25 @@ function redirectToLogin(): void {
   const { pathname, search, hash } = window.location;
   if (pathname === LOGIN_ROUTE) return; // never loop on the login page itself
   redirecting = true;
-  window.location.assign(`${LOGIN_ROUTE}?redirect=${encodeURIComponent(`${pathname}${search}${hash}`)}`);
+  page.assign(`${LOGIN_ROUTE}?redirect=${encodeURIComponent(`${pathname}${search}${hash}`)}`);
 }
 
 /**
  * The cookie names a household member nobody has any more (removed on
- * another device while this tab stayed open): forget the choice and load
- * this page again, which opens "Who's watching?" (or picks the only member).
- * The cookie is cleared before the reload, so it can't loop.
+ * another device while this tab stayed open): forget the choice and reload
+ * this page, which opens "Who's watching?" (or picks the only member). A
+ * reload, not an assign of the same URL, which with a `#…` would only scroll.
+ * The cookie is cleared first, so it can't loop.
  */
 function forgetMember(): void {
-  if (typeof window === 'undefined' || redirecting) return;
-  redirecting = true;
+  if (typeof window === 'undefined' || leavingPage()) return;
+  leavePage();
   clearMemberCookie();
-  const { pathname, search, hash } = window.location;
-  window.location.assign(`${pathname}${search}${hash}`);
+  page.reload();
 }
+
+/** A request that's never sent, for a page on its way out: nobody is left to read its answer. */
+const neverAnswered = () => new Promise<Response>(() => undefined);
 
 /**
  * Drop-in `fetch` for `/api/*`. The proxy's "session ended" answer
@@ -98,8 +102,20 @@ function forgetMember(): void {
  * rejecting a key) is returned like every other status: redirecting on it
  * would loop through /login. A 400 `unknown_member` reloads the page
  * without the member cookie (`forgetMember`) and throws.
+ *
+ * Household members (#239): when the member cookie no longer names the one
+ * this page was rendered for (another tab switched, or this page is
+ * switching), nothing is sent as someone else under this page: the page
+ * reloads (unless it's already leaving) and the request never settles.
  */
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  if (memberChangedUnderPage()) {
+    if (!leavingPage()) {
+      leavePage();
+      page.reload();
+    }
+    return neverAnswered();
+  }
   const response = await fetch(input, { credentials: 'same-origin', ...init });
   if (response.status === 401 || response.status === 400) {
     const body: unknown = await response.clone().json().catch(() => undefined);

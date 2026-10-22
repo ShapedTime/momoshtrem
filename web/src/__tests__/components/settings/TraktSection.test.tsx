@@ -4,6 +4,7 @@ import { MembersGate } from '@/components/members/MembersGate';
 import { ConfirmProvider, ToastProvider } from '@/components/ui';
 import { TraktSection } from '@/components/settings/TraktSection';
 import type { Member, TraktIntegration } from '@/lib/api/contract';
+import { resetPage } from '@/lib/members/page';
 
 /** Settings › Trakt (#134): the switches move on the tap and go back when the server refuses. */
 
@@ -119,6 +120,7 @@ describe('TraktSection in a household (#239)', () => {
 
   afterEach(() => {
     document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+    resetPage();
   });
 
   it('says whose Trakt it is, offers the other person, and names them in the disconnect', async () => {

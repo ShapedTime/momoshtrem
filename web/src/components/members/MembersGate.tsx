@@ -5,9 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Loader, LoadingRegion } from '@/components/ui';
 import type { Member } from '@/lib/api/contract';
 import { membersQuery } from '@/lib/api/endpoints';
-import { clearMemberCookie, readMemberCookie, writeMemberCookie } from '@/lib/members/cookie';
+import { clearMemberCookie, writeMemberCookie } from '@/lib/members/cookie';
 import { gateState, type MembersStatus, membersStatus } from '@/lib/members/gate';
-import { page, switchingMember } from '@/lib/members/switch';
+import { leavePage, leavingPage, memberChangedUnderPage, page, pageRestored, setPageMember } from '@/lib/members/page';
 import { WhoIsWatching } from './WhoIsWatching';
 
 export interface MembersContextValue {
@@ -30,22 +30,27 @@ export function useMembers(): MembersContextValue {
 }
 
 /**
- * Another tab switched person (the cookie is shared), or back/forward cache
- * restored a page rendered for someone else: load the page again as whoever
- * the cookie names now. Hidden tabs poll nothing meanwhile.
+ * Another tab switched person (the cookie is shared), it happened between the
+ * server's render and now, or back/forward cache restored a page rendered for
+ * someone else: load the page again as whoever the cookie names now. Until
+ * then `apiFetch` sends nothing (lib/members/page.ts).
  */
 function useReloadWhenCookieChanges(renderedFor: number | null) {
   useEffect(() => {
     const check = () => {
       // This page's own switch wrote the cookie and is navigating away: never reload over it
-      if (!switchingMember() && readMemberCookie() !== renderedFor) page.reload();
+      if (!leavingPage() && memberChangedUnderPage()) page.reload();
     };
     const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) check();
+      if (!event.persisted) return;
+      // Restored from the back/forward cache: the switch it started is over, and the cookie may be someone else's
+      pageRestored();
+      check();
     };
     const onVisibility = () => {
       if (document.visibilityState === 'visible') check();
     };
+    check();
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', check);
     document.addEventListener('visibilitychange', onVisibility);
@@ -82,6 +87,8 @@ export function MembersGate({ initialMemberId, children }: { initialMemberId: nu
   const [cookieId, setCookieId] = useState(initialMemberId);
   const status = membersStatus(query);
   const state = gateState(cookieId, status, query.data?.items);
+  // Who this page renders for, before any child's first request (client only; the same value on every render)
+  if (typeof window !== 'undefined') setPageMember(cookieId);
 
   // Effects, not render-phase writes: the cookie is in place before any child's query starts
   const autoId = state.kind === 'auto' ? state.member.id : null;
@@ -89,10 +96,12 @@ export function MembersGate({ initialMemberId, children }: { initialMemberId: nu
   useEffect(() => {
     if (reload) {
       // The page was rendered for someone nobody is: load it again as the only member, or for the picker
+      leavePage();
       if (autoId !== null) writeMemberCookie(autoId);
       else clearMemberCookie();
       page.reload();
     } else if (autoId !== null) {
+      setPageMember(autoId);
       writeMemberCookie(autoId);
       // The cookie (an external system) is written now; only then may the children mount and send it
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reveals the app once the cookie is in place
