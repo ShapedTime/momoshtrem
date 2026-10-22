@@ -25,7 +25,7 @@ func TestWireAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	d := aiDeps{cfg: config.DefaultConfig(), db: db, settings: library.NewSettingsRepository(db), aiStore: library.NewAIStore(db)}
+	d := aiDeps{cfg: config.DefaultConfig(), db: db, settings: library.NewSettingsRepository(db), aiStore: library.NewAIStore(db), member: 1}
 	var opts api.Options
 	core := wireAI(d, &opts)
 	ask := wireAsk(d, core, wireRecs(d, core, &opts), &opts)

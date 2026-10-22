@@ -2,6 +2,7 @@ package me
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // queryCounter counts the queries pgx runs.
@@ -128,24 +130,25 @@ func (s seeder) progress(traktID, tmdbID int, title string, watched time.Time, l
 	if nextSeason >= 0 {
 		ns, ne = nextSeason, nextEpisode
 	}
-	s.exec(`INSERT INTO trakt_show_progress (show_trakt_id, show_tmdb_id, title, aired, completed, last_watched_at,
+	s.exec(`INSERT INTO trakt_show_progress (member_id, show_trakt_id, show_tmdb_id, title, aired, completed, last_watched_at,
 			last_season, last_episode, next_season, next_episode)
-		VALUES ($1, $2, $3, 10, $4, $5, 1, $4, $6, $7)`, traktID, tmdbID, title, last, watched, ns, ne)
+		VALUES (1, $1, $2, $3, 10, $4, $5, 1, $4, $6, $7)`, traktID, tmdbID, title, last, watched, ns, ne)
 	for e := 1; e <= last; e++ {
-		s.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, plays, last_watched_at) VALUES ($1, 1, $2, 1, $3)`,
+		s.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, plays, last_watched_at)
+			VALUES (1, $1, 1, $2, 1, $3)`,
 			tmdbID, e, watched)
 	}
 }
 
 func (s seeder) calendar(traktID, tmdbID, season, episode int, firstAired time.Time) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_calendar (show_trakt_id, season, episode, show_tmdb_id, show_title, episode_title, first_aired)
-		VALUES ($1, $2, $3, $4, 'Calendar', $5, $6)`, traktID, season, episode, tmdbID, fmt.Sprintf("S%dE%d", season, episode), firstAired)
+	s.exec(`INSERT INTO trakt_calendar (member_id, show_trakt_id, season, episode, show_tmdb_id, show_title, episode_title, first_aired)
+		VALUES (1, $1, $2, $3, $4, 'Calendar', $5, $6)`, traktID, season, episode, tmdbID, fmt.Sprintf("S%dE%d", season, episode), firstAired)
 }
 
 func TestIntegration_Me(t *testing.T) {
 	db, counter := openSchemaDB(t)
-	ctx := context.Background()
+	ctx := member.WithID(context.Background(), 1) // the seeded member, as the API's middleware sets it
 	s := seeder{t: t, db: db}
 	date := func(days int) string { return now.AddDate(0, 0, days).Format(time.DateOnly) }
 
@@ -168,20 +171,20 @@ func TestIntegration_Me(t *testing.T) {
 	s.calendar(6, 9006, 1, 1, now.Add(-2*time.Hour))
 	// Delta is dropped.
 	s.progress(4, 9004, "Delta", now.Add(-time.Hour), 1, 1, 2)
-	s.exec(`INSERT INTO trakt_hidden (section, trakt_id, tmdb_id) VALUES ('dropped', 4, 9004)`)
+	s.exec(`INSERT INTO trakt_hidden (member_id, section, trakt_id, tmdb_id) VALUES (1, 'dropped', 4, 9004)`)
 	// Echo is watchlisted and in the library, not started.
 	echoShow, echo := s.show(9005, "Echo", map[int][]string{1: {date(-3), date(4)}})
-	s.exec(`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES
-		('tv', 5, 9005, 'Echo', 2026, $1), ('movie', 6, 603, 'The Matrix', 1999, $2), ('tv', 7, 9100, 'Elsewhere', 2025, $3)`,
+	s.exec(`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES
+		(1, 'tv', 5, 9005, 'Echo', 2026, $1), (1, 'movie', 6, 603, 'The Matrix', 1999, $2), (1, 'tv', 7, 9100, 'Elsewhere', 2025, $3)`,
 		now.Add(-5*24*time.Hour), now.Add(-time.Hour), now.Add(-10*24*time.Hour))
-	s.exec(`INSERT INTO trakt_history (id, media_type, tmdb_id, trakt_id, title, year, season, episode, episode_title, watched_at) VALUES
-		(11, 'episode', 9001, 1, 'Alpha', 2020, 1, 5, 'Five', $1), (12, 'movie', 603, 6, 'The Matrix', 1999, NULL, NULL, NULL, $2)`,
+	s.exec(`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, season, episode, episode_title, watched_at) VALUES
+		(1, 11, 'episode', 9001, 1, 'Alpha', 2020, 1, 5, 'Five', $1), (1, 12, 'movie', 603, 6, 'The Matrix', 1999, NULL, NULL, NULL, $2)`,
 		now.Add(-24*time.Hour), now.Add(-200*24*time.Hour))
 
 	repo := library.NewCatalogRepository(db)
 	svc := New(Deps{
 		Store:           repo,
-		Settings:        library.NewSettingsRepository(db),
+		Settings:        library.NewMemberRepository(db),
 		Catalog:         catalog.New(catalog.Deps{Store: repo, Now: func() time.Time { return now }}),
 		WebDAVPublicURL: "https://webdav.local",
 		Now:             func() time.Time { return now },
@@ -290,7 +293,7 @@ func TestIntegration_Me(t *testing.T) {
 
 	// A disconnect purges every Trakt table: /me answers empty, but new
 	// episodes of the library's shows.
-	if err := library.NewTraktAuthRepository(db).Purge(ctx); err != nil {
+	if err := library.NewTraktAuthRepository(db).ForMember(1).Purge(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if upNext, err := svc.UpNext(ctx); err != nil || len(upNext) != 0 {
@@ -312,5 +315,19 @@ func TestIntegration_Me(t *testing.T) {
 	}
 	if want := "Charlie S1E9, Alpha S1E6, Echo S1E1"; err != nil || strings.Join(got, ", ") != want {
 		t.Errorf("new episodes without Trakt = %s, %v; want %s", strings.Join(got, ", "), err, want)
+	}
+
+	// Every list is a member's: without one in the context, none answers.
+	bare := context.Background()
+	for name, call := range map[string]func() error{
+		"up next":          func() error { _, err := svc.UpNext(bare); return err },
+		"up next episodes": func() error { _, err := svc.UpNextEpisodes(bare); return err },
+		"new episodes":     func() error { _, err := svc.NewEpisodes(bare, 7); return err },
+		"watchlist":        func() error { _, err := svc.Watchlist(bare, ""); return err },
+		"history":          func() error { _, err := svc.History(bare, 1, 50); return err },
+	} {
+		if err := call(); !errors.Is(err, member.ErrNoMember) {
+			t.Errorf("%s without a member = %v, want ErrNoMember", name, err)
+		}
 	}
 }

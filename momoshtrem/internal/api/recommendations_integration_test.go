@@ -24,7 +24,7 @@ func TestRecommendations_Integration(t *testing.T) {
 	repo := library.NewRecRunRepository(db)
 	settings := library.NewSettingsRepository(db)
 	reader := runs.NewReader(runs.ReaderDeps{
-		Store: repo, Settings: settings, Titles: library.NewTasteRepository(db),
+		Store: repo, Settings: settings, Titles: library.NewTasteRepository(db).ForMember(1),
 		Library:    catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db)}),
 		Configured: true,
 	})
@@ -38,7 +38,7 @@ func TestRecommendations_Integration(t *testing.T) {
 
 	for _, q := range []string{
 		`INSERT INTO movies (tmdb_id, title, year) VALUES (1003, 'Movie 1003', 2024)`,
-		`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES ('tv', 77, 2001, 'Show 2001', 2022, NOW())`,
+		`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES (1, 'tv', 77, 2001, 'Show 2001', 2022, NOW())`,
 		`INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('movie', 1002, 'dislike', 'shelf'), ('movie', 1004, 'like', 'hero'),
 			('movie', 1006, 'seen', 'title')`,
 	} {

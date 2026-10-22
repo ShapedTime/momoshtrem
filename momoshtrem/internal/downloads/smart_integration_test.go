@@ -259,8 +259,8 @@ func TestSmart_LatePlayReleasedWatched(t *testing.T) {
 	h.sessions.set()
 	h.svc.poll(h.ctx)
 
-	h.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, plays, last_watched_at)
-		SELECT tmdb_id, 1, 2, 1, $2 FROM shows WHERE id = $1`, show, h.clock.Now().Add(-time.Hour))
+	h.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, plays, last_watched_at)
+		SELECT 1, tmdb_id, 1, 2, 1, $2 FROM shows WHERE id = $1`, show, h.clock.Now().Add(-time.Hour))
 	h.clock.advance(time.Minute)
 	h.runSmart(picker)
 	h.wantSmartRows("E2 played before it was picked",

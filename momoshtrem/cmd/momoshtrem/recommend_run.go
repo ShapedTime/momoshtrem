@@ -17,6 +17,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/aisettings"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 	"github.com/shapedtime/momoshtrem/internal/recommend/profile"
 	"github.com/shapedtime/momoshtrem/internal/recommend/runs"
@@ -71,6 +72,12 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 		return 1
 	}
 
+	// The lowest member's picks, as the server's until #245 adds -member.
+	memberID, err := member.NewService(library.NewMemberRepository(db)).Default(ctx)
+	if err != nil {
+		slog.Error("Couldn't read the household's members", "error", err)
+		return 1
+	}
 	settingsRepo := library.NewSettingsRepository(db)
 	aiStore := library.NewAIStore(db)
 	ledger := aicore.NewLedger(aiStore, settingsRepo)
@@ -78,9 +85,9 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 	core := &aiCore{client: client, ledger: ledger, settings: aisettings.New(settingsRepo, aiStore, client != nil)}
 	tmdbClient := tmdb.NewClient(cfg.TMDB.APIKey, tmdb.WithLanguage(cfg.TMDB.Language), tmdb.WithRateLimit(float64(cfg.TMDB.RPS)))
 	d := aiDeps{cfg: cfg, db: db, settings: settingsRepo, aiStore: aiStore,
-		tmdb: tmdb.NewCached(tmdbClient, library.NewTMDBCacheRepository(db))}
+		tmdb: tmdb.NewCached(tmdbClient, library.NewTMDBCacheRepository(db)), member: memberID}
 
-	auth, err := library.NewTraktAuthRepository(db).Get(ctx)
+	auth, err := library.NewTraktAuthRepository(db).ForMember(memberID).Get(ctx)
 	if err != nil {
 		slog.Error("Couldn't read the Trakt connection", "error", err)
 		return 1

@@ -26,20 +26,30 @@ type TitleRef struct {
 	TMDBID    int
 }
 
-// TasteRepository reads the taste inputs.
+// TasteRepository reads one household member's taste inputs: their Trakt
+// rows only (PLAN §6 "Household members": a title another member watched
+// can still be picked), and the library's titles. Bind it to the member
+// with ForMember: unbound, the Trakt reads fail.
 type TasteRepository struct {
-	db *DB
+	db     *DB
+	member boundMember
 }
 
-// NewTasteRepository creates a TasteRepository.
+// NewTasteRepository creates a TasteRepository, bound to no member yet.
 func NewTasteRepository(db *DB) *TasteRepository {
 	return &TasteRepository{db: db}
 }
 
+// ForMember is the repository for member id's taste.
+func (r *TasteRepository) ForMember(id int64) *TasteRepository {
+	return &TasteRepository{db: r.db, member: boundMember(id)}
+}
+
 // knownTitleLateral joins, as kt(title, year), the name the database knows
 // a title by: the library's, else its newest play's, Trakt progress's or
-// the watchlist's. mediaType ('movie' or 'tv') and tmdbID are SQL
-// expressions; kt's columns are NULL when nothing names it.
+// the watchlist's, any member's (only names). mediaType ('movie' or 'tv')
+// and tmdbID are SQL expressions; kt's columns are NULL when nothing names
+// it.
 func knownTitleLateral(mediaType, tmdbID string) string {
 	return `LEFT JOIN LATERAL (
 		SELECT n.title, n.year FROM (
@@ -71,16 +81,21 @@ type WatchedMovie struct {
 
 // WatchedMovies lists every movie with a play. One query.
 func (r *TasteRepository) WatchedMovies(ctx context.Context) ([]WatchedMovie, error) {
+	member, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT wm.tmdb_id, COALESCE(h.title, ''), COALESCE(h.year, 0), wm.plays, wm.last_watched_at
 		FROM trakt_watched_movies wm
 		LEFT JOIN LATERAL (
 			SELECT title, year FROM trakt_history
-			WHERE media_type = 'movie' AND tmdb_id = wm.tmdb_id
+			WHERE member_id = $1 AND media_type = 'movie' AND tmdb_id = wm.tmdb_id
 			ORDER BY watched_at DESC, id DESC LIMIT 1
 		) h ON TRUE
+		WHERE wm.member_id = $1
 		ORDER BY wm.last_watched_at DESC, wm.tmdb_id
-	`)
+	`, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list watched movies: %w", err)
 	}
@@ -121,15 +136,19 @@ type WatchedShow struct {
 
 // WatchedShows lists every show you started. One query.
 func (r *TasteRepository) WatchedShows(ctx context.Context) ([]WatchedShow, error) {
+	member, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
 		WITH eps AS (
 			SELECT show_tmdb_id, sum(plays)::int AS plays, count(*) FILTER (WHERE season > 0)::int AS watched,
 			       max(last_watched_at) AS last_watched_at
-			FROM trakt_watched_episodes GROUP BY show_tmdb_id
+			FROM trakt_watched_episodes WHERE member_id = $1 GROUP BY show_tmdb_id
 		),
 		prog AS (
 			SELECT DISTINCT ON (show_tmdb_id) show_tmdb_id, title, year, aired, completed, last_watched_at
-			FROM trakt_show_progress
+			FROM trakt_show_progress WHERE member_id = $1
 			ORDER BY show_tmdb_id, last_watched_at DESC NULLS LAST, show_trakt_id
 		)
 		SELECT COALESCE(p.show_tmdb_id, e.show_tmdb_id), COALESCE(p.title, h.title, ''), COALESCE(p.year, h.year, 0),
@@ -139,11 +158,11 @@ func (r *TasteRepository) WatchedShows(ctx context.Context) ([]WatchedShow, erro
 		FULL JOIN eps e ON e.show_tmdb_id = p.show_tmdb_id
 		LEFT JOIN LATERAL (
 			SELECT title, year FROM trakt_history
-			WHERE p.show_tmdb_id IS NULL AND media_type = 'episode' AND tmdb_id = e.show_tmdb_id
+			WHERE p.show_tmdb_id IS NULL AND member_id = $1 AND media_type = 'episode' AND tmdb_id = e.show_tmdb_id
 			ORDER BY watched_at DESC, id DESC LIMIT 1
 		) h ON TRUE
 		ORDER BY 9 DESC NULLS LAST, 1
-	`)
+	`, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list watched shows: %w", err)
 	}
@@ -181,20 +200,24 @@ type TasteRating struct {
 // TasteRatings lists every rated movie and show, with the name the
 // database knows it by. One query.
 func (r *TasteRepository) TasteRatings(ctx context.Context) ([]TasteRating, error) {
+	member, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
 		WITH own AS (
 			SELECT DISTINCT ON (r.media_type, r.tmdb_id)
 			       CASE r.media_type WHEN 'movie' THEN 'movie' ELSE 'tv' END AS media_type, r.tmdb_id,
 			       r.rating::float8 AS rating, r.rated_at, FALSE AS from_episodes
 			FROM trakt_ratings r
-			WHERE r.media_type IN ('movie', 'show') AND r.tmdb_id IS NOT NULL
+			WHERE r.member_id = $1 AND r.media_type IN ('movie', 'show') AND r.tmdb_id IS NOT NULL
 			ORDER BY r.media_type, r.tmdb_id, r.rated_at DESC
 		),
 		parts AS (
 			SELECT 'tv' AS media_type, r.show_tmdb_id AS tmdb_id, avg(r.rating)::float8 AS rating,
 			       max(r.rated_at) AS rated_at, TRUE AS from_episodes
 			FROM trakt_ratings r
-			WHERE r.media_type IN ('season', 'episode') AND r.show_tmdb_id IS NOT NULL
+			WHERE r.member_id = $1 AND r.media_type IN ('season', 'episode') AND r.show_tmdb_id IS NOT NULL
 			  AND NOT EXISTS (SELECT 1 FROM own o WHERE o.media_type = 'tv' AND o.tmdb_id = r.show_tmdb_id)
 			GROUP BY r.show_tmdb_id
 		),
@@ -203,7 +226,7 @@ func (r *TasteRepository) TasteRatings(ctx context.Context) ([]TasteRating, erro
 		FROM rated x
 		`+knownTitleLateral("x.media_type", "x.tmdb_id")+`
 		ORDER BY x.rated_at DESC, x.media_type, x.tmdb_id
-	`)
+	`, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list ratings: %w", err)
 	}
@@ -234,10 +257,14 @@ type HiddenShow struct {
 
 // HiddenShows lists the shows dropped or hidden on Trakt. One query.
 func (r *TasteRepository) HiddenShows(ctx context.Context) ([]HiddenShow, error) {
+	member, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT tmdb_id, bool_or(section = 'dropped'), bool_or(section = 'progress_watched')
-		FROM trakt_hidden GROUP BY tmdb_id ORDER BY tmdb_id
-	`)
+		FROM trakt_hidden WHERE member_id = $1 GROUP BY tmdb_id ORDER BY tmdb_id
+	`, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list hidden shows: %w", err)
 	}
@@ -260,9 +287,13 @@ func (r *TasteRepository) HiddenShows(ctx context.Context) ([]HiddenShow, error)
 // WatchlistRefs lists the titles on the Trakt watchlist, newest listed
 // first. One query.
 func (r *TasteRepository) WatchlistRefs(ctx context.Context) ([]TitleRef, error) {
+	member, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT media_type, tmdb_id FROM trakt_watchlist ORDER BY listed_at DESC, media_type, trakt_id
-	`)
+		SELECT media_type, tmdb_id FROM trakt_watchlist WHERE member_id = $1 ORDER BY listed_at DESC, media_type, trakt_id
+	`, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the watchlist: %w", err)
 	}
@@ -404,6 +435,10 @@ func (r *TasteRepository) TitleStates(ctx context.Context, refs []TitleRef) ([]T
 	if len(refs) == 0 {
 		return nil, nil
 	}
+	member, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	types, ids := make([]string, len(refs)), make([]int32, len(refs))
 	for i, ref := range refs {
 		if ref.TMDBID <= 0 || ref.TMDBID > math.MaxInt32 {
@@ -423,28 +458,31 @@ func (r *TasteRepository) TitleStates(ctx context.Context, refs []TitleRef) ([]T
 		       COALESCE(p.aired, 0), COALESCE(p.completed, 0),
 		       CASE WHEN k.media_type = 'movie' THEN wm.last_watched_at ELSE GREATEST(we.last_watched_at, p.last_watched_at) END,
 		       (SELECT r.rating FROM trakt_ratings r
-		        WHERE r.media_type = CASE WHEN k.media_type = 'movie' THEN 'movie' ELSE 'show' END AND r.tmdb_id = k.tmdb_id
+		        WHERE r.member_id = $3 AND r.media_type = CASE WHEN k.media_type = 'movie' THEN 'movie' ELSE 'show' END
+		          AND r.tmdb_id = k.tmdb_id
 		        ORDER BY r.rated_at DESC LIMIT 1),
-		       k.media_type = 'tv' AND EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = k.tmdb_id AND h.section = 'dropped'),
-		       k.media_type = 'tv' AND EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = k.tmdb_id AND h.section = 'progress_watched'),
+		       k.media_type = 'tv' AND EXISTS (SELECT 1 FROM trakt_hidden h
+		                                       WHERE h.member_id = $3 AND h.tmdb_id = k.tmdb_id AND h.section = 'dropped'),
+		       k.media_type = 'tv' AND EXISTS (SELECT 1 FROM trakt_hidden h
+		                                       WHERE h.member_id = $3 AND h.tmdb_id = k.tmdb_id AND h.section = 'progress_watched'),
 		       COALESCE(f.signal, ''),
-		       EXISTS (SELECT 1 FROM trakt_watchlist w WHERE w.media_type = k.media_type AND w.tmdb_id = k.tmdb_id),
+		       EXISTS (SELECT 1 FROM trakt_watchlist w WHERE w.member_id = $3 AND w.media_type = k.media_type AND w.tmdb_id = k.tmdb_id),
 		       CASE WHEN k.media_type = 'movie' THEN EXISTS (SELECT 1 FROM movies m WHERE m.tmdb_id = k.tmdb_id)
 		            ELSE EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = k.tmdb_id) END
 		FROM refs k
-		LEFT JOIN trakt_watched_movies wm ON k.media_type = 'movie' AND wm.tmdb_id = k.tmdb_id
+		LEFT JOIN trakt_watched_movies wm ON k.media_type = 'movie' AND wm.tmdb_id = k.tmdb_id AND wm.member_id = $3
 		LEFT JOIN LATERAL (
 			SELECT sum(w.plays)::int AS plays, max(w.last_watched_at) AS last_watched_at
-			FROM trakt_watched_episodes w WHERE k.media_type = 'tv' AND w.show_tmdb_id = k.tmdb_id
+			FROM trakt_watched_episodes w WHERE k.media_type = 'tv' AND w.show_tmdb_id = k.tmdb_id AND w.member_id = $3
 		) we ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT pr.show_tmdb_id, pr.aired, pr.completed, pr.last_watched_at FROM trakt_show_progress pr
-			WHERE k.media_type = 'tv' AND pr.show_tmdb_id = k.tmdb_id
+			WHERE k.media_type = 'tv' AND pr.member_id = $3 AND pr.show_tmdb_id = k.tmdb_id
 			ORDER BY pr.last_watched_at DESC NULLS LAST, pr.show_trakt_id LIMIT 1
 		) p ON TRUE
 		LEFT JOIN rec_feedback f ON f.media_type = k.media_type AND f.tmdb_id = k.tmdb_id
 		ORDER BY k.n
-	`, types, ids)
+	`, types, ids, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to look up titles: %w", err)
 	}

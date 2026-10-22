@@ -224,7 +224,7 @@ Every table is Trakt's: a disconnect purges them all in one transaction, and the
 - `trakt_show_progress`, one row per show from the bulk `/sync/progress/watched`: `show_trakt_id` pk, `show_tmdb_id` (indexed), `title`, `year`, `poster_path`, `backdrop_path`, `aired` and `completed` (regular episodes), `last_watched_at`, `reset_at`, `last_season`, `last_episode`, Trakt's next episode (`next_season`, `next_episode`, `next_episode_tmdb_id`, `next_title`, `next_still_path`; NULL when caught up), `updated_at`.
 - `trakt_hidden(section dropped|progress_watched, trakt_id, tmdb_id)`, pk `(section, trakt_id)`, indexed on `tmdb_id`.
 - `trakt_calendar(show_trakt_id, season, episode, show_tmdb_id, episode_tmdb_id, show_title, year, episode_title, first_aired, still_path, poster_path, backdrop_path)`, pk `(show_trakt_id, season, episode)`, indexed on `first_aired` and `show_tmdb_id`: `/calendars/my/shows` from 7 days ago, 33 days long.
-- `app_settings` key `trakt`: `{use_ratings, show_watchlist, include_paused}`, defaults `true`, `true`, `false`, read over the defaults (`library.SettingsRepository.TraktSettings`). `UpdateTraktSettings` is a partial update in one jsonb statement, so two toggles never lose each other's change.
+- `app_settings` key `trakt` (`members.trakt_settings` since `012`): `{use_ratings, show_watchlist, include_paused}`, defaults `true`, `true`, `false`, read over the defaults (`library.MemberRepository.TraktSettings`). `UpdateTraktSettings` is a partial update in one jsonb statement, so two toggles never lose each other's change.
 - Rollback: nothing else reads these tables, so an older binary ignores them.
 
 **`006_recommendations.sql` (R1, #153)**
@@ -1862,7 +1862,7 @@ Epic #9, in slices: the contract, stateful mocks and skeletons (#152); then R1 (
 
 **R1 · Taste profile, candidate pool and feedback** (#153; deterministic, no LLM)
 - Owns `internal/recommend/profile`, `internal/recommend/candidates`, migration 006, the agent's custom tools (each an `agent.Tool`), and feedback: `api.RecFeedback` (`SetFeedback`, `ClearFeedback`), set as `Options.RecFeedback` in `wire_recs.go` with or without a key, so it lands before the picks.
-- **Taste profile.** Weighted by recency, rating (only with Trakt's `use_ratings` on, `app_settings` key `trakt`) and completion. It covers:
+- **Taste profile.** Weighted by recency, rating (only with Trakt's `use_ratings` on, the member's Trakt settings) and completion. It covers:
   - Top genres, keywords, creators and cast.
   - Decades, languages and origin countries.
   - Anime share, the movie/show ratio and runtime tolerance.

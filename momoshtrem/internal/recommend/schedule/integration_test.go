@@ -99,15 +99,15 @@ func TestRefresh_EndToEnd(t *testing.T) {
 	db := openDB(t)
 	ctx := context.Background()
 	for _, q := range []string{
-		`INSERT INTO trakt_history (id, media_type, tmdb_id, trakt_id, title, year, watched_at) VALUES
-			(1, 'movie', 501, 1, 'Loved One', 2020, NOW() - INTERVAL '10 days'),
-			(2, 'movie', 502, 2, 'Loved Two', 2021, NOW() - INTERVAL '20 days'),
-			(3, 'movie', 503, 3, 'Loved Three', 2019, NOW() - INTERVAL '30 days'),
-			(4, 'movie', 504, 4, 'Loved Four', 2018, NOW() - INTERVAL '40 days'),
-			(5, 'movie', 505, 5, 'Loved Five', 2022, NOW() - INTERVAL '50 days'),
-			(6, 'movie', 1001, 6, 'Movie 1001', 2024, NOW() - INTERVAL '1 day')`,
-		`INSERT INTO trakt_watched_movies (tmdb_id, plays, last_watched_at)
-			SELECT tmdb_id, 1, watched_at FROM trakt_history`,
+		`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, watched_at) VALUES
+			(1, 1, 'movie', 501, 1, 'Loved One', 2020, NOW() - INTERVAL '10 days'),
+			(1, 2, 'movie', 502, 2, 'Loved Two', 2021, NOW() - INTERVAL '20 days'),
+			(1, 3, 'movie', 503, 3, 'Loved Three', 2019, NOW() - INTERVAL '30 days'),
+			(1, 4, 'movie', 504, 4, 'Loved Four', 2018, NOW() - INTERVAL '40 days'),
+			(1, 5, 'movie', 505, 5, 'Loved Five', 2022, NOW() - INTERVAL '50 days'),
+			(1, 6, 'movie', 1001, 6, 'Movie 1001', 2024, NOW() - INTERVAL '1 day')`,
+		`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at)
+			SELECT member_id, tmdb_id, 1, watched_at FROM trakt_history`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%.50s…: %v", q, err)
@@ -133,10 +133,10 @@ func TestRefresh_EndToEnd(t *testing.T) {
 	settings := library.NewSettingsRepository(db)
 	aiStore := library.NewAIStore(db)
 	ledger := aicore.NewLedger(aiStore, settings)
-	taste := library.NewTasteRepository(db)
+	taste := library.NewTasteRepository(db).ForMember(1)
 	repo := library.NewRecRunRepository(db)
-	profiles := profile.New(profile.Deps{Store: taste, Profiles: library.NewTasteProfileRepository(db), Settings: settings,
-		Trakt: connected{}})
+	profiles := profile.New(profile.Deps{Store: taste, Profiles: library.NewTasteProfileRepository(db),
+		Settings: library.NewMemberRepository(db).TraktSettingsFor(1), Trakt: connected{}})
 	runner := runs.NewRunner(runs.Deps{
 		AI:     aicore.New(aicore.Config{APIKey: "test-key", Recorder: ledger, Options: srv.Options()}),
 		Budget: ledger, Settings: settings, Profiles: profiles, Pools: pool{},

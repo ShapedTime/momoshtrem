@@ -9,6 +9,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // Up next's limits (PLAN §6 "Trakt (B5)").
@@ -31,26 +32,30 @@ type UpNextItem struct {
 	Source        string                `json:"source"`          // progress or watchlist
 }
 
-// UpNext lists GET /me/up-next: the shows to carry on with by last
-// watched, then watchlist starts, then what airs next. Queries: the
-// settings, the candidates and their episodes in the library.
+// UpNext lists GET /me/up-next, the context's member's: the shows to carry
+// on with by last watched, then watchlist starts, then what airs next.
+// Queries: the settings, the candidates and their episodes in the library.
 func (s *Service) UpNext(ctx context.Context) ([]UpNextItem, error) {
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now()
-	shows, episodes, err := s.readUpNext(ctx, now)
+	shows, episodes, err := s.readUpNext(ctx, memberID, now)
 	if err != nil || len(shows) == 0 {
 		return []UpNextItem{}, err
 	}
 	return upNextItems(shows, episodes, s.cards(), now, s.today()), nil
 }
 
-// readUpNext reads Up next's shows (upNextShows) with what the library
-// knows of the episode each names, one each, in order.
-func (s *Service) readUpNext(ctx context.Context, now time.Time) ([]library.UpNextCandidate, []library.KeyedEpisode, error) {
-	settings, err := s.settings.TraktSettings(ctx)
+// readUpNext reads the member's Up next shows (upNextShows) with what the
+// library knows of the episode each names, one each, in order.
+func (s *Service) readUpNext(ctx context.Context, memberID int64, now time.Time) ([]library.UpNextCandidate, []library.KeyedEpisode, error) {
+	settings, err := s.settings.TraktSettings(ctx, memberID)
 	if err != nil {
-		slog.Warn("Trakt settings unreadable; Up next uses the defaults", "component", "me", "error", err)
+		slog.Warn("Trakt settings unreadable; Up next uses the defaults", "component", "me", "member", memberID, "error", err)
 	}
-	candidates, err := s.store.UpNextCandidates(ctx, s.today())
+	candidates, err := s.store.UpNextCandidates(ctx, memberID, s.today())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -83,13 +88,17 @@ type UpNextEpisode struct {
 	LastWatchedAt *time.Time
 }
 
-// UpNextEpisodes lists Up next's shows the library has with the episode
-// each names next, when the library lists it: the shows upNextShows picks
-// (as GET /me/up-next does, without its cap or its order), in no
-// particular order. Empty without Trakt. Queries: the settings, the
-// candidates and their episodes.
+// UpNextEpisodes lists the context's member's Up next shows the library
+// has with the episode each names next, when the library lists it: the
+// shows upNextShows picks (as GET /me/up-next does, without its cap or its
+// order), in no particular order. Empty without Trakt. Queries: the
+// settings, the candidates and their episodes.
 func (s *Service) UpNextEpisodes(ctx context.Context) ([]UpNextEpisode, error) {
-	shows, episodes, err := s.readUpNext(ctx, s.now())
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	shows, episodes, err := s.readUpNext(ctx, memberID, s.now())
 	if err != nil {
 		return nil, err
 	}

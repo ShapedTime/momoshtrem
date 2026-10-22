@@ -11,6 +11,11 @@ import (
 // What the title pages, /library and /me read from the Trakt tables (PLAN
 // §6 "Trakt (B5)", "Watch state rules"). Only the sync writes them, and a
 // disconnect empties them, so without Trakt every read finds nothing.
+//
+// Each row is one household member's (PLAN §6 "Household members"). What's
+// watched is the household's: the title pages, seasons and /library read
+// every member's plays, as unions that never repeat a title (EXISTS, max,
+// sum). /me is personal: its reads take the member.
 
 // episodeCols names an episode's TMDB episode id, season and number in SQL.
 type episodeCols struct{ tmdbID, season, number string }
@@ -73,14 +78,15 @@ func libraryEpisodeLateral(showID string, t episodeCols) string {
 }
 
 // traktNextCTE is trakt_next: the Trakt progress rows that match scope (on
-// p), each with the episode Up next names for it (PLAN §6 "Trakt (B5)"):
-// Trakt's next episode, else, caught up, the first regular calendar entry
-// after the last watched one. Specials are never next. The episode's
-// columns are NULL when there's none; the calendar fills in what progress
-// lacks, and first_aired is the calendar's.
+// p), each with its member and the episode Up next names for it (PLAN §6
+// "Trakt (B5)"): Trakt's next episode, else, caught up, the first regular
+// calendar entry after the last watched one, both from the same member's
+// rows. Specials are never next. The episode's columns are NULL when
+// there's none; the calendar fills in what progress lacks, and first_aired
+// is the calendar's.
 func traktNextCTE(scope string) string {
 	return `trakt_next AS (
-		SELECT p.show_trakt_id, p.show_tmdb_id, p.title, p.poster_path, p.backdrop_path,
+		SELECT p.member_id, p.show_trakt_id, p.show_tmdb_id, p.title, p.poster_path, p.backdrop_path,
 		       p.completed, p.aired, p.last_watched_at,
 		       n.from_calendar, n.season, n.episode, n.episode_tmdb_id, n.episode_title, n.still_path, n.first_aired
 		FROM trakt_show_progress p
@@ -91,12 +97,13 @@ func traktNextCTE(scope string) string {
 			       COALESCE(p.next_still_path, c.still_path) AS still_path, c.first_aired
 			FROM (VALUES (1)) one(x)
 			LEFT JOIN trakt_calendar c
-			       ON c.show_trakt_id = p.show_trakt_id AND c.season = p.next_season AND c.episode = p.next_episode
+			       ON c.member_id = p.member_id AND c.show_trakt_id = p.show_trakt_id
+			      AND c.season = p.next_season AND c.episode = p.next_episode
 			WHERE p.next_season > 0 AND p.next_episode IS NOT NULL
 			UNION ALL
 			SELECT TRUE, c.season, c.episode, c.episode_tmdb_id, c.episode_title, c.still_path, c.first_aired
 			FROM trakt_calendar c
-			WHERE c.show_trakt_id = p.show_trakt_id AND c.season > 0
+			WHERE c.member_id = p.member_id AND c.show_trakt_id = p.show_trakt_id AND c.season > 0
 			  AND (c.season, c.episode) > (COALESCE(p.last_season, 0), COALESCE(p.last_episode, 0))
 			ORDER BY from_calendar, season, episode
 			LIMIT 1
@@ -105,14 +112,17 @@ func traktNextCTE(scope string) string {
 	)`
 }
 
-// TraktWatchState is what Trakt imported about one title; nil when it
-// knows nothing (no play, rating or progress).
+// TraktWatchState is what Trakt imported about one title, for the
+// household and its viewer; nil when it knows nothing (no member's play or
+// progress, and no rating by the viewer).
 type TraktWatchState struct {
-	Plays         int        // a show: the sum of its episodes' plays
-	LastWatchedAt *time.Time // a show: its last watched episode
-	Rating        *int
-	// Shows only. Progress is Trakt's (regular episodes), nil without it;
-	// Next is the episode Up next names, nil when there's none.
+	Plays         int        // every member's; a show: the sum of its episodes' plays
+	LastWatchedAt *time.Time // anyone's last play; a show: its last watched episode
+	Rating        *int       // the viewer's
+	// Shows only, from the member who played the show last (their
+	// progress's last_watched_at; the lower id on a tie). Progress is
+	// Trakt's (regular episodes), nil without it; Next is the episode Up
+	// next names, nil when there's none.
 	Progress *TraktProgress
 	Next     *TraktNext
 }
@@ -133,25 +143,28 @@ type TraktNext struct {
 }
 
 // WatchState returns what Trakt imported about a title: mediaType "movie"
-// or "tv", by TMDB id. Nil when Trakt knows nothing about it. One query.
-func (r *CatalogRepository) WatchState(ctx context.Context, mediaType string, tmdbID int) (*TraktWatchState, error) {
+// or "tv", by TMDB id. The plays are every member's, the rating viewer's
+// (0: no viewer, no rating). Nil when Trakt knows nothing about it. One
+// query.
+func (r *CatalogRepository) WatchState(ctx context.Context, viewer int64, mediaType string, tmdbID int) (*TraktWatchState, error) {
 	switch mediaType {
 	case string(JobMovie):
-		return r.movieWatchState(ctx, tmdbID)
+		return r.movieWatchState(ctx, viewer, tmdbID)
 	case string(JobTV):
-		return r.showWatchState(ctx, tmdbID)
+		return r.showWatchState(ctx, viewer, tmdbID)
 	}
 	return nil, fmt.Errorf("unknown media type %q", mediaType)
 }
 
-func (r *CatalogRepository) movieWatchState(ctx context.Context, tmdbID int) (*TraktWatchState, error) {
+func (r *CatalogRepository) movieWatchState(ctx context.Context, viewer int64, tmdbID int) (*TraktWatchState, error) {
 	var plays, rating sql.NullInt32
 	var last sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT wm.plays, wm.last_watched_at,
-		       (SELECT r.rating FROM trakt_ratings r WHERE r.media_type = 'movie' AND r.tmdb_id = $1 ORDER BY r.rated_at DESC LIMIT 1)
-		FROM (VALUES (1)) one(x) LEFT JOIN trakt_watched_movies wm ON wm.tmdb_id = $1
-	`, tmdbID).Scan(&plays, &last, &rating)
+		SELECT sum(wm.plays)::int, max(wm.last_watched_at),
+		       (SELECT r.rating FROM trakt_ratings r
+		        WHERE r.member_id = $2 AND r.media_type = 'movie' AND r.tmdb_id = $1 ORDER BY r.rated_at DESC LIMIT 1)
+		FROM trakt_watched_movies wm WHERE wm.tmdb_id = $1
+	`, tmdbID, viewer).Scan(&plays, &last, &rating)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the movie's watch state: %w", err)
 	}
@@ -161,7 +174,7 @@ func (r *CatalogRepository) movieWatchState(ctx context.Context, tmdbID int) (*T
 	return &TraktWatchState{Plays: int(plays.Int32), LastWatchedAt: nullTimePtr(last), Rating: nullIntPtr(rating)}, nil
 }
 
-func (r *CatalogRepository) showWatchState(ctx context.Context, tmdbID int) (*TraktWatchState, error) {
+func (r *CatalogRepository) showWatchState(ctx context.Context, viewer int64, tmdbID int) (*TraktWatchState, error) {
 	var (
 		plays, rating, completed, aired   sql.NullInt32
 		season, episode, libSeason, libEp sql.NullInt32
@@ -171,10 +184,11 @@ func (r *CatalogRepository) showWatchState(ctx context.Context, tmdbID int) (*Tr
 	)
 	err := r.db.QueryRowContext(ctx, `
 		WITH `+traktNextCTE(`p.show_tmdb_id = $1`)+`,
-		progress AS (SELECT * FROM trakt_next ORDER BY last_watched_at DESC NULLS LAST LIMIT 1)
+		progress AS (SELECT * FROM trakt_next ORDER BY last_watched_at DESC NULLS LAST, member_id, show_trakt_id LIMIT 1)
 		SELECT (SELECT sum(w.plays) FROM trakt_watched_episodes w WHERE w.show_tmdb_id = $1)::int,
 		       COALESCE((SELECT max(w.last_watched_at) FROM trakt_watched_episodes w WHERE w.show_tmdb_id = $1), n.last_watched_at),
-		       (SELECT r.rating FROM trakt_ratings r WHERE r.media_type = 'show' AND r.tmdb_id = $1 ORDER BY r.rated_at DESC LIMIT 1),
+		       (SELECT r.rating FROM trakt_ratings r
+		        WHERE r.member_id = $2 AND r.media_type = 'show' AND r.tmdb_id = $1 ORDER BY r.rated_at DESC LIMIT 1),
 		       n.completed, n.aired, n.season, n.episode, n.episode_title, n.first_aired,
 		       le.season_number, e.episode_number, e.absolute_number, e.name, e.air_date
 		FROM (VALUES (1)) one(x)
@@ -182,7 +196,7 @@ func (r *CatalogRepository) showWatchState(ctx context.Context, tmdbID int) (*Tr
 		LEFT JOIN shows s ON s.tmdb_id = $1
 		`+libraryEpisodeLateral("s.id", traktEpisode("n"))+`
 		LEFT JOIN episodes e ON e.id = le.episode_id
-	`, tmdbID).Scan(&plays, &last, &rating, &completed, &aired, &season, &episode, &traktName, &firstAired,
+	`, tmdbID, viewer).Scan(&plays, &last, &rating, &completed, &aired, &season, &episode, &traktName, &firstAired,
 		&libSeason, &libEp, &absolute, &libName, &libAirDate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the show's watch state: %w", err)
@@ -387,16 +401,16 @@ type TraktNextEpisode struct {
 	FromCalendar bool
 }
 
-// UpNextCandidates lists Up next's candidates: every Trakt progress row
-// with its next episode, and the watchlisted library shows nobody has
-// started, with their aired regular episodes as of today (YYYY-MM-DD). One
-// query.
-func (r *CatalogRepository) UpNextCandidates(ctx context.Context, today string) ([]UpNextCandidate, error) {
+// UpNextCandidates lists member's Up next candidates: every Trakt
+// progress row of theirs with its next episode, and the library shows on
+// their watchlist they haven't started, with their aired regular episodes
+// as of today (YYYY-MM-DD). Hidden is theirs. One query.
+func (r *CatalogRepository) UpNextCandidates(ctx context.Context, member int64, today string) ([]UpNextCandidate, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		WITH `+traktNextCTE(`TRUE`)+`
+		WITH `+traktNextCTE(`p.member_id = $2`)+`
 		SELECT 'progress', n.show_tmdb_id, n.title, COALESCE(n.poster_path, ''), COALESCE(n.backdrop_path, ''),
 		       n.completed, n.aired, n.last_watched_at, NULL::timestamptz,
-		       EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = n.show_tmdb_id),
+		       EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.member_id = $2 AND h.tmdb_id = n.show_tmdb_id),
 		       n.season, n.episode, n.episode_tmdb_id, COALESCE(n.episode_title, ''), COALESCE(n.still_path, ''),
 		       n.first_aired, COALESCE(n.from_calendar, FALSE)
 		FROM trakt_next n
@@ -405,11 +419,12 @@ func (r *CatalogRepository) UpNextCandidates(ctx context.Context, today string) 
 		       0, (SELECT count(*) FROM seasons sn JOIN episodes e ON e.season_id = sn.id
 		           WHERE sn.show_id = s.id AND sn.season_number > 0 AND e.air_date <= $1)::int,
 		       NULL, w.listed_at,
-		       EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = w.tmdb_id),
+		       EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.member_id = $2 AND h.tmdb_id = w.tmdb_id),
 		       1, 1, NULL, '', '', NULL, FALSE
 		FROM trakt_watchlist w JOIN shows s ON s.tmdb_id = w.tmdb_id
-		WHERE w.media_type = 'tv' AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes we WHERE we.show_tmdb_id = w.tmdb_id)
-	`, today)
+		WHERE w.member_id = $2 AND w.media_type = 'tv'
+		  AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes we WHERE we.show_tmdb_id = w.tmdb_id AND we.member_id = $2)
+	`, today, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Up next candidates: %w", err)
 	}
@@ -458,12 +473,13 @@ type NewEpisodeCandidate struct {
 }
 
 // NewEpisodeCandidates lists the regular episodes that aired from from
-// (midnight UTC; fromDate is its date) until now (today is its date): the
-// library shows' by air date and the calendar's by first airing, each
-// without a play. The calendar also lists watchlisted shows, so its
-// entries count only for shows the user started (a progress row) or the
-// library has. Shows dropped or hidden on Trakt are left out. One query.
-func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, from, now time.Time, fromDate, today string) ([]NewEpisodeCandidate, error) {
+// (midnight UTC; fromDate is its date) until now (today is its date) that
+// member hasn't played: the library shows' by air date and member's
+// calendar's by first airing. The calendar also lists watchlisted shows,
+// so its entries count only for shows the member started (a progress row)
+// or the library has. Shows the member dropped or hid on Trakt are left
+// out. One query.
+func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, member int64, from, now time.Time, fromDate, today string) ([]NewEpisodeCandidate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT FALSE, s.tmdb_id, sn.season_number, e.episode_number, COALESCE(e.tmdb_episode_id, 0),
 		       '', '', '', '', '', NULL::timestamptz, e.air_date
@@ -471,20 +487,21 @@ func (r *CatalogRepository) NewEpisodeCandidates(ctx context.Context, from, now 
 		JOIN seasons sn ON sn.show_id = s.id AND sn.season_number > 0
 		JOIN episodes e ON e.season_id = sn.id
 		WHERE e.air_date >= $3 AND e.air_date <= $4
-		  AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = s.tmdb_id)
-		  AND NOT `+episodeWatchedSQL("s.tmdb_id", libraryEpisode, `TRUE`)+`
+		  AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.member_id = $5 AND h.tmdb_id = s.tmdb_id)
+		  AND NOT `+episodeWatchedSQL("s.tmdb_id", libraryEpisode, `w.member_id = $5`)+`
 		UNION ALL
 		SELECT TRUE, c.show_tmdb_id, c.season, c.episode, COALESCE(c.episode_tmdb_id, 0),
 		       c.show_title, COALESCE(c.poster_path, ''), COALESCE(c.backdrop_path, ''),
 		       COALESCE(c.episode_title, ''), COALESCE(c.still_path, ''), c.first_aired, ''
 		FROM trakt_calendar c
-		WHERE c.season > 0 AND c.first_aired >= $1 AND c.first_aired <= $2
-		  AND (EXISTS (SELECT 1 FROM trakt_show_progress p WHERE p.show_tmdb_id = c.show_tmdb_id)
+		WHERE c.member_id = $5 AND c.season > 0 AND c.first_aired >= $1 AND c.first_aired <= $2
+		  AND (EXISTS (SELECT 1 FROM trakt_show_progress p WHERE p.member_id = $5 AND p.show_tmdb_id = c.show_tmdb_id)
 		    OR EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = c.show_tmdb_id))
-		  AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = c.show_tmdb_id)
+		  AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.member_id = $5 AND h.tmdb_id = c.show_tmdb_id)
 		  AND NOT EXISTS (SELECT 1 FROM trakt_watched_episodes w
-		                  WHERE w.show_tmdb_id = c.show_tmdb_id AND `+sameEpisode(traktEpisode("w"), traktEpisode("c"))+`)
-	`, from, now, fromDate, today)
+		                  WHERE w.show_tmdb_id = c.show_tmdb_id AND w.member_id = $5
+		                    AND `+sameEpisode(traktEpisode("w"), traktEpisode("c"))+`)
+	`, from, now, fromDate, today, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list new episodes: %w", err)
 	}
@@ -517,15 +534,15 @@ type TraktWatchlistItem struct {
 	ListedAt   time.Time
 }
 
-// TraktWatchlist lists the watchlist, newest listed first: mediaType
+// TraktWatchlist lists member's watchlist, newest listed first: mediaType
 // "movie" or "tv", or "" for both. One query.
-func (r *CatalogRepository) TraktWatchlist(ctx context.Context, mediaType string) ([]TraktWatchlistItem, error) {
+func (r *CatalogRepository) TraktWatchlist(ctx context.Context, member int64, mediaType string) ([]TraktWatchlistItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT media_type, tmdb_id, title, COALESCE(year, 0), COALESCE(poster_path, ''), listed_at
 		FROM trakt_watchlist
-		WHERE $1 = '' OR media_type = $1
+		WHERE member_id = $2 AND ($1 = '' OR media_type = $1)
 		ORDER BY listed_at DESC, media_type, trakt_id
-	`, mediaType)
+	`, mediaType, member)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the watchlist: %w", err)
 	}
@@ -559,18 +576,18 @@ type TraktPlay struct {
 	WatchedAt    time.Time
 }
 
-// TraktHistory returns a page of plays, newest first, and how many there
-// are in all. One query.
-func (r *CatalogRepository) TraktHistory(ctx context.Context, limit, offset int) ([]TraktPlay, int, error) {
+// TraktHistory returns a page of member's plays, newest first, and how
+// many there are in all. One query.
+func (r *CatalogRepository) TraktHistory(ctx context.Context, member int64, limit, offset int) ([]TraktPlay, int, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		WITH page AS (
-			SELECT * FROM trakt_history ORDER BY watched_at DESC, id DESC LIMIT $1 OFFSET $2
+			SELECT * FROM trakt_history WHERE member_id = $3 ORDER BY watched_at DESC, id DESC LIMIT $1 OFFSET $2
 		)
-		SELECT (SELECT count(*) FROM trakt_history), p.id, p.media_type, p.tmdb_id, p.title, p.year,
+		SELECT (SELECT count(*) FROM trakt_history WHERE member_id = $3), p.id, p.media_type, p.tmdb_id, p.title, p.year,
 		       p.season, p.episode, p.episode_title, p.watched_at
 		FROM (VALUES (1)) one(x) LEFT JOIN page p ON TRUE
 		ORDER BY p.watched_at DESC, p.id DESC
-	`, limit, offset)
+	`, limit, offset, member)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list the history: %w", err)
 	}

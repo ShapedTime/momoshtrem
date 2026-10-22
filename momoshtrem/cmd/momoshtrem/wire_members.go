@@ -10,15 +10,20 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
-// wireMembers sets up the household's members (#241): /members, and the
-// member each API request is for. Until each member has their own Trakt
-// connection (#244), the one there is shows on the lowest member, and the
-// others' are off.
-func wireMembers(db *library.DB, traktAuth *trakt.Auth, opts *api.Options) {
+// newMembers reads the household's members (#241).
+func newMembers(db *library.DB) *member.Service {
 	members := member.NewService(library.NewMemberRepository(db))
 	if err := members.Load(context.Background()); err != nil {
 		slog.Error("Failed to read the household's members; trying again on first use", "error", err)
 	}
+	return members
+}
+
+// wireMembers serves the household's members: /members, and the member
+// each API request is for. Until each member has their own Trakt
+// connection (#244), the one there is shows on the lowest member, and the
+// others' are off.
+func wireMembers(members *member.Service, traktAuth *trakt.Auth, opts *api.Options) {
 	members.SetTraktSummary(lowestMemberTrakt(members, traktAuth))
 	opts.Members = members
 }

@@ -1,8 +1,9 @@
-// Package me serves the user's own lists (PLAN §6 "Trakt (B5)"): Up next,
-// new episodes, the watchlist and the history. They come from what the
-// Trakt sync imported and what the library holds, and only read: without
-// Trakt (nothing imported) they're empty, except new episodes, which the
-// library's shows still fill.
+// Package me serves a household member's own lists (PLAN §6 "Trakt (B5)"):
+// Up next, new episodes, the watchlist and the history. They come from
+// what the member's Trakt sync imported and what the library holds, and
+// only read: without Trakt (nothing imported) they're empty, except new
+// episodes, which the library's shows still fill. Each list is the
+// context's member's (member.Require).
 package me
 
 import (
@@ -16,22 +17,22 @@ import (
 
 // Store is the database. *library.CatalogRepository implements it.
 type Store interface {
-	UpNextCandidates(ctx context.Context, today string) ([]library.UpNextCandidate, error)
-	NewEpisodeCandidates(ctx context.Context, from, now time.Time, fromDate, today string) ([]library.NewEpisodeCandidate, error)
+	UpNextCandidates(ctx context.Context, member int64, today string) ([]library.UpNextCandidate, error)
+	NewEpisodeCandidates(ctx context.Context, member int64, from, now time.Time, fromDate, today string) ([]library.NewEpisodeCandidate, error)
 	EpisodesByKeys(ctx context.Context, keys []library.TraktEpisodeKey) ([]library.KeyedEpisode, error)
-	TraktWatchlist(ctx context.Context, mediaType string) ([]library.TraktWatchlistItem, error)
-	TraktHistory(ctx context.Context, limit, offset int) ([]library.TraktPlay, int, error)
+	TraktWatchlist(ctx context.Context, member int64, mediaType string) ([]library.TraktWatchlistItem, error)
+	TraktHistory(ctx context.Context, member int64, limit, offset int) ([]library.TraktPlay, int, error)
 }
 
 var _ Store = (*library.CatalogRepository)(nil)
 
-// Settings reads the Trakt settings. *library.SettingsRepository
+// Settings reads a member's Trakt settings. *library.MemberRepository
 // implements it.
 type Settings interface {
-	TraktSettings(ctx context.Context) (library.TraktSettings, error)
+	TraktSettings(ctx context.Context, member int64) (library.TraktSettings, error)
 }
 
-var _ Settings = (*library.SettingsRepository)(nil)
+var _ Settings = (*library.MemberRepository)(nil)
 
 // Catalog is what the title pages know about library titles and files.
 // *catalog.Service implements it.

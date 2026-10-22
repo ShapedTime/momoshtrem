@@ -6,6 +6,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // WatchlistItem is one title of GET /me/watchlist.
@@ -21,11 +22,15 @@ type WatchlistItem struct {
 	Library *catalog.SimilarLibrary `json:"library"`
 }
 
-// Watchlist lists GET /me/watchlist, newest listed first: mediaType
-// "movie" or "tv", or "" for both. Queries: the watchlist and its titles'
-// library state.
+// Watchlist lists GET /me/watchlist, the context's member's, newest listed
+// first: mediaType "movie" or "tv", or "" for both. Queries: the watchlist
+// and its titles' library state.
 func (s *Service) Watchlist(ctx context.Context, mediaType string) ([]WatchlistItem, error) {
-	rows, err := s.store.TraktWatchlist(ctx, mediaType)
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.store.TraktWatchlist(ctx, memberID, mediaType)
 	if err != nil || len(rows) == 0 {
 		return []WatchlistItem{}, err
 	}

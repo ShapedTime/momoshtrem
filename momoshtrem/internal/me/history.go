@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // History page sizes (PLAN §6 "Trakt (B5)").
@@ -39,14 +40,18 @@ type HistoryPage struct {
 	PageSize int           `json:"page_size"`
 }
 
-// History lists GET /me/history, newest first: page from 1, pageSize
-// 1–MaxHistoryPageSize. One query.
+// History lists GET /me/history, the context's member's, newest first:
+// page from 1, pageSize 1–MaxHistoryPageSize. One query.
 func (s *Service) History(ctx context.Context, page, pageSize int) (*HistoryPage, error) {
 	if page < 1 || pageSize < 1 || pageSize > MaxHistoryPageSize {
 		return nil, fmt.Errorf("page %d, page_size %d: out of range", page, pageSize)
 	}
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	page = min(page, maxHistoryPage)
-	plays, total, err := s.store.TraktHistory(ctx, pageSize, (page-1)*pageSize)
+	plays, total, err := s.store.TraktHistory(ctx, memberID, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, err
 	}

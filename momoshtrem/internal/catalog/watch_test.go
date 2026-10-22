@@ -3,10 +3,12 @@ package catalog
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 )
 
@@ -109,6 +111,24 @@ func TestMovieTitle_WatchState(t *testing.T) {
 	// A movie's has no progress or next episode.
 	if raw, _ := json.Marshal(title.WatchState); string(raw) != `{"watched_at":"2026-03-01T20:00:00Z","plays":2,"rating":8}` {
 		t.Errorf("watch_state = %s", raw)
+	}
+}
+
+// The watch state's viewer (its rating's) is the context's member; none
+// without one.
+func TestWatchState_Viewer(t *testing.T) {
+	f := newFixture()
+	if _, err := f.svc.MovieTitle(member.WithID(context.Background(), 2), duneTMDB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ShowTitle(member.WithID(context.Background(), 3), frierenTMDB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.MovieTitle(context.Background(), duneTMDB); err != nil {
+		t.Fatal(err)
+	}
+	if want := []int64{2, 3, 0}; !slices.Equal(f.store.viewers, want) {
+		t.Errorf("viewers = %v, want %v", f.store.viewers, want)
 	}
 }
 
