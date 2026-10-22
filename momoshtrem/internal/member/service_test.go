@@ -433,6 +433,12 @@ func TestService_DeleteHidesTheMember(t *testing.T) {
 				t.Errorf("the member being removed cost %d reads", store.listCount()-reads)
 			}
 		})
+		// A member that stays is shown again only once it's added back.
+		s.OnAdded(func(context.Context, int64) {
+			if _, err := s.Resolve(ctx, "1"); !errors.Is(err, ErrUnknown) {
+				t.Errorf(`Resolve("1") while adding it back = %v, want ErrUnknown`, err)
+			}
+		})
 		err := s.Delete(ctx, 1)
 		id, rerr := s.Resolve(ctx, "1")
 		def, _ := s.Default(ctx)
@@ -442,6 +448,28 @@ func TestService_DeleteHidesTheMember(t *testing.T) {
 		case !fails && (err != nil || !errors.Is(rerr, ErrUnknown) || def != 2):
 			t.Errorf("a delete = %v; then Resolve = %v, Default %d", err, rerr, def)
 		}
+	}
+}
+
+// A listener's panic (gin recovers it) leaves the member shown and the
+// next change free to run.
+func TestService_DeletePanics(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore("Teymur", "Sam")
+	s := NewService(store)
+	s.OnRemoving(func(context.Context, int64) { panic("listener") })
+	func() {
+		defer func() { _ = recover() }()
+		_ = s.Delete(ctx, 2)
+	}()
+	if id, err := s.Resolve(ctx, "2"); err != nil || id != 2 {
+		t.Errorf(`Resolve("2") after the panic = %d, %v, want 2`, id, err)
+	}
+	if ids, err := s.IDs(ctx); err != nil || !slices.Equal(ids, []int64{1, 2}) {
+		t.Errorf("IDs after the panic = %v, %v", ids, err)
+	}
+	if _, err := s.Create(ctx, "Ari", nil); err != nil {
+		t.Errorf("Create after the panic = %v", err)
 	}
 }
 

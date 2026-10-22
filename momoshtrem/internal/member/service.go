@@ -313,12 +313,14 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		return ErrLastMember
 	}
 
+	// Shown again once it's over: gone from the refreshed list, back after
+	// the OnAdded listeners, or after a listener's panic.
 	s.setLeaving(id, true)
+	defer s.setLeaving(id, false)
 	ctx = context.WithoutCancel(ctx)
 	s.tell(ctx, &s.removing, id)
 	err = s.store.Delete(ctx, id)
 	s.refresh(ctx)
-	s.setLeaving(id, false)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			s.log.Warn("Household member not removed; adding it back", "member", id, "error", err)
