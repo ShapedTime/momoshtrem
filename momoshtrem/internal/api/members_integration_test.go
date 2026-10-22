@@ -65,8 +65,13 @@ func TestMembers_Integration(t *testing.T) {
 		{"POST", "/api/members", `{"name":"SAM"}`, 409, CodeMemberNameTaken, ""},
 		{"POST", "/api/members", `{"name":"` + strings.Repeat("é", 33) + `"}`, 422, CodeValidationError, "name"},
 		{"POST", "/api/members", `{"name":"Ari","color":"blue"}`, 422, CodeValidationError, "color"},
+		{"POST", "/api/members", `{"name":"Ari","color":null}`, 400, CodeBadRequest, ""},
 		{"PATCH", "/api/members/2", `{"name":"me"}`, 409, CodeMemberNameTaken, ""},
 		{"PATCH", "/api/members/9", `{"name":"Nine"}`, 404, CodeNotFound, ""},
+		// PATCH checks 400, 422, 404, 409 in that order.
+		{"PATCH", "/api/members/9", `{"name":null}`, 400, CodeBadRequest, ""},
+		{"PATCH", "/api/members/9", `{"color":"blue"}`, 422, CodeValidationError, "color"},
+		{"PATCH", "/api/members/9", `{"name":"me"}`, 404, CodeNotFound, ""},
 		{"DELETE", "/api/members/9", ``, 404, CodeNotFound, ""},
 	} {
 		rec := doBody(t, s, tt.method, tt.path, tt.body)

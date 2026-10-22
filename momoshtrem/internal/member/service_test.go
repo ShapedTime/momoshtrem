@@ -316,6 +316,10 @@ func TestService_Update(t *testing.T) {
 	if _, err := s.Update(ctx, 9, Patch{Color: ptr("rose")}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Update(9) = %v", err)
 	}
+	// A bad value is refused before the member is looked up (422 before 404).
+	if _, err := s.Update(ctx, 9, Patch{Color: ptr("red")}); !errors.As(err, &v) || v.Field != "color" {
+		t.Errorf("Update(9, red) = %v, want a color ValidationError", err)
+	}
 }
 
 func TestService_Delete(t *testing.T) {

@@ -68,23 +68,14 @@ func (s *Server) listMembers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
-// POST /members {name, color?} → 201 Member. A missing or null color is
-// the first no member uses; unknown fields are ignored.
+// POST /members {name, color?} → 201 Member. Without a color it's the
+// first no member uses; unknown fields are ignored.
 func (s *Server) createMember(c *gin.Context) {
 	if !s.membersReady(c) {
 		return
 	}
-	fields, ok := readMemberBody(c)
+	name, color, ok := readMemberBody(c)
 	if !ok {
-		return
-	}
-	name, err := memberStringField(fields, "name", false)
-	var color *string
-	if err == nil {
-		color, err = memberStringField(fields, "color", true)
-	}
-	if err != nil {
-		membersErrorResponse(c, err)
 		return
 	}
 	if name == nil {
@@ -99,24 +90,15 @@ func (s *Server) createMember(c *gin.Context) {
 }
 
 // PATCH /members/{id} with any of {name, color} → 200 Member. Fields left
-// out keep their value and unknown ones are ignored.
+// out keep their value and unknown ones are ignored. Checks, in order: 400
+// (the id, the body), 422, 404, 409.
 func (s *Server) updateMember(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok || !s.membersReady(c) {
 		return
 	}
-	fields, ok := readMemberBody(c)
-	if !ok {
-		return
-	}
 	var p member.Patch
-	var err error
-	p.Name, err = memberStringField(fields, "name", false)
-	if err == nil {
-		p.Color, err = memberStringField(fields, "color", false)
-	}
-	if err != nil {
-		membersErrorResponse(c, err)
+	if p.Name, p.Color, ok = readMemberBody(c); !ok {
 		return
 	}
 	m, err := s.opts.Members.Update(c.Request.Context(), id, p)
@@ -141,34 +123,37 @@ func (s *Server) deleteMember(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// readMemberBody reads a JSON object's fields; anything else is 400.
-func readMemberBody(c *gin.Context) (map[string]json.RawMessage, bool) {
+// readMemberBody reads a POST or PATCH body: a JSON object whose name and
+// color, each nil when it isn't sent, are strings. Anything else is 400, a
+// wrong type (null included) too, as the quality profile does; unknown
+// fields are ignored. The member service checks the values (422).
+func readMemberBody(c *gin.Context) (name, color *string, ok bool) {
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 64<<10))
 	if err != nil {
 		errorResponse(c, http.StatusBadRequest, "Couldn't read the body.")
-		return nil, false
+		return nil, nil, false
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		errorResponse(c, http.StatusBadRequest, "Send the member as a JSON object.")
-		return nil, false
+		return nil, nil, false
 	}
-	return fields, true
-}
-
-// memberStringField is a field's string: nil when it isn't sent, or is
-// null where nullOK; anything else is a *member.ValidationError naming it.
-// The member service checks the value.
-func memberStringField(fields map[string]json.RawMessage, name string, nullOK bool) (*string, error) {
-	raw, sent := fields[name]
-	if !sent || (nullOK && string(raw) == "null") {
-		return nil, nil
+	for _, f := range []struct {
+		key string
+		dst **string
+	}{{"name", &name}, {"color", &color}} {
+		value, sent := fields[f.key]
+		if !sent {
+			continue
+		}
+		var v string
+		if string(value) == "null" || json.Unmarshal(value, &v) != nil {
+			errorResponse(c, http.StatusBadRequest, f.key+" must be a string.")
+			return nil, nil, false
+		}
+		*f.dst = &v
 	}
-	var v string
-	if string(raw) == "null" || json.Unmarshal(raw, &v) != nil {
-		return nil, &member.ValidationError{Field: name, Message: name + " must be a string"}
-	}
-	return &v, nil
+	return name, color, true
 }
 
 // membersErrorResponse maps the members' errors.

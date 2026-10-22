@@ -20,24 +20,22 @@ func TestMemberRoutes(t *testing.T) {
 		t.Errorf("GET = %d %s, want %s", rec.Code, rec.Body, want)
 	}
 
-	// POST: color is optional (null too); unknown fields are ignored.
+	// POST: color is optional; unknown fields are ignored.
 	rec = doBody(t, s, "POST", "/api/members", `{"name":" Ari ","color":"lime","theme":"dark"}`)
 	if want := `{"id":3,"name":" Ari ","color":"lime","created_at":"2026-10-22T08:00:00Z","trakt":{"state":"off","username":null}}`; rec.Code != 201 || rec.Body.String() != want {
 		t.Errorf("POST = %d %s", rec.Code, rec.Body)
 	}
-	for _, body := range []string{`{"name":"Kim"}`, `{"name":"Kim","color":null}`} {
-		if rec := doBody(t, s, "POST", "/api/members", body); rec.Code != 201 {
-			t.Errorf("POST %s = %d %s", body, rec.Code, rec.Body)
-		}
+	if rec := doBody(t, s, "POST", "/api/members", `{"name":"Kim"}`); rec.Code != 201 {
+		t.Errorf("POST without a color = %d %s", rec.Code, rec.Body)
 	}
 	// No name is the service's to refuse (as an empty one).
 	if rec := doBody(t, s, "POST", "/api/members", `{"color":"sand"}`); rec.Code != 201 {
 		t.Errorf("POST without a name = %d %s", rec.Code, rec.Body)
 	}
-	if want := []string{" Ari ", "Kim", "Kim", ""}; !slices.Equal(f.created, want) {
+	if want := []string{" Ari ", "Kim", ""}; !slices.Equal(f.created, want) {
 		t.Errorf("created %q, want %q", f.created, want)
 	}
-	if f.colors[0] == nil || *f.colors[0] != "lime" || f.colors[1] != nil || f.colors[2] != nil {
+	if f.colors[0] == nil || *f.colors[0] != "lime" || f.colors[1] != nil || f.colors[2] == nil {
 		t.Errorf("colors = %v", f.colors)
 	}
 
@@ -72,12 +70,15 @@ func TestMemberRoutes_BadRequests(t *testing.T) {
 		{"POST", "/api/members", `[]`, 400, CodeBadRequest, ""},
 		{"POST", "/api/members", `"Sam"`, 400, CodeBadRequest, ""},
 		{"POST", "/api/members", `{"name":`, 400, CodeBadRequest, ""},
-		{"POST", "/api/members", `{"name":5}`, 422, CodeValidationError, "name"},
-		{"POST", "/api/members", `{"name":null}`, 422, CodeValidationError, "name"},
-		{"POST", "/api/members", `{"name":"Sam","color":3}`, 422, CodeValidationError, "color"},
+		// A wrong JSON type, null included, is 400, as on the quality profile.
+		{"POST", "/api/members", `{"name":5}`, 400, CodeBadRequest, ""},
+		{"POST", "/api/members", `{"name":null}`, 400, CodeBadRequest, ""},
+		{"POST", "/api/members", `{"name":"Sam","color":3}`, 400, CodeBadRequest, ""},
+		{"POST", "/api/members", `{"name":"Sam","color":null}`, 400, CodeBadRequest, ""},
 		{"PATCH", "/api/members/2", `[]`, 400, CodeBadRequest, ""},
-		{"PATCH", "/api/members/2", `{"name":null}`, 422, CodeValidationError, "name"},
-		{"PATCH", "/api/members/2", `{"color":null}`, 422, CodeValidationError, "color"},
+		{"PATCH", "/api/members/2", `{"name":null}`, 400, CodeBadRequest, ""},
+		{"PATCH", "/api/members/2", `{"color":null}`, 400, CodeBadRequest, ""},
+		{"PATCH", "/api/members/2", `{"name":"Sam","color":["rose"]}`, 400, CodeBadRequest, ""},
 		{"PATCH", "/api/members/two", `{}`, 400, CodeBadRequest, ""},
 		{"PATCH", "/api/members/0", `{}`, 400, CodeBadRequest, ""},
 		{"DELETE", "/api/members/two", ``, 400, CodeBadRequest, ""},
