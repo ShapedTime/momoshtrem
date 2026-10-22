@@ -15,7 +15,7 @@ import { showSourceParams } from '@/lib/source/context';
 import { episodeCode, parseEpisodeCode } from '@/lib/title/episodes';
 import { formatDate } from '@/lib/title/format';
 import { keepOf, NOT_DOWNLOADABLE_COPY } from '@/lib/title/keep';
-import { downloadsAvailable, episodeKeepContext, heldByAction, heldByCopy, keepSheetParams } from '@/lib/title/keep-sheet';
+import { episodeKeepContext, episodeKeepOffered, heldByAction, heldByCopy, keepSheetParams } from '@/lib/title/keep-sheet';
 import { KeepStatus } from '../KeepStatus';
 import { SubtitlesPanel } from '../SubtitlesPanel';
 
@@ -51,11 +51,8 @@ function EpisodeBody({ show, episode, close }: { show: ShowTitle; episode: Episo
   // Watched wins the state (B5): the file, when there is one, still plays
   const watched = episode.state === 'watched';
   const facts = [episode.runtime ? `${episode.runtime} min` : null, episode.air_date ? formatDate(episode.air_date) : null].filter(Boolean);
-  // Download & keep (#206), over this sheet in history too: once something keeps it, or with a torrent file
-  // (HDRezka streams from the CDN, so a Keep would be refused). Nothing while the backend has no downloads.
-  const kept = keepOf(episode.keep);
-  const keepable = hasFile(episode) && episode.source !== 'hdrezka';
-  const keepSection = downloadsAvailable(episode) && (kept || keepable) && (
+  // Download & keep (#206), over this sheet in history too (`episodeKeepOffered`: kept, or a torrent file)
+  const keepSection = episodeKeepOffered(episode) && (
     <EpisodeKeep
       episode={episode}
       name={`${show.title} · ${code}`}

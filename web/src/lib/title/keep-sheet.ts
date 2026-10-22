@@ -101,6 +101,14 @@ export type KeepSubjectResult =
  */
 export const downloadsAvailable = (holder: { keep?: Keep | null } | null | undefined): boolean => holder?.keep !== undefined;
 
+/**
+ * The episode sheet has a keep section (and the row's options name it): once something keeps the
+ * episode, or with a torrent file (HDRezka streams from the CDN, so a Keep would be refused).
+ * Nothing while the backend has no downloads.
+ */
+export const episodeKeepOffered = (episode: Pick<EpisodeSummary, 'keep' | 'webdav_path' | 'source'>): boolean =>
+  downloadsAvailable(episode) && (keepOf(episode.keep) !== null || (episode.webdav_path !== null && episode.source !== 'hdrezka'));
+
 /** The library target for `context`, and its download, from the title and (season and episode scopes) the season. */
 export function keepSubject(context: KeepContext, title: Title, season: SeasonDetail | undefined): KeepSubjectResult {
   const libraryId = title.library.library_id;

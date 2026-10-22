@@ -3,6 +3,7 @@ import {
   changedToast,
   downloadsAvailable,
   episodeKeepContext,
+  episodeKeepOffered,
   heldByAction,
   heldByContext,
   heldByCopy,
@@ -114,6 +115,17 @@ describe('keepSubject', () => {
     expect(downloadsAvailable({ keep: keep() })).toBe(true);
     expect(downloadsAvailable({})).toBe(false);
     expect(downloadsAvailable(undefined)).toBe(false);
+  });
+
+  it('offers an episode’s keep once something keeps it, or with a torrent file', () => {
+    const file = { webdav_path: '/Shows/Bluey/S03E01.mkv', source: 'torrent' as const };
+    expect(episodeKeepOffered({ ...file, keep: null })).toBe(true);
+    expect(episodeKeepOffered({ ...file, source: 'hdrezka', keep: null })).toBe(false);
+    expect(episodeKeepOffered({ ...file, source: 'hdrezka', keep: keep() })).toBe(true);
+    expect(episodeKeepOffered({ webdav_path: null, source: null, keep: null })).toBe(false);
+    expect(episodeKeepOffered({ webdav_path: null, source: null, keep: keep({ state: 'no_file' }) })).toBe(true);
+    // A backend without downloads
+    expect(episodeKeepOffered({ ...file, keep: undefined as unknown as null })).toBe(false);
   });
 });
 

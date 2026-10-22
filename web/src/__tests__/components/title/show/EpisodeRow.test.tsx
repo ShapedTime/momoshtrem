@@ -37,6 +37,11 @@ describe('EpisodeRow', () => {
     expect(screen.getByRole('button', { name: 'S01E01 options: how to play, subtitles, replace, remove' })).toBeInTheDocument();
   });
 
+  it('names no keep for an HDRezka episode nothing keeps (its sheet offers none)', () => {
+    renderRow({ ...episode(209867, 1, 1), source: 'hdrezka', keep: null });
+    expect(screen.getByRole('button', { name: 'S01E01 options: how to play, subtitles, replace, remove' })).toBeInTheDocument();
+  });
+
   it('watched without a file (a Trakt play): the pill, and the sheet offers to find one', () => {
     const watched = { ...episode(209867, 1, 1), webdav_path: null, source: null };
     const { onOpen, onFind } = renderRow(watched);
