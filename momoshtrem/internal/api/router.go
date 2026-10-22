@@ -114,6 +114,11 @@ type Options struct {
 	// Downloads serves /downloads: Keeps, smart picks and the estimate
 	// (#77 P4; wire_downloads.go). Nil makes those routes return 503.
 	Downloads Downloads
+	// Members serves /members and puts each /api request's member (the
+	// X-Momoshtrem-Member header's, else the lowest id) in its context
+	// (#241; wire_members.go). Nil: no member in the context, and those
+	// routes return 503.
+	Members Members
 }
 
 // NewServer creates a new API server
@@ -182,6 +187,11 @@ func (s *Server) setupMiddleware() {
 		s.router.Use(auth)
 	}
 
+	// The household member the request is for (#241)
+	if members := memberMiddleware(s.opts.Members); members != nil {
+		s.router.Use(members)
+	}
+
 	// JSON errors for unknown routes. Global middleware also wraps NoRoute,
 	// so unknown /api paths need the token too.
 	s.router.NoRoute(func(c *gin.Context) {
@@ -239,6 +249,8 @@ func (s *Server) setupRoutes() {
 	s.registerRecommendationRoutes(api) // Picks: home, refresh, runs and feedback
 	s.registerAskRoutes(api)            // Ask over SSE, and its threads
 	s.registerAISettingsRoutes(api)     // GET/PUT /settings/ai and its usage
+
+	s.registerMemberRoutes(api) // Household members (#241)
 }
 
 // Handler returns the HTTP handler

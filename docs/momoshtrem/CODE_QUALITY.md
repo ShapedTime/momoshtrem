@@ -203,6 +203,16 @@ errorCodeResponse(c, http.StatusConflict, "already_assigned", "...") // explicit
 
 ---
 
+## Household members
+
+Every `/api` request is for one household member (PLAN §6 "Household members"). `api/member_middleware.go` puts its id in the request context once (`member.WithID`):
+
+- Only the top-level service methods that the `api` interfaces name read it, with `member.Require(ctx)` (`member.IDFrom(ctx)` where a member is optional, as on a title page).
+- Below them the id is explicit: a repository method takes a `memberID`, or the repository is bound to one with `ForMember(id)` for a long-lived per-member object (a Trakt sync, a profile builder). Repositories never read the context.
+- Background jobs and the CLI never get a default implicitly: each names the member it works for (`member.WithID(ctx, id)`), or works for the household.
+
+---
+
 ## Logging
 
 **Use slog with component context:**

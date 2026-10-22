@@ -15,7 +15,7 @@ const TokenHeader = "X-Momoshtrem-Token"
 
 const (
 	corsAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-	corsAllowHeaders = "Content-Type, Authorization, " + TokenHeader
+	corsAllowHeaders = "Content-Type, Authorization, " + TokenHeader + ", " + MemberHeader
 	corsMaxAge       = "600"
 )
 
