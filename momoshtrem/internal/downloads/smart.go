@@ -96,7 +96,9 @@ type smartAnchor struct {
 // their picks are made: each episode streaming now (by show, then
 // episode), counting from the one after it; then each Up next show
 // watched within UpNextWithin, the most recently watched first, counting
-// from the episode it names. Specials anchor nothing.
+// from the episode it names. A show on several members' Up next anchors
+// once, at the entry of whoever watched it last (lastWatchedPerShow).
+// Specials anchor nothing.
 func smartAnchors(upNext []UpNextShow, streaming map[int64][]episodeNumber, now time.Time) []smartAnchor {
 	var out []smartAnchor
 	for _, show := range slices.Sorted(maps.Keys(streaming)) {
@@ -108,7 +110,7 @@ func smartAnchors(upNext []UpNextShow, streaming map[int64][]episodeNumber, now 
 		}
 	}
 	var recent []UpNextShow
-	for _, u := range upNext {
+	for _, u := range lastWatchedPerShow(upNext) {
 		if u.LastWatchedAt != nil && now.Sub(*u.LastWatchedAt) <= UpNextWithin && u.SeasonNumber > 0 {
 			recent = append(recent, u)
 		}
@@ -120,6 +122,32 @@ func smartAnchors(upNext []UpNextShow, streaming map[int64][]episodeNumber, now 
 		out = append(out, smartAnchor{u.ShowID, episodeNumber{u.SeasonNumber, u.EpisodeNumber}, library.SmartUpNext})
 	}
 	return out
+}
+
+// lastWatchedPerShow is upNext with one entry per show, every member's Up
+// next merged: the newest LastWatchedAt's (PLAN §6 "Household members":
+// the member who watched it last), a nil one (a watchlist start) oldest,
+// the first listed on a tie. Episodes anyone watched are passed over, so
+// that's the household's next episode. In the order of the entries kept.
+func lastWatchedPerShow(upNext []UpNextShow) []UpNextShow {
+	latest := map[int64]int{} // show → its entry in out
+	var out []UpNextShow
+	for _, u := range upNext {
+		i, seen := latest[u.ShowID]
+		switch {
+		case !seen:
+			latest[u.ShowID] = len(out)
+			out = append(out, u)
+		case newerWatch(u.LastWatchedAt, out[i].LastWatchedAt):
+			out[i] = u
+		}
+	}
+	return out
+}
+
+// newerWatch: a is a later watch than b; nil is never watched.
+func newerWatch(a, b *time.Time) bool {
+	return a != nil && (b == nil || a.After(*b))
 }
 
 func compareEpisodes(a, b episodeNumber) int {
@@ -379,7 +407,8 @@ func victimsFor(need int64, show int64, pool []smartVictim, now time.Time) []sma
 }
 
 // victimPool is the Up next picks that may give their room to a stream's,
-// with their shows' last plays: the active ones not released this pass,
+// with their shows' last plays (the newest of every member's Up next): the
+// active ones not released this pass,
 // of shows that don't stream now (two streams don't take each other's),
 // whose file releasing them frees. That's a file smart pays for (the
 // snapshot's smart files: admitted, and no kept download has it) that no
@@ -391,7 +420,7 @@ func victimPool(picks []library.SmartPick, released map[int64]bool, upNext []UpN
 		return nil
 	}
 	watched := map[int64]*time.Time{}
-	for _, u := range upNext {
+	for _, u := range lastWatchedPerShow(upNext) {
 		watched[u.ShowID] = u.LastWatchedAt
 	}
 	key := func(p library.SmartPick) FileKey { return FileKey{Hash: p.File.InfoHash, Path: p.File.FilePath} }

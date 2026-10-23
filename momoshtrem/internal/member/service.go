@@ -225,12 +225,14 @@ func (s *Service) IDs(ctx context.Context) ([]int64, error) {
 	return ids, nil
 }
 
-// List is GET /members: every member, by id.
+// List is GET /members: every member, by id, but those being removed (so
+// the picker never offers them).
 func (s *Service) List(ctx context.Context) ([]View, error) {
 	list, err := s.reload(ctx)
 	if err != nil {
 		return nil, err
 	}
+	list = s.staying(list)
 	out := make([]View, len(list))
 	for i, m := range list {
 		out[i] = s.view(m)

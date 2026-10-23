@@ -264,6 +264,40 @@ func TestClient_DeviceToken(t *testing.T) {
 	}
 }
 
+// The fake holds several accounts at once (#244): each token is its
+// user's, a refresh keeps the user, and ListFor serves one user's list
+// over the default one.
+func TestFake_TokensKeepTheirUser(t *testing.T) {
+	srv := trakttest.New(t)
+	c := newTestClient(srv, newFakeClock())
+	ctx := context.Background()
+	srv.SetUser("Ann", "ann")
+	annAccess, annRefresh := srv.Grant()
+	srv.SetUser("Bob", "bob")
+	bobAccess, _ := srv.Grant()
+	srv.List("/sync/watchlist/movies/added/desc", []obj{{"rank": 1}})
+	srv.ListFor("bob", "/sync/watchlist/movies/added/desc", []obj{{"rank": 7}, {"rank": 8}})
+
+	set, err := c.RefreshToken(ctx, annRefresh) // Bob is SetUser's now
+	if err != nil {
+		t.Fatal(err)
+	}
+	for token, want := range map[string]string{set.AccessToken: "ann", bobAccess: "bob"} {
+		if u, err := c.UserSettings(ctx, token); err != nil || u.User.IDs.Slug != want {
+			t.Errorf("UserSettings(%s) = %+v, %v; want %s", token, u, err, want)
+		}
+	}
+	for token, want := range map[string]int{set.AccessToken: 1, bobAccess: 2} {
+		var items []obj
+		if _, err := c.Get(ctx, token, "/sync/watchlist/movies/added/desc", nil, &items); err != nil || len(items) != want {
+			t.Errorf("the list for %s = %v, %v; want %d items", token, items, err, want)
+		}
+	}
+	if _, err := c.UserSettings(ctx, annAccess); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("Ann's replaced token = %v", err)
+	}
+}
+
 // Refresh tokens are single-use and rotate; no error carries a token or
 // the client secret.
 func TestClient_RefreshRotates(t *testing.T) {

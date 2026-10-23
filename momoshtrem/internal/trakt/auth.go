@@ -93,6 +93,9 @@ type AuthDeps struct {
 	Store    Store
 	Settings Settings
 	Clock    Clock // nil: real time
+	// Member is whose connection it is (the stores are bound to them),
+	// for the logs only; 0 leaves it out.
+	Member int64
 }
 
 // Auth is the Trakt connection (PLAN §6 "Trakt (B5)"): the device-code
@@ -156,7 +159,7 @@ func NewAuth(d AuthDeps) *Auth {
 		store:    d.Store,
 		settings: d.Settings,
 		clock:    d.Clock,
-		log:      slog.With("component", "trakt"),
+		log:      memberLog("trakt", d.Member),
 		state:    StateOff,
 	}
 	if d.Client != nil && d.Box != nil {
@@ -445,6 +448,16 @@ func (a *Auth) finishConnect(ctx context.Context, f *flow, set *TokenSet) {
 		TokenCreatedAt:  t.createdAt,
 		ExpiresAt:       t.expiresAt,
 	})
+	if errors.Is(err, library.ErrTraktAccountInUse) {
+		// Not revoked: Trakt's docs don't say whether a second grant to
+		// the same account and app gets a token of its own, nor whether a
+		// revoke ends more than the one token, so revoking it might sign
+		// the other member out. Never stored, it's dropped.
+		a.life.Unlock()
+		a.log.Warn("Trakt approved the code for an account another member has connected", "username", user.User.Username)
+		a.endFlow(f, ConnectAccountInUse)
+		return
+	}
 	if err != nil {
 		a.life.Unlock()
 		a.log.Error("Failed to store the Trakt connection", "error", err)
@@ -487,6 +500,19 @@ func (a *Auth) endFlowLocked(f *flow, why ConnectError) {
 // table in one transaction and revokes the token (best effort, 5 s). The
 // settings stay. Calling it again changes nothing.
 func (a *Auth) Disconnect(ctx context.Context) error {
+	return a.disconnect(ctx, false)
+}
+
+// Forget disconnects in any state, for a member being removed: it cancels
+// a pending code, then stops the sync (waiting at most 10 s), purges and
+// revokes the token (best effort, 5 s), as Disconnect does once connected.
+func (a *Auth) Forget(ctx context.Context) error {
+	return a.disconnect(ctx, true)
+}
+
+// disconnect is Disconnect, and with always Forget: past a pending code
+// it goes on.
+func (a *Auth) disconnect(ctx context.Context, always bool) error {
 	ctx = context.WithoutCancel(ctx)
 	if err := a.Load(ctx); err != nil {
 		return err
@@ -498,8 +524,10 @@ func (a *Auth) Disconnect(ctx context.Context) error {
 	if f := a.flow; f != nil {
 		f.cancel()
 		a.flow, a.state = nil, f.from
-		a.mu.Unlock()
-		return nil
+		if !always {
+			a.mu.Unlock()
+			return nil
+		}
 	}
 	stop := a.hooks.StopSync
 	a.mu.Unlock()

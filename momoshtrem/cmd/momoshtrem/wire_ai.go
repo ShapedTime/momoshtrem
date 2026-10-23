@@ -25,17 +25,16 @@ type aiDeps struct {
 	aiStore  *library.AIStore            // ai_usage and ai_cache, shared with the classifier
 	tmdb     *tmdb.Cached
 	// member is whose taste the picks and Ask read (their Trakt rows and
-	// use_ratings): the one Trakt connection's, until #245 and #246 build
-	// them per member.
+	// use_ratings): the lowest member at startup, until #245 and #246
+	// build them per member.
 	member int64
 	// catalog joins the library state onto rec cards (LibraryStates) and
 	// takes the title pages' reasons (a SetReasons setter, #157).
 	catalog *catalog.Service
-	// traktAuth says whether Trakt is connected; the first_sync run hooks
-	// onto traktSync when the initial import finishes (a SetOnImported
-	// setter, #157).
-	traktAuth *trakt.Auth
-	traktSync *trakt.Syncer
+	// trakt says whether member's Trakt is connected (Connection); the
+	// first_sync run hooks onto the end of their initial import (a
+	// SetOnImported setter, #157).
+	trakt *trakt.Registry
 }
 
 // aiCore is the AI core (#154) the picks and Ask run on.

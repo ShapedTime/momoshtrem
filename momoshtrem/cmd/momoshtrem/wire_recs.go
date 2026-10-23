@@ -59,8 +59,8 @@ type recsWiring struct {
 // (SetRecs) and rescheduling on a settings change (SetOnChange).
 func wireRecs(d aiDeps, core *aiCore, opts *api.Options) *recsWiring {
 	var trakt profile.Connection
-	if d.traktAuth != nil {
-		trakt = d.traktAuth
+	if d.trakt != nil {
+		trakt = d.trakt.Connection(d.member)
 	}
 	w := newRecsWiring(d, core, trakt)
 	opts.RecFeedback = recommend.NewFeedbackService(library.NewRecFeedbackRepository(d.db))
@@ -75,8 +75,14 @@ func wireRecs(d aiDeps, core *aiCore, opts *api.Options) *recsWiring {
 	if d.catalog != nil {
 		d.catalog.SetReasons(w.scheduler)
 	}
-	if d.traktSync != nil {
-		d.traktSync.SetOnImported(w.scheduler.FirstSync)
+	if d.trakt != nil {
+		// The picks are d.member's until #245 runs them per member, with
+		// FirstSync(ctx, memberID) taking every member's import here.
+		d.trakt.SetOnImported(func(ctx context.Context, memberID int64) {
+			if memberID == d.member {
+				w.scheduler.FirstSync(ctx)
+			}
+		})
 	}
 	if err := w.scheduler.Start(context.Background()); err != nil {
 		slog.Error("Failed to start the picks' scheduler; runs left active stay so until the next start", "error", err)

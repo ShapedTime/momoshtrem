@@ -451,6 +451,40 @@ func TestService_DeleteHidesTheMember(t *testing.T) {
 	}
 }
 
+// GET /members leaves out a member being removed too (their Trakt
+// disconnect can take seconds), so a page loaded meanwhile never offers
+// them; a delete that fails lists them again.
+func TestService_ListHidesTheMemberBeingRemoved(t *testing.T) {
+	ctx := context.Background()
+	ids := func(views []View) []int64 {
+		out := make([]int64, len(views))
+		for i, v := range views {
+			out[i] = v.ID
+		}
+		return out
+	}
+	for _, fails := range []bool{false, true} {
+		store := newFakeStore("Teymur", "Sam")
+		if fails {
+			store.deleteErr = errors.New("db down")
+		}
+		s := NewService(store)
+		s.OnRemoving(func(context.Context, int64) {
+			if list, err := s.List(ctx); err != nil || !slices.Equal(ids(list), []int64{2}) {
+				t.Errorf("List while removing 1 = %v, %v, want [2]", ids(list), err)
+			}
+		})
+		_ = s.Delete(ctx, 1)
+		want := []int64{2}
+		if fails {
+			want = []int64{1, 2}
+		}
+		if list, err := s.List(ctx); err != nil || !slices.Equal(ids(list), want) {
+			t.Errorf("List after a delete (failing %v) = %v, %v, want %v", fails, ids(list), err, want)
+		}
+	}
+}
+
 // A listener's panic (gin recovers it) leaves the member shown and the
 // next change free to run.
 func TestService_DeletePanics(t *testing.T) {

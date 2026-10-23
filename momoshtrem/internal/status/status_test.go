@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // fakeClock is a manually advanced clock.
@@ -412,7 +414,7 @@ func TestReport_LiveFieldsNotCached(t *testing.T) {
 		StartedAt:       clock.Now(),
 		ActiveReaders:   func() int { return readers },
 		TraktConfigured: true,
-		TraktConnected:  func() bool { return traktConnected },
+		TraktConnected:  func(context.Context) bool { return traktConnected },
 		Now:             clock.Now,
 	})
 
@@ -433,6 +435,40 @@ func TestReport_LiveFieldsNotCached(t *testing.T) {
 	}
 	if first.Trakt.Connected || !second.Trakt.Connected || !second.Trakt.Configured {
 		t.Errorf("trakt = %+v then %+v, want connected live", first.Trakt, second.Trakt)
+	}
+}
+
+// trakt.connected is the viewer's, the request context's member (#244),
+// over one cached report; false without a member (an unknown header).
+func TestReport_TraktConnectedIsTheViewers(t *testing.T) {
+	clock := newFakeClock()
+	db := &fakeDB{}
+	svc := NewService(Options{
+		DB:              db,
+		StartedAt:       clock.Now(),
+		TraktConfigured: true,
+		TraktConnected: func(ctx context.Context) bool {
+			id, ok := member.IDFrom(ctx)
+			return ok && id == 2
+		},
+		Now: clock.Now,
+	})
+	ctx := context.Background()
+	for _, tt := range []struct {
+		name string
+		ctx  context.Context
+		want bool
+	}{
+		{"member 2, connected", member.WithID(ctx, 2), true},
+		{"member 1, not", member.WithID(ctx, 1), false},
+		{"no member", ctx, false},
+	} {
+		if r := svc.Report(tt.ctx, false); r.Trakt.Connected != tt.want || !r.Trakt.Configured {
+			t.Errorf("%s: trakt = %+v, want connected %v", tt.name, r.Trakt, tt.want)
+		}
+	}
+	if got := db.pings.Load(); got != 1 {
+		t.Errorf("db pings = %d, want 1 (one cached report for every viewer)", got)
 	}
 }
 

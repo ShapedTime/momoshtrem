@@ -66,6 +66,41 @@ func TestSmartAnchors(t *testing.T) {
 				{1, episodeNumber{1, 3}, library.SmartUpNext},
 			},
 		},
+		{
+			// Two members' Up next merged (wire_smart.go): the member who
+			// watched the show last names its episode.
+			name: "a show two members watch anchors once, at whoever watched it last",
+			upNext: []UpNextShow{
+				{ShowID: 1, SeasonNumber: 1, EpisodeNumber: 3, LastWatchedAt: &recent}, // member 1
+				{ShowID: 2, SeasonNumber: 1, EpisodeNumber: 1},                         // member 1's watchlist start
+				{ShowID: 1, SeasonNumber: 1, EpisodeNumber: 6, LastWatchedAt: &newer},  // member 2, ahead
+				{ShowID: 2, SeasonNumber: 2, EpisodeNumber: 4, LastWatchedAt: &recent}, // member 2
+			},
+			want: []smartAnchor{
+				{1, episodeNumber{1, 6}, library.SmartUpNext},
+				{2, episodeNumber{2, 4}, library.SmartUpNext},
+			},
+		},
+		{
+			name: "the slower member's later watch wins, and a tie keeps the first listed",
+			upNext: []UpNextShow{
+				{ShowID: 1, SeasonNumber: 1, EpisodeNumber: 6, LastWatchedAt: &recent},
+				{ShowID: 1, SeasonNumber: 1, EpisodeNumber: 3, LastWatchedAt: &newer},
+				{ShowID: 2, SeasonNumber: 1, EpisodeNumber: 2, LastWatchedAt: &recent},
+				{ShowID: 2, SeasonNumber: 1, EpisodeNumber: 5, LastWatchedAt: &recent},
+			},
+			want: []smartAnchor{
+				{1, episodeNumber{1, 3}, library.SmartUpNext},
+				{2, episodeNumber{1, 2}, library.SmartUpNext},
+			},
+		},
+		{
+			name: "whoever watched it last watched it too long ago: nothing",
+			upNext: []UpNextShow{
+				{ShowID: 1, SeasonNumber: 1, EpisodeNumber: 3, LastWatchedAt: &old},
+				{ShowID: 1, SeasonNumber: 1, EpisodeNumber: 1},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -385,5 +420,18 @@ func TestVictimPool(t *testing.T) {
 	}
 	if victimPool(picks, nil, nil, nil, nil) != nil {
 		t.Error("a pool before the first pass")
+	}
+
+	// Two members' Up next: a show's last play is the newest of theirs,
+	// in either order, a watchlist start's nil the oldest.
+	earlier := watched.Add(-24 * time.Hour)
+	for _, upNext := range [][]UpNextShow{
+		{{ShowID: 1, LastWatchedAt: &earlier}, {ShowID: 1, LastWatchedAt: &watched}, {ShowID: 1}},
+		{{ShowID: 1}, {ShowID: 1, LastWatchedAt: &watched}, {ShowID: 1, LastWatchedAt: &earlier}},
+	} {
+		pool := victimPool(picks, map[int64]bool{7: true}, upNext, map[int64][]episodeNumber{2: {{1, 1}}}, snap)
+		if !reflect.DeepEqual(pool, want) {
+			t.Errorf("with Up next %v: pool = %+v\nwant   %+v", upNext, pool, want)
+		}
 	}
 }
