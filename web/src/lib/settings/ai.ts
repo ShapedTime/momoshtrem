@@ -1,4 +1,15 @@
-import type { AiFeature, AiSettings, AiSettingsPatch, AiUsage, ClassifierModel, Member, RecModel, RecSchedule, RunSummary } from '@/lib/api/contract';
+import type {
+  AiFeature,
+  AiSettings,
+  AiSettingsPatch,
+  AiUsage,
+  ClassifierModel,
+  Member,
+  RecModel,
+  RecSchedule,
+  RunSummary,
+  TraktState,
+} from '@/lib/api/contract';
 import { possessive } from '@/lib/members/display';
 
 /**
@@ -373,6 +384,8 @@ export interface ScheduleHelpInput {
   saved: Pick<AiSettings, 'rec_enabled' | 'rec_schedule'>;
   configured: boolean;
   recs: AiUsage['recs'] | undefined;
+  /** The viewer's Trakt (#239); null while it's unknown. Only a connected member's runs are scheduled. */
+  trakt: TraktState | null;
   now: number;
 }
 
@@ -384,19 +397,22 @@ const SLOTS = 'Nightly runs at 03:00 server time, weekly on Sunday.';
  * Sunday. Next run tonight; the last one took 41 s and cost $0.36."), from
  * the usage's `next_run_at` and last run. A known next run says its own day
  * and time in this browser's time ("Next run tonight at 03:00; …"); without
- * one, the slots are said in server time.
+ * one, the slots are said in server time. The schedule queues runs only for
+ * members with Trakt connected (#239), so without it the help says to connect
+ * rather than promise a run.
  */
-export function scheduleHelp({ draft, saved, configured, recs, now }: ScheduleHelpInput): string {
+export function scheduleHelp({ draft, saved, configured, recs, trakt, now }: ScheduleHelpInput): string {
   const unsaved = draft.rec_enabled !== saved.rec_enabled || draft.rec_schedule !== saved.rec_schedule;
   const last = lastRunClause(recs?.last_run ?? null);
   const withLast = (lead: string) => (last ? `${lead}; ${last}.` : `${lead}.`);
-  if (configured && draft.rec_enabled && draft.rec_schedule !== 'manual' && !unsaved && recs?.next_run_at) {
-    return withLast(`Next run ${nextRunPhrase(recs.next_run_at, now)}`);
-  }
   let lead: string | null = null;
   if (configured && !draft.rec_enabled) lead = 'Picks are off, so nothing runs';
   else if (configured && draft.rec_schedule === 'manual') lead = 'Manual: only when you press Run now';
+  else if (configured && trakt !== null && trakt !== 'connected') {
+    lead = `${trakt === 'reauth' ? 'Sign in to Trakt again' : 'Connect Trakt'} to get ${draft.rec_schedule} picks`;
+  }
   if (lead) return `${SLOTS} ${withLast(lead)}`;
+  if (configured && !unsaved && recs?.next_run_at) return withLast(`Next run ${nextRunPhrase(recs.next_run_at, now)}`);
   return last ? `${SLOTS} ${capitalize(last.replace('the last one', 'the last run'))}.` : SLOTS;
 }
 

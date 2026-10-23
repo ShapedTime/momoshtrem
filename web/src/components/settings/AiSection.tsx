@@ -11,6 +11,7 @@ import { isApiError } from '@/lib/api/client';
 import type { AiSettingsPatch } from '@/lib/api/contract';
 import { isActiveRun, recApi, recKeys, recRunQuery } from '@/lib/api/endpoints/recommendations';
 import { aiSettingsQuery, aiUsageQuery, settingsApi, settingsKeys } from '@/lib/api/endpoints/settings';
+import { traktIntegrationQuery } from '@/lib/api/endpoints/trakt';
 import {
   aiChanges,
   type AiDraft,
@@ -75,6 +76,8 @@ export function AiSection() {
   const settings = useQuery(aiSettingsQuery());
   const usage = useQuery(aiUsageQuery());
   const household = useMembers();
+  // The viewer's Trakt: the schedule runs only for a connected member (the Trakt section polls; this reads along)
+  const trakt = useQuery({ ...traktIntegrationQuery(), refetchInterval: false });
   const now = useNow(60_000);
   // Only the fields touched here: the rest follows the server, so a stale page never sends them back
   const [edits, setEdits] = useState<Partial<AiDraft>>({});
@@ -204,6 +207,7 @@ export function AiSection() {
         problem={problem}
         onRunNow={() => refresh.mutate()}
         memberNote={picksMemberNote(household.current, household.members.length)}
+        trakt={trakt.data?.state ?? null}
       />
 
       <BudgetCard

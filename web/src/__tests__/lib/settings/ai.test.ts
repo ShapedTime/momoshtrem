@@ -251,6 +251,7 @@ describe('personal picks', () => {
       saved: { rec_enabled: true, rec_schedule: 'nightly' },
       configured: true,
       recs: usage().recs,
+      trakt: 'connected',
       now: NOW,
       ...overrides,
     });
@@ -271,6 +272,26 @@ describe('personal picks', () => {
     expect(help({ configured: false, recs: { last_run: null, active_run: null, next_run_at: null } })).toBe(
       'Nightly runs at 03:00 server time, weekly on Sunday.'
     );
+  });
+
+  it('without the viewer’s Trakt connected, says to connect it rather than promise a run (#239)', () => {
+    const none = { last_run: null, active_run: null, next_run_at: null };
+    expect(help({ trakt: 'off', recs: none })).toBe('Nightly runs at 03:00 server time, weekly on Sunday. Connect Trakt to get nightly picks.');
+    expect(help({ trakt: 'pending', recs: none, draft: { rec_enabled: true, rec_schedule: 'weekly' } })).toBe(
+      'Nightly runs at 03:00 server time, weekly on Sunday. Connect Trakt to get weekly picks.'
+    );
+    // Disconnected since the last run (it's kept); in reauth the token stopped working, so nothing is scheduled either
+    expect(help({ trakt: 'reauth', recs: { ...none, last_run: LAST_RUN } })).toBe(
+      'Nightly runs at 03:00 server time, weekly on Sunday. Sign in to Trakt again to get nightly picks; the last one took 41 s and cost $0.36.'
+    );
+    // Picks off and Manual say so first
+    expect(help({ trakt: 'off', recs: none, draft: { rec_enabled: false, rec_schedule: 'nightly' } })).toMatch(/Picks are off, so nothing runs\.$/);
+    expect(help({ trakt: 'off', recs: none, draft: { rec_enabled: true, rec_schedule: 'manual' } })).toMatch(/Manual: only when you press Run now\.$/);
+    // Connected, or not known yet, with the next run still to come: the plain schedule
+    expect(help({ trakt: 'connected', recs: none })).toBe('Nightly runs at 03:00 server time, weekly on Sunday.');
+    expect(help({ trakt: null, recs: none })).toBe('Nightly runs at 03:00 server time, weekly on Sunday.');
+    // Without an Anthropic key nothing runs anyway: no Trakt advice
+    expect(help({ trakt: 'off', configured: false, recs: none })).toBe('Nightly runs at 03:00 server time, weekly on Sunday.');
   });
 
   it('says when the last run failed or was skipped', () => {

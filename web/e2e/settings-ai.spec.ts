@@ -165,6 +165,8 @@ test.describe('Settings › AI & picks', () => {
   test('Run now without enough Trakt history points to Trakt', async ({ page }) => {
     await scenario(page, 'trakt-off');
     await openSection(page);
+    // Only a member with Trakt connected gets scheduled runs (#239): no promise of one
+    await expect(scheduleHelp(page)).toHaveText('Nightly runs at 03:00 server time, weekly on Sunday. Connect Trakt to get nightly picks.');
     await runNow(page).click();
     const alert = picks(page).getByRole('alert');
     await expect(alert).toContainText('Not enough history yet');

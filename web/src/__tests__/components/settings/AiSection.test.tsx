@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MembersGate } from '@/components/members/MembersGate';
 import { ToastProvider } from '@/components/ui';
 import { AiSection } from '@/components/settings/AiSection';
-import type { AiSettings, AiSettingsPatch, AiUsage, Member } from '@/lib/api/contract';
+import type { AiSettings, AiSettingsPatch, AiUsage, Member, TraktState } from '@/lib/api/contract';
 import { AI_SETTINGS } from '@/mocks/fixtures/settings';
 
 /** Settings › AI & picks (#159): partial saves, the budget's errors, and no key. */
@@ -172,12 +172,14 @@ describe('AiSection in a household (#239)', () => {
   ];
 
   /** As Teymur (1), with /api/members answering `members`. */
-  function renderInHousehold(members: Member[], usageBody: AiUsage) {
+  function renderInHousehold(members: Member[], usageBody: AiUsage, traktState?: TraktState) {
     document.cookie = 'momoshtrem_member=1; Path=/';
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url === '/api/members') return Promise.resolve(answer(200, { items: members }));
       if (url.endsWith('/api/settings/ai/usage')) return Promise.resolve(answer(200, usageBody));
+      // The section reads only the state
+      if (url.endsWith('/api/integrations/trakt') && traktState) return Promise.resolve(answer(200, { state: traktState }));
       return Promise.resolve(answer(200, AI_SETTINGS));
     }) as typeof fetch;
     render(
@@ -216,5 +218,11 @@ describe('AiSection in a household (#239)', () => {
     renderInHousehold([person(1, 'Teymur', 'teal'), person(2, 'Sam', 'rose')], usage());
     expect(await screen.findByText('Runs and Run now are Teymur’s. The schedule, model and budget are shared.')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Picks and Ask by person' })).not.toBeInTheDocument();
+  });
+
+  it('the viewer without Trakt: the schedule says to connect it, not that a run is coming', async () => {
+    renderInHousehold([person(1, 'Teymur', 'teal'), person(2, 'Sam', 'rose')], usage(), 'off');
+    const help = await screen.findByText(/Connect Trakt to get nightly picks\./);
+    expect(help).toHaveTextContent('Nightly runs at 03:00 server time, weekly on Sunday. Connect Trakt to get nightly picks.');
   });
 });

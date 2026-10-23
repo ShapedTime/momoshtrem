@@ -1,6 +1,6 @@
 import { Play } from 'lucide-react';
 import { Banner, Button, ButtonLink, Chip, SegmentedControl, Steps, Switch } from '@/components/ui';
-import type { AiSettings, AiUsage, RunProgress } from '@/lib/api/contract';
+import type { AiSettings, AiUsage, RunProgress, TraktState } from '@/lib/api/contract';
 import { RUN_STEPS, stepRows } from '@/lib/recommendations/steps';
 import {
   type AiDraft,
@@ -36,6 +36,8 @@ interface PicksCardProps {
   onRunNow: () => void;
   /** With two or more people (#239): whose runs these are, and what's shared. */
   memberNote: string | null;
+  /** The viewer's Trakt, null while unknown: the schedule runs only for a connected member. */
+  trakt: TraktState | null;
 }
 
 /** The run's named steps while it works (HANDOFF §4.3), with its model and cost so far. */
@@ -59,7 +61,7 @@ function RunStatus({ run }: { run: RunProgress }) {
  * means no shelves and no runs at all, while the schedule says when. The
  * runs are the viewer's and the settings the household's (#239).
  */
-export function PicksCard({ draft, saved, usage, configured, now, onChange, errorFor, run, starting, problem, onRunNow, memberNote }: PicksCardProps) {
+export function PicksCard({ draft, saved, usage, configured, now, onChange, errorFor, run, starting, problem, onRunNow, memberNote, trakt }: PicksCardProps) {
   const off = !configured;
   return (
     <SettingsCard
@@ -109,7 +111,7 @@ export function PicksCard({ draft, saved, usage, configured, now, onChange, erro
       <SettingRow
         id="ai-schedule"
         label="Schedule"
-        help={scheduleHelp({ draft, saved, configured, recs: usage?.recs, now })}
+        help={scheduleHelp({ draft, saved, configured, recs: usage?.recs, trakt, now })}
         error={errorFor('rec_schedule')}
         stack
       >
