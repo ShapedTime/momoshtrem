@@ -6,8 +6,8 @@ import "errors"
 var errUnbound = errors.New("the repository isn't bound to a household member (ForMember)")
 
 // boundMember is the member a repository reads and writes for (ForMember:
-// TraktAuthRepository, TraktSyncStore, TasteRepository); 0 until it's
-// bound.
+// TraktAuthRepository, TraktSyncStore, TasteRepository,
+// TasteProfileRepository); 0 until it's bound.
 type boundMember int64
 
 // id is the member, or errUnbound.

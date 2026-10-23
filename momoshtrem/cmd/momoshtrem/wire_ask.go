@@ -28,23 +28,25 @@ type askWiring struct {
 // wireAsk serves /recommendations/ask and /recommendations/threads
 // (Options.Ask), on the AI core and R1's tools. Threads read without a
 // key; asking needs one. At startup a turn a crash left streaming is
-// marked failed, and Ask's part of /settings/ai/usage is installed.
+// marked failed, and Ask's part of /settings/ai/usage is installed. Ask
+// reads d.member's taste until #246 runs it per member.
 func wireAsk(d aiDeps, core *aiCore, recs *recsWiring, opts *api.Options) *askWiring {
+	m := recs.member(d.member)
 	inputs := tools.NewCached(func(ctx context.Context) (*profile.Profile, error) {
-		stored, err := recs.profiles.Current(ctx, askProfileMaxAge)
+		stored, err := m.profiles.Current(ctx, askProfileMaxAge)
 		if err != nil {
 			return nil, err
 		}
 		return stored.Profile, nil
-	}, recs.pools.Build, askInputsTTL)
+	}, m.pools.Build, askInputsTTL)
 	deps := ask.Deps{
 		Budget:   core.ledger,
 		Store:    library.NewAskRepository(d.db),
 		Settings: d.settings, // rec_model: new threads' model
-		Titles:   recs.taste,
+		Titles:   m.taste,
 		Library:  d.catalog,
 		TMDB:     d.tmdb,
-		Tools:    recs.tools(inputs),
+		Tools:    m.tools(inputs),
 	}
 	if core.client != nil {
 		deps.Runner = core.client

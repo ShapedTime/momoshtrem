@@ -411,7 +411,8 @@ func TestCountSchema(t *testing.T) {
 	}
 }
 
-// The system prompt is byte-stable (cached): nothing in it varies by run.
+// The system prompt is byte-stable (cached): nothing in it varies by run,
+// or by member.
 func TestSystemPrompt_Stable(t *testing.T) {
 	for _, volatile := range []string{"2026", "Today", "%s", "%d"} {
 		if strings.Contains(systemPrompt, volatile) {
@@ -419,9 +420,9 @@ func TestSystemPrompt_Stable(t *testing.T) {
 		}
 	}
 	h := newHarness(t)
-	a := h.runner.request("claude-opus-5-5", aicore.UserText("a"), nil, nil, 1)
-	b := h.runner.request("claude-opus-5-5", aicore.UserText("b"), nil, nil, 2)
-	if a.System != b.System || !bytes.Equal(toolDefs(t, a.Tools), toolDefs(t, b.Tools)) {
+	a := h.runner.request("claude-opus-5-5", aicore.UserText("a"), skeletonTools(h.member(1)), nil, 1)
+	b := h.runner.request("claude-opus-5-5", aicore.UserText("b"), skeletonTools(h.member(2)), nil, 2)
+	if len(a.Tools) != 7 || a.System != b.System || !bytes.Equal(toolDefs(t, a.Tools), toolDefs(t, b.Tools)) {
 		t.Error("two runs' prefixes differ")
 	}
 }

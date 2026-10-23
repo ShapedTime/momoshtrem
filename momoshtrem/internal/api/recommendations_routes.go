@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 )
 
@@ -221,10 +222,14 @@ func parseFeedback(raw []byte) (recommend.Feedback, bool) {
 // the client's mistake, never a 500.
 func validTMDBID(id int) bool { return id > 0 && id <= math.MaxInt32 }
 
-// recsErrorResponse maps the recommendations' and Ask's errors.
+// recsErrorResponse maps the recommendations' and Ask's errors. A member
+// removed while their request ran is unknown_member, as the middleware
+// answers.
 func recsErrorResponse(c *gin.Context, err error) {
 	var limit *recommend.LimitError
 	switch {
+	case errors.Is(err, member.ErrUnknown):
+		unknownMemberResponse(c)
 	case errors.As(err, &limit):
 		msg := "This month’s AI budget is used up."
 		if limit.Code == recommend.CodeAskLimit {

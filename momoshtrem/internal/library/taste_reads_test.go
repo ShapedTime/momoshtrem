@@ -3,9 +3,12 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // seedTaste fills a private schema with a small history:
@@ -55,10 +58,10 @@ func seedTaste(t *testing.T, db *DB) {
 		`INSERT INTO seasons (id, show_id, season_number) VALUES (1, 1, 1), (2, 1, 0)`,
 		`INSERT INTO episodes (season_id, episode_number, runtime) VALUES (1, 1, 24), (1, 2, 25), (2, 1, 90)`,
 		`INSERT INTO movies (tmdb_id, title, year, runtime, genres) VALUES (693134, 'Dune Part Two', 2024, 166, '["Science Fiction"]')`,
-		`INSERT INTO rec_feedback (media_type, tmdb_id, signal, source, updated_at) VALUES
-			('tv', 136315, 'like', 'shelf', '2026-10-12T00:00:00Z'),
-			('movie', 550, 'dislike', 'hero', '2026-10-13T00:00:00Z'),
-			('tv', 1399, 'seen', 'title', '2026-10-11T00:00:00Z')`,
+		`INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source, updated_at) VALUES
+			(1, 'tv', 136315, 'like', 'shelf', '2026-10-12T00:00:00Z'),
+			(1, 'movie', 550, 'dislike', 'hero', '2026-10-13T00:00:00Z'),
+			(1, 'tv', 1399, 'seen', 'title', '2026-10-11T00:00:00Z')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%.60s…: %v", q, err)
@@ -237,10 +240,10 @@ func TestRecFeedbackRepository(t *testing.T) {
 	ctx := context.Background()
 	severance := TitleRef{TitleTV, 95396}
 
-	if err := repo.Set(ctx, severance, "dislike", "shelf"); err != nil {
+	if err := repo.Set(ctx, 1, severance, "dislike", "shelf"); err != nil {
 		t.Fatal(err)
 	}
-	first, err := repo.List(ctx)
+	first, err := repo.List(ctx, 1)
 	if err != nil || len(first) != 1 || first[0].Signal != "dislike" || first[0].Source != "shelf" {
 		t.Fatalf("after set: %+v, %v", first, err)
 	}
@@ -248,13 +251,13 @@ func TestRecFeedbackRepository(t *testing.T) {
 	if _, err := db.Exec(`UPDATE rec_feedback SET created_at = created_at - INTERVAL '1 day', updated_at = updated_at - INTERVAL '1 day'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Set(ctx, severance, "like", "title"); err != nil {
+	if err := repo.Set(ctx, 1, severance, "like", "title"); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Set(ctx, TitleRef{TitleMovie, 95396}, "seen", "ask"); err != nil {
+	if err := repo.Set(ctx, 1, TitleRef{TitleMovie, 95396}, "seen", "ask"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := repo.List(ctx)
+	got, err := repo.List(ctx, 1)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("after upsert: %+v, %v", got, err)
 	}
@@ -269,24 +272,61 @@ func TestRecFeedbackRepository(t *testing.T) {
 	}
 
 	// An unknown signal is the database's to refuse
-	if err := repo.Set(ctx, severance, "love", "shelf"); err == nil {
+	if err := repo.Set(ctx, 1, severance, "love", "shelf"); err == nil {
 		t.Error("unknown signal saved")
+	}
+
+	// Another member's feedback is theirs (#245): their own signal on the
+	// same title, in their list and title states, and theirs to clear.
+	if _, err := NewMemberRepository(db).Create(ctx, "Sam", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Set(ctx, 2, severance, "not_interested", "hero"); err != nil {
+		t.Fatal(err)
+	}
+	if theirs, err := repo.List(ctx, 2); err != nil || len(theirs) != 1 || theirs[0].Signal != "not_interested" {
+		t.Errorf("member 2's feedback = %+v, %v", theirs, err)
+	}
+	for memberID, want := range map[int64]string{1: "like", 2: "not_interested"} {
+		taste := NewTasteRepository(db).ForMember(memberID)
+		states, err := taste.TitleStates(ctx, []TitleRef{severance})
+		if err != nil || len(states) != 1 || states[0].Feedback != want {
+			t.Errorf("member %d's title state = %+v, %v; want %s", memberID, states, err, want)
+		}
+		listed, err := taste.TasteFeedback(ctx)
+		if err != nil || len(listed) == 0 || listed[0].Signal == "" {
+			t.Fatalf("member %d's taste feedback = %+v, %v", memberID, listed, err)
+		}
+		for _, f := range listed {
+			if f.TitleRef == severance && f.Signal != want {
+				t.Errorf("member %d's taste feedback on Severance = %s, want %s", memberID, f.Signal, want)
+			}
+		}
+	}
+	if err := repo.Clear(ctx, 2, severance); err != nil {
+		t.Fatal(err)
+	}
+	if mine, err := repo.List(ctx, 1); err != nil || len(mine) != 2 {
+		t.Errorf("member 1's feedback after member 2 cleared theirs = %+v, %v", mine, err)
 	}
 
 	// Clear is idempotent
 	for i := 0; i < 2; i++ {
-		if err := repo.Clear(ctx, severance); err != nil {
+		if err := repo.Clear(ctx, 1, severance); err != nil {
 			t.Fatalf("clear %d: %v", i, err)
 		}
 	}
-	if left, err := repo.List(ctx); err != nil || len(left) != 1 || left[0].MediaType != TitleMovie {
+	if left, err := repo.List(ctx, 1); err != nil || len(left) != 1 || left[0].MediaType != TitleMovie {
 		t.Errorf("after clear: %+v, %v", left, err)
+	}
+	if _, err := NewTasteRepository(db).TasteFeedback(ctx); !errors.Is(err, errUnbound) {
+		t.Errorf("an unbound feedback read = %v, want errUnbound", err)
 	}
 }
 
 func TestTasteProfileRepository(t *testing.T) {
 	db := openSchemaDB(t)
-	repo := NewTasteProfileRepository(db)
+	repo := NewTasteProfileRepository(db).ForMember(1)
 	ctx := context.Background()
 
 	if p, err := repo.Latest(ctx); err != nil || p != nil {
@@ -300,7 +340,18 @@ func TestTasteProfileRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO rec_runs (kind, status, model, profile_id) VALUES ('manual', 'succeeded', 'x', $1)`, referenced.ID); err != nil {
+	if _, err := db.Exec(`INSERT INTO rec_runs (member_id, kind, status, model, profile_id) VALUES (1, 'manual', 'succeeded', 'x', $1)`,
+		referenced.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Another member's old profile, which member 1's builds never prune
+	// (#245).
+	if _, err := NewMemberRepository(db).Create(ctx, "Sam", ""); err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := NewTasteProfileRepository(db).ForMember(2).Insert(ctx, json.RawMessage(`{"loved": 9}`), json.RawMessage(`{"v": 9}`),
+		time.Now().Add(-time.Hour))
+	if err != nil {
 		t.Fatal(err)
 	}
 	// Both are young: the next insert keeps them
@@ -316,7 +367,7 @@ func TestTasteProfileRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[int64]bool{old.ID: false, referenced.ID: true, recent.ID: false, latest.ID: true} {
+	for id, want := range map[int64]bool{old.ID: false, referenced.ID: true, recent.ID: false, latest.ID: true, theirs.ID: true} {
 		p, err := repo.Get(ctx, id)
 		if err != nil || (p != nil) != want {
 			t.Errorf("profile %d exists = %v (%v), want %v", id, p != nil, err, want)
@@ -325,6 +376,15 @@ func TestTasteProfileRepository(t *testing.T) {
 	got, err := repo.Latest(ctx)
 	if err != nil || got == nil || got.ID != latest.ID || string(got.Counts) != `{"loved": 4}` || string(got.Profile) != `{"v": 4}` {
 		t.Errorf("latest = %+v, %v", got, err)
+	}
+	if got, err := NewTasteProfileRepository(db).ForMember(2).Latest(ctx); err != nil || got == nil || got.ID != theirs.ID {
+		t.Errorf("member 2's latest = %+v, %v; want %d", got, err, theirs.ID)
+	}
+	if _, err := NewTasteProfileRepository(db).Latest(ctx); !errors.Is(err, errUnbound) {
+		t.Errorf("an unbound Latest = %v, want errUnbound", err)
+	}
+	if _, err := NewTasteProfileRepository(db).ForMember(99).Insert(ctx, json.RawMessage(`{}`), json.RawMessage(`{}`), time.Now()); !errors.Is(err, member.ErrUnknown) {
+		t.Errorf("a profile for no member = %v, want member.ErrUnknown", err)
 	}
 }
 

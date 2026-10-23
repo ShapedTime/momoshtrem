@@ -12,14 +12,14 @@ import (
 
 // ReadStore reads runs (library.RecRunRepository).
 type ReadStore interface {
-	ActiveRecRun(ctx context.Context) (*library.RecRun, error)
+	ActiveRecRun(ctx context.Context, memberID int64) (*library.RecRun, error)
 	GetRecRun(ctx context.Context, id int64) (*library.RecRun, error)
-	LatestSucceededRecRun(ctx context.Context) (*library.RecRun, error)
-	LatestFinishedRecRun(ctx context.Context) (*library.RecRun, error)
-	ListRecRuns(ctx context.Context, limit int) ([]library.RecRun, error)
+	LatestSucceededRecRun(ctx context.Context, memberID int64) (*library.RecRun, error)
+	LatestFinishedRecRun(ctx context.Context, memberID int64) (*library.RecRun, error)
+	ListRecRuns(ctx context.Context, memberID int64, limit int) ([]library.RecRun, error)
 	RecRunShelves(ctx context.Context, runID int64) ([]library.RecShelfRow, error)
 	RecRunHeroPicks(ctx context.Context, runID int64) ([]library.RecHeroPickRow, error)
-	RecommendationReason(ctx context.Context, ref library.TitleRef) (*string, error)
+	RecommendationReason(ctx context.Context, memberID int64, ref library.TitleRef) (*string, error)
 	RecRunCostMeans(ctx context.Context, n int) (map[string]float64, error)
 }
 
@@ -37,9 +37,9 @@ var _ LibraryStates = (*catalog.Service)(nil)
 type ReaderDeps struct {
 	Store    ReadStore
 	Settings Settings
-	// Titles answers feedback and the watchlist (TasteRepository's
-	// TitleStates, one query).
-	Titles  Titles
+	// Titles answers a member's feedback and watchlist (their
+	// TasteRepository's TitleStates, one query).
+	Titles  func(memberID int64) Titles
 	Library LibraryStates
 	// Configured says whether ANTHROPIC_API_KEY is set.
 	Configured bool
@@ -47,7 +47,8 @@ type ReaderDeps struct {
 }
 
 // Reader serves the picks from the database: /home, the runs, the title
-// pages' reason and the usage page's part. It never calls TMDB.
+// pages' reason and the usage page's part, each a member's (the run
+// estimates are everyone's). It never calls TMDB.
 type Reader struct {
 	d ReaderDeps
 }
@@ -75,12 +76,13 @@ func (r *Reader) enabled(ctx context.Context) (bool, error) {
 	return settings.RecEnabled, nil
 }
 
-// Home is GET /recommendations/home: the newest succeeded run's shelves
-// and the day's hero picks, with library state, the watchlist and feedback
-// joined now, and the active run. Queries: the active run, the newest
-// succeeded one, its shelves and items, its hero picks, then one each for
-// feedback with the watchlist, and library state.
-func (r *Reader) Home(ctx context.Context) (*recommend.Home, error) {
+// Home is the member's GET /recommendations/home: their newest succeeded
+// run's shelves and the day's hero picks, with library state, their
+// watchlist and feedback joined now, and their active run. Queries: the
+// active run, the newest succeeded one, its shelves and items, its hero
+// picks, then one each for feedback with the watchlist, and library
+// state.
+func (r *Reader) Home(ctx context.Context, memberID int64) (*recommend.Home, error) {
 	home := &recommend.Home{Configured: r.d.Configured, HeroPicks: []recommend.HeroPick{}, Shelves: []recommend.Shelf{}}
 	on, err := r.enabled(ctx)
 	if err != nil || !on {
@@ -88,14 +90,14 @@ func (r *Reader) Home(ctx context.Context) (*recommend.Home, error) {
 	}
 	home.Enabled = true
 
-	active, err := r.d.Store.ActiveRecRun(ctx)
+	active, err := r.d.Store.ActiveRecRun(ctx, memberID)
 	if err != nil {
 		return nil, err
 	}
 	if active != nil {
 		home.ActiveRun = ProgressOf(active)
 	}
-	run, err := r.d.Store.LatestSucceededRecRun(ctx)
+	run, err := r.d.Store.LatestSucceededRecRun(ctx, memberID)
 	if err != nil || run == nil {
 		return home, err
 	}
@@ -125,7 +127,7 @@ func (r *Reader) Home(ctx context.Context) (*recommend.Home, error) {
 	for _, p := range picks {
 		add(p.TitleRef)
 	}
-	states, err := r.states(ctx, refs)
+	states, err := r.states(ctx, memberID, refs)
 	if err != nil {
 		return nil, err
 	}
@@ -164,12 +166,12 @@ func (r *Reader) Home(ctx context.Context) (*recommend.Home, error) {
 	return home, nil
 }
 
-func (r *Reader) states(ctx context.Context, refs []library.TitleRef) (map[library.TitleRef]library.TitleState, error) {
+func (r *Reader) states(ctx context.Context, memberID int64, refs []library.TitleRef) (map[library.TitleRef]library.TitleState, error) {
 	out := map[library.TitleRef]library.TitleState{}
 	if len(refs) == 0 {
 		return out, nil
 	}
-	list, err := r.d.Titles.TitleStates(ctx, refs)
+	list, err := r.d.Titles(memberID).TitleStates(ctx, refs)
 	if err != nil {
 		return nil, err
 	}
@@ -226,9 +228,9 @@ func daysBetween(a, b time.Time) int {
 	return max(days, 0)
 }
 
-// Runs lists the newest runs first.
-func (r *Reader) Runs(ctx context.Context, limit int) ([]recommend.RunSummary, error) {
-	rows, err := r.d.Store.ListRecRuns(ctx, limit)
+// Runs lists the member's newest runs first.
+func (r *Reader) Runs(ctx context.Context, memberID int64, limit int) ([]recommend.RunSummary, error) {
+	rows, err := r.d.Store.ListRecRuns(ctx, memberID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -239,14 +241,14 @@ func (r *Reader) Runs(ctx context.Context, limit int) ([]recommend.RunSummary, e
 	return out, nil
 }
 
-// Run is one run with its progress and usage; recommend.ErrNotFound for
-// an unknown one.
-func (r *Reader) Run(ctx context.Context, id int64) (*recommend.RunDetail, error) {
+// Run is one of the member's runs with its progress and usage;
+// recommend.ErrNotFound for an unknown one or another member's.
+func (r *Reader) Run(ctx context.Context, memberID, id int64) (*recommend.RunDetail, error) {
 	run, err := r.d.Store.GetRecRun(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if run == nil {
+	if run == nil || run.MemberID != memberID {
 		return nil, recommend.ErrNotFound
 	}
 	return &recommend.RunDetail{
@@ -258,30 +260,30 @@ func (r *Reader) Run(ctx context.Context, id int64) (*recommend.RunDetail, error
 	}, nil
 }
 
-// RecommendationReason is a title page's recommendation_reason: the newest
-// succeeded run's reason for it; nil without one, while picks are off, and
-// after negative feedback.
-func (r *Reader) RecommendationReason(ctx context.Context, mediaType string, tmdbID int) (*string, error) {
+// RecommendationReason is a title page's recommendation_reason for the
+// member: their newest succeeded run's reason for it; nil without one,
+// while picks are off, and after their negative feedback.
+func (r *Reader) RecommendationReason(ctx context.Context, memberID int64, mediaType string, tmdbID int) (*string, error) {
 	on, err := r.enabled(ctx)
 	if err != nil || !on {
 		return nil, err
 	}
-	return r.d.Store.RecommendationReason(ctx, library.TitleRef{MediaType: mediaType, TMDBID: tmdbID})
+	return r.d.Store.RecommendationReason(ctx, memberID, library.TitleRef{MediaType: mediaType, TMDBID: tmdbID})
 }
 
-// LastFinished is the newest finished run (succeeded, failed or skipped),
-// nil before the first.
-func (r *Reader) LastFinished(ctx context.Context) (*recommend.RunSummary, error) {
-	run, err := r.d.Store.LatestFinishedRecRun(ctx)
+// LastFinished is the member's newest finished run (succeeded, failed or
+// skipped), nil before their first.
+func (r *Reader) LastFinished(ctx context.Context, memberID int64) (*recommend.RunSummary, error) {
+	run, err := r.d.Store.LatestFinishedRecRun(ctx, memberID)
 	if err != nil || run == nil {
 		return nil, err
 	}
 	return SummaryOf(run), nil
 }
 
-// Active is the queued or running run, nil when there's none.
-func (r *Reader) Active(ctx context.Context) (*recommend.RunProgress, error) {
-	run, err := r.d.Store.ActiveRecRun(ctx)
+// Active is the member's queued or running run, nil when there's none.
+func (r *Reader) Active(ctx context.Context, memberID int64) (*recommend.RunProgress, error) {
+	run, err := r.d.Store.ActiveRecRun(ctx, memberID)
 	if err != nil || run == nil {
 		return nil, err
 	}
@@ -289,7 +291,7 @@ func (r *Reader) Active(ctx context.Context) (*recommend.RunProgress, error) {
 }
 
 // RunEstimates is, per rec model, the mean cost of its newest 5
-// succeeded runs; nil for a model without any.
+// succeeded runs, anyone's; nil for a model without any.
 func (r *Reader) RunEstimates(ctx context.Context) (map[string]*float64, error) {
 	means, err := r.d.Store.RecRunCostMeans(ctx, EstimateRuns)
 	if err != nil {

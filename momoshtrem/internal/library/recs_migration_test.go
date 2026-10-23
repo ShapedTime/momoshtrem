@@ -34,13 +34,15 @@ func openBareSchemaDB(t *testing.T, prefix string) *DB {
 }
 
 // Production is at 009 when 006 lands (numbers are reserved per task): the
-// runner applies the missing version on top, and 006 is idempotent. Then
-// every table takes a row and the CHECKs and partial unique indexes hold.
+// runner applies the missing version on top, and the later ones after it,
+// and 006 is idempotent. Then every table takes a row and the CHECKs and
+// partial unique indexes hold (one active run and one feedback per title,
+// per member since 013).
 func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 	db := openBareSchemaDB(t, "mig006")
 	ctx := context.Background()
 
-	// A database at 009 without 006, as production has it.
+	// A database at 009 without 006, as production had it.
 	if _, err := db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())`); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +52,7 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 	}
 	highest := 0
 	for _, m := range all {
-		if m.Version == 6 {
+		if m.Version == 6 || m.Version > 9 {
 			continue
 		}
 		data, err := migrationsFS.ReadFile("migrations/" + m.Name)
@@ -65,8 +67,8 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 		}
 		highest = max(highest, m.Version)
 	}
-	if highest < 9 {
-		t.Fatalf("highest migration = %d, want at least 009", highest)
+	if highest != 9 {
+		t.Fatalf("highest migration = %d, want 009", highest)
 	}
 
 	if err := db.Migrate(ctx); err != nil {
@@ -91,14 +93,14 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 			t.Fatalf("%.70s…: %v", query, err)
 		}
 	}
-	must(`INSERT INTO taste_profiles (id, counts, profile) VALUES (1, '{"loved": 12}', '{"genres": []}')`)
-	must(`INSERT INTO rec_runs (id, kind, status, model, profile_id, progress) VALUES (1, 'scheduled', 'succeeded', 'claude-opus-5-5', 1, '{"steps": []}')`)
-	must(`INSERT INTO rec_runs (id, kind, status, model, skip_reason) VALUES (2, 'first_sync', 'skipped', 'claude-opus-5-5', 'no_history')`)
-	must(`INSERT INTO rec_runs (id, kind, status, model) VALUES (3, 'manual', 'queued', 'claude-sonnet-5-5')`)
+	must(`INSERT INTO taste_profiles (id, member_id, counts, profile) VALUES (1, 1, '{"loved": 12}', '{"genres": []}')`)
+	must(`INSERT INTO rec_runs (id, member_id, kind, status, model, profile_id, progress) VALUES (1, 1, 'scheduled', 'succeeded', 'claude-opus-5-5', 1, '{"steps": []}')`)
+	must(`INSERT INTO rec_runs (id, member_id, kind, status, model, skip_reason) VALUES (2, 1, 'first_sync', 'skipped', 'claude-opus-5-5', 'no_history')`)
+	must(`INSERT INTO rec_runs (id, member_id, kind, status, model) VALUES (3, 1, 'manual', 'queued', 'claude-sonnet-5-5')`)
 	must(`INSERT INTO rec_shelves (id, run_id, position, slug, kind, title) VALUES (1, 1, 0, 'because-severance', 'because', 'Because you loved Severance')`)
 	must(`INSERT INTO rec_items (shelf_id, position, media_type, tmdb_id, reason, meta) VALUES (1, 0, 'tv', 95396, 'Workplace mystery', '{"title": "Severance"}')`)
 	must(`INSERT INTO rec_hero_picks (run_id, position, media_type, tmdb_id, kicker, reason) VALUES (1, 0, 'movie', 693134, 'Tonight', 'Big and quiet')`)
-	must(`INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('tv', 1399, 'dislike', 'shelf')`)
+	must(`INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'tv', 1399, 'dislike', 'shelf')`)
 	must(`INSERT INTO ask_threads (id, title, model, prompt_version) VALUES (1, 'Something like Severance', 'claude-opus-5-5', 'ask-v1')`)
 	must(`INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (1, 1, 0, 'something like Severance', 'done')`)
 	must(`INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (2, 1, 1, 'lighter', 'streaming')`)
@@ -114,16 +116,16 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 	}
 
 	rejected := []struct{ name, insert, constraint string }{
-		{"a second active run", `INSERT INTO rec_runs (id, kind, status, model) VALUES (10, 'manual', 'running', 'x')`, "rec_runs_one_active"},
-		{"an unknown run kind", `INSERT INTO rec_runs (kind, status, model) VALUES ('nightly', 'failed', 'x')`, "rec_runs_kind_check"},
-		{"an unknown skip reason", `INSERT INTO rec_runs (kind, status, model, skip_reason) VALUES ('manual', 'skipped', 'x', 'tired')`, "rec_runs_skip_reason_check"},
+		{"a second active run", `INSERT INTO rec_runs (id, member_id, kind, status, model) VALUES (10, 1, 'manual', 'running', 'x')`, "rec_runs_one_active"},
+		{"an unknown run kind", `INSERT INTO rec_runs (member_id, kind, status, model) VALUES (1, 'nightly', 'failed', 'x')`, "rec_runs_kind_check"},
+		{"an unknown skip reason", `INSERT INTO rec_runs (member_id, kind, status, model, skip_reason) VALUES (1, 'manual', 'skipped', 'x', 'tired')`, "rec_runs_skip_reason_check"},
 		{"an unknown shelf kind", `INSERT INTO rec_shelves (run_id, position, slug, kind, title) VALUES (1, 1, 'x', 'mixed', 'x')`, "rec_shelves_kind_check"},
 		{"a shelf slug twice", `INSERT INTO rec_shelves (run_id, position, slug, kind, title) VALUES (1, 1, 'because-severance', 'other', 'x')`, "rec_shelves_run_id_slug_key"},
 		{"an item twice on a shelf", `INSERT INTO rec_items (shelf_id, position, media_type, tmdb_id, reason) VALUES (1, 1, 'tv', 95396, 'x')`, "rec_items_shelf_id_media_type_tmdb_id_key"},
 		{"a hero pick twice", `INSERT INTO rec_hero_picks (run_id, position, media_type, tmdb_id, kicker, reason) VALUES (1, 1, 'movie', 693134, 'x', 'x')`, "rec_hero_picks_run_id_media_type_tmdb_id_key"},
-		{"an unknown signal", `INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('movie', 1, 'love', 'shelf')`, "rec_feedback_signal_check"},
-		{"an unknown source", `INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('movie', 1, 'like', 'email')`, "rec_feedback_source_check"},
-		{"feedback twice on a title", `INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('tv', 1399, 'like', 'title')`, "rec_feedback_pkey"},
+		{"an unknown signal", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'movie', 1, 'love', 'shelf')`, "rec_feedback_signal_check"},
+		{"an unknown source", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'movie', 1, 'like', 'email')`, "rec_feedback_source_check"},
+		{"feedback twice on a title", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'tv', 1399, 'like', 'title')`, "rec_feedback_pkey"},
 		{"a second streaming turn", `INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (10, 1, 2, 'x', 'streaming')`, "ask_turns_one_streaming"},
 		{"a system message", `INSERT INTO ask_messages (thread_id, turn_id, position, role, content) VALUES (1, 1, 1, 'system', '[]')`, "ask_messages_role_check"},
 	}

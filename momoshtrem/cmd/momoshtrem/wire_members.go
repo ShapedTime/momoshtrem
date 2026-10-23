@@ -10,7 +10,7 @@ import (
 )
 
 // newMembers reads the household's members (#241) and answers the lowest
-// id: until #245, the member the picks are for.
+// id: until #246, the member Ask is for.
 func newMembers(db *library.DB) (*member.Service, int64, error) {
 	members := member.NewService(library.NewMemberRepository(db))
 	lowest, err := members.Default(context.Background()) // reads them

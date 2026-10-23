@@ -177,6 +177,118 @@ func TestMigration012_MemberTrakt(t *testing.T) {
 	}
 }
 
+// 013 on a database at 012, as production has it after #243, run twice:
+// every profile, run and feedback is the lowest member's (member 1 is gone
+// here, so 2's), one run is active and one signal kept per member and
+// title, the reads' indexes lead with the member, member_id has no
+// default, an unknown member is refused, and a member's rows (a run's
+// shelves with it) go with them.
+func TestMigration013_MemberPicks(t *testing.T) {
+	db := openBareSchemaDB(t, "mig013")
+	ctx := context.Background()
+	migrateUpTo(t, db, 13)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(query, args...); err != nil {
+			t.Fatalf("%.60s…: %v", query, err)
+		}
+	}
+	exec(`INSERT INTO members (name, color) VALUES ('Sam', 'rose')`)
+	exec(`DELETE FROM members WHERE id = 1`)
+	exec(`INSERT INTO taste_profiles (counts, profile) VALUES ('{"loved": 12}', '{}')`)
+	exec(`INSERT INTO rec_runs (kind, status, model, profile_id, finished_at)
+		VALUES ('scheduled', 'succeeded', 'x', (SELECT min(id) FROM taste_profiles), NOW())`)
+	exec(`INSERT INTO rec_runs (kind, status, model) VALUES ('manual', 'queued', 'x')`)
+	exec(`INSERT INTO rec_shelves (run_id, position, slug, kind, title) VALUES ((SELECT min(id) FROM rec_runs), 0, 'a', 'other', 'A')`)
+	exec(`INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('tv', 1399, 'dislike', 'shelf')`)
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	data, err := migrationsFS.ReadFile("migrations/013_member_picks.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(string(data)) // idempotent
+
+	picksTables := []string{"taste_profiles", "rec_runs", "rec_feedback"}
+	for _, table := range picksTables {
+		var all, owned int
+		if err := db.QueryRow(`SELECT count(*), count(*) FILTER (WHERE member_id = 2) FROM `+table).Scan(&all, &owned); err != nil {
+			t.Fatal(err)
+		}
+		if all == 0 || all != owned {
+			t.Errorf("%s: %d rows, %d of them member 2's; want them all member 2's", table, all, owned)
+		}
+	}
+	var pkey string
+	if err := db.QueryRow(`
+		SELECT string_agg(a.attname, ',' ORDER BY k.n)
+		FROM pg_index i
+		CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, n)
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+		WHERE i.indrelid = 'rec_feedback'::regclass AND i.indisprimary`).Scan(&pkey); err != nil || pkey != "member_id,media_type,tmdb_id" {
+		t.Errorf("rec_feedback's primary key = (%s) %v, want (member_id,media_type,tmdb_id)", pkey, err)
+	}
+	for name, want := range map[string]string{
+		"rec_runs_one_active": "UNIQUE INDEX rec_runs_one_active ON %s.rec_runs USING btree (member_id) " +
+			"WHERE (status = ANY (ARRAY['queued'::text, 'running'::text]))",
+		"idx_rec_runs_member_finished": "INDEX idx_rec_runs_member_finished ON %s.rec_runs USING btree (member_id, status, finished_at DESC)",
+		"idx_rec_runs_member":          "INDEX idx_rec_runs_member ON %s.rec_runs USING btree (member_id, id DESC)",
+		"idx_rec_runs_queued":          "INDEX idx_rec_runs_queued ON %s.rec_runs USING btree (created_at, id) WHERE (status = 'queued'::text)",
+		"idx_taste_profiles_member":    "INDEX idx_taste_profiles_member ON %s.taste_profiles USING btree (member_id, id DESC)",
+		"idx_rec_runs_profile":         "INDEX idx_rec_runs_profile ON %s.rec_runs USING btree (profile_id)",
+	} {
+		var schema, def string
+		err := db.QueryRow(`SELECT schemaname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`, name).
+			Scan(&schema, &def)
+		if want = "CREATE " + fmt.Sprintf(want, schema); err != nil || def != want {
+			t.Errorf("%s = %q %v\nwant %q", name, def, err, want)
+		}
+	}
+	var stale bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema()
+		AND indexname = 'idx_rec_runs_status_finished')`).Scan(&stale); err != nil || stale {
+		t.Errorf("idx_rec_runs_status_finished is still there (%v)", err)
+	}
+
+	// One active run and one signal per member and title; every row names
+	// a member that exists.
+	exec(`INSERT INTO members (name, color) VALUES ('Ari', 'lime')`) // 3
+	exec(`INSERT INTO rec_runs (member_id, kind, status, model) VALUES (3, 'manual', 'running', 'x')`)
+	exec(`INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (3, 'tv', 1399, 'like', 'hero')`)
+	exec(`INSERT INTO taste_profiles (member_id, counts, profile) VALUES (3, '{}', '{}')`)
+	for _, tt := range []struct{ name, insert, constraint string }{
+		{"a second active run", `INSERT INTO rec_runs (member_id, kind, status, model) VALUES (2, 'scheduled', 'queued', 'x')`, "rec_runs_one_active"},
+		{"feedback twice on a title", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (2, 'tv', 1399, 'like', 'title')`, "rec_feedback_pkey"},
+		{"no member", `INSERT INTO rec_runs (kind, status, model) VALUES ('manual', 'failed', 'x')`, `"member_id"`},
+		{"an unknown member", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (9, 'movie', 1, 'like', 'title')`, "rec_feedback_member_id_fkey"},
+		{"a profile for an unknown member", `INSERT INTO taste_profiles (member_id, counts, profile) VALUES (9, '{}', '{}')`, "taste_profiles_member_id_fkey"},
+	} {
+		if _, err := db.Exec(tt.insert); err == nil || !strings.Contains(err.Error(), tt.constraint) {
+			t.Errorf("%s: %v, want %s", tt.name, err, tt.constraint)
+		}
+	}
+
+	// A member's rows go with them, their runs' shelves too.
+	exec(`DELETE FROM members WHERE id = 2`)
+	for _, table := range append(picksTables, "rec_shelves") {
+		var gone int
+		query := `SELECT count(*) FROM ` + table + ` WHERE member_id = 2`
+		if table == "rec_shelves" {
+			query = `SELECT count(*) FROM rec_shelves`
+		}
+		if err := db.QueryRow(query).Scan(&gone); err != nil || gone != 0 {
+			t.Errorf("%s keeps %d rows of the removed member (%v)", table, gone, err)
+		}
+	}
+	for _, table := range picksTables {
+		var kept int
+		if err := db.QueryRow(`SELECT count(*) FROM ` + table + ` WHERE member_id = 3`).Scan(&kept); err != nil || kept != 1 {
+			t.Errorf("%s: the other member's rows = %d (%v), want their one", table, kept, err)
+		}
+	}
+}
+
 // 011 on a database at 010: the first member is the Trakt connection's
 // username (trimmed, 32 characters at most), else "Me", in teal, with id
 // 1. Running it again adds nobody.

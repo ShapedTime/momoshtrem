@@ -24,14 +24,15 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 )
 
-// recommendRunCommand runs one picks run in the foreground (#157, #160's
-// live check), or with -dry-run builds its first request and counts its
-// tokens for free.
+// recommendRunCommand runs one household member's picks run in the
+// foreground (#157, #160's live check), or with -dry-run builds its first
+// request and counts its tokens for free.
 const recommendRunCommand = "recommend-run"
 
 // recommendRunFlags are the parsed `recommend-run` flags.
 type recommendRunFlags struct {
 	dryRun bool
+	member int64 // 0: the lowest member
 }
 
 // parseRecommendRunFlags parses the subcommand's flags before anything
@@ -40,6 +41,14 @@ type recommendRunFlags struct {
 func parseRecommendRunFlags(args []string) (f recommendRunFlags, code int, ok bool) {
 	fs := flag.NewFlagSet(recommendRunCommand, flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "build the run's first request and count its tokens (free); store nothing, call no model")
+	fs.Func("member", "the household member whose picks run, by id (default: the lowest)", func(v string) error {
+		id, err := member.ParseID(v)
+		if err != nil {
+			return errors.New("want a member's id, a positive integer")
+		}
+		f.member = id
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return f, 0, false
@@ -72,12 +81,13 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 		return 1
 	}
 
-	// The lowest member's picks, as the server's until #245 adds -member.
-	memberID, err := member.NewService(library.NewMemberRepository(db)).Default(ctx)
+	// -member's picks, else the lowest member's.
+	who, err := recommendMember(ctx, member.NewService(library.NewMemberRepository(db)), f.member)
 	if err != nil {
-		slog.Error("Couldn't read the household's members", "error", err)
+		slog.Error("Couldn't choose the household member", "error", err)
 		return 1
 	}
+	memberID := who.ID
 	settingsRepo := library.NewSettingsRepository(db)
 	aiStore := library.NewAIStore(db)
 	ledger := aicore.NewLedger(aiStore, settingsRepo)
@@ -92,7 +102,8 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 		slog.Error("Couldn't read the Trakt connection", "error", err)
 		return 1
 	}
-	w := newRecsWiring(d, core, storedConnection(auth != nil && !auth.NeedsReauth))
+	connected := storedConnection(auth != nil && !auth.NeedsReauth)
+	w := newRecsWiring(d, core, func(int64) profile.Connection { return connected })
 	settings, err := settingsRepo.AISettings(ctx)
 	if err != nil {
 		slog.Error("Couldn't read the AI settings", "error", err)
@@ -100,7 +111,7 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 	}
 
 	if f.dryRun {
-		return recommendDryRun(ctx, os.Stdout, w, client, settings.RecModel, settings.RecEnabled)
+		return recommendDryRun(ctx, os.Stdout, w, client, who, settings.RecModel, settings.RecEnabled)
 	}
 	if client == nil {
 		slog.Error("ANTHROPIC_API_KEY is required for a run (try -dry-run without one)")
@@ -110,13 +121,14 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 		slog.Error(`Personal picks are off (rec_enabled): turn them on in Settings › AI & picks, or PUT /api/settings/ai {"rec_enabled": true}`)
 		return 1
 	}
-	id, queued, err := w.runs.QueueRecRun(ctx, recommend.KindManual, settings.RecModel)
+	id, queued, err := w.runs.QueueRecRun(ctx, memberID, recommend.KindManual, settings.RecModel)
 	if err != nil {
 		slog.Error("Couldn't queue the run", "error", err)
 		return 1
 	}
 	if !queued {
-		slog.Error("Another picks run is active; wait for it (GET /api/recommendations/runs/{id})", "run", id)
+		slog.Error("Another picks run of this member's is active; wait for it (GET /api/recommendations/runs/{id})",
+			"run", id, "member", memberID)
 		return 1
 	}
 	run, err := w.runs.GetRecRun(ctx, id)
@@ -124,18 +136,33 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 		slog.Error("Couldn't read the queued run", "run", id, "error", err)
 		return 1
 	}
-	slog.Info("Running picks", "run", id, "model", run.Model)
+	slog.Info("Running picks", "run", id, "member", memberID, "name", who.Name, "model", run.Model)
 	started := time.Now()
 	if _, err := w.runner.Execute(ctx, *run); err != nil {
 		slog.Error("Couldn't record the run", "run", id, "error", err)
 	}
-	return printRun(context.WithoutCancel(ctx), os.Stdout, w.runs, id, time.Since(started))
+	return printRun(context.WithoutCancel(ctx), os.Stdout, w.runs, who, id, time.Since(started))
 }
 
-// recommendDryRun builds the request a run would send first and reports
-// its size, and with a key its tokens (count_tokens is free).
-func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *aicore.Client, model string, enabled bool) int {
-	prep, err := w.runner.Prepare(ctx, model)
+// recommendMember is the member whose picks run: id's, else (0) the
+// lowest.
+func recommendMember(ctx context.Context, members *member.Service, id int64) (member.Member, error) {
+	list, err := members.List(ctx)
+	if err != nil {
+		return member.Member{}, err
+	}
+	for _, m := range list {
+		if id == 0 || m.ID == id {
+			return m.Member, nil
+		}
+	}
+	return member.Member{}, fmt.Errorf("no household member has id %d (GET /api/members lists them)", id)
+}
+
+// recommendDryRun builds the request the member's run would send first
+// and reports its size, and with a key its tokens (count_tokens is free).
+func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *aicore.Client, who member.Member, model string, enabled bool) int {
+	prep, err := w.runner.Prepare(ctx, who.ID, model)
 	if err != nil {
 		slog.Error("Couldn't build the run's request", "error", err)
 		return 1
@@ -147,7 +174,8 @@ func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *
 	}
 	profileJSON, _ := json.Marshal(prep.Profile)
 
-	fmt.Fprintf(out, "recommend-run -dry-run: the first request of a %s run (nothing stored, no model called)\n", model)
+	fmt.Fprintf(out, "recommend-run -dry-run: the first request of a %s run for %s (member %d; nothing stored, no model called)\n",
+		model, who.Name, who.ID)
 	ready := "no: a run would be skipped (no_history)"
 	if prep.Readiness.Enough() {
 		ready = "yes"
@@ -188,13 +216,14 @@ func recommendDryRun(ctx context.Context, out io.Writer, w *recsWiring, client *
 
 // printRun prints how a run ended, its shelves and hero picks, and its
 // usage; the exit code is 0 when it succeeded.
-func printRun(ctx context.Context, out io.Writer, store *library.RecRunRepository, id int64, took time.Duration) int {
+func printRun(ctx context.Context, out io.Writer, store *library.RecRunRepository, who member.Member, id int64, took time.Duration) int {
 	run, err := store.GetRecRun(ctx, id)
 	if err != nil || run == nil {
 		slog.Error("Couldn't read the run", "run", id, "error", err)
 		return 1
 	}
-	fmt.Fprintf(out, "\nRun %d (%s, %s): %s in %s\n", run.ID, run.Kind, run.Model, run.Status, took.Round(time.Second))
+	fmt.Fprintf(out, "\nRun %d (%s, %s) for %s (member %d): %s in %s\n", run.ID, run.Kind, run.Model, who.Name, who.ID,
+		run.Status, took.Round(time.Second))
 	switch run.Status {
 	case recommend.StatusSkipped:
 		fmt.Fprintf(out, "  skipped: %s\n", deref(run.SkipReason))

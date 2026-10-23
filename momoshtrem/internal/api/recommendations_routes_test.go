@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 )
 
@@ -220,6 +221,7 @@ func TestRecommendationRoutes_Errors(t *testing.T) {
 		{"no history", recommend.ErrNoHistory, 409, CodeNoHistory},
 		{"budget", fmt.Errorf("refresh: %w", &recommend.LimitError{Code: recommend.CodeBudgetExceeded, ResetsAt: resets}), 429, recommend.CodeBudgetExceeded},
 		{"canceled", context.Canceled, StatusClientClosedRequest, CodeClientClosed},
+		{"member removed meanwhile", fmt.Errorf("member 2: %w", member.ErrUnknown), 400, CodeUnknownMember},
 		{"other", errors.New("db down"), 500, CodeInternalError},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

@@ -239,7 +239,7 @@ New tables only, so an older binary ignores them. Wire shapes: §6 "Recommendati
   - usage, summed from its `ai_usage` rows as they land: `api_calls`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `web_searches`, `cost_usd numeric`;
   - `created_at`, `started_at`, `finished_at`;
   - a partial unique index on `((true)) WHERE status IN ('queued', 'running')`, so at most one run is active, an index on `(status, finished_at DESC)` (the newest succeeded run), and one on `profile_id` (the prune).
-  - At startup a run a crash left `queued` or `running` is `failed` ("momoshtrem restarted").
+  - At startup a run a crash left `running` is `failed` ("momoshtrem restarted"). Runs left `queued` (other members', behind it) run then, unless there's no key: then they're `failed` too.
 - `rec_shelves(id, run_id FK cascade, position, slug, kind, title, subtitle)`: `kind` CHECK `because|new|anime|gems|coming_soon|other`; UNIQUE `(run_id, position)` and UNIQUE `(run_id, slug)`.
 - `rec_items(id, shelf_id FK cascade, position, media_type, tmdb_id, reason, meta jsonb, signals jsonb)`:
   - `meta` is a snapshot taken at write time: `title, year, year_end, poster_path, seasons, runtime_minutes, vote_average, release_date, badge`, so reads never call TMDB;
@@ -329,7 +329,7 @@ One migration per slice, each landing with the code that writes its columns, so 
   - `rec_runs_one_active` becomes one active run per member, and `rec_feedback`'s PK `(member_id, media_type, tmdb_id)`.
   - Indexes for a member's newest runs and for the oldest queued run.
   - Shelves, items and hero picks don't change: they belong to their run.
-  - The prune (`PruneRecRuns`) keeps each member's 30 newest runs and their newest succeeded one, and it never deletes a run created in the current budget month (`MonthBounds` in `TZ`), so `by_member` still finds the month's spend.
+  - The prune (`PruneRecRuns`) keeps each member's 30 newest runs and their newest succeeded one, and it never deletes a run that finished in the current budget month (`MonthBounds` in `TZ`), so `by_member` still finds the month's spend; that covers a run queued late on the month's last day that spends into the new one. An active run is never pruned.
 - `014_member_ask.sql` (B3b, #246): `member_id` on `ask_threads` and `ask_turns`.
   - A composite FK, `ask_turns (thread_id, member_id)` → `ask_threads (id, member_id)` `ON DELETE CASCADE`, keeps a turn's member its thread's.
   - `ask_turns_one_streaming` becomes one streaming turn per member, and the daily limit's index becomes `(member_id, created_at)`.

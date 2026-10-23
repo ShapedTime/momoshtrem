@@ -35,9 +35,10 @@ type UsageStore interface {
 
 // RecsReporter is the picks' part of the usage page (R2, #157).
 type RecsReporter interface {
-	// RecsUsage is the newest finished run (succeeded, failed or skipped),
-	// the queued or running run, and the schedule's next run (nil when
-	// manual, off or not configured).
+	// RecsUsage is the context's member's newest finished run (succeeded,
+	// failed or skipped), their queued or running run, and the schedule's
+	// next run (nil when manual, off, not configured, or without their
+	// Trakt).
 	RecsUsage(ctx context.Context) (recommend.RecsUsage, error)
 	// RunEstimates is, per rec model, the mean cost of its last 5
 	// succeeded runs; a model without any is nil or missing.
