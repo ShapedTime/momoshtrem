@@ -188,7 +188,7 @@ func (t *turn) showPicks(ctx context.Context, input json.RawMessage) (json.RawMe
 	for i, p := range picks {
 		refs[i] = p.ref
 	}
-	l, err := readLive(ctx, t.s.d.Titles, t.s.d.Library, refs)
+	l, err := readLive(ctx, t.parts.Titles, t.s.d.Library, refs)
 	if err != nil {
 		return nil, err
 	}

@@ -95,7 +95,7 @@ func runRecommend(cfg *config.Config, db *library.DB, f recommendRunFlags) int {
 	core := &aiCore{client: client, ledger: ledger, settings: aisettings.New(settingsRepo, aiStore, client != nil)}
 	tmdbClient := tmdb.NewClient(cfg.TMDB.APIKey, tmdb.WithLanguage(cfg.TMDB.Language), tmdb.WithRateLimit(float64(cfg.TMDB.RPS)))
 	d := aiDeps{cfg: cfg, db: db, settings: settingsRepo, aiStore: aiStore,
-		tmdb: tmdb.NewCached(tmdbClient, library.NewTMDBCacheRepository(db)), member: memberID}
+		tmdb: tmdb.NewCached(tmdbClient, library.NewTMDBCacheRepository(db))}
 
 	auth, err := library.NewTraktAuthRepository(db).ForMember(memberID).Get(ctx)
 	if err != nil {

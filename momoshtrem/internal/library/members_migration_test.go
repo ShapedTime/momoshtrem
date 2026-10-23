@@ -289,6 +289,100 @@ func TestMigration013_MemberPicks(t *testing.T) {
 	}
 }
 
+// 014 on a database at 013, as production has it after #245, run twice:
+// every thread is the lowest member's (member 1 is gone here, so 2's) and
+// every turn its thread's member's, one turn streams per member, a turn
+// can't be in another member's thread (the composite FK), the reads'
+// indexes lead with the member, member_id has no default, an unknown
+// member is refused, and a member's threads go with them, their turns and
+// messages too.
+func TestMigration014_MemberAsk(t *testing.T) {
+	db := openBareSchemaDB(t, "mig014")
+	ctx := context.Background()
+	migrateUpTo(t, db, 14)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(query, args...); err != nil {
+			t.Fatalf("%.60s…: %v", query, err)
+		}
+	}
+	exec(`INSERT INTO members (name, color) VALUES ('Sam', 'rose')`)
+	exec(`DELETE FROM members WHERE id = 1`)
+	exec(`INSERT INTO ask_threads (title, model, prompt_version) VALUES ('A', 'x', 'ask-v2'), ('B', 'x', 'ask-v2')`)
+	exec(`INSERT INTO ask_turns (thread_id, position, message, status)
+		VALUES (1, 0, 'a', 'done'), (1, 1, 'b', 'streaming'), (2, 0, 'c', 'done')`)
+	exec(`INSERT INTO ask_messages (thread_id, turn_id, position, role, content) VALUES (1, 1, 0, 'user', '[]')`)
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	data, err := migrationsFS.ReadFile("migrations/014_member_ask.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(string(data)) // idempotent
+
+	for _, table := range []string{"ask_threads", "ask_turns"} {
+		var all, owned int
+		if err := db.QueryRow(`SELECT count(*), count(*) FILTER (WHERE member_id = 2) FROM `+table).Scan(&all, &owned); err != nil {
+			t.Fatal(err)
+		}
+		if all == 0 || all != owned {
+			t.Errorf("%s: %d rows, %d of them member 2's; want them all member 2's", table, all, owned)
+		}
+	}
+	var fks string
+	if err := db.QueryRow(`SELECT string_agg(conname || ' ' || pg_get_constraintdef(oid), '; ' ORDER BY conname)
+		FROM pg_constraint WHERE conrelid = 'ask_turns'::regclass AND contype = 'f'`).Scan(&fks); err != nil ||
+		fks != "ask_turns_thread_member_fkey FOREIGN KEY (thread_id, member_id) REFERENCES ask_threads(id, member_id) ON DELETE CASCADE" {
+		t.Errorf("ask_turns' foreign keys = %q (%v), want the composite one only", fks, err)
+	}
+	for name, want := range map[string]string{
+		"ask_turns_one_streaming":        "UNIQUE INDEX ask_turns_one_streaming ON %s.ask_turns USING btree (member_id) WHERE (status = 'streaming'::text)",
+		"idx_ask_turns_member_created":   "INDEX idx_ask_turns_member_created ON %s.ask_turns USING btree (member_id, created_at)",
+		"idx_ask_threads_member_updated": "INDEX idx_ask_threads_member_updated ON %s.ask_threads USING btree (member_id, updated_at DESC, id DESC)",
+		"ask_threads_id_member_key":      "UNIQUE INDEX ask_threads_id_member_key ON %s.ask_threads USING btree (id, member_id)",
+	} {
+		var schema, def string
+		err := db.QueryRow(`SELECT schemaname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`, name).
+			Scan(&schema, &def)
+		if want = "CREATE " + fmt.Sprintf(want, schema); err != nil || def != want {
+			t.Errorf("%s = %q %v\nwant %q", name, def, err, want)
+		}
+	}
+	var stale bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema()
+		AND indexname = 'idx_ask_turns_created')`).Scan(&stale); err != nil || stale {
+		t.Errorf("idx_ask_turns_created is still there (%v)", err)
+	}
+
+	// One streaming turn per member, each in their own threads; every row
+	// names a member that exists.
+	exec(`INSERT INTO members (name, color) VALUES ('Ari', 'lime')`) // 3
+	exec(`INSERT INTO ask_threads (id, member_id, title, model, prompt_version) VALUES (3, 3, 'C', 'x', 'ask-v2')`)
+	exec(`INSERT INTO ask_turns (member_id, thread_id, position, message, status) VALUES (3, 3, 0, 'd', 'streaming')`)
+	for _, tt := range []struct{ name, query, constraint string }{
+		{"a member's second streaming turn", `INSERT INTO ask_turns (member_id, thread_id, position, message, status) VALUES (2, 2, 1, 'x', 'streaming')`, "ask_turns_one_streaming"},
+		{"a turn in another member's thread", `INSERT INTO ask_turns (member_id, thread_id, position, message, status) VALUES (3, 1, 2, 'x', 'done')`, "ask_turns_thread_member_fkey"},
+		{"a thread moved under its turns", `UPDATE ask_threads SET member_id = 3 WHERE id = 1`, "ask_turns_thread_member_fkey"},
+		{"a thread without a member", `INSERT INTO ask_threads (title, model, prompt_version) VALUES ('x', 'x', 'x')`, `"member_id"`},
+		{"a turn without a member", `INSERT INTO ask_turns (thread_id, position, message, status) VALUES (3, 1, 'x', 'done')`, `"member_id"`},
+		{"an unknown member's thread", `INSERT INTO ask_threads (member_id, title, model, prompt_version) VALUES (9, 'x', 'x', 'x')`, "ask_threads_member_id_fkey"},
+	} {
+		if _, err := db.Exec(tt.query); err == nil || !strings.Contains(err.Error(), tt.constraint) {
+			t.Errorf("%s: %v, want %s", tt.name, err, tt.constraint)
+		}
+	}
+
+	// A member's threads go with them, their turns and messages too.
+	exec(`DELETE FROM members WHERE id = 2`)
+	for table, want := range map[string]int{"ask_threads": 1, "ask_turns": 1, "ask_messages": 0} {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); err != nil || n != want {
+			t.Errorf("%s has %d rows (%v) after member 2 went, want %d (Ari's)", table, n, err, want)
+		}
+	}
+}
+
 // 011 on a database at 010: the first member is the Trakt connection's
 // username (trimmed, 32 characters at most), else "Me", in teal, with id
 // 1. Running it again adds nobody.

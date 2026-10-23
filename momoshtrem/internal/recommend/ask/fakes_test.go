@@ -16,6 +16,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/aicore"
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend/ask"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 )
@@ -23,6 +24,7 @@ import (
 // ---- Stores: the service's tests run on an in-memory store and, with
 // MOMOSHTREM_TEST_DATABASE_URL, on Postgres too (each in a schema of its
 // own, so the one-streaming index and the daily count are the test's).
+// Both have the household's two members, Me (1) and Sam (2).
 
 type storeKind struct {
 	name string
@@ -46,7 +48,8 @@ func forEachStore(t *testing.T, test func(t *testing.T, store ask.Store)) {
 	}
 }
 
-// openSchemaDB opens the test database in a new schema, migrated.
+// openSchemaDB opens the test database in a new schema, migrated, with a
+// second member (Sam, 2) beside the one it seeds.
 func openSchemaDB(t *testing.T) *library.DB {
 	t.Helper()
 	url := os.Getenv("MOMOSHTREM_TEST_DATABASE_URL")
@@ -73,7 +76,43 @@ func openSchemaDB(t *testing.T) *library.DB {
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := sqlDB.Exec(`INSERT INTO members (id, name, color) VALUES (2, 'Sam', 'rose')`); err != nil {
+		t.Fatal(err)
+	}
 	return db
+}
+
+// household is the members' store behind the API's member.Service: Me (1)
+// and Sam (2), as the stores have them. Delete only forgets the member
+// here (ForgetMember's listener runs first, as in production).
+type household struct {
+	mu   sync.Mutex
+	list []member.Member
+}
+
+func newHousehold() *household {
+	return &household{list: []member.Member{{ID: 1, Name: "Me", Color: "teal"}, {ID: 2, Name: "Sam", Color: "rose"}}}
+}
+
+func (h *household) List(context.Context) ([]member.Member, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.list), nil
+}
+
+func (h *household) Create(context.Context, string, string) (member.Member, error) {
+	return member.Member{}, errors.New("these tests don't add members")
+}
+
+func (h *household) Update(context.Context, int64, member.Patch) (member.Member, error) {
+	return member.Member{}, errors.New("these tests don't change members")
+}
+
+func (h *household) Delete(_ context.Context, id int64) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.list = slices.DeleteFunc(h.list, func(m member.Member) bool { return m.ID == id })
+	return nil
 }
 
 // memStore is library.AskRepository's behaviour in memory.
@@ -116,12 +155,14 @@ func (m *memStore) Thread(_ context.Context, id int64) (*library.AskThread, erro
 	return m.threadCopy(id), nil
 }
 
-func (m *memStore) Threads(_ context.Context, limit int) ([]library.AskThread, error) {
+func (m *memStore) Threads(_ context.Context, memberID int64, limit int) ([]library.AskThread, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []library.AskThread
-	for id := range m.threads {
-		out = append(out, *m.threadCopy(id))
+	for id, t := range m.threads {
+		if t.MemberID == memberID {
+			out = append(out, *m.threadCopy(id))
+		}
 	}
 	slices.SortFunc(out, func(a, b library.AskThread) int {
 		if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {
@@ -153,8 +194,14 @@ func (m *memStore) Messages(_ context.Context, threadID int64) ([]library.AskMes
 func (m *memStore) StartTurn(_ context.Context, in library.NewAskTurn) (*library.AskThread, *library.AskTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if in.MemberID != 1 && in.MemberID != 2 {
+		return nil, nil, member.ErrUnknown
+	}
+	if th := m.threads[in.ThreadID]; in.ThreadID != 0 && (th == nil || th.MemberID != in.MemberID) {
+		return nil, nil, member.ErrUnknown // the composite FK
+	}
 	for _, t := range m.turns {
-		if t.Status == library.AskTurnStreaming {
+		if t.Status == library.AskTurnStreaming && m.memberOf(t) == in.MemberID {
 			return nil, nil, library.ErrAskTurnStreaming
 		}
 	}
@@ -163,7 +210,8 @@ func (m *memStore) StartTurn(_ context.Context, in library.NewAskTurn) (*library
 	if id == 0 {
 		m.nextThread++
 		id = m.nextThread
-		m.threads[id] = &library.AskThread{ID: id, Title: in.Title, Model: in.Model, PromptVersion: in.PromptVersion, CreatedAt: now}
+		m.threads[id] = &library.AskThread{ID: id, MemberID: in.MemberID, Title: in.Title, Model: in.Model,
+			PromptVersion: in.PromptVersion, CreatedAt: now}
 	}
 	m.threads[id].UpdatedAt = now
 	m.nextTurn++
@@ -182,6 +230,9 @@ func (m *memStore) turn(id int64) *library.AskTurn {
 	}
 	return nil
 }
+
+// memberOf is a turn's member: its thread's.
+func (m *memStore) memberOf(t *library.AskTurn) int64 { return m.threads[t.ThreadID].MemberID }
 
 func (m *memStore) CancelTurn(_ context.Context, id int64) error {
 	m.mu.Lock()
@@ -236,12 +287,12 @@ func (m *memStore) FailStreaming(_ context.Context, code string, view []byte) (i
 	return n, nil
 }
 
-func (m *memStore) TurnsSince(_ context.Context, since time.Time) (int, error) {
+func (m *memStore) TurnsSince(_ context.Context, memberID int64, since time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
 	for _, t := range m.turns {
-		if !t.CreatedAt.Before(since) {
+		if m.memberOf(t) == memberID && !t.CreatedAt.Before(since) {
 			n++
 		}
 	}

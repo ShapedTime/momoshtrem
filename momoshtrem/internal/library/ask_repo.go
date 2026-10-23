@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // Ask momoshtrem's threads (PLAN §5 006, §6 "Ask momoshtrem"; R3, #158):
 // ask_threads, ask_turns and ask_messages. A turn starts in one
 // transaction and ends in another; its raw API messages are written only
-// when it ends done, so a cancelled or failed turn never replays.
+// when it ends done, so a cancelled or failed turn never replays. Threads
+// and turns are a household member's (014, #246): a turn is its thread's
+// member's, and each member has one streaming turn at most.
 
 // Ask turn statuses (ask_turns.status).
 const (
@@ -21,14 +25,17 @@ const (
 	AskTurnCancelled = "cancelled"
 )
 
-// ErrAskTurnStreaming: another turn is streaming (the partial unique index
-// on ask_turns allows one, in any thread).
+// ErrAskTurnStreaming: another of the member's turns is streaming (the
+// partial unique index on ask_turns allows one per member, in any of their
+// threads).
 var ErrAskTurnStreaming = errors.New("another ask turn is streaming")
 
 // AskThread is a conversation.
 type AskThread struct {
-	ID    int64
-	Title string
+	ID int64
+	// MemberID is whose thread it is: only they read it or follow it up.
+	MemberID int64
+	Title    string
 	// Model and PromptVersion are the first turn's, kept for the thread's
 	// life: thinking blocks are bound to the model, and a replay must send
 	// the same system prompt and tools.
@@ -62,9 +69,10 @@ type AskMessage struct {
 	Content []byte
 }
 
-// NewAskTurn starts a turn: in ThreadID, or in a new thread with Title,
-// Model and PromptVersion when ThreadID is 0.
+// NewAskTurn starts the member's turn: in ThreadID (theirs), or in a new
+// thread of theirs with Title, Model and PromptVersion when ThreadID is 0.
 type NewAskTurn struct {
+	MemberID      int64
 	ThreadID      int64
 	Title         string
 	Model         string
@@ -93,16 +101,17 @@ func NewAskRepository(db *DB) *AskRepository {
 	return &AskRepository{db: db}
 }
 
-const askThreadColumns = `t.id, t.title, t.model, t.prompt_version, t.created_at, t.updated_at,
+const askThreadColumns = `t.id, t.member_id, t.title, t.model, t.prompt_version, t.created_at, t.updated_at,
 	(SELECT count(*) FROM ask_turns n WHERE n.thread_id = t.id)`
 
 func scanAskThread(row interface{ Scan(...any) error }) (AskThread, error) {
 	var t AskThread
-	err := row.Scan(&t.ID, &t.Title, &t.Model, &t.PromptVersion, &t.CreatedAt, &t.UpdatedAt, &t.TurnCount)
+	err := row.Scan(&t.ID, &t.MemberID, &t.Title, &t.Model, &t.PromptVersion, &t.CreatedAt, &t.UpdatedAt, &t.TurnCount)
 	return t, err
 }
 
-// Thread returns a thread with its turn count; nil for an unknown one.
+// Thread returns a thread, whoever's it is (the caller checks MemberID),
+// with its turn count; nil for an unknown one.
 func (r *AskRepository) Thread(ctx context.Context, id int64) (*AskThread, error) {
 	t, err := scanAskThread(r.db.QueryRowContext(ctx, `SELECT `+askThreadColumns+` FROM ask_threads t WHERE t.id = $1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -114,12 +123,13 @@ func (r *AskRepository) Thread(ctx context.Context, id int64) (*AskThread, error
 	return &t, nil
 }
 
-// Threads lists the threads, the newest updated first, at most limit.
-func (r *AskRepository) Threads(ctx context.Context, limit int) ([]AskThread, error) {
+// Threads lists the member's threads, the newest updated first, at most
+// limit.
+func (r *AskRepository) Threads(ctx context.Context, memberID int64, limit int) ([]AskThread, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT `+askThreadColumns+`
-		FROM ask_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`, limit)
+		FROM ask_threads t WHERE t.member_id = $1 ORDER BY t.updated_at DESC, t.id DESC LIMIT $2`, memberID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list ask threads: %w", err)
+		return nil, fmt.Errorf("failed to list member %d's ask threads: %w", memberID, err)
 	}
 	defer rows.Close()
 	var out []AskThread
@@ -193,9 +203,12 @@ func (r *AskRepository) Messages(ctx context.Context, threadID int64) ([]AskMess
 	return out, nil
 }
 
-// StartTurn creates a streaming turn (and its thread when it's new) in one
-// transaction, and bumps the thread's updated_at. ErrAskTurnStreaming when
-// another turn is streaming.
+// StartTurn creates the member's streaming turn (and their thread when
+// it's new) in one transaction, and bumps the thread's updated_at.
+// ErrAskTurnStreaming when another of their turns is streaming;
+// member.ErrUnknown when the member is gone, their threads with them. A
+// follow-up in another member's thread is refused the same way (the
+// composite FK: a turn is its thread's member's).
 func (r *AskRepository) StartTurn(ctx context.Context, in NewAskTurn) (*AskThread, *AskTurn, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -205,9 +218,13 @@ func (r *AskRepository) StartTurn(ctx context.Context, in NewAskTurn) (*AskThrea
 
 	threadID := in.ThreadID
 	if threadID == 0 {
-		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO ask_threads (title, model, prompt_version) VALUES ($1, $2, $3) RETURNING id
-		`, in.Title, in.Model, in.PromptVersion).Scan(&threadID); err != nil {
+		err = tx.QueryRowContext(ctx, `
+			INSERT INTO ask_threads (member_id, title, model, prompt_version) VALUES ($1, $2, $3, $4) RETURNING id
+		`, in.MemberID, in.Title, in.Model, in.PromptVersion).Scan(&threadID)
+		if isForeignKeyViolation(err) {
+			return nil, nil, fmt.Errorf("member %d: %w", in.MemberID, member.ErrUnknown)
+		}
+		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create an ask thread: %w", err)
 		}
 	} else if _, err := tx.ExecContext(ctx, `SELECT 1 FROM ask_threads WHERE id = $1 FOR UPDATE`, threadID); err != nil {
@@ -216,15 +233,19 @@ func (r *AskRepository) StartTurn(ctx context.Context, in NewAskTurn) (*AskThrea
 
 	turn := AskTurn{ThreadID: threadID, Message: in.Message, Status: AskTurnStreaming}
 	// The one-streaming index (and the thread's positions) are the
-	// arbiters: no row back means another turn is streaming.
+	// arbiters: no row back means another of the member's turns is
+	// streaming.
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO ask_turns (thread_id, position, message, status)
-		VALUES ($1, (SELECT COALESCE(MAX(position) + 1, 0) FROM ask_turns WHERE thread_id = $1), $2, 'streaming')
+		INSERT INTO ask_turns (member_id, thread_id, position, message, status)
+		VALUES ($1, $2, (SELECT COALESCE(MAX(position) + 1, 0) FROM ask_turns WHERE thread_id = $2), $3, 'streaming')
 		ON CONFLICT DO NOTHING
 		RETURNING id, position, created_at
-	`, threadID, in.Message).Scan(&turn.ID, &turn.Position, &turn.CreatedAt)
+	`, in.MemberID, threadID, in.Message).Scan(&turn.ID, &turn.Position, &turn.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrAskTurnStreaming
+	}
+	if isForeignKeyViolation(err) {
+		return nil, nil, fmt.Errorf("member %d, ask thread %d: %w", in.MemberID, threadID, member.ErrUnknown)
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create an ask turn: %w", err)
@@ -270,29 +291,42 @@ func (r *AskRepository) EndTurn(ctx context.Context, end AskTurnEnd) (bool, erro
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var errorCode *string
-	if end.ErrorCode != "" {
-		errorCode = &end.ErrorCode
-	}
+	// The thread's row first, then the turn's: a member's removal cascades
+	// in that order (members, ask_threads, ask_turns), and the other order
+	// deadlocks with it. The lock also orders two writers of the thread's
+	// messages (there's one turn at a time, but a crash's leftovers must
+	// never interleave). No row: the turn is gone, with its member.
 	var threadID int64
 	err = tx.QueryRowContext(ctx, `
-		UPDATE ask_turns
-		SET status = $2, view = $3::jsonb, error_code = $4, cost_usd = $5, finished_at = COALESCE(finished_at, NOW())
-		WHERE id = $1 AND (status = 'streaming' OR (status = 'cancelled' AND $2 = 'cancelled'))
-		RETURNING thread_id
-	`, end.TurnID, end.Status, jsonParam(end.View), errorCode, end.CostUSD).Scan(&threadID)
+		SELECT id FROM ask_threads WHERE id = (SELECT thread_id FROM ask_turns WHERE id = $1) FOR UPDATE
+	`, end.TurnID).Scan(&threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
+		return false, fmt.Errorf("failed to lock ask turn %d's thread: %w", end.TurnID, err)
+	}
+
+	var errorCode *string
+	if end.ErrorCode != "" {
+		errorCode = &end.ErrorCode
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE ask_turns
+		SET status = $2, view = $3::jsonb, error_code = $4, cost_usd = $5, finished_at = COALESCE(finished_at, NOW())
+		WHERE id = $1 AND (status = 'streaming' OR (status = 'cancelled' AND $2 = 'cancelled'))
+	`, end.TurnID, end.Status, jsonParam(end.View), errorCode, end.CostUSD)
+	if err != nil {
 		return false, fmt.Errorf("failed to end ask turn %d: %w", end.TurnID, err)
 	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to end ask turn %d: %w", end.TurnID, err)
+	}
+	if n == 0 {
+		return false, nil // it had already ended otherwise
+	}
 	if len(end.Messages) > 0 {
-		// The thread row's lock orders two writers (there's one turn at a
-		// time, but a crash's leftovers must never interleave).
-		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM ask_threads WHERE id = $1 FOR UPDATE`, threadID); err != nil {
-			return false, fmt.Errorf("failed to lock ask thread %d: %w", threadID, err)
-		}
 		var next int
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM ask_messages WHERE thread_id = $1`,
 			threadID).Scan(&next); err != nil {
@@ -328,8 +362,9 @@ func (r *AskRepository) AbandonTurn(ctx context.Context, turnID int64) error {
 	return nil
 }
 
-// FailStreaming ends every streaming turn as an error with code and view:
-// at startup, the turns a crash left streaming. It returns how many.
+// FailStreaming ends every streaming turn, everyone's, as an error with
+// code and view: at startup, the turns a crash left streaming. It returns
+// how many.
 func (r *AskRepository) FailStreaming(ctx context.Context, code string, view []byte) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE ask_turns SET status = 'error', error_code = $1, view = $2::jsonb, finished_at = NOW()
@@ -341,18 +376,19 @@ func (r *AskRepository) FailStreaming(ctx context.Context, code string, view []b
 	return res.RowsAffected()
 }
 
-// TurnsSince counts the turns started since a time, whatever their status
-// (Ask's daily limit).
-func (r *AskRepository) TurnsSince(ctx context.Context, since time.Time) (int, error) {
+// TurnsSince counts the member's turns started since a time, whatever
+// their status (Ask's daily limit).
+func (r *AskRepository) TurnsSince(ctx context.Context, memberID int64, since time.Time) (int, error) {
 	var n int
-	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM ask_turns WHERE created_at >= $1`, since).Scan(&n); err != nil {
-		return 0, fmt.Errorf("failed to count ask turns: %w", err)
+	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM ask_turns WHERE member_id = $1 AND created_at >= $2`,
+		memberID, since).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to count member %d's ask turns: %w", memberID, err)
 	}
 	return n, nil
 }
 
-// MeanDoneCost is the mean cost of the newest n done turns; nil without
-// any.
+// MeanDoneCost is the mean cost of the newest n done turns, anyone's; nil
+// without any.
 func (r *AskRepository) MeanDoneCost(ctx context.Context, n int) (*float64, error) {
 	var mean sql.NullFloat64
 	if err := r.db.QueryRowContext(ctx, `

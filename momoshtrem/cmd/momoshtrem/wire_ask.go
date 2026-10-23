@@ -12,9 +12,9 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/recommend/tools"
 )
 
-// Ask reads the newest stored taste profile while it's younger than
+// Ask reads a member's newest stored taste profile while it's younger than
 // askProfileMaxAge (else builds one), and keeps the profile and the
-// candidate pool it built for askInputsTTL between turns.
+// candidate pool it built for askInputsTTL between their turns.
 const (
 	askProfileMaxAge = 12 * time.Hour
 	askInputsTTL     = time.Hour
@@ -26,27 +26,20 @@ type askWiring struct {
 }
 
 // wireAsk serves /recommendations/ask and /recommendations/threads
-// (Options.Ask), on the AI core and R1's tools. Threads read without a
-// key; asking needs one. At startup a turn a crash left streaming is
-// marked failed, and Ask's part of /settings/ai/usage is installed. Ask
-// reads d.member's taste until #246 runs it per member.
+// (Options.Ask), on the AI core and R1's tools, each household member's
+// (#246): their threads, limits and taste (askMember). Threads read
+// without a key; asking needs one. At startup a turn a crash left
+// streaming is marked failed, and Ask's part of /settings/ai/usage is
+// installed. A removed member's turns are cancelled and their cache
+// dropped (OnRemoving, after their picks run is stopped).
 func wireAsk(d aiDeps, core *aiCore, recs *recsWiring, opts *api.Options) *askWiring {
-	m := recs.member(d.member)
-	inputs := tools.NewCached(func(ctx context.Context) (*profile.Profile, error) {
-		stored, err := m.profiles.Current(ctx, askProfileMaxAge)
-		if err != nil {
-			return nil, err
-		}
-		return stored.Profile, nil
-	}, m.pools.Build, askInputsTTL)
 	deps := ask.Deps{
-		Budget:   core.ledger,
-		Store:    library.NewAskRepository(d.db),
-		Settings: d.settings, // rec_model: new threads' model
-		Titles:   m.taste,
-		Library:  d.catalog,
-		TMDB:     d.tmdb,
-		Tools:    m.tools(inputs),
+		Budget:    core.ledger,
+		Store:     library.NewAskRepository(d.db),
+		Settings:  d.settings, // rec_model: new threads' model
+		Library:   d.catalog,
+		TMDB:      d.tmdb,
+		ForMember: askMember(recs),
 	}
 	if core.client != nil {
 		deps.Runner = core.client
@@ -63,7 +56,28 @@ func wireAsk(d aiDeps, core *aiCore, recs *recsWiring, opts *api.Options) *askWi
 
 	opts.Ask = svc
 	core.settings.SetAsk(svc)
+	if d.members != nil {
+		d.members.OnRemoving(svc.ForgetMember)
+	}
 	return &askWiring{svc: svc}
+}
+
+// askMember builds a member's Ask parts from their R1 parts: their taste,
+// and R1's tools over a tools.Cached of their own, so one member's profile
+// and pool are never another's. The service builds one per member and
+// keeps it.
+func askMember(recs *recsWiring) func(memberID int64) ask.Member {
+	return func(memberID int64) ask.Member {
+		m := recs.member(memberID)
+		inputs := tools.NewCached(func(ctx context.Context) (*profile.Profile, error) {
+			stored, err := m.profiles.Current(ctx, askProfileMaxAge)
+			if err != nil {
+				return nil, err
+			}
+			return stored.Profile, nil
+		}, m.pools.Build, askInputsTTL)
+		return ask.Member{Titles: m.taste, Tools: m.tools(inputs)}
+	}
 }
 
 // Close cancels the turns in flight (each ends cancelled, its usage

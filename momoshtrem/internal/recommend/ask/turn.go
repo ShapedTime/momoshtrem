@@ -23,7 +23,10 @@ const (
 // turn's goroutine, in order; only the cancel watcher runs beside them, and
 // it touches nothing but the outcome, the store and the slot.
 type turn struct {
-	s       *Service
+	s *Service
+	// member is whose turn it is, and parts their titles and tools.
+	member  int64
+	parts   Member
 	thread  library.AskThread
 	turnID  int64
 	message string
@@ -39,6 +42,7 @@ type turn struct {
 	cancel context.CancelFunc
 	events chan recommend.Event
 	stop   chan struct{} // closed when the run returns
+	done   chan struct{} // closed once the turn has ended (ForgetMember)
 
 	// What the turn showed, for its view.
 	tracker     *tracker
@@ -59,6 +63,7 @@ type turn struct {
 
 // run streams the turn, then ends it.
 func (t *turn) run() {
+	defer close(t.done)
 	defer t.s.untrack(t)
 	defer close(t.events)
 	defer t.cancel()
@@ -102,19 +107,20 @@ func (t *turn) decided() string {
 	return t.outcome
 }
 
-// cancelNow marks the turn cancelled in the database and frees the slot.
-// When the store can't take it, the turn is left for the next ask to end
-// (Service.heal): a row left streaming would answer ask_busy.
+// cancelNow marks the turn cancelled in the database and frees the
+// member's slot. When the store can't take it, the turn is left for their
+// next ask to end (Service.heal): a row left streaming would answer them
+// ask_busy.
 func (t *turn) cancelNow() {
 	if err := t.persist("cancel", func(ctx context.Context) error {
 		return t.s.d.Store.CancelTurn(ctx, t.turnID)
 	}); err != nil {
-		t.s.stale(t.turnID)
+		t.s.stale(t.member, t.turnID)
 	}
 	t.release()
 }
 
-func (t *turn) release() { t.released.Do(t.s.release) }
+func (t *turn) release() { t.released.Do(func() { t.s.release(t.member) }) }
 
 // end writes how the turn ended, frees the slot, and only then sends done
 // or error: the web closes the stream as soon as it reads either, and a
@@ -210,12 +216,12 @@ func (t *turn) write(v view, end library.AskTurnEnd) bool {
 
 // abandon is the last resort when the turn's end can't be written: the
 // least that frees the one-streaming index (status error, nothing else).
-// If even that fails, the next ask tries again (Service.heal).
+// If even that fails, the member's next ask tries again (Service.heal).
 func (t *turn) abandon() {
 	if err := t.persist("abandon", func(ctx context.Context) error {
 		return t.s.d.Store.AbandonTurn(ctx, t.turnID)
 	}); err != nil {
-		t.s.stale(t.turnID)
+		t.s.stale(t.member, t.turnID)
 	}
 }
 

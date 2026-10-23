@@ -33,14 +33,21 @@ func (f *fakeSettings) UpdateAISettings(_ context.Context, p library.AISettingsP
 }
 
 type fakeUsage struct {
-	totals []library.AIFeatureTotal
-	since  time.Time
-	err    error
+	totals      []library.AIFeatureTotal
+	members     []library.AIMemberTotal
+	since       time.Time
+	memberSince time.Time
+	err         error
 }
 
 func (f *fakeUsage) FeatureTotalsSince(_ context.Context, since time.Time) ([]library.AIFeatureTotal, error) {
 	f.since = since
 	return f.totals, f.err
+}
+
+func (f *fakeUsage) MemberSpendSince(_ context.Context, since time.Time) ([]library.AIMemberTotal, error) {
+	f.memberSince = since
+	return f.members, f.err
 }
 
 type fakeRecs struct {
@@ -115,10 +122,19 @@ func TestUsage(t *testing.T) {
 	}
 
 	// Without the picks and Ask wired: all three features, nulls and zeros.
-	usage := &fakeUsage{totals: []library.AIFeatureTotal{
-		{Feature: "classifier", CostUSD: 0.1 + 0.2, Requests: 12},
-		{Feature: "recs", CostUSD: 14.7, Requests: 30},
-	}}
+	usage := &fakeUsage{
+		totals: []library.AIFeatureTotal{
+			{Feature: "classifier", CostUSD: 0.1 + 0.2, Requests: 12},
+			{Feature: "recs", CostUSD: 14.7, Requests: 30},
+		},
+		// Sam's spend isn't all of the recs': a removed member's run is no
+		// one's.
+		members: []library.AIMemberTotal{
+			{MemberID: 1, Name: "Me", CostUSD: 10.1 + 0.2, Requests: 21},
+			{MemberID: 2, Name: "Sam", CostUSD: 4, Requests: 8},
+			{MemberID: 5, Name: "Ari"},
+		},
+	}
 	s := newService(library.DefaultAISettings(), usage)
 	got, err := s.AIUsage(ctx)
 	if err != nil {
@@ -132,14 +148,20 @@ func TestUsage(t *testing.T) {
 			{Feature: "ask", CostUSD: 0, Requests: 0},
 			{Feature: "classifier", CostUSD: 0.3, Requests: 12},
 		},
+		ByMember: []recommend.MemberUsage{
+			{MemberID: 1, Name: "Me", CostUSD: 10.3, Requests: 21},
+			{MemberID: 2, Name: "Sam", CostUSD: 4, Requests: 8},
+			{MemberID: 5, Name: "Ari", CostUSD: 0, Requests: 0},
+		},
 		Estimates:     recommend.Estimates{RunUSD: map[string]*float64{}},
 		AskDailyLimit: 30,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("usage =\n%+v\nwant\n%+v", got, want)
 	}
-	if !usage.since.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, tokyo)) {
-		t.Errorf("month starts %v", usage.since)
+	monthStart := time.Date(2026, 11, 1, 0, 0, 0, 0, tokyo)
+	if !usage.since.Equal(monthStart) || !usage.memberSince.Equal(monthStart) {
+		t.Errorf("month starts %v (by member %v)", usage.since, usage.memberSince)
 	}
 
 	// No cap: never reached.

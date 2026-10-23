@@ -58,7 +58,11 @@ func TestAISettings_Integration(t *testing.T) {
 		t.Errorf("classifier's view = %+v, %v", got, err)
 	}
 
-	// Usage: this month's rows, by feature, against the budget.
+	// Usage: this month's rows, by feature and member (the picks' through
+	// their run, Me's), against the budget.
+	if _, err := db.Exec(`INSERT INTO rec_runs (id, member_id, kind, status, model) VALUES (1, 1, 'manual', 'succeeded', 'claude-opus-5-5')`); err != nil {
+		t.Fatal(err)
+	}
 	ledger := aicore.NewLedger(store, library.NewSettingsRepository(db))
 	for _, r := range []struct {
 		feature string
@@ -88,6 +92,7 @@ func TestAISettings_Integration(t *testing.T) {
 		"budget_usd":      `0.25`,
 		"budget_reached":  `true`,
 		"by_feature":      `[{"feature":"recs","cost_usd":0.36,"requests":1},{"feature":"ask","cost_usd":0,"requests":0},{"feature":"classifier","cost_usd":0.001,"requests":2}]`,
+		"by_member":       `[{"member_id":1,"name":"Me","cost_usd":0.36,"requests":1}]`,
 		"recs":            `{"last_run":null,"active_run":null,"next_run_at":null}`,
 		"estimates":       `{"run_usd":{"claude-opus-5-5":null,"claude-sonnet-5-5":null},"ask_usd":null}`,
 		"asks_today":      `0`,

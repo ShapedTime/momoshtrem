@@ -1,7 +1,6 @@
 package ask_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -161,7 +160,7 @@ func TestAsk_EndWriteFailures(t *testing.T) {
 			if last.Name != "error" || field[string](t, last, "code") != recommend.AskErrorInternal || turn.Status != library.AskTurnError {
 				t.Fatalf("a turn whose end can't be written: %s %s, turn %s", last.Name, last.Data, turn.Status)
 			}
-			thread, err := h.svc.Thread(context.Background(), threadID)
+			thread, err := h.svc.Thread(memberCtx(1), threadID)
 			if err != nil || thread.Turns[len(thread.Turns)-1].Error == nil {
 				t.Errorf("the abandoned turn reads %+v, %v", thread.Turns, err)
 			}
