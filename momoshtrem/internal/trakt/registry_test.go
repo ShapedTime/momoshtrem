@@ -454,7 +454,7 @@ func TestRegistry_MemberDeletedMidWrite(t *testing.T) {
 	}
 	waitFor(t, "Bob's history write to wait", func() bool {
 		var n int
-		err := e.db.QueryRow(`SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&n)
+		err := e.db.QueryRow(`SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 4244 AND NOT granted`).Scan(&n)
 		return err == nil && n == 1
 	})
 

@@ -44,7 +44,7 @@ type Listener func(ctx context.Context, id int64)
 // Service is the household's members: /members, and the member every API
 // request is for (Resolve). It keeps the list (six at most) in memory,
 // read at start, again after each change and once on an id it doesn't
-// know. A member being removed is gone for Resolve, Default and IDs from
+// know. A member being removed is gone for Resolve, Default, IDs and List from
 // the start of the delete. It is safe for concurrent use.
 //
 // Lock order: write, then load, then mu.
@@ -148,7 +148,7 @@ func (s *Service) isLeaving(id int64) bool {
 	return s.leaving[id]
 }
 
-// setLeaving hides a member being removed from Resolve, Default and IDs,
+// setLeaving hides a member being removed from Resolve, Default, IDs and List,
 // or shows it again.
 func (s *Service) setLeaving(id int64, leaving bool) {
 	s.mu.Lock()
@@ -298,7 +298,7 @@ func (s *Service) Update(ctx context.Context, id int64, p Patch) (View, error) {
 // listeners let go of what's theirs, then the row goes and what's theirs
 // with it. ErrNotFound, ErrLastMember. Once the checks pass it runs to the
 // end, whether or not the client waits, and the member is gone for
-// Resolve, Default and IDs from then on. Should the row stay after the
+// Resolve, Default, IDs and List from then on. Should the row stay after the
 // listeners ran, the member comes back and the OnAdded listeners are told
 // again, so it has nothing running (Trakt off).
 func (s *Service) Delete(ctx context.Context, id int64) error {
