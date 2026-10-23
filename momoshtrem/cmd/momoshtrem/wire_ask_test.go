@@ -94,15 +94,19 @@ func TestWireAsk(t *testing.T) {
 		t.Errorf("usage = %+v, %v", usage, err)
 	}
 
-	// Each member's tools read their own stored profile.
+	// Each member's tools read their own stored profile, from the one
+	// ForMember the service is given: nothing it builds is shared between
+	// members.
 	for id, title := range map[int64]string{1: "Severance", sam.ID: "Frieren"} {
 		if _, err := db.Exec(`INSERT INTO taste_profiles (member_id, counts, profile) VALUES ($1, '{}', $2)`,
 			id, `{"loved": [{"media_type": "tv", "tmdb_id": 1, "title": "`+title+`"}]}`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for id, title := range map[int64]string{1: "Severance", sam.ID: "Frieren"} {
-		m := askMember(recs)(id)
+	forMember := askMember(recs)
+	for _, id := range []int64{1, sam.ID, 1} {
+		title := map[int64]string{1: "Severance", sam.ID: "Frieren"}[id]
+		m := forMember(id)
 		if len(m.Tools) == 0 || m.Tools[0].Name() != "get_taste_profile" {
 			t.Fatalf("member %d's tools = %v", id, m.Tools)
 		}

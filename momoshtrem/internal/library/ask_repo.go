@@ -291,29 +291,42 @@ func (r *AskRepository) EndTurn(ctx context.Context, end AskTurnEnd) (bool, erro
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var errorCode *string
-	if end.ErrorCode != "" {
-		errorCode = &end.ErrorCode
-	}
+	// The thread's row first, then the turn's: a member's removal cascades
+	// in that order (members, ask_threads, ask_turns), and the other order
+	// deadlocks with it. The lock also orders two writers of the thread's
+	// messages (there's one turn at a time, but a crash's leftovers must
+	// never interleave). No row: the turn is gone, with its member.
 	var threadID int64
 	err = tx.QueryRowContext(ctx, `
-		UPDATE ask_turns
-		SET status = $2, view = $3::jsonb, error_code = $4, cost_usd = $5, finished_at = COALESCE(finished_at, NOW())
-		WHERE id = $1 AND (status = 'streaming' OR (status = 'cancelled' AND $2 = 'cancelled'))
-		RETURNING thread_id
-	`, end.TurnID, end.Status, jsonParam(end.View), errorCode, end.CostUSD).Scan(&threadID)
+		SELECT id FROM ask_threads WHERE id = (SELECT thread_id FROM ask_turns WHERE id = $1) FOR UPDATE
+	`, end.TurnID).Scan(&threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
+		return false, fmt.Errorf("failed to lock ask turn %d's thread: %w", end.TurnID, err)
+	}
+
+	var errorCode *string
+	if end.ErrorCode != "" {
+		errorCode = &end.ErrorCode
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE ask_turns
+		SET status = $2, view = $3::jsonb, error_code = $4, cost_usd = $5, finished_at = COALESCE(finished_at, NOW())
+		WHERE id = $1 AND (status = 'streaming' OR (status = 'cancelled' AND $2 = 'cancelled'))
+	`, end.TurnID, end.Status, jsonParam(end.View), errorCode, end.CostUSD)
+	if err != nil {
 		return false, fmt.Errorf("failed to end ask turn %d: %w", end.TurnID, err)
 	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to end ask turn %d: %w", end.TurnID, err)
+	}
+	if n == 0 {
+		return false, nil // it had already ended otherwise
+	}
 	if len(end.Messages) > 0 {
-		// The thread row's lock orders two writers (there's one turn at a
-		// time, but a crash's leftovers must never interleave).
-		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM ask_threads WHERE id = $1 FOR UPDATE`, threadID); err != nil {
-			return false, fmt.Errorf("failed to lock ask thread %d: %w", threadID, err)
-		}
 		var next int
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM ask_messages WHERE thread_id = $1`,
 			threadID).Scan(&next); err != nil {

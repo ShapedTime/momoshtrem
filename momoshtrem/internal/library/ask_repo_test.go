@@ -284,3 +284,94 @@ func TestAskRepository_PerMember(t *testing.T) {
 		t.Errorf("Me's thread after Sam's removal = %+v, %v", th, err)
 	}
 }
+
+// A turn's end and its member's removal meet without a deadlock: EndTurn
+// locks the thread before the turn, the order the removal's cascade takes
+// (members, ask_threads, ask_turns), so the removal waits for the end to
+// commit, then takes the thread with its turns and messages.
+func TestAskRepository_EndTurnMeetsMemberRemoval(t *testing.T) {
+	r := openAskDB(t)
+	ctx := context.Background()
+	exec := func(query string) {
+		t.Helper()
+		if _, err := r.db.Exec(query); err != nil {
+			t.Fatalf("%.60s…: %v", query, err)
+		}
+	}
+	exec(`INSERT INTO members (id, name, color) VALUES (2, 'Sam', 'rose')`)
+	th, tu, err := r.StartTurn(ctx, NewAskTurn{MemberID: 2, Title: "T", Model: "claude-opus-5-5", PromptVersion: "ask-v2", Message: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The end's turn update waits, inside its transaction, for a lock the
+	// test holds.
+	exec(`CREATE FUNCTION hold_end() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN PERFORM pg_advisory_xact_lock(4246); RETURN NEW; END $$`)
+	exec(`CREATE TRIGGER hold_end AFTER UPDATE ON ask_turns FOR EACH ROW EXECUTE FUNCTION hold_end()`)
+	lock, err := r.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if _, err := lock.ExecContext(ctx, `SELECT pg_advisory_lock(4246)`); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan error, 1)
+	go func() {
+		ok, err := r.EndTurn(ctx, AskTurnEnd{TurnID: tu.ID, Status: AskTurnDone, View: []byte(`{}`), CostUSD: 0.02,
+			Messages: []AskMessage{{Role: "user", Content: []byte(`[{"type":"text","text":"m"}]`)},
+				{Role: "assistant", Content: []byte(`[{"type":"text","text":"ok"}]`)}}})
+		if err == nil && !ok {
+			err = errors.New("the turn didn't take its end")
+		}
+		ended <- err
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		var waiting int
+		if err := r.db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the end never reached the held lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	deleted := make(chan error, 1)
+	go func() {
+		_, err := r.db.ExecContext(ctx, `DELETE FROM members WHERE id = 2`)
+		deleted <- err
+	}()
+	select {
+	case err := <-deleted:
+		t.Fatalf("the removal = %v while the end is held, want it to wait", err)
+	case <-time.After(time.Second):
+	}
+	if _, err := lock.ExecContext(ctx, `SELECT pg_advisory_unlock(4246)`); err != nil {
+		t.Fatal(err)
+	}
+	for name, done := range map[string]chan error{"EndTurn": ended, "the removal": deleted} {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("%s = %v, want it to succeed (no deadlock)", name, err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatalf("%s never finished", name)
+		}
+	}
+
+	if got, err := r.Thread(ctx, th.ID); got != nil || err != nil {
+		t.Errorf("Sam's thread after the removal = %+v, %v", got, err)
+	}
+	for _, table := range []string{"ask_turns", "ask_messages"} {
+		var n int
+		if err := r.db.QueryRow(`SELECT count(*) FROM `+table+` WHERE thread_id = $1`, th.ID).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s keeps %d rows of the removed member's thread (%v)", table, n, err)
+		}
+	}
+}
