@@ -329,7 +329,7 @@ func TestAskRepository_EndTurnMeetsMemberRemoval(t *testing.T) {
 	}()
 	for deadline := time.Now().Add(5 * time.Second); ; {
 		var waiting int
-		if err := r.db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&waiting); err != nil {
+		if err := r.db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 4246 AND NOT granted`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting == 1 {
