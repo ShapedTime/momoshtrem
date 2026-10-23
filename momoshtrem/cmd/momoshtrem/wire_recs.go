@@ -64,13 +64,13 @@ type recsMember struct {
 //
 // It starts the scheduler (rec_schedule, 03:00 server-local, a run for
 // every member with Trakt connected; a slot missed while the server was
-// down runs once, a minute after startup; runs a crash left active are
-// marked failed first) and installs its hooks with setters, since their
-// owners are built in main before this runs: the first_sync trigger on
-// each member's Trakt sync (SetOnImported), the title pages' reasons on
-// the catalog (SetReasons), the usage page's part (SetRecs), rescheduling
-// on a settings change (SetOnChange), and stopping a removed member's run
-// (OnRemoving, after their Trakt is forgotten).
+// down runs once, a minute after startup; runs a crash left running are
+// marked failed first, and with no key the queued ones too) and
+// installs its hooks with setters, since their owners are built in main
+// before this runs: the first_sync trigger on each member's Trakt sync
+// (SetOnImported), the title pages' reasons on the catalog (SetReasons), the usage
+// page's part (SetRecs), rescheduling on a settings change (SetOnChange), and
+// stopping a removed member's run (OnRemoving, after their Trakt is forgotten).
 func wireRecs(d aiDeps, core *aiCore, opts *api.Options) *recsWiring {
 	connection := func(memberID int64) profile.Connection {
 		if d.trakt == nil {

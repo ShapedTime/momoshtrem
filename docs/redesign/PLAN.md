@@ -1494,7 +1494,7 @@ HANDOFF has no screens for these, so this is their spec. The wording lives in `l
 Several people share one login (D7). Each is a household **member** with their own Trakt, For You, picks, feedback and Ask threads; the library, downloads, Activity and settings are the household's. A request names its member with `X-Momoshtrem-Member` (Conventions). Types: `web/src/lib/api/contract/members.ts`. B1 #241 serves it: the context helpers and the service in `internal/member`, the store in `library/member_repo.go`, the middleware and the `/members` routes in `internal/api`. Then come Trakt per member in B2a #243 and B2b #244, picks in B3a #245, and Ask and the usage split in B3b #246. UI: "Who's watching?", the account menu's switcher and the Trakt note (W1 #242); Settings › Household and the usage split (W2 #247).
 
 ```
-GET /members → 200 {items: [Member]}     // by id, never empty; the first is the default member (no header)
+GET /members → 200 {items: [Member]}     // by id, never empty, without a member being removed; the first is the default member (no header)
 Member {
   id, name, created_at,
   color,                                 // rose|orchid|periwinkle|teal|lime|sand (the web maps it to a --member-* token)
@@ -1545,7 +1545,6 @@ Member {
   - With one member it's chosen automatically. With two or more and no valid cookie, "Who's watching?" shows before anything personal loads.
   - `400 unknown_member` clears the cookie and reloads once. Switching writes the cookie, clears the query cache and loads `/`.
   - A backend without `/members` (`404`) gives the single-member app, as before.
-- **Until the slices land,** a second member isn't safe: Trakt's connection and sync stay the lowest member's until #244, picks until #245, Ask until #246. So Settings › Household (#247) merges after #246, and a second member is added only then.
 
 ### System
 - `GET /status[?refresh=1]` (G2) returns:
