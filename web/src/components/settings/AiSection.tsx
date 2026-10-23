@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Sparkles } from 'lucide-react';
+import { useMembers } from '@/components/members/MembersGate';
 import { Banner, Button, LoadingRegion, Skeleton, useToast } from '@/components/ui';
 import { useNow } from '@/hooks/useNow';
 import { isApiError } from '@/lib/api/client';
 import type { AiSettingsPatch } from '@/lib/api/contract';
 import { isActiveRun, recApi, recKeys, recRunQuery } from '@/lib/api/endpoints/recommendations';
 import { aiSettingsQuery, aiUsageQuery, settingsApi, settingsKeys } from '@/lib/api/endpoints/settings';
+import { traktIntegrationQuery } from '@/lib/api/endpoints/trakt';
 import {
   aiChanges,
   type AiDraft,
@@ -19,6 +21,8 @@ import {
   fieldErrorCopy,
   hasChanges,
   isAiField,
+  memberSpend,
+  picksMemberNote,
   runNowProblem,
   runToastBody,
   withEdits,
@@ -62,7 +66,8 @@ function AiSkeleton() {
  * episode mapping's classifier. Edits stay local until Save sends only what
  * changed (PUT /settings/ai is partial); a 422 shows next to the field it
  * names. Without an Anthropic key the picks controls are off, and the rest
- * still saves.
+ * still saves. With household members (#239) the runs are the viewer's, and
+ * the budget splits picks and Ask by person.
  */
 export function AiSection() {
   const queryClient = useQueryClient();
@@ -70,6 +75,9 @@ export function AiSection() {
   const { toast } = useToast();
   const settings = useQuery(aiSettingsQuery());
   const usage = useQuery(aiUsageQuery());
+  const household = useMembers();
+  // The viewer's Trakt: the schedule runs only for a connected member (the Trakt section polls; this reads along)
+  const trakt = useQuery({ ...traktIntegrationQuery(), refetchInterval: false });
   const now = useNow(60_000);
   // Only the fields touched here: the rest follows the server, so a stale page never sends them back
   const [edits, setEdits] = useState<Partial<AiDraft>>({});
@@ -198,10 +206,13 @@ export function AiSection() {
         starting={refresh.isPending}
         problem={problem}
         onRunNow={() => refresh.mutate()}
+        memberNote={picksMemberNote(household.current, household.members.length)}
+        trakt={trakt.data?.state ?? null}
       />
 
       <BudgetCard
         usage={usage.data}
+        people={usage.data ? memberSpend(usage.data, household.members) : null}
         onRetryUsage={() => void usage.refetch()}
         now={now}
         budget={current.budget}

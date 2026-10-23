@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Command, LogOut, Settings, Tv } from 'lucide-react';
+import { Command, LogOut, Settings, Tv, Users } from 'lucide-react';
 import { CatAvatar, MarkMono } from '@/components/brand';
 import { useMembers } from '@/components/members/MembersGate';
 import { Button, Kbd, MemberAvatar, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Sheet, Spinner } from '@/components/ui';
@@ -33,11 +33,14 @@ export function accountMenuLabel(member: Member | null, canSwitch: boolean): str
   return member ? `Account menu, ${member.name}: ${actions}` : `Account menu: ${actions}`;
 }
 
+/** Settings › Household (#247). */
+const HOUSEHOLD_HREF = '/settings?section=household';
+
 /**
- * The account menu (HANDOFF §3 Menu): who's watching and "Switch to …" for
- * everyone else (#239), then Settings, Infuse setup, Command palette and Log
- * out. A popover on desktop; a sheet on phone. Switching goes to `/` as the
- * other person, with every cached query dropped.
+ * The account menu (HANDOFF §3 Menu): who's watching, "Switch to …" for
+ * everyone else and Manage household (#239), then Settings, Infuse setup,
+ * Command palette and Log out. A popover on desktop; a sheet on phone.
+ * Switching goes to `/` as the other person, with every cached query dropped.
  */
 export function UserMenu({ className }: { className?: string }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
@@ -74,13 +77,16 @@ export function UserMenu({ className }: { className?: string }) {
         <MenuContent aria-label="Account" className="min-w-[260px]">
           <AccountMenuHeader member={member} />
           <MenuSeparator />
-          {others.length > 0 && (
+          {member && (
             <>
               {others.map((other) => (
                 <MenuItem key={other.id} icon={<MemberAvatar name={other.name} color={other.color} size="xs" />} onSelect={() => switchMember(other.id)}>
                   Switch to {other.name}
                 </MenuItem>
               ))}
+              <MenuItem href={HOUSEHOLD_HREF} icon={<Users size={18} aria-hidden="true" />}>
+                Manage household
+              </MenuItem>
               <MenuSeparator />
             </>
           )}
@@ -124,7 +130,15 @@ export function UserMenu({ className }: { className?: string }) {
               {switching === other.id && <Spinner size={18} className="text-fg-3" />}
             </button>
           ))}
-          {others.length > 0 && <hr className="my-1 border-line-1" />}
+          {member && (
+            <>
+              <Link href={HOUSEHOLD_HREF} className="list-row rounded-md" onClick={() => setSheetOpen(false)}>
+                <Users size={20} className="text-fg-3" aria-hidden="true" />
+                <span className="grow font-medium">Manage household</span>
+              </Link>
+              <hr className="my-1 border-line-1" />
+            </>
+          )}
           <Link href="/settings" className="list-row rounded-md" onClick={() => setSheetOpen(false)}>
             <Settings size={20} className="text-fg-3" aria-hidden="true" />
             <span className="grow font-medium">Settings</span>

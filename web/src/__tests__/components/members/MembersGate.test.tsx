@@ -4,7 +4,7 @@ import { MembersGate, useMembers } from '@/components/members/MembersGate';
 import { ToastProvider } from '@/components/ui';
 import type { Member } from '@/lib/api/contract';
 import { upNextQuery } from '@/lib/api/endpoints';
-import { page, resetPage } from '@/lib/members/page';
+import { leavePage, page, resetPage, stayOnPage } from '@/lib/members/page';
 import { switchMember } from '@/lib/members/switch';
 
 /** Who's watching? (#239): nothing personal is asked before someone is chosen. */
@@ -52,8 +52,7 @@ function Probe() {
   );
 }
 
-function renderGate(initialMemberId: number | null) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderGate(initialMemberId: number | null, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -189,6 +188,41 @@ describe('MembersGate', () => {
     renderGate(9);
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(document.cookie).not.toContain('momoshtrem_member');
+  });
+
+  it('removing yourself (the page leaving): a list without you keeps the app as it was; calling it off hands back to the list', async () => {
+    // TanStack tells its observers on the next tick: let the gate render what the list says
+    const tick = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    stubFetch({ status: 200, body: { items: TWO } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderGate(1, client);
+    await screen.findByText('App for Teymur; others: Sam');
+
+    // The DELETE is out: the server stops listing Teymur, and a refetch says so
+    leavePage();
+    stubFetch({ status: 200, body: { items: TWO.slice(1) } });
+    await act(() => client.refetchQueries({ queryKey: ['members'] }));
+    await tick();
+    expect(client.getQueryData(['members'])).toEqual({ items: TWO.slice(1) });
+    expect(screen.getByText('App for Teymur; others: Sam')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
+
+    // It failed: the sheet puts the list back as the DELETE found it, then calls the leave off. Teymur stays
+    act(() => {
+      client.setQueryData(['members'], { items: TWO });
+      stayOnPage();
+    });
+    await tick();
+    expect(screen.getByText('App for Teymur; others: Sam')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(document.cookie).toContain('momoshtrem_member=1');
+
+    // A fresh list decides. One that still lacks him (it went through, only the answer was lost): the stale path
+    await act(() => client.refetchQueries({ queryKey: ['members'] }));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(document.cookie).toContain('momoshtrem_member=2');
   });
 
   it('a stale cookie with one person left: that person, and a reload', async () => {

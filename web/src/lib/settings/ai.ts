@@ -1,4 +1,16 @@
-import type { AiFeature, AiSettings, AiSettingsPatch, AiUsage, ClassifierModel, RecModel, RecSchedule, RunSummary } from '@/lib/api/contract';
+import type {
+  AiFeature,
+  AiSettings,
+  AiSettingsPatch,
+  AiUsage,
+  ClassifierModel,
+  Member,
+  RecModel,
+  RecSchedule,
+  RunSummary,
+  TraktState,
+} from '@/lib/api/contract';
+import { possessive } from '@/lib/members/display';
 
 /**
  * Settings › AI & picks (screens/settings/ai-*; PLAN §6 "AI settings and
@@ -237,6 +249,32 @@ export function spendLine(usage: Pick<AiUsage, 'total_usd' | 'budget_usd'>): { s
   return { spent: usd(usage.total_usd), of: usage.budget_usd !== null ? `of ${usd(usage.budget_usd)} this month` : 'this month · no cap' };
 }
 
+// ---- Picks and Ask by person (#239) ------------------------------------------------------
+
+export interface MemberSpend {
+  memberId: number;
+  name: string;
+  /** Their colour key from the household list, joined by id; null when the list doesn't have them (a neutral avatar). */
+  color: string | null;
+  cost: number;
+}
+
+/**
+ * The budget's "Picks and Ask by person": the usage's `by_member` rows (every
+ * current member, in id order), each with their colour. Null when there's no
+ * split to show: one person, or a backend from before household members.
+ */
+export function memberSpend(usage: Pick<AiUsage, 'by_member'>, members: ReadonlyArray<Pick<Member, 'id' | 'color'>>): MemberSpend[] | null {
+  const rows = usage.by_member;
+  if (!rows || rows.length < 2) return null;
+  return rows.map((row) => ({
+    memberId: row.member_id,
+    name: row.name,
+    color: members.find((m) => m.id === row.member_id)?.color ?? null,
+    cost: row.cost_usd,
+  }));
+}
+
 const PAUSES = 'If the budget runs out, AI pauses until the 1st and mapping falls back to rules.';
 const NO_CAP = 'There’s no cap, so AI never pauses.';
 
@@ -277,6 +315,14 @@ export function runEstimate(estimates: AiUsage['estimates'] | undefined, model: 
 export function runToastBody(model: RecModel, estimates: AiUsage['estimates'] | undefined): string {
   const value = estimates?.run_usd[model];
   return `About a minute. ${MODEL_NAMES[model]}${value === null || value === undefined ? '' : ` · ≈ ${usd(value)}`}`;
+}
+
+/**
+ * Personal picks with two or more people (#239): the runs are the viewer's,
+ * the settings the household's. Null alone, or without household members.
+ */
+export function picksMemberNote(current: Pick<Member, 'name'> | null, people: number): string | null {
+  return current && people >= 2 ? `Runs and Run now are ${possessive(current.name)}. The schedule, model and budget are shared.` : null;
 }
 
 /** The master switch's help: it's what picks need at all (Ask doesn't). */
@@ -338,6 +384,8 @@ export interface ScheduleHelpInput {
   saved: Pick<AiSettings, 'rec_enabled' | 'rec_schedule'>;
   configured: boolean;
   recs: AiUsage['recs'] | undefined;
+  /** The viewer's Trakt (#239); null while it's unknown. Only a connected member's runs are scheduled. */
+  trakt: TraktState | null;
   now: number;
 }
 
@@ -349,19 +397,22 @@ const SLOTS = 'Nightly runs at 03:00 server time, weekly on Sunday.';
  * Sunday. Next run tonight; the last one took 41 s and cost $0.36."), from
  * the usage's `next_run_at` and last run. A known next run says its own day
  * and time in this browser's time ("Next run tonight at 03:00; …"); without
- * one, the slots are said in server time.
+ * one, the slots are said in server time. The schedule queues runs only for
+ * members with Trakt connected (#239), so without it the help says to connect
+ * rather than promise a run.
  */
-export function scheduleHelp({ draft, saved, configured, recs, now }: ScheduleHelpInput): string {
+export function scheduleHelp({ draft, saved, configured, recs, trakt, now }: ScheduleHelpInput): string {
   const unsaved = draft.rec_enabled !== saved.rec_enabled || draft.rec_schedule !== saved.rec_schedule;
   const last = lastRunClause(recs?.last_run ?? null);
   const withLast = (lead: string) => (last ? `${lead}; ${last}.` : `${lead}.`);
-  if (configured && draft.rec_enabled && draft.rec_schedule !== 'manual' && !unsaved && recs?.next_run_at) {
-    return withLast(`Next run ${nextRunPhrase(recs.next_run_at, now)}`);
-  }
   let lead: string | null = null;
   if (configured && !draft.rec_enabled) lead = 'Picks are off, so nothing runs';
   else if (configured && draft.rec_schedule === 'manual') lead = 'Manual: only when you press Run now';
+  else if (configured && trakt !== null && trakt !== 'connected') {
+    lead = `${trakt === 'reauth' ? 'Sign in to Trakt again' : 'Connect Trakt'} to get ${draft.rec_schedule} picks`;
+  }
   if (lead) return `${SLOTS} ${withLast(lead)}`;
+  if (configured && !unsaved && recs?.next_run_at) return withLast(`Next run ${nextRunPhrase(recs.next_run_at, now)}`);
   return last ? `${SLOTS} ${capitalize(last.replace('the last one', 'the last run'))}.` : SLOTS;
 }
 

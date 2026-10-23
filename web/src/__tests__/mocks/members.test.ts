@@ -225,6 +225,41 @@ describe('who’s asking', () => {
     expect(await failure(recApi.threads())).toEqual({ status: 400, code: 'unknown_member' });
   });
 
+  it('by_member splits picks and Ask: every current member in id order, zeros included, never more than their total', async () => {
+    const recsAndAsk = (usage: Awaited<ReturnType<typeof settingsApi.aiUsage>>) =>
+      usage.by_feature.filter((row) => row.feature !== 'classifier').reduce((sum, row) => sum + row.cost_usd, 0);
+    await membersApi.create({ name: 'Alex' });
+    const usage = await settingsApi.aiUsage();
+    expect(usage.by_member).toEqual([
+      { member_id: 1, name: 'Teymur', cost_usd: 2.03, requests: 48 },
+      { member_id: 2, name: 'Sam', cost_usd: 0.68, requests: 16 },
+      { member_id: 3, name: 'Alex', cost_usd: 0, requests: 0 },
+    ]);
+
+    // What a member spends on the page joins their row; a rename shows there too
+    setMockMember(2);
+    await ask('a 90-minute thriller for tonight');
+    await membersApi.update(2, { name: 'Samira' });
+    const after = await settingsApi.aiUsage();
+    const sam = after.by_member?.find((row) => row.member_id === 2);
+    expect(sam).toMatchObject({ name: 'Samira' });
+    expect(sam!.cost_usd).toBeGreaterThan(0.68);
+    const split = after.by_member!.reduce((sum, row) => sum + row.cost_usd, 0);
+    expect(split).toBeLessThanOrEqual(recsAndAsk(after) + 0.005);
+
+    // Removed: no row, and their spend stays in the total alone
+    setMockMember(1);
+    await membersApi.remove(2);
+    const removed = await settingsApi.aiUsage();
+    expect(removed.by_member?.map((row) => row.member_id)).toEqual([1, 3]);
+    expect(removed.total_usd).toBe(after.total_usd);
+  });
+
+  it('by_member is missing from a backend before households', async () => {
+    setMockScenario('members-absent');
+    expect((await settingsApi.aiUsage()).by_member).toBeUndefined();
+  });
+
   it('trakt-account-in-use: the code ends with account_in_use, back to off', async () => {
     setMockScenario('trakt-account-in-use');
     expect(await traktApi.integration()).toMatchObject({ state: 'off' });

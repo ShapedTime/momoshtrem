@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MembersGate } from '@/components/members/MembersGate';
 import { ToastProvider } from '@/components/ui';
 import { AiSection } from '@/components/settings/AiSection';
-import type { AiSettings, AiSettingsPatch, AiUsage } from '@/lib/api/contract';
+import type { AiSettings, AiSettingsPatch, AiUsage, Member, TraktState } from '@/lib/api/contract';
 import { AI_SETTINGS } from '@/mocks/fixtures/settings';
 
 /** Settings › AI & picks (#159): partial saves, the budget's errors, and no key. */
@@ -154,5 +155,74 @@ describe('AiSection', () => {
     fireEvent.click(within(bar()!).getByRole('button', { name: 'Save' }));
     expect(await screen.findByText('Settings saved')).toBeInTheDocument();
     expect(puts).toEqual([{ auto_apply_high_confidence: false }]);
+  });
+});
+
+describe('AiSection in a household (#239)', () => {
+  const person = (id: number, name: string, color: Member['color']): Member => ({
+    id,
+    name,
+    color,
+    created_at: '2026-01-01T00:00:00Z',
+    trakt: { state: 'connected', username: name.toLowerCase() },
+  });
+  const BY_MEMBER = [
+    { member_id: 1, name: 'Teymur', cost_usd: 2.03, requests: 48 },
+    { member_id: 2, name: 'Sam', cost_usd: 0.68, requests: 16 },
+  ];
+
+  /** As Teymur (1), with /api/members answering `members`. */
+  function renderInHousehold(members: Member[], usageBody: AiUsage, traktState?: TraktState) {
+    document.cookie = 'momoshtrem_member=1; Path=/';
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/members') return Promise.resolve(answer(200, { items: members }));
+      if (url.endsWith('/api/settings/ai/usage')) return Promise.resolve(answer(200, usageBody));
+      // The section reads only the state
+      if (url.endsWith('/api/integrations/trakt') && traktState) return Promise.resolve(answer(200, { state: traktState }));
+      return Promise.resolve(answer(200, AI_SETTINGS));
+    }) as typeof fetch;
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ToastProvider>
+          <MembersGate initialMemberId={1}>
+            <AiSection />
+          </MembersGate>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  afterEach(() => {
+    document.cookie = 'momoshtrem_member=; Path=/; Max-Age=0';
+  });
+
+  it('says whose runs these are, and splits picks and Ask by person', async () => {
+    renderInHousehold([person(1, 'Teymur', 'teal'), person(2, 'Sam', 'rose')], usage({ by_member: BY_MEMBER }));
+    const picks = await screen.findByRole('region', { name: 'Personal picks' });
+    expect(await within(picks).findByText('Runs and Run now are Teymur’s. The schedule, model and budget are shared.')).toBeInTheDocument();
+    const split = screen.getByRole('list', { name: 'Picks and Ask by person' });
+    expect(within(split).getAllByRole('listitem').map((row) => row.textContent)).toEqual(['TTeymur$2.03', 'SSam$0.68']);
+    expect(split.querySelector('.member-avatar[data-color="rose"]')).not.toBeNull();
+  });
+
+  it('alone, or from a backend without the split, neither shows', async () => {
+    renderInHousehold([person(1, 'Teymur', 'teal')], usage({ by_member: BY_MEMBER.slice(0, 1) }));
+    await screen.findByRole('region', { name: 'Personal picks' });
+    expect(await screen.findByRole('img', { name: /^Spent \$3\.12/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Runs and Run now are/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Picks and Ask by person' })).not.toBeInTheDocument();
+  });
+
+  it('two people but no by_member (an older backend): the note, no split', async () => {
+    renderInHousehold([person(1, 'Teymur', 'teal'), person(2, 'Sam', 'rose')], usage());
+    expect(await screen.findByText('Runs and Run now are Teymur’s. The schedule, model and budget are shared.')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Picks and Ask by person' })).not.toBeInTheDocument();
+  });
+
+  it('the viewer without Trakt: the schedule says to connect it, not that a run is coming', async () => {
+    renderInHousehold([person(1, 'Teymur', 'teal'), person(2, 'Sam', 'rose')], usage(), 'off');
+    const help = await screen.findByText(/Connect Trakt to get nightly picks\./);
+    expect(help).toHaveTextContent('Nightly runs at 03:00 server time, weekly on Sunday. Connect Trakt to get nightly picks.');
   });
 });

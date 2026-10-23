@@ -1209,11 +1209,42 @@ const FEATURES: readonly AiFeature[] = ['recs', 'ask', 'classifier'];
 const mean = (values: number[]) => (values.length === 0 ? null : round2(values.reduce((a, b) => a + b, 0) / values.length));
 
 /**
+ * Whose the seeded month's picks and Ask (AI_SPEND) were: three quarters
+ * Teymur's, a quarter Sam's. A share counts only while its member is in the
+ * household; removed (or never there, under `members-one`), it stays in the
+ * total alone, as a removed member's spend does.
+ */
+const SEEDED_SHARE: Record<number, number> = { 1: 0.75, 2: 0.25 };
+
+/**
+ * `by_member` (#239): picks and Ask this month for every current member in id
+ * order, zeros included: their share of the seeded spend plus what their runs
+ * and asks on this page cost. A backend before household members
+ * (`members-absent`) sends none.
+ */
+function spendByMember(now: number): AiUsage['by_member'] {
+  if (scenario() === 'members-absent') return undefined;
+  const seeded = { cost_usd: AI_SPEND.recs.cost_usd + AI_SPEND.ask.cost_usd, requests: AI_SPEND.recs.requests + AI_SPEND.ask.requests };
+  return mockMembers().map((member) => {
+    const share = SEEDED_SHARE[member.id] ?? 0;
+    const { recs, ask } = stateFor(member.id, now).spend;
+    return {
+      member_id: member.id,
+      name: member.name,
+      cost_usd: round2(share * seeded.cost_usd + recs.cost_usd + ask.cost_usd),
+      requests: Math.round(share * seeded.requests) + recs.requests + ask.requests,
+    };
+  });
+}
+
+/**
  * GET /settings/ai/usage: this month (local), the page's runs and asks included. The spend, budget and
- * estimates are the household's (a removed member's spend included); `recs` and `asks_today` the viewer's.
+ * estimates are the household's (a removed member's spend included), split by member in `by_member`;
+ * `recs` and `asks_today` the viewer's.
  */
 export function aiUsage(now = Date.now()): AiUsage {
   const s = current(now);
+  const byMember = spendByMember(now);
   const all = everyone(now);
   const settings = mockAiSettings();
   const spent = (feature: AiFeature) => [...all.map((m) => m.spend[feature]), removedSpend[feature]];
@@ -1251,6 +1282,7 @@ export function aiUsage(now = Date.now()): AiUsage {
     budget_usd: budget,
     budget_reached: budget !== null && total >= budget,
     by_feature: byFeature,
+    ...(byMember ? { by_member: byMember } : {}),
     recs: { last_run: lastFinished ? summary(lastFinished) : null, active_run: active ? progress(active) : null, next_run_at: at(scheduled) },
     estimates: {
       run_usd: { 'claude-opus-5-5': mean(succeeded('claude-opus-5-5')), 'claude-sonnet-5-5': mean(succeeded('claude-sonnet-5-5')) },

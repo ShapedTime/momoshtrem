@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { writeMemberCookie } from './cookie';
+import { clearMemberCookie, writeMemberCookie } from './cookie';
 import { leavePage, loadPage } from './page';
 
 export { currentUrl } from './page';
@@ -21,6 +21,19 @@ export function switchMember(id: number, clearCache: () => void, to = '/'): void
   writeMemberCookie(id);
   clearCache();
   loadPage(to);
+}
+
+/**
+ * Removing yourself (#247): nobody is chosen any more. As a switch does, the
+ * page is marked leaving, then the cookie goes, every cached query is
+ * dropped, and a full navigation to `/`, where "Who's watching?" follows (or
+ * the only person left, chosen automatically).
+ */
+export function leaveHousehold(clearCache: () => void): void {
+  leavePage();
+  clearMemberCookie();
+  clearCache();
+  loadPage('/');
 }
 
 /** `switchMember` with this app's cache, like `useSignOut`. */

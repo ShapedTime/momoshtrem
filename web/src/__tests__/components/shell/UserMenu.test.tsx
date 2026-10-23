@@ -74,6 +74,7 @@ describe('UserMenu', () => {
     const nav = within(sheet).getByRole('navigation', { name: 'Account' });
     const rows = within(nav).getAllByRole('button', { name: /^Switch to/ });
     expect(rows.map((row) => row.textContent)).toEqual(['SSwitch to Sam', 'ASwitch to Alex']);
+    expect(within(nav).getByRole('link', { name: 'Manage household' })).toHaveAttribute('href', '/settings?section=household');
     expect(within(nav).getByRole('link', { name: 'Settings' })).toBeInTheDocument();
   });
 
@@ -94,7 +95,7 @@ describe('UserMenu', () => {
     expect(assign).toHaveBeenCalledTimes(1);
   });
 
-  it('on desktop the dropdown has a Switch to item per other person', async () => {
+  it('on desktop the dropdown has a Switch to item per other person, then Manage household', async () => {
     const matchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({ ...matchMedia(query), matches: query === '(min-width: 1024px)' })) as typeof window.matchMedia;
     try {
@@ -105,7 +106,15 @@ describe('UserMenu', () => {
       const menu = await screen.findByRole('menu', { name: /Account menu, Teymur/ });
       expect(within(menu).getByText('Trakt · teymur')).toBeInTheDocument();
       const item = within(menu).getByRole('menuitem', { name: 'Switch to Sam' });
-      expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['SSwitch to Sam', 'Settings', 'Infuse setup', 'Command palette⌘K', 'Log out']);
+      expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+        'SSwitch to Sam',
+        'Manage household',
+        'Settings',
+        'Infuse setup',
+        'Command palette⌘K',
+        'Log out',
+      ]);
+      expect(within(menu).getByRole('menuitem', { name: 'Manage household' })).toHaveAttribute('href', '/settings?section=household');
       fireEvent.click(item);
       expect(document.cookie).toContain('momoshtrem_member=2');
       expect(assign).toHaveBeenCalledWith('/');
@@ -114,12 +123,13 @@ describe('UserMenu', () => {
     }
   });
 
-  it('alone: the member, but no Switch rows', async () => {
+  it('alone: the member and Manage household (to add someone), but no Switch rows', async () => {
     renderMenu({ status: 200, body: { items: [person(1, 'Teymur')] } });
     fireEvent.click(await screen.findByRole('button', { name: 'Account menu, Teymur: settings, log out' }));
     const sheet = await screen.findByRole('dialog', { name: 'Account' });
     expect(within(sheet).getByText('Teymur')).toBeInTheDocument();
     expect(within(sheet).queryByRole('button', { name: /Switch to/ })).not.toBeInTheDocument();
+    expect(within(sheet).getByRole('link', { name: 'Manage household' })).toBeInTheDocument();
   });
 
   it('without household members (an older backend): the app, as before', async () => {
@@ -129,5 +139,6 @@ describe('UserMenu', () => {
     expect(within(sheet).getByText('momoshtrem')).toBeInTheDocument();
     expect(within(sheet).getByText('Signed in')).toBeInTheDocument();
     expect(within(sheet).queryByRole('button', { name: /Switch to/ })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('link', { name: 'Manage household' })).not.toBeInTheDocument();
   });
 });

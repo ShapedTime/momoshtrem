@@ -37,6 +37,16 @@ export function loadPage(to: string): void {
 let rendered: number | null | undefined;
 /** This page switched person (or forgot one) and is navigating away. */
 let leaving = false;
+/** Told when a leave is called off (`stayOnPage`): the gate, which holds the app on screen while the page leaves (#247). */
+const stayListeners = new Set<() => void>();
+
+/** Run `listener` whenever `stayOnPage()` calls a leave off. Answers the unsubscribe. */
+export function onStayOnPage(listener: () => void): () => void {
+  stayListeners.add(listener);
+  return () => {
+    stayListeners.delete(listener);
+  };
+}
 
 export function setPageMember(id: number | null): void {
   rendered = id;
@@ -55,6 +65,16 @@ export function leavePage(): void {
 }
 
 export const leavingPage = (): boolean => leaving;
+
+/**
+ * A leave that didn't happen (#247: removing yourself failed): this page stays as it is, and a later cookie
+ * change or `unknown_member` is someone else's doing again, and the gate goes back to what the list says.
+ */
+export function stayOnPage(): void {
+  if (!leaving) return;
+  leaving = false;
+  for (const listener of stayListeners) listener();
+}
 
 /** A page restored from the back/forward cache is live again: whatever the cookie says now is someone else's doing. */
 export function pageRestored(): void {
