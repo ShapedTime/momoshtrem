@@ -28,9 +28,11 @@ type SettingsStore interface {
 	UpdateAISettings(ctx context.Context, patch library.AISettingsPatch) (library.AISettings, error)
 }
 
-// UsageStore sums ai_usage (library.AIStore).
+// UsageStore sums ai_usage (library.AIStore): by feature, and the picks
+// and Ask by household member.
 type UsageStore interface {
 	FeatureTotalsSince(ctx context.Context, since time.Time) ([]library.AIFeatureTotal, error)
+	MemberSpendSince(ctx context.Context, since time.Time) ([]library.AIMemberTotal, error)
 }
 
 // RecsReporter is the picks' part of the usage page (R2, #157).
@@ -50,8 +52,8 @@ type AskReporter interface {
 	// AskEstimate is the mean cost of the last 20 done turns; nil
 	// without any.
 	AskEstimate(ctx context.Context) (*float64, error)
-	// AsksToday counts the turns started since dayStart, the server-local
-	// midnight: cancelled and failed ones too.
+	// AsksToday counts the context's member's turns started since
+	// dayStart, the server-local midnight: cancelled and failed ones too.
 	AsksToday(ctx context.Context, dayStart time.Time) (int, error)
 }
 
@@ -150,8 +152,9 @@ func toWire(s library.AISettings) recommend.Settings {
 var features = []string{library.AIFeatureRecs, library.AIFeatureAsk, library.AIFeatureClassifier}
 
 // AIUsage is this server-local month's spend by feature against the
-// budget, with the picks' and Ask's parts when their reporters are set. A
-// reporter that fails leaves its part null (logged): the page still loads.
+// budget, and the picks and Ask by member, with the picks' and Ask's
+// parts (the context's member's) when their reporters are set. A reporter
+// that fails leaves its part null (logged): the page still loads.
 func (s *Service) AIUsage(ctx context.Context) (*recommend.UsageReport, error) {
 	now := s.now()
 	monthStart, next := aicore.MonthBounds(now)
@@ -160,6 +163,10 @@ func (s *Service) AIUsage(ctx context.Context) (*recommend.UsageReport, error) {
 		return nil, err
 	}
 	totals, err := s.usage.FeatureTotalsSince(ctx, monthStart)
+	if err != nil {
+		return nil, err
+	}
+	members, err := s.usage.MemberSpendSince(ctx, monthStart)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +192,11 @@ func (s *Service) AIUsage(ctx context.Context) (*recommend.UsageReport, error) {
 	}
 	report.TotalUSD = roundUSD(total)
 	report.BudgetReached = settings.MonthlyBudgetUSD != nil && total >= *settings.MonthlyBudgetUSD
+	for _, m := range members {
+		report.ByMember = append(report.ByMember, recommend.MemberUsage{
+			MemberID: m.MemberID, Name: m.Name, CostUSD: roundUSD(m.CostUSD), Requests: m.Requests,
+		})
+	}
 
 	s.mu.RLock()
 	recs, ask := s.recs, s.ask

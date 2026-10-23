@@ -100,3 +100,69 @@ func TestAIStoreUsage(t *testing.T) {
 		t.Errorf("row = %+v ref %v", got, refID)
 	}
 }
+
+// The picks and Ask by member: every current member by id, zeros
+// included, each call found through its run or turn. The classifier's
+// isn't anyone's, nor a call whose run or turn went with a removed member;
+// both still count in the totals.
+func TestAIStoreMemberSpend(t *testing.T) {
+	db := openSchemaDB(t)
+	s := NewAIStore(db)
+	ctx := context.Background()
+	since := time.Now().Add(-time.Hour)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(query, args...); err != nil {
+			t.Fatalf("%.60s…: %v", query, err)
+		}
+	}
+
+	// Only Me: one row, at zero.
+	got, err := s.MemberSpendSince(ctx, since)
+	if err != nil || len(got) != 1 || got[0] != (AIMemberTotal{MemberID: 1, Name: "Me"}) {
+		t.Fatalf("one member, no spend = %+v, %v", got, err)
+	}
+
+	exec(`INSERT INTO members (id, name, color) VALUES (2, 'Sam', 'rose'), (3, 'Ari', 'lime'), (4, 'Gone', 'sand')`)
+	// Run 1 is Me's and turn 1 Sam's: the same ref_id, told apart by the
+	// feature.
+	exec(`INSERT INTO rec_runs (id, member_id, kind, status, model) VALUES (1, 1, 'manual', 'succeeded', 'x'),
+		(2, 2, 'scheduled', 'succeeded', 'x'), (3, 4, 'manual', 'succeeded', 'x')`)
+	exec(`INSERT INTO ask_threads (id, member_id, title, model, prompt_version) VALUES (1, 2, 'T', 'x', 'ask-v2')`)
+	exec(`INSERT INTO ask_turns (id, member_id, thread_id, position, message, status) VALUES (1, 2, 1, 0, 'm', 'done')`)
+	ref := func(id int64) *int64 { return &id }
+	for _, u := range []AIUsage{
+		{Feature: AIFeatureRecs, CostUSD: 0.5, RefID: ref(1)},
+		{Feature: AIFeatureRecs, CostUSD: 0.25, RefID: ref(1)},
+		{Feature: AIFeatureAsk, CostUSD: 0.02, RefID: ref(1)},
+		{Feature: AIFeatureRecs, CostUSD: 0.1, RefID: ref(2)},
+		{Feature: AIFeatureClassifier, CostUSD: 0.003, RefID: ref(1)}, // a job, the household's
+		{Feature: AIFeatureAsk, CostUSD: 0.04, RefID: ref(99)},        // a turn that's gone
+		{Feature: AIFeatureRecs, CostUSD: 0.3, RefID: ref(3)},         // Gone's run
+	} {
+		u.Model = "claude-opus-5-5"
+		if err := s.RecordUsage(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO ai_usage (feature, model, cost_usd, ref_id, created_at)
+		VALUES ('recs', 'claude-opus-5-5', 9, 1, $1::timestamptz - INTERVAL '1 second')`, since) // last month
+	exec(`DELETE FROM members WHERE id = 4`)
+
+	got, err = s.MemberSpendSince(ctx, since)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("by member = %+v, %v", got, err)
+	}
+	for i, want := range []AIMemberTotal{
+		{MemberID: 1, Name: "Me", CostUSD: 0.75, Requests: 2},
+		{MemberID: 2, Name: "Sam", CostUSD: 0.12, Requests: 2},
+		{MemberID: 3, Name: "Ari"},
+	} {
+		if g := got[i]; g.MemberID != want.MemberID || g.Name != want.Name || math.Abs(g.CostUSD-want.CostUSD) > 1e-9 || g.Requests != want.Requests {
+			t.Errorf("by member[%d] = %+v, want %+v", i, g, want)
+		}
+	}
+	if total, err := s.CostSince(ctx, since); err != nil || math.Abs(total-1.213) > 1e-9 {
+		t.Errorf("total = %v, %v; want 1.213, the unsplit spend included", total, err)
+	}
+}

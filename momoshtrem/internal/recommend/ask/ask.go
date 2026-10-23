@@ -12,7 +12,12 @@
 // messages unchanged, on the model and prompt version the thread started
 // with; a turn's messages are stored only when it ends done, in one
 // transaction, so a cancelled or failed turn never replays (and never
-// leaves an orphaned tool_use). One turn streams at a time, in any thread.
+// leaves an orphaned tool_use).
+//
+// Ask is each household member's (#239, #246): the request's member
+// (member.Require) has their own threads (another's is ErrNotFound), one
+// turn streaming at a time in any of their threads, their own daily limit,
+// and their own taste profile and candidate pool. The budget is shared.
 package ask
 
 import (
@@ -29,6 +34,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/aicore"
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 	"github.com/shapedtime/momoshtrem/internal/recommend/agent"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -45,10 +51,11 @@ type Budget interface {
 	Check(ctx context.Context) error
 }
 
-// Store keeps the threads (library.AskRepository).
+// Store keeps the threads (library.AskRepository). Thread is anyone's: the
+// service checks it's the member's.
 type Store interface {
 	Thread(ctx context.Context, id int64) (*library.AskThread, error)
-	Threads(ctx context.Context, limit int) ([]library.AskThread, error)
+	Threads(ctx context.Context, memberID int64, limit int) ([]library.AskThread, error)
 	Turns(ctx context.Context, threadID int64) ([]library.AskTurn, error)
 	Messages(ctx context.Context, threadID int64) ([]library.AskMessage, error)
 	StartTurn(ctx context.Context, in library.NewAskTurn) (*library.AskThread, *library.AskTurn, error)
@@ -56,7 +63,7 @@ type Store interface {
 	EndTurn(ctx context.Context, end library.AskTurnEnd) (bool, error)
 	AbandonTurn(ctx context.Context, turnID int64) error
 	FailStreaming(ctx context.Context, code string, view []byte) (int64, error)
-	TurnsSince(ctx context.Context, since time.Time) (int, error)
+	TurnsSince(ctx context.Context, memberID int64, since time.Time) (int, error)
 	MeanDoneCost(ctx context.Context, n int) (*float64, error)
 }
 
@@ -67,7 +74,7 @@ type Settings interface {
 }
 
 // Titles looks up what's known about titles: watched, rated, hidden,
-// feedback, the watchlist (library.TasteRepository).
+// feedback, the watchlist (library.TasteRepository, bound to a member).
 type Titles interface {
 	TitleStates(ctx context.Context, refs []library.TitleRef) ([]library.TitleState, error)
 }
@@ -83,6 +90,16 @@ type TMDB interface {
 	ShowDetails(ctx context.Context, id int) (*tmdb.ShowDetails, error)
 }
 
+// Member is what Ask reads for one household member.
+type Member struct {
+	// Titles are the member's: what they watched, rated, hid, turned down
+	// and listed.
+	Titles Titles
+	// Tools are R1's custom tools (tools.All) over the member's own
+	// tools.Cached, in their fixed order; show_picks is added after them.
+	Tools []agent.Tool
+}
+
 // Deps are what Ask is built from.
 type Deps struct {
 	// Runner is nil without ANTHROPIC_API_KEY: asking answers
@@ -91,12 +108,13 @@ type Deps struct {
 	Budget   Budget
 	Store    Store
 	Settings Settings
-	Titles   Titles
 	Library  Library
 	TMDB     TMDB
-	// Tools are R1's custom tools (tools.All over a tools.Cached), in
-	// their fixed order; show_picks is added after them.
-	Tools []agent.Tool
+	// ForMember builds a member's parts. The service calls it once per
+	// member and keeps what it returns (until ForgetMember), so each
+	// member's tools.Cached is theirs alone: one member's profile and
+	// pool are never another's.
+	ForMember func(memberID int64) Member
 	// Now is the clock; time.Now by default. Days are server-local.
 	Now func() time.Time
 	// WriteTimeout bounds a turn's final writes, retries included;
@@ -137,13 +155,14 @@ type Service struct {
 	writeTimeout time.Duration
 
 	mu      sync.Mutex
-	busy    bool // a turn holds the one slot
+	busy    map[int64]bool // the members whose turn holds their one slot
 	closed  bool
 	running map[*turn]struct{}
-	// unended are turns whose end couldn't be written: their rows may
-	// still say streaming, which answers ask_busy, so the next ask ends
-	// them (heal).
-	unended map[int64]bool
+	members map[int64]Member // ForMember's, kept
+	// unended are turns whose end couldn't be written, with their
+	// members: their rows may still say streaming, which answers ask_busy
+	// to that member, so their next ask ends them (heal).
+	unended map[int64]int64
 	wg      sync.WaitGroup
 }
 
@@ -156,8 +175,20 @@ func New(d Deps) *Service {
 	if timeout <= 0 {
 		timeout = DefaultWriteTimeout
 	}
-	return &Service{d: d, log: slog.With("component", "ask"), writeTimeout: timeout,
-		running: map[*turn]struct{}{}, unended: map[int64]bool{}}
+	return &Service{d: d, log: slog.With("component", "ask"), writeTimeout: timeout, busy: map[int64]bool{},
+		running: map[*turn]struct{}{}, members: map[int64]Member{}, unended: map[int64]int64{}}
+}
+
+// member is the member's parts, built on first use and kept.
+func (s *Service) member(memberID int64) Member {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.members[memberID]
+	if !ok {
+		m = s.d.ForMember(memberID)
+		s.members[memberID] = m
+	}
+	return m
 }
 
 // Recover ends the turns a crash left streaming as errors (internal), at
@@ -171,9 +202,14 @@ func (s *Service) Recover(ctx context.Context) (int64, error) {
 	return s.d.Store.FailStreaming(ctx, recommend.AskErrorInternal, v)
 }
 
-// Threads lists the threads, the newest updated first (at most 50).
+// Threads lists the member's threads, the newest updated first (at most
+// 50).
 func (s *Service) Threads(ctx context.Context) ([]recommend.ThreadSummary, error) {
-	rows, err := s.d.Store.Threads(ctx, threadsListed)
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.d.Store.Threads(ctx, memberID, threadsListed)
 	if err != nil {
 		return nil, err
 	}
@@ -188,14 +224,19 @@ func summaryOf(t library.AskThread) recommend.ThreadSummary {
 	return recommend.ThreadSummary{ID: t.ID, Title: t.Title, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, TurnCount: t.TurnCount}
 }
 
-// Thread is one thread with its turns, library, watchlist and feedback
-// read now; titles with negative feedback are left out.
+// Thread is one of the member's threads with its turns, library,
+// watchlist and feedback read now; titles with negative feedback are left
+// out. Another member's is ErrNotFound.
 func (s *Service) Thread(ctx context.Context, id int64) (*recommend.Thread, error) {
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	t, err := s.d.Store.Thread(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if t == nil {
+	if t == nil || t.MemberID != memberID {
 		return nil, recommend.ErrNotFound
 	}
 	turns, err := s.d.Store.Turns(ctx, id)
@@ -219,7 +260,7 @@ func (s *Service) Thread(ctx context.Context, id int64) (*recommend.Thread, erro
 			}
 		}
 	}
-	l, err := readLive(ctx, s.d.Titles, s.d.Library, refs)
+	l, err := readLive(ctx, s.member(memberID).Titles, s.d.Library, refs)
 	if err != nil {
 		return nil, err
 	}
@@ -230,39 +271,46 @@ func (s *Service) Thread(ctx context.Context, id int64) (*recommend.Thread, erro
 	return out, nil
 }
 
-// AskEstimate is the mean cost of the last 20 done turns; nil without any.
+// AskEstimate is the mean cost of the last 20 done turns, anyone's; nil
+// without any.
 func (s *Service) AskEstimate(ctx context.Context) (*float64, error) {
 	return s.d.Store.MeanDoneCost(ctx, estimateTurns)
 }
 
-// AsksToday counts the turns started since dayStart, cancelled and failed
-// ones included.
+// AsksToday counts the member's turns started since dayStart, cancelled
+// and failed ones included.
 func (s *Service) AsksToday(ctx context.Context, dayStart time.Time) (int, error) {
-	return s.d.Store.TurnsSince(ctx, dayStart)
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.d.Store.TurnsSince(ctx, memberID, dayStart)
 }
 
 // Ask checks what answers before the stream, in PLAN §6's order (the body
-// is the handler's): no key (ErrUnavailable), an unknown thread
-// (ErrNotFound), a full one (ErrThreadFull), a turn streaming
-// (ErrAskBusy), today's asks and the budget (*recommend.LimitError). Then
-// it starts the turn, whose events arrive on the channel: start first,
-// done or error last (none after a cancel), then it's closed. The turn
-// runs under ctx: when it's cancelled (the client went away) the turn ends
-// cancelled, with what it spent recorded, and frees the slot at once.
+// is the handler's): no key (ErrUnavailable), an unknown thread or another
+// member's (ErrNotFound), a full one (ErrThreadFull), one of the member's
+// turns streaming (ErrAskBusy), their asks today and the budget
+// (*recommend.LimitError). Then it starts the member's turn, whose events
+// arrive on the channel: start first, done or error last (none after a
+// cancel), then it's closed. The turn runs under ctx: when it's cancelled
+// (the client went away) the turn ends cancelled, with what it spent
+// recorded, and frees the member's slot at once.
 func (s *Service) Ask(ctx context.Context, req recommend.AskRequest) (<-chan recommend.Event, error) {
 	if s.d.Runner == nil || s.isClosed() {
 		return nil, recommend.ErrUnavailable
 	}
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	message := strings.TrimSpace(req.Message)
-	var (
-		thread *library.AskThread
-		err    error
-	)
+	var thread *library.AskThread
 	if req.ThreadID != nil {
 		if thread, err = s.d.Store.Thread(ctx, *req.ThreadID); err != nil {
 			return nil, err
 		}
-		if thread == nil {
+		if thread == nil || thread.MemberID != memberID {
 			return nil, recommend.ErrNotFound
 		}
 		if thread.TurnCount >= recommend.ThreadMaxTurns {
@@ -275,20 +323,20 @@ func (s *Service) Ask(ctx context.Context, req recommend.AskRequest) (<-chan rec
 			return nil, recommend.ErrThreadFull
 		}
 	}
-	if !s.acquire() {
+	if !s.acquire(memberID) {
 		return nil, recommend.ErrAskBusy
 	}
 	started := false
 	defer func() {
 		if !started {
-			s.release()
+			s.release(memberID)
 		}
 	}()
-	s.heal(ctx)
+	s.heal(ctx, memberID)
 
 	now := s.d.Now()
 	dayStart, nextDay := aicore.DayBounds(now)
-	asked, err := s.d.Store.TurnsSince(ctx, dayStart)
+	asked, err := s.d.Store.TurnsSince(ctx, memberID, dayStart)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +344,7 @@ func (s *Service) Ask(ctx context.Context, req recommend.AskRequest) (<-chan rec
 		return nil, &recommend.LimitError{Code: recommend.CodeAskLimit, ResetsAt: nextDay}
 	}
 
-	t := &turn{s: s, message: message, started: now, tracker: newTracker()}
+	t := &turn{s: s, member: memberID, parts: s.member(memberID), message: message, started: now, tracker: newTracker()}
 	if err := s.prepare(ctx, t, thread); err != nil {
 		return nil, err
 	}
@@ -311,7 +359,7 @@ func (s *Service) Ask(ctx context.Context, req recommend.AskRequest) (<-chan rec
 		return nil, err
 	}
 
-	newTurn := library.NewAskTurn{Message: message}
+	newTurn := library.NewAskTurn{MemberID: memberID, Message: message}
 	if thread != nil {
 		newTurn.ThreadID = thread.ID
 	} else {
@@ -329,6 +377,7 @@ func (s *Service) Ask(ctx context.Context, req recommend.AskRequest) (<-chan rec
 	t.ctx, t.cancel = context.WithCancel(ctx)
 	t.events = make(chan recommend.Event, 16)
 	t.stop = make(chan struct{})
+	t.done = make(chan struct{})
 
 	s.mu.Lock()
 	if s.closed {
@@ -382,7 +431,7 @@ func (s *Service) prepare(ctx context.Context, t *turn, thread *library.AskThrea
 	t.req = aicore.Request{
 		Model:                  model,
 		System:                 p.system,
-		Tools:                  append(slices.Clone(s.d.Tools), picksTool{run: t.showPicks}),
+		Tools:                  append(slices.Clone(t.parts.Tools), picksTool{run: t.showPicks}),
 		WebSearchMaxUses:       p.webSearches,
 		WebFetchMaxUses:        p.webFetches,
 		Messages:               append(history, t.user),
@@ -479,44 +528,85 @@ func (s *Service) Close() {
 	}
 }
 
+// ForgetMember lets go of a member being removed (a member.OnRemoving
+// listener): it cancels their turns in flight (each ends cancelled, its
+// usage recorded), waits a little for them to write how they ended, and
+// drops their parts, the cached profile and pool with them. Their threads
+// go with the member's row.
+func (s *Service) ForgetMember(_ context.Context, memberID int64) {
+	s.mu.Lock()
+	var ending []*turn
+	for t := range s.running {
+		if t.member == memberID {
+			t.cancel()
+			ending = append(ending, t)
+		}
+	}
+	s.mu.Unlock()
+	if len(ending) > 0 {
+		s.log.Info("Stopping the Ask turns of a member being removed", "member", memberID, "turns", len(ending))
+	}
+	deadline := time.After(closeWait)
+wait:
+	for _, t := range ending {
+		select {
+		case <-t.done:
+		case <-deadline:
+			s.log.Warn("The removed member's Ask turns didn't end in time", "member", memberID)
+			break wait
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.members, memberID)
+	for turnID, m := range s.unended {
+		if m == memberID {
+			delete(s.unended, turnID)
+		}
+	}
+}
+
 func (s *Service) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
 }
 
-// acquire takes the one slot a streaming turn holds.
-func (s *Service) acquire() bool {
+// acquire takes the member's one slot a streaming turn holds.
+func (s *Service) acquire(memberID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.busy {
+	if s.busy[memberID] {
 		return false
 	}
-	s.busy = true
+	s.busy[memberID] = true
 	return true
 }
 
-func (s *Service) release() {
+func (s *Service) release(memberID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.busy = false
+	delete(s.busy, memberID)
 }
 
-// stale remembers a turn whose end couldn't be written.
-func (s *Service) stale(turnID int64) {
+// stale remembers a member's turn whose end couldn't be written.
+func (s *Service) stale(memberID, turnID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.unended[turnID] = true
+	s.unended[turnID] = memberID
 }
 
-// heal ends the turns whose end couldn't be written (their rows may still
-// say streaming, and the one-streaming index would answer ask_busy until a
-// restart). It runs holding the slot, so none of them is running.
-func (s *Service) heal(ctx context.Context) {
+// heal ends the member's turns whose end couldn't be written (their rows
+// may still say streaming, and the one-streaming index would answer them
+// ask_busy until a restart). It runs holding the member's slot, so none of
+// them is running.
+func (s *Service) heal(ctx context.Context, memberID int64) {
 	s.mu.Lock()
 	var ids []int64
-	for id := range s.unended {
-		ids = append(ids, id)
+	for id, m := range s.unended {
+		if m == memberID {
+			ids = append(ids, id)
+		}
 	}
 	s.mu.Unlock()
 	for _, id := range ids {
@@ -544,6 +634,6 @@ func (s *Service) endUnstarted(t *turn) {
 	defer cancel()
 	if err := s.d.Store.CancelTurn(ctx, t.turnID); err != nil {
 		s.log.Warn("Ask: failed to cancel a turn at shutdown", "turn", t.turnID, "error", err)
-		s.stale(t.turnID)
+		s.stale(t.member, t.turnID)
 	}
 }

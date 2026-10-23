@@ -54,6 +54,7 @@ func emptyThreadSlices(t recommend.Thread) recommend.Thread {
 // before any run on it).
 func emptyUsageSlices(u recommend.UsageReport) recommend.UsageReport {
 	u.ByFeature = orEmpty(u.ByFeature)
+	u.ByMember = orEmpty(u.ByMember)
 	if u.Recs.ActiveRun != nil {
 		active := emptyProgressSlices(*u.Recs.ActiveRun)
 		u.Recs.ActiveRun = &active

@@ -24,7 +24,13 @@ type apiError struct {
 
 func (h *harness) refused(body string) apiError {
 	h.t.Helper()
-	s, resp := h.post(body)
+	return h.refusedAs(0, body)
+}
+
+// refusedAs posts as a member (0: no header) and fails if a stream opens.
+func (h *harness) refusedAs(memberID int64, body string) apiError {
+	h.t.Helper()
+	s, resp := h.postAs(memberID, body)
 	if s != nil {
 		h.t.Fatalf("%s opened a stream: %s", body, dump(s.all()))
 	}
@@ -42,13 +48,20 @@ func (h *harness) refused(body string) apiError {
 	return apiError{resp.StatusCode, e.Error.Code, e.Error.ResetsAt}
 }
 
-// seed adds n ended turns to a thread (0: a new one) and returns its id.
+// seed adds n ended turns to one of Me's threads (0: a new one) and
+// returns its id.
 func seed(t *testing.T, store ask.Store, threadID int64, n int) int64 {
+	t.Helper()
+	return seedAs(t, store, 1, threadID, n)
+}
+
+// seedAs seeds a member's thread.
+func seedAs(t *testing.T, store ask.Store, memberID, threadID int64, n int) int64 {
 	t.Helper()
 	ctx := context.Background()
 	for i := 0; i < n; i++ {
-		th, tu, err := store.StartTurn(ctx, library.NewAskTurn{ThreadID: threadID, Title: "Seeded", Model: recommend.ModelOpus,
-			PromptVersion: ask.PromptVersion, Message: "seeded"})
+		th, tu, err := store.StartTurn(ctx, library.NewAskTurn{MemberID: memberID, ThreadID: threadID, Title: "Seeded",
+			Model: recommend.ModelOpus, PromptVersion: ask.PromptVersion, Message: "seeded"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +131,7 @@ func TestAsk_PreflightErrors(t *testing.T) {
 		if n := len(h.api.Requests()); n != 1 {
 			t.Errorf("API requests = %d, want only the one that streamed", n)
 		}
-		if n, _ := store.TurnsSince(context.Background(), time.Now().Add(-time.Hour)); n != 30 {
+		if n, _ := store.TurnsSince(context.Background(), 1, time.Now().Add(-time.Hour)); n != 30 {
 			t.Errorf("turns = %d, want 30: a refused ask stores nothing", n)
 		}
 	})
@@ -128,7 +141,7 @@ func TestAsk_PreflightErrors(t *testing.T) {
 // is still ask_busy: the one-streaming index is the arbiter.
 func TestAsk_BusyInTheStore(t *testing.T) {
 	forEachStore(t, func(t *testing.T, store ask.Store) {
-		if _, _, err := store.StartTurn(context.Background(), library.NewAskTurn{Title: "Elsewhere", Model: recommend.ModelOpus,
+		if _, _, err := store.StartTurn(context.Background(), library.NewAskTurn{MemberID: 1, Title: "Elsewhere", Model: recommend.ModelOpus,
 			PromptVersion: ask.PromptVersion, Message: "elsewhere"}); err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +157,7 @@ func TestAsk_BusyInTheStore(t *testing.T) {
 		if turn.Status != library.AskTurnError || turn.ErrorCode != recommend.AskErrorInternal {
 			t.Errorf("recovered turn = %s %s", turn.Status, turn.ErrorCode)
 		}
-		thread, err := h.svc.Thread(context.Background(), 1)
+		thread, err := h.svc.Thread(memberCtx(1), 1)
 		if err != nil || thread.Turns[0].Error == nil || thread.Turns[0].Error.Code != recommend.AskErrorInternal {
 			t.Errorf("recovered thread = %+v, %v", thread, err)
 		}
@@ -155,7 +168,7 @@ func TestAsk_BusyInTheStore(t *testing.T) {
 // #160) can't go on.
 func TestAsk_UnknownPromptVersion(t *testing.T) {
 	store := newMemStore()
-	th, tu, _ := store.StartTurn(context.Background(), library.NewAskTurn{Title: "Old", Model: recommend.ModelOpus, PromptVersion: "ask-v1", Message: "old"})
+	th, tu, _ := store.StartTurn(context.Background(), library.NewAskTurn{MemberID: 1, Title: "Old", Model: recommend.ModelOpus, PromptVersion: "ask-v1", Message: "old"})
 	_, _ = store.EndTurn(context.Background(), library.AskTurnEnd{TurnID: tu.ID, Status: library.AskTurnDone, View: []byte(`{}`)})
 	h := newHarness(t, store)
 	if e := h.refused(`{"thread_id":` + itoa(th.ID) + `,"message":"more"}`); e.code != "thread_full" {

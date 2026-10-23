@@ -390,6 +390,15 @@ type FeatureUsage struct {
 	Requests int     `json:"requests"` // API calls
 }
 
+// MemberUsage is one household member's picks and Ask spend this month
+// (#239).
+type MemberUsage struct {
+	MemberID int64   `json:"member_id"`
+	Name     string  `json:"name"`
+	CostUSD  float64 `json:"cost_usd"`
+	Requests int     `json:"requests"` // API calls
+}
+
 // RecsUsage is the picks' part of the usage page, the viewer's.
 type RecsUsage struct {
 	LastRun   *RunSummary  `json:"last_run"` // the newest finished run: succeeded, failed or skipped
@@ -412,8 +421,12 @@ type UsageReport struct {
 	BudgetUSD     *float64       `json:"budget_usd"`
 	BudgetReached bool           `json:"budget_reached"`
 	ByFeature     []FeatureUsage `json:"by_feature"` // recs, ask, classifier: always all three
-	Recs          RecsUsage      `json:"recs"`
-	Estimates     Estimates      `json:"estimates"`
-	AsksToday     int            `json:"asks_today"`
-	AskDailyLimit int            `json:"ask_daily_limit"`
+	// ByMember splits the picks and Ask: every current member, by id,
+	// zeros included. The classifier's spend isn't split, and a removed
+	// member's counts only in the totals.
+	ByMember      []MemberUsage `json:"by_member"`
+	Recs          RecsUsage     `json:"recs"` // the viewer's
+	Estimates     Estimates     `json:"estimates"`
+	AsksToday     int           `json:"asks_today"` // the viewer's
+	AskDailyLimit int           `json:"ask_daily_limit"`
 }

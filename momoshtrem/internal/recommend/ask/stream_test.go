@@ -170,7 +170,7 @@ func TestAsk_Request(t *testing.T) {
 	if len(body.Messages) != 1 || body.Messages[0].Content[0].Text != "Today is "+today+".\n\n<ask>anime with a Frieren vibe</ask>" {
 		t.Errorf("messages = %+v", body.Messages)
 	}
-	thread, _ := h.svc.Thread(context.Background(), 1)
+	thread, _ := h.svc.Thread(memberCtx(1), 1)
 	if thread.Model != recommend.ModelSonnet {
 		t.Errorf("thread model = %s", thread.Model)
 	}

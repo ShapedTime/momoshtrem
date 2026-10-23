@@ -77,7 +77,7 @@ type AIUsage struct {
 	CacheReadTokens int
 	WebSearches     int
 	CostUSD         float64
-	// RefID is the job or run the call was for; nil for none.
+	// RefID is the job, run or Ask turn the call was for; nil for none.
 	RefID *int64
 }
 
@@ -136,6 +136,51 @@ func (s *AIStore) FeatureTotalsSince(ctx context.Context, since time.Time) ([]AI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read AI usage by feature: %w", err)
+	}
+	return out, nil
+}
+
+// AIMemberTotal is one household member's picks and Ask spend and API
+// calls over a period.
+type AIMemberTotal struct {
+	MemberID int64
+	Name     string
+	CostUSD  float64
+	Requests int
+}
+
+// MemberSpendSince sums each current member's picks and Ask usage since a
+// time: every member, by id, zeros included. A call is a member's through
+// its ai_usage row's ref_id, their run (recs) or turn (ask). The
+// classifier's is the household's, and a call whose run or turn is gone
+// (a removed member's) is no one's: both count only in the totals.
+func (s *AIStore) MemberSpendSince(ctx context.Context, since time.Time) ([]AIMemberTotal, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.id, m.name, COALESCE(SUM(u.cost_usd), 0)::float8, COUNT(u.cost_usd)
+		FROM members m
+		LEFT JOIN (
+			SELECT COALESCE(r.member_id, t.member_id) AS member_id, u.cost_usd
+			FROM ai_usage u
+			LEFT JOIN rec_runs r ON u.feature = 'recs' AND r.id = u.ref_id
+			LEFT JOIN ask_turns t ON u.feature = 'ask' AND t.id = u.ref_id
+			WHERE u.created_at >= $1 AND u.feature IN ('recs', 'ask')
+		) u ON u.member_id = m.id
+		GROUP BY m.id, m.name ORDER BY m.id
+	`, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sum AI usage by member: %w", err)
+	}
+	defer rows.Close()
+	var out []AIMemberTotal
+	for rows.Next() {
+		var t AIMemberTotal
+		if err := rows.Scan(&t.MemberID, &t.Name, &t.CostUSD, &t.Requests); err != nil {
+			return nil, fmt.Errorf("failed to read AI usage by member: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read AI usage by member: %w", err)
 	}
 	return out, nil
 }

@@ -172,10 +172,9 @@ func main() {
 	api.ValidateOptions(apiOpts)
 
 	// Household members (#241), read before anything starts. Each has
-	// their own Trakt connection and sync (#244, wireTrakt below) and
-	// picks (#245, wireRecs), but Ask stays the lowest member's at startup
-	// until #246.
-	members, askMember, err := newMembers(db)
+	// their own Trakt connection and sync (#244, wireTrakt below), picks
+	// (#245, wireRecs) and Ask (#246, wireAsk).
+	members, err := newMembers(db)
 	if err != nil {
 		slog.Error("Failed to read the household's members", "error", err)
 		os.Exit(1)
@@ -640,7 +639,6 @@ func main() {
 		settings: settingsRepo,
 		aiStore:  aiStore,
 		tmdb:     cachedTMDB,
-		member:   askMember,
 		members:  members,
 		catalog:  catalogService,
 		trakt:    traktRegistry,

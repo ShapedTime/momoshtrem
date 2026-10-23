@@ -83,9 +83,10 @@ func TestAISettingsRoutes(t *testing.T) {
 	rec = doBody(t, s, "GET", "/api/settings/ai/usage", "")
 	var usage struct {
 		ByFeature []recommend.FeatureUsage   `json:"by_feature"`
+		ByMember  []recommend.MemberUsage    `json:"by_member"`
 		Estimates map[string]json.RawMessage `json:"estimates"`
 	}
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &usage) != nil || usage.ByFeature == nil ||
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &usage) != nil || usage.ByFeature == nil || usage.ByMember == nil ||
 		string(usage.Estimates["run_usd"]) != `{"claude-opus-5-5":null,"claude-sonnet-5-5":null}` {
 		t.Errorf("usage = %d %s", rec.Code, rec.Body)
 	}

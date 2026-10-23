@@ -37,7 +37,7 @@ func openBareSchemaDB(t *testing.T, prefix string) *DB {
 // runner applies the missing version on top, and the later ones after it,
 // and 006 is idempotent. Then every table takes a row and the CHECKs and
 // partial unique indexes hold (one active run and one feedback per title,
-// per member since 013).
+// per member since 013, and one streaming turn, per member since 014).
 func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 	db := openBareSchemaDB(t, "mig006")
 	ctx := context.Background()
@@ -101,9 +101,9 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 	must(`INSERT INTO rec_items (shelf_id, position, media_type, tmdb_id, reason, meta) VALUES (1, 0, 'tv', 95396, 'Workplace mystery', '{"title": "Severance"}')`)
 	must(`INSERT INTO rec_hero_picks (run_id, position, media_type, tmdb_id, kicker, reason) VALUES (1, 0, 'movie', 693134, 'Tonight', 'Big and quiet')`)
 	must(`INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'tv', 1399, 'dislike', 'shelf')`)
-	must(`INSERT INTO ask_threads (id, title, model, prompt_version) VALUES (1, 'Something like Severance', 'claude-opus-5-5', 'ask-v1')`)
-	must(`INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (1, 1, 0, 'something like Severance', 'done')`)
-	must(`INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (2, 1, 1, 'lighter', 'streaming')`)
+	must(`INSERT INTO ask_threads (id, member_id, title, model, prompt_version) VALUES (1, 1, 'Something like Severance', 'claude-opus-5-5', 'ask-v1')`)
+	must(`INSERT INTO ask_turns (id, member_id, thread_id, position, message, status) VALUES (1, 1, 1, 0, 'something like Severance', 'done')`)
+	must(`INSERT INTO ask_turns (id, member_id, thread_id, position, message, status) VALUES (2, 1, 1, 1, 'lighter', 'streaming')`)
 	must(`INSERT INTO ask_messages (thread_id, turn_id, position, role, content) VALUES (1, 1, 0, 'user', '[{"type": "text", "text": "hi"}]')`)
 
 	// Ask's history replays byte for byte: json keeps key order and
@@ -126,7 +126,7 @@ func TestMigration006_AppliesOnTopOf009(t *testing.T) {
 		{"an unknown signal", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'movie', 1, 'love', 'shelf')`, "rec_feedback_signal_check"},
 		{"an unknown source", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'movie', 1, 'like', 'email')`, "rec_feedback_source_check"},
 		{"feedback twice on a title", `INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'tv', 1399, 'like', 'title')`, "rec_feedback_pkey"},
-		{"a second streaming turn", `INSERT INTO ask_turns (id, thread_id, position, message, status) VALUES (10, 1, 2, 'x', 'streaming')`, "ask_turns_one_streaming"},
+		{"a second streaming turn", `INSERT INTO ask_turns (id, member_id, thread_id, position, message, status) VALUES (10, 1, 1, 2, 'x', 'streaming')`, "ask_turns_one_streaming"},
 		{"a system message", `INSERT INTO ask_messages (thread_id, turn_id, position, role, content) VALUES (1, 1, 1, 'system', '[]')`, "ask_messages_role_check"},
 	}
 	for _, tt := range rejected {

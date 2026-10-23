@@ -2,8 +2,11 @@ package library
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // openAskDB is a migrated database in a schema of its own: the
@@ -23,7 +26,7 @@ func openAskDB(t *testing.T) *AskRepository {
 func TestAskRepository_MessagesAreExact(t *testing.T) {
 	r := openAskDB(t)
 	ctx := context.Background()
-	th, tu, err := r.StartTurn(ctx, NewAskTurn{Title: "Anime", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "anime"})
+	th, tu, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, Title: "Anime", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "anime"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +59,7 @@ func TestAskRepository_MessagesAreExact(t *testing.T) {
 	}
 
 	// A second done turn appends after them.
-	_, tu2, err := r.StartTurn(ctx, NewAskTurn{ThreadID: th.ID, Message: "lighter"})
+	_, tu2, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, ThreadID: th.ID, Message: "lighter"})
 	if err != nil || tu2.Position != 1 {
 		t.Fatalf("second turn = %+v, %v", tu2, err)
 	}
@@ -83,21 +86,21 @@ func TestAskRepository_MessagesAreExact(t *testing.T) {
 func TestAskRepository_TurnLifecycle(t *testing.T) {
 	r := openAskDB(t)
 	ctx := context.Background()
-	th, tu, err := r.StartTurn(ctx, NewAskTurn{Title: "One", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "one"})
+	th, tu, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, Title: "One", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "one"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.StartTurn(ctx, NewAskTurn{Title: "Two", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "two"}); err != ErrAskTurnStreaming {
+	if _, _, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, Title: "Two", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "two"}); err != ErrAskTurnStreaming {
 		t.Fatalf("a second streaming turn = %v, want ErrAskTurnStreaming", err)
 	}
-	if threads, _ := r.Threads(ctx, 50); len(threads) != 1 {
+	if threads, _ := r.Threads(ctx, 1, 50); len(threads) != 1 {
 		t.Errorf("threads = %d: the refused turn's thread must not stay", len(threads))
 	}
 
 	if err := r.CancelTurn(ctx, tu.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, tu2, err := r.StartTurn(ctx, NewAskTurn{ThreadID: th.ID, Message: "again"})
+	_, tu2, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, ThreadID: th.ID, Message: "again"})
 	if err != nil {
 		t.Fatalf("after a cancel: %v", err)
 	}
@@ -125,7 +128,7 @@ func TestAskRepository_TurnLifecycle(t *testing.T) {
 	}
 
 	// A crash's streaming turn ends as an error at startup.
-	_, tu3, err := r.StartTurn(ctx, NewAskTurn{ThreadID: th.ID, Message: "crash"})
+	_, tu3, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, ThreadID: th.ID, Message: "crash"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,10 +138,10 @@ func TestAskRepository_TurnLifecycle(t *testing.T) {
 	if ok, _ := r.EndTurn(ctx, AskTurnEnd{TurnID: tu3.ID, Status: AskTurnDone, View: []byte(`{}`)}); ok {
 		t.Error("a failed turn took a done end")
 	}
-	if n, _ := r.TurnsSince(ctx, time.Now().Add(-time.Minute)); n != 3 {
+	if n, _ := r.TurnsSince(ctx, 1, time.Now().Add(-time.Minute)); n != 3 {
 		t.Errorf("TurnsSince = %d, want 3 (every status)", n)
 	}
-	if n, _ := r.TurnsSince(ctx, time.Now().Add(time.Minute)); n != 0 {
+	if n, _ := r.TurnsSince(ctx, 1, time.Now().Add(time.Minute)); n != 0 {
 		t.Errorf("TurnsSince later = %d", n)
 	}
 	if mean, err := r.MeanDoneCost(ctx, 20); mean != nil || err != nil {
@@ -152,7 +155,7 @@ func TestAskRepository_TurnLifecycle(t *testing.T) {
 func TestAskRepository_AbandonTurn(t *testing.T) {
 	r := openAskDB(t)
 	ctx := context.Background()
-	th, tu, err := r.StartTurn(ctx, NewAskTurn{Title: "One", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "one"})
+	th, tu, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, Title: "One", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +166,7 @@ func TestAskRepository_AbandonTurn(t *testing.T) {
 	if turns[0].Status != AskTurnError || turns[0].ErrorCode != "internal" || turns[0].View != nil || turns[0].FinishedAt == nil {
 		t.Errorf("abandoned turn = %+v", turns[0])
 	}
-	_, tu2, err := r.StartTurn(ctx, NewAskTurn{ThreadID: th.ID, Message: "two"})
+	_, tu2, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, ThreadID: th.ID, Message: "two"})
 	if err != nil {
 		t.Fatalf("after abandoning: %v", err)
 	}
@@ -185,7 +188,7 @@ func TestAskRepository_ListAndMean(t *testing.T) {
 	ctx := context.Background()
 	var ids []int64
 	for _, cost := range []float64{0.01, 0.02, 0.06} {
-		th, tu, err := r.StartTurn(ctx, NewAskTurn{Title: "T", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "m"})
+		th, tu, err := r.StartTurn(ctx, NewAskTurn{MemberID: 1, Title: "T", Model: "claude-opus-5-5", PromptVersion: "ask-v1", Message: "m"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,7 +197,7 @@ func TestAskRepository_ListAndMean(t *testing.T) {
 		}
 		ids = append(ids, th.ID)
 	}
-	threads, err := r.Threads(ctx, 2)
+	threads, err := r.Threads(ctx, 1, 2)
 	if err != nil || len(threads) != 2 || threads[0].ID != ids[2] || threads[1].ID != ids[1] || threads[0].TurnCount != 1 {
 		t.Errorf("threads = %+v, %v", threads, err)
 	}
@@ -203,5 +206,81 @@ func TestAskRepository_ListAndMean(t *testing.T) {
 	}
 	if missing, err := r.Thread(ctx, 999999); missing != nil || err != nil {
 		t.Errorf("unknown thread = %v, %v", missing, err)
+	}
+}
+
+// Threads and turns are a member's (014): each member has one streaming
+// turn, their own list and daily count; a turn can't go into another
+// member's thread (the composite FK), nor be a member's no one has; a
+// removed member's threads go with them.
+func TestAskRepository_PerMember(t *testing.T) {
+	r := openAskDB(t)
+	ctx := context.Background()
+	if _, err := r.db.Exec(`INSERT INTO members (id, name, color) VALUES (2, 'Sam', 'rose')`); err != nil {
+		t.Fatal(err)
+	}
+	start := func(memberID, threadID int64) (*AskThread, *AskTurn, error) {
+		return r.StartTurn(ctx, NewAskTurn{MemberID: memberID, ThreadID: threadID, Title: "T", Model: "claude-opus-5-5",
+			PromptVersion: "ask-v2", Message: "m"})
+	}
+	mine, _, err := start(1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sams, samTurn, err := start(2, 0)
+	if err != nil {
+		t.Fatalf("Sam's turn while Me's streams = %v", err)
+	}
+	if mine.MemberID != 1 || sams.MemberID != 2 {
+		t.Errorf("threads' members = %d, %d", mine.MemberID, sams.MemberID)
+	}
+	for _, id := range []int64{1, 2} {
+		if _, _, err := start(id, 0); !errors.Is(err, ErrAskTurnStreaming) {
+			t.Errorf("member %d's second streaming turn = %v, want ErrAskTurnStreaming", id, err)
+		}
+	}
+
+	// Another member's thread, or a member no one has, is refused, and
+	// nothing is stored.
+	if _, err := r.EndTurn(ctx, AskTurnEnd{TurnID: samTurn.ID, Status: AskTurnDone, View: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := start(2, mine.ID); !errors.Is(err, member.ErrUnknown) {
+		t.Errorf("Sam's turn in Me's thread = %v, want member.ErrUnknown", err)
+	}
+	if _, _, err := start(9, 0); !errors.Is(err, member.ErrUnknown) {
+		t.Errorf("an unknown member's thread = %v, want member.ErrUnknown", err)
+	}
+	if th, err := r.Thread(ctx, mine.ID); err != nil || th.TurnCount != 1 || th.MemberID != 1 {
+		t.Errorf("Me's thread = %+v, %v; want its one turn", th, err)
+	}
+	var stray int
+	if err := r.db.QueryRow(`SELECT count(*) FROM ask_turns WHERE member_id <> (SELECT member_id FROM ask_threads WHERE id = thread_id)`).
+		Scan(&stray); err != nil || stray != 0 {
+		t.Errorf("turns of another member's thread = %d (%v)", stray, err)
+	}
+
+	for id, want := range map[int64]int64{1: mine.ID, 2: sams.ID} {
+		threads, err := r.Threads(ctx, id, 50)
+		if err != nil || len(threads) != 1 || threads[0].ID != want {
+			t.Errorf("member %d's threads = %+v, %v", id, threads, err)
+		}
+		if n, err := r.TurnsSince(ctx, id, time.Now().Add(-time.Minute)); err != nil || n != 1 {
+			t.Errorf("member %d's turns today = %d, %v; want 1", id, n, err)
+		}
+	}
+	if n, err := r.FailStreaming(ctx, "internal", []byte(`{}`)); n != 1 || err != nil {
+		t.Errorf("FailStreaming = %d, %v; want Me's one (everyone's)", n, err)
+	}
+
+	// A removed member's threads, turns and messages go with them.
+	if _, err := r.db.Exec(`DELETE FROM members WHERE id = 2`); err != nil {
+		t.Fatal(err)
+	}
+	if th, err := r.Thread(ctx, sams.ID); th != nil || err != nil {
+		t.Errorf("Sam's thread after the removal = %+v, %v", th, err)
+	}
+	if th, err := r.Thread(ctx, mine.ID); th == nil || err != nil {
+		t.Errorf("Me's thread after Sam's removal = %+v, %v", th, err)
 	}
 }

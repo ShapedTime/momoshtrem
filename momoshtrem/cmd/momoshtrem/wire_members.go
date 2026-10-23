@@ -9,12 +9,10 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
-// newMembers reads the household's members (#241) and answers the lowest
-// id: until #246, the member Ask is for.
-func newMembers(db *library.DB) (*member.Service, int64, error) {
+// newMembers reads the household's members (#241).
+func newMembers(db *library.DB) (*member.Service, error) {
 	members := member.NewService(library.NewMemberRepository(db))
-	lowest, err := members.Default(context.Background()) // reads them
-	return members, lowest, err
+	return members, members.Load(context.Background())
 }
 
 // wireMembers serves the household's members: /members, each with their

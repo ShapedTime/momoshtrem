@@ -21,6 +21,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/api"
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend/ask"
 	"github.com/shapedtime/momoshtrem/internal/recommend/candidates"
 	"github.com/shapedtime/momoshtrem/internal/recommend/profile"
@@ -28,17 +29,26 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 )
 
-// harness is Ask behind the real API routes, on the fake Anthropic API.
+// harness is Ask behind the real API routes, on the fake Anthropic API,
+// for a household of two: Me (1, the default without a header, whose
+// taste is testProfile) and Sam (2, samProfile).
 type harness struct {
 	t        *testing.T
 	api      *fake.Server
 	store    ask.Store
 	svc      *ask.Service
+	members  *member.Service
 	server   *httptest.Server
 	budget   *budget
-	titles   *titles
+	titles   *titles // Me's; titlesOf has Sam's
 	recorder *recorder
 	upstream *watchTransport
+
+	mu     sync.Mutex
+	others map[int64]*titles
+	// built counts each member's ForMember calls, and profiles their
+	// taste profile's builds.
+	built, profiles map[int64]int
 }
 
 type harnessOpts struct {
@@ -54,16 +64,15 @@ func newHarness(t *testing.T, store ask.Store, script ...fake.Response) *harness
 func newHarnessWith(t *testing.T, store ask.Store, o harnessOpts, script ...fake.Response) *harness {
 	t.Helper()
 	h := &harness{t: t, api: fake.New(t, script...), store: store, budget: &budget{}, titles: &titles{},
-		recorder: &recorder{}, upstream: newWatchTransport()}
+		recorder: &recorder{}, upstream: newWatchTransport(),
+		others: map[int64]*titles{}, built: map[int64]int{}, profiles: map[int64]int{}}
 	deps := ask.Deps{
-		Budget:   h.budget,
-		Store:    store,
-		Settings: settings{model: o.model},
-		Titles:   h.titles,
-		Library:  libraryStates{{MediaType: "tv", TMDBID: 1001}: {LibraryID: 7, AvailabilityStage: catalog.Stage("ready")}},
-		TMDB:     testTMDB,
-		Tools: tools.All(tools.Deps{Inputs: tools.Fixed{P: testProfile, C: testPool()}, TMDB: testTMDB,
-			Titles: h.titles}),
+		Budget:       h.budget,
+		Store:        store,
+		Settings:     settings{model: o.model},
+		Library:      libraryStates{{MediaType: "tv", TMDBID: 1001}: {LibraryID: 7, AvailabilityStage: catalog.Stage("ready")}},
+		TMDB:         testTMDB,
+		ForMember:    h.forMember,
 		WriteTimeout: o.writeTimeout,
 	}
 	if !o.noKey {
@@ -71,12 +80,54 @@ func newHarnessWith(t *testing.T, store ask.Store, o harnessOpts, script ...fake
 		deps.Runner = aicore.New(aicore.Config{APIKey: "test-key", Recorder: h.recorder, Options: opts})
 	}
 	h.svc = ask.New(deps)
-	h.server = httptest.NewServer(api.NewServer(nil, nil, nil, nil, nil, api.Options{Ask: h.svc}).Handler())
+	h.members = member.NewService(newHousehold())
+	h.members.OnRemoving(h.svc.ForgetMember)
+	h.server = httptest.NewServer(api.NewServer(nil, nil, nil, nil, nil, api.Options{Ask: h.svc, Members: h.members}).Handler())
 	t.Cleanup(func() {
 		h.svc.Close()
 		h.server.Close()
 	})
 	return h
+}
+
+// forMember is the member's parts, as wireAsk builds them: their titles,
+// and R1's tools over a tools.Cached of their own.
+func (h *harness) forMember(memberID int64) ask.Member {
+	h.mu.Lock()
+	h.built[memberID]++
+	h.mu.Unlock()
+	titles := h.titlesOf(memberID)
+	inputs := tools.NewCached(func(context.Context) (*profile.Profile, error) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.profiles[memberID]++
+		if memberID == 2 {
+			return samProfile, nil
+		}
+		return testProfile, nil
+	}, func(context.Context, *profile.Profile) (*candidates.Pool, error) { return testPool(), nil }, time.Hour)
+	return ask.Member{Titles: titles, Tools: tools.All(tools.Deps{Inputs: inputs, TMDB: testTMDB, Titles: titles})}
+}
+
+// titlesOf is what the member watched, rated and turned down: h.titles for
+// Me.
+func (h *harness) titlesOf(memberID int64) *titles {
+	if memberID == 1 {
+		return h.titles
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.others[memberID] == nil {
+		h.others[memberID] = &titles{}
+	}
+	return h.others[memberID]
+}
+
+// counts are a member's ForMember calls and profile builds.
+func (h *harness) counts(memberID int64) (built, profiles int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.built[memberID], h.profiles[memberID]
 }
 
 // ---- Fixtures
@@ -88,6 +139,15 @@ var testProfile = &profile.Profile{
 		{MediaType: "tv", TMDBID: 136315, Title: "The Bear", Note: "rated 9"},
 		{MediaType: "tv", TMDBID: 97546, Title: "Ted Lasso", Note: "completed"},
 		{MediaType: "movie", TMDBID: 545611, Title: "Everything Everywhere All at Once", Note: "rated 9"},
+	},
+}
+
+// samProfile is the second member's taste: nothing of Me's.
+var samProfile = &profile.Profile{
+	Counts: profile.Counts{Loved: 2, Completed: 5, Plays: 311},
+	Loved: []profile.Title{
+		{MediaType: "tv", TMDBID: 209867, Title: "Frieren: Beyond Journey's End", Note: "rated 10"},
+		{MediaType: "tv", TMDBID: 94605, Title: "Arcane", Note: "completed"},
 	},
 }
 
@@ -194,14 +254,22 @@ type stream struct {
 	pings  int
 }
 
-// post sends POST /api/recommendations/ask; a 200 is an open stream.
+// post sends POST /api/recommendations/ask, as the default member (no
+// header); a 200 is an open stream.
 func (h *harness) post(body string) (*stream, *http.Response) {
+	h.t.Helper()
+	return h.postAs(0, body)
+}
+
+// postAs posts as a member (0: no header).
+func (h *harness) postAs(memberID int64, body string) (*stream, *http.Response) {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(ctx, "POST", h.server.URL+"/api/recommendations/ask", strings.NewReader(body))
 	if err != nil {
 		h.t.Fatal(err)
 	}
+	asMember(req, memberID)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		cancel()
@@ -222,7 +290,13 @@ func (h *harness) post(body string) (*stream, *http.Response) {
 // open posts and fails unless the stream opens.
 func (h *harness) open(body string) *stream {
 	h.t.Helper()
-	s, resp := h.post(body)
+	return h.openAs(0, body)
+}
+
+// openAs opens a stream as a member (0: no header).
+func (h *harness) openAs(memberID int64, body string) *stream {
+	h.t.Helper()
+	s, resp := h.postAs(memberID, body)
 	if s == nil {
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -230,6 +304,18 @@ func (h *harness) open(body string) *stream {
 	}
 	return s
 }
+
+// asMember names the request's member in the header, as the web's proxy
+// does (0: none, so the default member).
+func asMember(req *http.Request, memberID int64) {
+	if memberID > 0 {
+		req.Header.Set(api.MemberHeader, strconv.FormatInt(memberID, 10))
+	}
+}
+
+// memberCtx is a context for a member, as the API's middleware gives the
+// service.
+func memberCtx(memberID int64) context.Context { return member.WithID(context.Background(), memberID) }
 
 // next reads the next event, skipping ": ping" comments; ok is false at
 // the end of the stream.

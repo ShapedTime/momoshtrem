@@ -3,6 +3,7 @@ package ask_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -12,13 +13,25 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/aicore"
 	"github.com/shapedtime/momoshtrem/internal/aicore/fake"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 	"github.com/shapedtime/momoshtrem/internal/recommend/ask"
 )
 
 func (h *harness) get(path string) (int, []byte) {
 	h.t.Helper()
-	resp, err := http.Get(h.server.URL + path)
+	return h.getAs(0, path)
+}
+
+// getAs reads as a member (0: no header).
+func (h *harness) getAs(memberID int64, path string) (int, []byte) {
+	h.t.Helper()
+	req, err := http.NewRequest("GET", h.server.URL+path, nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	asMember(req, memberID)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -302,7 +315,8 @@ func schemaCounts(t *testing.T, tool string, node any) (unions, optional int) {
 	return unions, optional
 }
 
-// The usage page's Ask part: turns started today, and the mean done turn.
+// The usage page's Ask part: the viewer's turns started today, and the
+// mean done turn, anyone's.
 func TestAsk_UsageReporter(t *testing.T) {
 	forEachStore(t, func(t *testing.T, store ask.Store) {
 		h := newHarness(t, store)
@@ -310,15 +324,22 @@ func TestAsk_UsageReporter(t *testing.T) {
 			t.Errorf("estimate before any = %v, %v", est, err)
 		}
 		seed(t, store, 0, 3)
+		seedAs(t, store, 2, 0, 1)
 		dayStart, _ := aicore.DayBounds(time.Now())
-		n, err := h.svc.AsksToday(context.Background(), dayStart)
+		n, err := h.svc.AsksToday(memberCtx(1), dayStart)
 		est, err2 := h.svc.AskEstimate(context.Background())
 		if err != nil || err2 != nil || n != 3 || est == nil || *est < 0.0199 || *est > 0.0201 {
 			t.Errorf("asks today %d, estimate %v (%v, %v)", n, est, err, err2)
 		}
+		if n, err := h.svc.AsksToday(memberCtx(2), dayStart); err != nil || n != 1 {
+			t.Errorf("Sam's asks today = %d, %v; want 1", n, err)
+		}
 		tomorrow := dayStart.Add(36 * time.Hour)
-		if n, _ := h.svc.AsksToday(context.Background(), tomorrow); n != 0 {
+		if n, _ := h.svc.AsksToday(memberCtx(1), tomorrow); n != 0 {
 			t.Errorf("asks since tomorrow = %d", n)
+		}
+		if _, err := h.svc.AsksToday(context.Background(), dayStart); !errors.Is(err, member.ErrNoMember) {
+			t.Errorf("asks today without a member = %v, want member.ErrNoMember", err)
 		}
 	})
 }
