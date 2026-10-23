@@ -21,9 +21,13 @@ import (
 type aiDeps struct {
 	cfg      *config.Config // AI.AnthropicAPIKey; Anthropic is off without it
 	db       *library.DB
-	settings *library.SettingsRepository // app_settings: "ai" and "trakt" (use_ratings)
+	settings *library.SettingsRepository // app_settings: "ai"
 	aiStore  *library.AIStore            // ai_usage and ai_cache, shared with the classifier
 	tmdb     *tmdb.Cached
+	// member is whose taste the picks and Ask read (their Trakt rows and
+	// use_ratings): the one Trakt connection's, until #245 and #246 build
+	// them per member.
+	member int64
 	// catalog joins the library state onto rec cards (LibraryStates) and
 	// takes the title pages' reasons (a SetReasons setter, #157).
 	catalog *catalog.Service

@@ -6,6 +6,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/me"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
 
@@ -14,6 +15,9 @@ type smartDeps struct {
 	db        *library.DB
 	downloads *downloads.Service
 	me        *me.Service
+	// member is whose Up next the picks read: the one Trakt connection's,
+	// until #244 reads every member's.
+	member    int64
 	traktSync *trakt.Syncer
 }
 
@@ -27,18 +31,21 @@ type smartDeps struct {
 func wireSmart(d smartDeps) *downloads.SmartPicker {
 	picker := downloads.NewSmartPicker(d.downloads, downloads.SmartDeps{
 		Store:  library.NewDownloadsRepository(d.db),
-		UpNext: upNextShows{d.me},
+		UpNext: upNextShows{me: d.me, member: d.member},
 	})
 	d.traktSync.SetOnSynced(picker.Nudge)
 	return picker
 }
 
 // upNextShows is Up next as the smart picks read it: the library shows
-// /me/up-next lists, with the episode each names next.
-type upNextShows struct{ me *me.Service }
+// the member's /me/up-next lists, with the episode each names next.
+type upNextShows struct {
+	me     *me.Service
+	member int64
+}
 
 func (u upNextShows) UpNextShows(ctx context.Context) ([]downloads.UpNextShow, error) {
-	eps, err := u.me.UpNextEpisodes(ctx)
+	eps, err := u.me.UpNextEpisodes(member.WithID(ctx, u.member))
 	if err != nil {
 		return nil, err
 	}

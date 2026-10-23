@@ -34,9 +34,9 @@ type SyncAuth interface {
 
 var _ SyncAuth = (*Auth)(nil)
 
-// SyncStore is where the sync writes. Every write names the connection
-// (Token.Generation) and is refused once it's replaced. *library.TraktSyncStore
-// implements it.
+// SyncStore is where the sync writes, one member's rows. Every write names
+// the connection (Token.Generation) and is refused once it's replaced.
+// *library.TraktSyncStore implements it, bound with ForMember.
 type SyncStore interface {
 	State(ctx context.Context) (library.TraktSyncState, error)
 	LatestPlays(ctx context.Context) (movie, episode time.Time, err error)

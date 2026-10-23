@@ -13,11 +13,11 @@ import (
 func syncStore(t *testing.T) (*DB, *TraktSyncStore, time.Time) {
 	t.Helper()
 	db := openSchemaDB(t)
-	gen, err := NewTraktAuthRepository(db).Connect(context.Background(), traktAuthRow("teymur"))
+	gen, err := NewTraktAuthRepository(db).ForMember(1).Connect(context.Background(), traktAuthRow("teymur"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db, NewTraktSyncStore(db), gen
+	return db, NewTraktSyncStore(db).ForMember(1), gen
 }
 
 func at(s string) time.Time {
@@ -136,13 +136,13 @@ func TestTraktSyncStore_GenerationGuard(t *testing.T) {
 	if err := s.ReplaceHistory(ctx, gen.Add(time.Microsecond), plays); !errors.Is(err, ErrTraktConnectionReplaced) {
 		t.Errorf("a write for another connection = %v, want ErrTraktConnectionReplaced", err)
 	}
-	if err := NewTraktAuthRepository(db).Purge(ctx); err != nil {
+	if err := NewTraktAuthRepository(db).ForMember(1).Purge(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SaveRun(ctx, gen, json.RawMessage(`{}`)); !errors.Is(err, ErrTraktConnectionReplaced) {
 		t.Errorf("a write after a disconnect = %v, want ErrTraktConnectionReplaced", err)
 	}
-	for table, n := range rowCounts(t, db) {
+	for table, n := range rowCounts(t, db, 1) {
 		if n != 0 {
 			t.Errorf("%s has %d rows", table, n)
 		}
@@ -158,8 +158,8 @@ func TestTraktSyncStore_PurgeWaitsForAWrite(t *testing.T) {
 	written, release := make(chan struct{}), make(chan struct{})
 	errs := make(chan error, 1)
 	go func() {
-		errs <- s.write(ctx, gen, func(tx *sql.Tx) error {
-			if err := writeHistory(ctx, tx, []TraktPlayRow{moviePlay(1, 603, "2026-10-10T20:00:00Z")}); err != nil {
+		errs <- s.write(ctx, gen, func(tx *sql.Tx, memberID int64) error {
+			if err := writeHistory(ctx, tx, memberID, []TraktPlayRow{moviePlay(1, 603, "2026-10-10T20:00:00Z")}); err != nil {
 				return err
 			}
 			close(written)
@@ -169,7 +169,7 @@ func TestTraktSyncStore_PurgeWaitsForAWrite(t *testing.T) {
 	}()
 	<-written
 	purged := make(chan error, 1)
-	go func() { purged <- NewTraktAuthRepository(db).Purge(ctx) }()
+	go func() { purged <- NewTraktAuthRepository(db).ForMember(1).Purge(ctx) }()
 	select {
 	case err := <-purged:
 		t.Fatalf("Purge finished during a write: %v", err)
@@ -182,7 +182,7 @@ func TestTraktSyncStore_PurgeWaitsForAWrite(t *testing.T) {
 	if err := <-purged; err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	for table, n := range rowCounts(t, db) {
+	for table, n := range rowCounts(t, db, 1) {
 		if n != 0 {
 			t.Errorf("%s has %d rows after the purge", table, n)
 		}

@@ -17,29 +17,30 @@ func traktAuthRow(slug string) TraktAuth {
 	}
 }
 
-// seedTraktData puts a row in every Trakt table but trakt_auth.
-func seedTraktData(t *testing.T, db *DB) {
+// seedTraktData puts a row of memberID's in every Trakt table but
+// trakt_auth (two in the watchlist).
+func seedTraktData(t *testing.T, db *DB, memberID int64) {
 	t.Helper()
 	for _, q := range []string{
-		`INSERT INTO trakt_sync_state (key, value) VALUES ('last_sync_at', '"2026-10-16T08:00:00Z"')`,
-		`INSERT INTO trakt_history (id, media_type, tmdb_id, trakt_id, title, watched_at) VALUES (9001, 'movie', 603, 481, 'The Matrix', NOW())`,
-		`INSERT INTO trakt_watched_movies (tmdb_id, plays, last_watched_at) VALUES (603, 1, NOW())`,
-		`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, plays, last_watched_at) VALUES (1399, 1, 1, 1, NOW())`,
-		`INSERT INTO trakt_ratings (media_type, trakt_id, tmdb_id, rating, rated_at) VALUES ('movie', 481, 603, 9, NOW())`,
-		`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, listed_at) VALUES ('movie', 481, 603, 'The Matrix', NOW()), ('tv', 1390, 1399, 'Game of Thrones', NOW())`,
-		`INSERT INTO trakt_show_progress (show_trakt_id, show_tmdb_id, title, aired, completed) VALUES (1390, 1399, 'Game of Thrones', 73, 1)`,
-		`INSERT INTO trakt_hidden (section, trakt_id, tmdb_id) VALUES ('dropped', 1390, 1399)`,
-		`INSERT INTO trakt_calendar (show_trakt_id, season, episode, show_tmdb_id, show_title, first_aired) VALUES (1390, 9, 1, 1399, 'Game of Thrones', NOW())`,
+		`INSERT INTO trakt_sync_state (member_id, key, value) VALUES ($1, 'last_sync_at', '"2026-10-16T08:00:00Z"')`,
+		`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, watched_at) VALUES ($1, 9001, 'movie', 603, 481, 'The Matrix', NOW())`,
+		`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at) VALUES ($1, 603, 1, NOW())`,
+		`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, plays, last_watched_at) VALUES ($1, 1399, 1, 1, 1, NOW())`,
+		`INSERT INTO trakt_ratings (member_id, media_type, trakt_id, tmdb_id, rating, rated_at) VALUES ($1, 'movie', 481, 603, 9, NOW())`,
+		`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, listed_at) VALUES ($1, 'movie', 481, 603, 'The Matrix', NOW()), ($1, 'tv', 1390, 1399, 'Game of Thrones', NOW())`,
+		`INSERT INTO trakt_show_progress (member_id, show_trakt_id, show_tmdb_id, title, aired, completed) VALUES ($1, 1390, 1399, 'Game of Thrones', 73, 1)`,
+		`INSERT INTO trakt_hidden (member_id, section, trakt_id, tmdb_id) VALUES ($1, 'dropped', 1390, 1399)`,
+		`INSERT INTO trakt_calendar (member_id, show_trakt_id, season, episode, show_tmdb_id, show_title, first_aired) VALUES ($1, 1390, 9, 1, 1399, 'Game of Thrones', NOW())`,
 	} {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.Exec(q, memberID); err != nil {
 			t.Fatalf("%.50s…: %v", q, err)
 		}
 	}
 }
 
-// rowCounts counts the rows of every table the schema has whose name
+// rowCounts counts memberID's rows of every table the schema has whose name
 // starts with trakt_, so a table added later without Purge knowing fails.
-func rowCounts(t *testing.T, db *DB) map[string]int {
+func rowCounts(t *testing.T, db *DB, memberID int64) map[string]int {
 	t.Helper()
 	rows, err := db.Query(`SELECT table_name FROM information_schema.tables
 		WHERE table_schema = current_schema() AND table_name LIKE 'trakt\_%'`)
@@ -61,7 +62,7 @@ func rowCounts(t *testing.T, db *DB) map[string]int {
 	counts := map[string]int{}
 	for _, table := range tables {
 		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE member_id = $1`, memberID).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		counts[table] = n
@@ -71,7 +72,7 @@ func rowCounts(t *testing.T, db *DB) map[string]int {
 
 func TestTraktAuthRepository_ConnectAndTokens(t *testing.T) {
 	db := openSchemaDB(t)
-	repo := NewTraktAuthRepository(db)
+	repo := NewTraktAuthRepository(db).ForMember(1)
 	ctx := context.Background()
 
 	if got, err := repo.Get(ctx); got != nil || err != nil {
@@ -107,7 +108,7 @@ func TestTraktAuthRepository_ConnectAndTokens(t *testing.T) {
 
 	// Reconnecting the same account keeps its data, clears reauth and
 	// starts a new generation.
-	seedTraktData(t, db)
+	seedTraktData(t, db, 1)
 	gen2, err := repo.Connect(ctx, traktAuthRow("teymur"))
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +117,7 @@ func TestTraktAuthRepository_ConnectAndTokens(t *testing.T) {
 	if !gen2.After(gen) || got.NeedsReauth || got.ReauthReason != "" {
 		t.Errorf("reconnect = %+v (generation %v after %v)", got, gen2, gen)
 	}
-	if n := rowCounts(t, db)["trakt_history"]; n != 1 {
+	if n := rowCounts(t, db, 1)["trakt_history"]; n != 1 {
 		t.Errorf("the same account's history = %d rows, want it kept", n)
 	}
 	if err := repo.UpdateTokens(ctx, gen, tokens); !errors.Is(err, ErrTraktConnectionReplaced) {
@@ -127,7 +128,7 @@ func TestTraktAuthRepository_ConnectAndTokens(t *testing.T) {
 	if _, err := repo.Connect(ctx, traktAuthRow("someone-else")); err != nil {
 		t.Fatal(err)
 	}
-	for table, n := range rowCounts(t, db) {
+	for table, n := range rowCounts(t, db, 1) {
 		if want := map[bool]int{true: 1, false: 0}[table == "trakt_auth"]; n != want {
 			t.Errorf("after another account connected, %s has %d rows, want %d", table, n, want)
 		}
@@ -136,14 +137,14 @@ func TestTraktAuthRepository_ConnectAndTokens(t *testing.T) {
 
 func TestTraktAuthRepository_PurgeAndCounts(t *testing.T) {
 	db := openSchemaDB(t)
-	repo := NewTraktAuthRepository(db)
-	settings := NewSettingsRepository(db)
+	repo := NewTraktAuthRepository(db).ForMember(1)
+	settings := NewMemberRepository(db).TraktSettingsFor(1)
 	ctx := context.Background()
 
 	if _, err := repo.Connect(ctx, traktAuthRow("teymur")); err != nil {
 		t.Fatal(err)
 	}
-	seedTraktData(t, db)
+	seedTraktData(t, db, 1)
 	if _, err := db.Exec(`INSERT INTO movies (tmdb_id, title, year) VALUES (603, 'The Matrix', 1999)`); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +163,7 @@ func TestTraktAuthRepository_PurgeAndCounts(t *testing.T) {
 	if err := repo.Purge(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for table, n := range rowCounts(t, db) {
+	for table, n := range rowCounts(t, db, 1) {
 		if n != 0 {
 			t.Errorf("after the purge %s has %d rows", table, n)
 		}

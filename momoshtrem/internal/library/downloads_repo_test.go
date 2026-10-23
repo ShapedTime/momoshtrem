@@ -128,8 +128,8 @@ func TestDownloadsRepository_Resolve(t *testing.T) {
 		VALUES ('episode', $1, 'hdrezka', '{"provider":"hdrezka"}', 'hdrezka/1/t1/s02e01/1080p.mp4', 0, TRUE)`, e21)
 	// E1 watched on Trakt (by TMDB id), E2 here.
 	watchedTrakt := time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)
-	f.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
-		VALUES ($1, 9, 9, 9011, 1, $2)`, f.show.TMDBID, watchedTrakt)
+	f.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
+		VALUES (1, $1, 9, 9, 9011, 1, $2)`, f.show.TMDBID, watchedTrakt)
 	watchedHere := time.Date(2026, 10, 2, 20, 0, 0, 0, time.UTC)
 	if err := f.repo.UpsertLocalWatch(ctx, ItemRef{ItemTypeEpisode, e12}, watchedHere); err != nil {
 		t.Fatal(err)
@@ -288,8 +288,8 @@ func TestDownloadsRepository_SmartPicks(t *testing.T) {
 	check(e11, "watched")
 	// Watched on Trakt, matched by season and number when TMDB ids are missing.
 	f.exec(`UPDATE episodes SET tmdb_episode_id = NULL WHERE id = $1`, e21)
-	f.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, plays, last_watched_at)
-		VALUES ($1, 2, 1, 1, NOW())`, f.show.TMDBID)
+	f.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, plays, last_watched_at)
+		VALUES (1, $1, 2, 1, 1, NOW())`, f.show.TMDBID)
 	check(e21, "watched")
 }
 

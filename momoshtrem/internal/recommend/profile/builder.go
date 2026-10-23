@@ -29,8 +29,8 @@ type ProfileStore interface {
 	Latest(ctx context.Context) (*library.StoredTasteProfile, error)
 }
 
-// Settings reads Trakt's settings: use_ratings
-// (library.SettingsRepository).
+// Settings reads the member's Trakt settings: use_ratings
+// (library.MemberTraktSettings).
 type Settings interface {
 	TraktSettings(ctx context.Context) (library.TraktSettings, error)
 }

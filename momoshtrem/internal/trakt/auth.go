@@ -36,7 +36,8 @@ const (
 )
 
 // Store keeps the connection (trakt_auth) and purges what was imported
-// with it. *library.TraktAuthRepository implements it.
+// with it, one member's. *library.TraktAuthRepository implements it, bound
+// with ForMember.
 type Store interface {
 	Get(ctx context.Context) (*library.TraktAuth, error)
 	Connect(ctx context.Context, a library.TraktAuth) (time.Time, error)
@@ -48,14 +49,15 @@ type Store interface {
 
 var _ Store = (*library.TraktAuthRepository)(nil)
 
-// Settings are the Trakt settings (app_settings key trakt).
-// *library.SettingsRepository implements it.
+// Settings are one member's Trakt settings (members.trakt_settings).
+// library.MemberTraktSettings (MemberRepository.TraktSettingsFor)
+// implements it.
 type Settings interface {
 	TraktSettings(ctx context.Context) (library.TraktSettings, error)
 	UpdateTraktSettings(ctx context.Context, patch library.TraktSettingsPatch) (library.TraktSettings, error)
 }
 
-var _ Settings = (*library.SettingsRepository)(nil)
+var _ Settings = library.MemberTraktSettings{}
 
 // Hooks plug the sync (#132) into the connection. Every field is optional.
 type Hooks struct {

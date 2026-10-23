@@ -173,6 +173,16 @@ func main() {
 	}
 	api.ValidateOptions(apiOpts)
 
+	// Household members (#241), read before anything starts. Trakt's rows
+	// are each member's (#243), but until each member has their own
+	// connection (#244) the one there is, its sync, smart downloads' Up
+	// next and the picks are the lowest member's at startup.
+	members, traktMember, err := newMembers(db)
+	if err != nil {
+		slog.Error("Failed to read the household's members", "error", err)
+		os.Exit(1)
+	}
+
 	// Ensure required directories exist
 	if err := cfg.EnsureDirectories(); err != nil {
 		slog.Error("Failed to create directories", "error", err)
@@ -501,8 +511,8 @@ func main() {
 	traktAuth := trakt.NewAuth(trakt.AuthDeps{
 		Client:   traktClient,
 		Box:      traktBox,
-		Store:    library.NewTraktAuthRepository(db),
-		Settings: settingsRepo,
+		Store:    library.NewTraktAuthRepository(db).ForMember(traktMember),
+		Settings: library.NewMemberRepository(db).TraktSettingsFor(traktMember),
 	})
 	if err := traktAuth.Load(context.Background()); err != nil {
 		slog.Error("Failed to read the Trakt connection; trying again on first use", "error", err)
@@ -522,7 +532,7 @@ func main() {
 	}
 	traktSync := trakt.NewSyncer(trakt.SyncDeps{
 		Auth:    traktAuth,
-		Store:   library.NewTraktSyncStore(db),
+		Store:   library.NewTraktSyncStore(db).ForMember(traktMember),
 		Artwork: traktArtwork,
 	})
 	traktAuth.SetHooks(traktSync.Hooks())
@@ -532,7 +542,7 @@ func main() {
 	}
 	// Household members (#241): /members, and the member each API request
 	// is for (the X-Momoshtrem-Member header's, else the lowest id).
-	wireMembers(db, traktAuth, &apiOpts)
+	wireMembers(members, traktMember, traktAuth, &apiOpts)
 	apiOpts.Status = status.NewService(statusOpts)
 	apiOpts.Settings = settingsRepo
 	apiOpts.TMDB = cachedTMDB
@@ -644,7 +654,7 @@ func main() {
 	// episodes of the library's shows.
 	meService := me.New(me.Deps{
 		Store:           library.NewCatalogRepository(db),
-		Settings:        settingsRepo,
+		Settings:        library.NewMemberRepository(db),
 		Catalog:         catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db), Torrents: torrentService, Downloads: catalogDownloads(downloadsService)}),
 		WebDAVPublicURL: webdavPublicURL,
 	})
@@ -656,6 +666,7 @@ func main() {
 		db:        db,
 		downloads: downloadsService,
 		me:        meService,
+		member:    traktMember,
 		traktSync: traktSync,
 	})
 	smartPicker.Start()
@@ -670,6 +681,7 @@ func main() {
 		settings:  settingsRepo,
 		aiStore:   aiStore,
 		tmdb:      cachedTMDB,
+		member:    traktMember,
 		catalog:   catalogService,
 		traktAuth: traktAuth,
 		traktSync: traktSync,

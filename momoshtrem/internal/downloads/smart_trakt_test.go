@@ -17,6 +17,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
 	"github.com/shapedtime/momoshtrem/internal/me"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/secret"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/storagecap"
@@ -100,11 +101,11 @@ func (s *streams) set(list ...sessions.Session) {
 	s.list = list
 }
 
-// upNext is Up next as main adapts it (wire_smart.go).
+// upNext is Up next as main adapts it (wire_smart.go): the seeded member's.
 type upNext struct{ me *me.Service }
 
 func (u upNext) UpNextShows(ctx context.Context) ([]downloads.UpNextShow, error) {
-	eps, err := u.me.UpNextEpisodes(ctx)
+	eps, err := u.me.UpNextEpisodes(member.WithID(ctx, 1))
 	out := make([]downloads.UpNextShow, len(eps))
 	for i, e := range eps {
 		out[i] = downloads.UpNextShow{ShowID: e.ShowID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber,
@@ -288,10 +289,11 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 	auth := trakt.NewAuth(trakt.AuthDeps{
 		Client: trakt.NewClient(trakttest.ClientID, trakttest.ClientSecret, "test",
 			trakt.WithBaseURLs(srv.URL, srv.URL), trakt.WithClock(clock), trakt.WithLimiters(nil, nil)),
-		Box: box, Store: library.NewTraktAuthRepository(db), Settings: settings, Clock: clock,
+		Box: box, Store: library.NewTraktAuthRepository(db).ForMember(1), Settings: library.NewMemberRepository(db).TraktSettingsFor(1),
+		Clock: clock,
 	})
 	t.Cleanup(auth.Close)
-	syncer := trakt.NewSyncer(trakt.SyncDeps{Auth: auth, Store: library.NewTraktSyncStore(db), Clock: clock})
+	syncer := trakt.NewSyncer(trakt.SyncDeps{Auth: auth, Store: library.NewTraktSyncStore(db).ForMember(1), Clock: clock})
 	auth.SetHooks(syncer.Hooks())
 	t.Cleanup(syncer.Stop)
 	synced := make(chan struct{}, 4)
@@ -306,7 +308,7 @@ func TestSmart_UpNextFromTrakt(t *testing.T) {
 	}
 
 	picker := downloads.NewSmartPicker(svc, downloads.SmartDeps{Store: repo, UpNext: upNext{me.New(me.Deps{
-		Store: library.NewCatalogRepository(db), Settings: settings, Now: clock.Now})}})
+		Store: library.NewCatalogRepository(db), Settings: library.NewMemberRepository(db), Now: clock.Now})}})
 	run := func() {
 		t.Helper()
 		if err := picker.Run(ctx); err != nil {

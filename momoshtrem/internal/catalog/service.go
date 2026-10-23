@@ -45,7 +45,7 @@ type Store interface {
 	LibraryItems(ctx context.Context, q library.LibraryQuery) ([]library.LibraryItem, int, error)
 	ListLibrary(ctx context.Context, q library.LibraryQuery) (*library.LibraryListing, error)
 	ReviewState(ctx context.Context, mediaType string, libraryID int64) (*library.ReviewState, error)
-	WatchState(ctx context.Context, mediaType string, tmdbID int) (*library.TraktWatchState, error)
+	WatchState(ctx context.Context, viewer int64, mediaType string, tmdbID int) (*library.TraktWatchState, error)
 }
 
 var _ Store = (*library.CatalogRepository)(nil)

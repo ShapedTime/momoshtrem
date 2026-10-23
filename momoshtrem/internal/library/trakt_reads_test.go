@@ -11,10 +11,12 @@ import (
 	"time"
 )
 
-// traktSeed writes what a Trakt sync would import. 0 stands for a NULL id.
+// traktSeed writes what member's Trakt sync would import. 0 stands for a
+// NULL id.
 type traktSeed struct {
-	t  *testing.T
-	db *DB
+	t      *testing.T
+	db     *DB
+	member int64
 }
 
 func (s traktSeed) exec(query string, args ...any) {
@@ -26,24 +28,26 @@ func (s traktSeed) exec(query string, args ...any) {
 
 func (s traktSeed) watched(show, season, episode, episodeTMDB, plays int, at time.Time) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
-		VALUES ($1, $2, $3, NULLIF($4, 0), $5, $6)`, show, season, episode, episodeTMDB, plays, at)
+	s.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
+		VALUES ($7, $1, $2, $3, NULLIF($4, 0), $5, $6)`, show, season, episode, episodeTMDB, plays, at, s.member)
 }
 
 func (s traktSeed) watchedMovie(tmdbID, plays int, at time.Time) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_watched_movies (tmdb_id, plays, last_watched_at) VALUES ($1, $2, $3)`, tmdbID, plays, at)
+	s.exec(`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at) VALUES ($4, $1, $2, $3)`,
+		tmdbID, plays, at, s.member)
 }
 
 func (s traktSeed) rating(mediaType string, traktID, tmdbID, rating int) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_ratings (media_type, trakt_id, tmdb_id, rating, rated_at) VALUES ($1, $2, $3, $4, NOW())`,
-		mediaType, traktID, tmdbID, rating)
+	s.exec(`INSERT INTO trakt_ratings (member_id, media_type, trakt_id, tmdb_id, rating, rated_at) VALUES ($5, $1, $2, $3, $4, NOW())`,
+		mediaType, traktID, tmdbID, rating, s.member)
 }
 
 func (s traktSeed) hidden(section string, traktID, tmdbID int) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_hidden (section, trakt_id, tmdb_id) VALUES ($1, $2, $3)`, section, traktID, tmdbID)
+	s.exec(`INSERT INTO trakt_hidden (member_id, section, trakt_id, tmdb_id) VALUES ($4, $1, $2, $3)`,
+		section, traktID, tmdbID, s.member)
 }
 
 // progressRow is a trakt_show_progress row; zero next/last fields are NULL.
@@ -72,25 +76,25 @@ func (s traktSeed) progress(p progressRow) {
 	if p.hasNext {
 		nextSeason, nextEpisode = p.nextSeason, p.nextEpisode
 	}
-	s.exec(`INSERT INTO trakt_show_progress (show_trakt_id, show_tmdb_id, title, aired, completed, last_watched_at,
+	s.exec(`INSERT INTO trakt_show_progress (member_id, show_trakt_id, show_tmdb_id, title, aired, completed, last_watched_at,
 			last_season, last_episode, next_season, next_episode, next_episode_tmdb_id, next_title)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, 0), NULLIF($12, ''))`,
+		VALUES ($13, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, 0), NULLIF($12, ''))`,
 		p.traktID, p.tmdbID, p.title, p.aired, p.completed, last, lastSeason, lastEpisode, nextSeason, nextEpisode,
-		p.nextTMDB, p.nextTitle)
+		p.nextTMDB, p.nextTitle, s.member)
 }
 
 func (s traktSeed) calendar(showTraktID, showTMDB, season, episode, episodeTMDB int, title string, firstAired time.Time) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_calendar (show_trakt_id, season, episode, show_tmdb_id, episode_tmdb_id, show_title, episode_title,
-			first_aired, still_path)
-		VALUES ($1, $2, $3, $4, NULLIF($5, 0), 'Calendar show', $6, $7, '/still.jpg')`,
-		showTraktID, season, episode, showTMDB, episodeTMDB, title, firstAired)
+	s.exec(`INSERT INTO trakt_calendar (member_id, show_trakt_id, season, episode, show_tmdb_id, episode_tmdb_id, show_title,
+			episode_title, first_aired, still_path)
+		VALUES ($8, $1, $2, $3, $4, NULLIF($5, 0), 'Calendar show', $6, $7, '/still.jpg')`,
+		showTraktID, season, episode, showTMDB, episodeTMDB, title, firstAired, s.member)
 }
 
 func (s traktSeed) watchlist(mediaType string, traktID, tmdbID int, title string, listed time.Time) {
 	s.t.Helper()
-	s.exec(`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, year, poster_path, listed_at)
-		VALUES ($1, $2, $3, $4, 2020, '/poster.jpg', $5)`, mediaType, traktID, tmdbID, title, listed)
+	s.exec(`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, year, poster_path, listed_at)
+		VALUES ($6, $1, $2, $3, $4, 2020, '/poster.jpg', $5)`, mediaType, traktID, tmdbID, title, listed, s.member)
 }
 
 func (s traktSeed) play(id int64, mediaType string, tmdbID int, title string, season, episode int, episodeTitle string, at time.Time) {
@@ -99,8 +103,9 @@ func (s traktSeed) play(id int64, mediaType string, tmdbID int, title string, se
 	if mediaType == "episode" {
 		se, ep = season, episode
 	}
-	s.exec(`INSERT INTO trakt_history (id, media_type, tmdb_id, trakt_id, title, year, season, episode, episode_title, watched_at)
-		VALUES ($1, $2, $3, $3::int + 0, $4, 2020, $5, $6, NULLIF($7, ''), $8)`, id, mediaType, tmdbID, title, se, ep, episodeTitle, at)
+	s.exec(`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, season, episode, episode_title, watched_at)
+		VALUES ($9, $1, $2, $3, $3::int + 0, $4, 2020, $5, $6, NULLIF($7, ''), $8)`,
+		id, mediaType, tmdbID, title, se, ep, episodeTitle, at, s.member)
 }
 
 func (s catalogSeed) setTMDBEpisode(episodeID int64, tmdbID int) {
@@ -117,7 +122,7 @@ func TestTraktEpisodeMatching(t *testing.T) {
 	ctx := context.Background()
 	repo := NewCatalogRepository(db)
 	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
-	tr := traktSeed{t: t, db: db}
+	tr := traktSeed{t: t, db: db, member: 1}
 	at := time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)
 
 	show := seed.show("Matching", true)
@@ -202,7 +207,7 @@ func TestListLibrary_WatchState(t *testing.T) {
 	ctx := context.Background()
 	repo := NewCatalogRepository(db)
 	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
-	tr := traktSeed{t: t, db: db}
+	tr := traktSeed{t: t, db: db, member: 1}
 	day := func(n int) time.Time { return time.Date(2026, 10, n, 20, 0, 0, 0, time.UTC) }
 
 	// Alpha: E1–E2 watched, no files: the frontier starts at E3.
@@ -308,7 +313,7 @@ func TestWatchState(t *testing.T) {
 	ctx := context.Background()
 	repo := NewCatalogRepository(db)
 	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
-	tr := traktSeed{t: t, db: db}
+	tr := traktSeed{t: t, db: db, member: 1}
 	at := time.Date(2026, 10, 10, 21, 0, 0, 0, time.UTC)
 	soon := time.Date(2026, 10, 20, 1, 30, 0, 0, time.UTC)
 
@@ -316,14 +321,14 @@ func TestWatchState(t *testing.T) {
 	tr.watchedMovie(603, 2, at)
 	tr.rating("movie", 1, 603, 9)
 	tr.rating("movie", 2, 604, 7)
-	ws, err := repo.WatchState(ctx, "movie", 603)
+	ws, err := repo.WatchState(ctx, 1, "movie", 603)
 	if err != nil || ws == nil || ws.Plays != 2 || !ws.LastWatchedAt.Equal(at) || *ws.Rating != 9 || ws.Progress != nil || ws.Next != nil {
 		t.Errorf("movie 603 = %+v, %v", ws, err)
 	}
-	if ws, err := repo.WatchState(ctx, "movie", 604); err != nil || ws == nil || ws.Plays != 0 || ws.LastWatchedAt != nil || *ws.Rating != 7 {
+	if ws, err := repo.WatchState(ctx, 1, "movie", 604); err != nil || ws == nil || ws.Plays != 0 || ws.LastWatchedAt != nil || *ws.Rating != 7 {
 		t.Errorf("movie 604 = %+v, %v", ws, err)
 	}
-	if ws, err := repo.WatchState(ctx, "movie", 605); err != nil || ws != nil {
+	if ws, err := repo.WatchState(ctx, 1, "movie", 605); err != nil || ws != nil {
 		t.Errorf("movie 605 = %+v, %v; want nil", ws, err)
 	}
 
@@ -340,7 +345,7 @@ func TestWatchState(t *testing.T) {
 	tr.rating("show", 3, golf.TMDBID, 8)
 	tr.progress(progressRow{traktID: 11, tmdbID: golf.TMDBID, title: "Golf", aired: 3, completed: 2, lastWatched: at,
 		hasLast: true, lastSeason: 1, lastEpisode: 2, hasNext: true, nextSeason: 9, nextEpisode: 9, nextTMDB: 5003, nextTitle: "Trakt's name"})
-	ws, err = repo.WatchState(ctx, "tv", golf.TMDBID)
+	ws, err = repo.WatchState(ctx, 1, "tv", golf.TMDBID)
 	if err != nil || ws == nil {
 		t.Fatalf("golf = %+v, %v", ws, err)
 	}
@@ -359,7 +364,7 @@ func TestWatchState(t *testing.T) {
 	tr.calendar(12, 7012, 0, 3, 0, "A special", at)
 	tr.calendar(12, 7012, 2, 2, 0, "Later", soon.Add(7*24*time.Hour))
 	tr.calendar(12, 7012, 2, 1, 0, "Premiere", soon)
-	ws, err = repo.WatchState(ctx, "tv", 7012)
+	ws, err = repo.WatchState(ctx, 1, "tv", 7012)
 	if err != nil || ws == nil || ws.Plays != 0 || ws.Next == nil {
 		t.Fatalf("hotel = %+v, %v", ws, err)
 	}
@@ -371,17 +376,17 @@ func TestWatchState(t *testing.T) {
 	tr.progress(progressRow{traktID: 13, tmdbID: 7013, title: "India", aired: 4, completed: 4, lastWatched: at,
 		hasLast: true, lastSeason: 1, lastEpisode: 4, hasNext: true, nextSeason: 0, nextEpisode: 1})
 	tr.calendar(13, 7013, 1, 5, 0, "Regular", soon)
-	if ws, err := repo.WatchState(ctx, "tv", 7013); err != nil || ws.Next == nil || ws.Next.Season != 1 || ws.Next.Episode != 5 {
+	if ws, err := repo.WatchState(ctx, 1, "tv", 7013); err != nil || ws.Next == nil || ws.Next.Season != 1 || ws.Next.Episode != 5 {
 		t.Errorf("india = %+v, %v", ws, err)
 	}
 
 	// Caught up with nothing on the calendar: progress, no next.
 	tr.progress(progressRow{traktID: 14, tmdbID: 7014, title: "Juliett", aired: 4, completed: 4, lastWatched: at,
 		hasLast: true, lastSeason: 1, lastEpisode: 4})
-	if ws, err := repo.WatchState(ctx, "tv", 7014); err != nil || ws == nil || ws.Next != nil || ws.Progress == nil {
+	if ws, err := repo.WatchState(ctx, 1, "tv", 7014); err != nil || ws == nil || ws.Next != nil || ws.Progress == nil {
 		t.Errorf("juliett = %+v, %v", ws, err)
 	}
-	if ws, err := repo.WatchState(ctx, "tv", 7999); err != nil || ws != nil {
+	if ws, err := repo.WatchState(ctx, 1, "tv", 7999); err != nil || ws != nil {
 		t.Errorf("unknown show = %+v, %v; want nil", ws, err)
 	}
 }
@@ -391,7 +396,7 @@ func TestUpNextCandidates(t *testing.T) {
 	ctx := context.Background()
 	repo := NewCatalogRepository(db)
 	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
-	tr := traktSeed{t: t, db: db}
+	tr := traktSeed{t: t, db: db, member: 1}
 	at := time.Date(2026, 10, 10, 21, 0, 0, 0, time.UTC)
 	soon := time.Date(2026, 10, 20, 1, 30, 0, 0, time.UTC)
 
@@ -413,7 +418,7 @@ func TestUpNextCandidates(t *testing.T) {
 	tr.watchlist("tv", 23, 8099, "Not in the library", at)
 	tr.watchlist("movie", 24, 603, "A movie", at)
 
-	candidates, err := repo.UpNextCandidates(ctx, today)
+	candidates, err := repo.UpNextCandidates(ctx, 1, today)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +453,7 @@ func TestNewEpisodeCandidates(t *testing.T) {
 	ctx := context.Background()
 	repo := NewCatalogRepository(db)
 	seed := catalogSeed{t: t, db: db, meta: NewMetadataRepository(db)}
-	tr := traktSeed{t: t, db: db}
+	tr := traktSeed{t: t, db: db, member: 1}
 	from := time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 
@@ -476,7 +481,7 @@ func TestNewEpisodeCandidates(t *testing.T) {
 	tr.calendar(44, kilo.TMDBID, 1, 3, 0, "Library", time.Date(2026, 10, 9, 2, 0, 0, 0, time.UTC))
 	tr.calendar(45, 8105, 1, 1, 0, "Watchlisted", time.Date(2026, 10, 13, 2, 0, 0, 0, time.UTC))
 
-	candidates, err := repo.NewEpisodeCandidates(ctx, from, now, "2026-10-07", "2026-10-14")
+	candidates, err := repo.NewEpisodeCandidates(ctx, 1, from, now, "2026-10-07", "2026-10-14")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,18 +562,18 @@ func TestTraktWatchlistAndHistory(t *testing.T) {
 	db := openSchemaDB(t)
 	ctx := context.Background()
 	repo := NewCatalogRepository(db)
-	tr := traktSeed{t: t, db: db}
+	tr := traktSeed{t: t, db: db, member: 1}
 	day := func(n int) time.Time { return time.Date(2026, 10, n, 20, 0, 0, 0, time.UTC) }
 
 	tr.watchlist("movie", 1, 603, "The Matrix", day(1))
 	tr.watchlist("tv", 2, 1399, "Game of Thrones", day(3))
 	tr.watchlist("movie", 3, 604, "Reloaded", day(2))
-	all, err := repo.TraktWatchlist(ctx, "")
+	all, err := repo.TraktWatchlist(ctx, 1, "")
 	if err != nil || len(all) != 3 || all[0].TMDBID != 1399 || all[1].TMDBID != 604 || all[2].TMDBID != 603 ||
 		all[0].Year != 2020 || all[0].PosterPath != "/poster.jpg" || !all[0].ListedAt.Equal(day(3)) {
 		t.Errorf("watchlist = %+v, %v", all, err)
 	}
-	if movies, err := repo.TraktWatchlist(ctx, "movie"); err != nil || len(movies) != 2 || movies[0].MediaType != "movie" {
+	if movies, err := repo.TraktWatchlist(ctx, 1, "movie"); err != nil || len(movies) != 2 || movies[0].MediaType != "movie" {
 		t.Errorf("movies = %+v, %v", movies, err)
 	}
 
@@ -579,7 +584,7 @@ func TestTraktWatchlistAndHistory(t *testing.T) {
 	tr.play(5, "episode", 1399, "Game of Thrones", 1, 3, "Lord Snow", day(3))
 	var ids []int64
 	for offset := 0; offset < 6; offset += 2 {
-		plays, total, err := repo.TraktHistory(ctx, 2, offset)
+		plays, total, err := repo.TraktHistory(ctx, 1, 2, offset)
 		if err != nil || total != 5 {
 			t.Fatalf("history at %d = %+v, total %d, %v", offset, plays, total, err)
 		}
@@ -590,11 +595,11 @@ func TestTraktWatchlistAndHistory(t *testing.T) {
 	if want := []int64{4, 5, 3, 2, 1}; !slices.Equal(ids, want) {
 		t.Errorf("history order = %v, want %v", ids, want)
 	}
-	plays, total, err := repo.TraktHistory(ctx, 2, 10)
+	plays, total, err := repo.TraktHistory(ctx, 1, 2, 10)
 	if err != nil || total != 5 || len(plays) != 0 {
 		t.Errorf("past the end = %+v, total %d, %v", plays, total, err)
 	}
-	plays, _, _ = repo.TraktHistory(ctx, 5, 0)
+	plays, _, _ = repo.TraktHistory(ctx, 1, 5, 0)
 	if m, e := plays[0], plays[3]; m.MediaType != "movie" || m.Season != nil || m.Episode != nil || m.EpisodeTitle != "" ||
 		e.MediaType != "episode" || *e.Season != 1 || *e.Episode != 1 || e.EpisodeTitle != "Winter Is Coming" || e.Year != 2020 {
 		t.Errorf("plays = %+v, %+v", m, e)
@@ -624,8 +629,8 @@ func TestLibraryItemsSQL_LargeHistory(t *testing.T) {
 		       CASE WHEN e % 3 = 0 THEN NULL ELSE (s.tmdb_id - 300000) * 10000 + sn.season_number * 2000 + e END
 		FROM shows s JOIN seasons sn ON sn.show_id = s.id,
 		     generate_series(1, CASE WHEN s.tmdb_id = 399999 THEN 1500 ELSE 100 END) e`)
-	exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
-		SELECT s.tmdb_id, sn.season_number, e.episode_number, e.tmdb_episode_id, 1, NOW() - e.id * INTERVAL '1 minute'
+	exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
+		SELECT 1, s.tmdb_id, sn.season_number, e.episode_number, e.tmdb_episode_id, 1, NOW() - e.id * INTERVAL '1 minute'
 		FROM shows s JOIN seasons sn ON sn.show_id = s.id JOIN episodes e ON e.season_id = sn.id`)
 	exec(`ANALYZE`)
 	var plays int

@@ -177,7 +177,7 @@ func newSyncEnv(t *testing.T, clock Clock) *syncEnv {
 	db := openSchemaDB(t)
 	se := &syncEnv{
 		t: t, ctx: context.Background(), clock: clock, srv: trakttest.New(t), db: db,
-		store: library.NewTraktAuthRepository(db), art: &fakeArtwork{steps: map[SyncStep]bool{}},
+		store: library.NewTraktAuthRepository(db).ForMember(1), art: &fakeArtwork{steps: map[SyncStep]bool{}},
 	}
 	se.srv.SetClock(clock.Now)
 	box := mustBox(t, testKey)
@@ -192,11 +192,11 @@ func newSyncEnv(t *testing.T, clock Clock) *syncEnv {
 		t.Fatal(err)
 	}
 	se.auth = NewAuth(AuthDeps{
-		Client: newTestClient(se.srv, clock), Box: box, Store: se.store, Settings: library.NewSettingsRepository(db), Clock: clock,
+		Client: newTestClient(se.srv, clock), Box: box, Store: se.store, Settings: library.NewMemberRepository(db).TraktSettingsFor(1), Clock: clock,
 	})
 	t.Cleanup(se.auth.Close)
 	se.conn = &watchedAuth{Auth: se.auth}
-	se.syncer = NewSyncer(SyncDeps{Auth: se.conn, Store: library.NewTraktSyncStore(db), Artwork: se.art, Clock: clock})
+	se.syncer = NewSyncer(SyncDeps{Auth: se.conn, Store: library.NewTraktSyncStore(db).ForMember(1), Artwork: se.art, Clock: clock})
 	se.conn.s, se.art.s = se.syncer, se.syncer
 	se.auth.SetHooks(se.syncer.Hooks())
 	t.Cleanup(se.syncer.Stop)
@@ -570,7 +570,7 @@ func TestSync_ReconcileRemovesDeletedPlays(t *testing.T) {
 	if got := se.rows(`SELECT plays::text FROM trakt_watched_movies`); !reflect.DeepEqual(got, []string{"1"}) {
 		t.Errorf("Matrix plays = %q", got)
 	}
-	state, err := library.NewTraktSyncStore(se.db).State(se.ctx)
+	state, err := library.NewTraktSyncStore(se.db).ForMember(1).State(se.ctx)
 	if err != nil || !state.LastReconcileAt.Equal(se.clock.Now()) {
 		t.Errorf("last_reconcile_at = %v, %v", state.LastReconcileAt, err)
 	}
@@ -627,7 +627,7 @@ func TestSync_FailedImportPicksUpAtItsStep(t *testing.T) {
 		t.Errorf("rows: history %d, ratings %d, watchlist %d", se.countRows("trakt_history"), se.countRows("trakt_ratings"), se.countRows("trakt_watchlist"))
 	}
 	// Reported after a restart too.
-	restarted, err := NewSyncer(SyncDeps{Auth: se.conn, Store: library.NewTraktSyncStore(se.db)}).Status(se.ctx)
+	restarted, err := NewSyncer(SyncDeps{Auth: se.conn, Store: library.NewTraktSyncStore(se.db).ForMember(1)}).Status(se.ctx)
 	if err != nil || restarted.Run.Status != SyncError || ptrValue(restarted.Run.Step) != StepWatchlist {
 		t.Errorf("stored run = %+v, %v", restarted.Run, err)
 	}
@@ -839,7 +839,7 @@ func TestSync_OnSynced(t *testing.T) {
 func TestSync_ConnectStartsTheInitialImport(t *testing.T) {
 	e := newEnv(t)
 	art := &fakeArtwork{steps: map[SyncStep]bool{}}
-	syncer := NewSyncer(SyncDeps{Auth: e.auth, Store: library.NewTraktSyncStore(e.db), Artwork: art, Clock: e.clock})
+	syncer := NewSyncer(SyncDeps{Auth: e.auth, Store: library.NewTraktSyncStore(e.db).ForMember(1), Artwork: art, Clock: e.clock})
 	t.Cleanup(syncer.Stop)
 	e.auth.SetHooks(syncer.Hooks())
 	se := &syncEnv{t: t, ctx: e.ctx, clock: e.clock, srv: e.srv, db: e.db, syncer: syncer}

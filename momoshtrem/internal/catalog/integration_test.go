@@ -231,8 +231,8 @@ func (it *integration) stream(itemType library.ItemType, titleID, itemID int64, 
 // TMDB id for it).
 func (it *integration) watched(showTMDB, season, episode, episodeTMDB int) {
 	it.t.Helper()
-	it.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
-		VALUES ($1, $2, $3, NULLIF($4, 0), 1, NOW())`, showTMDB, season, episode, episodeTMDB)
+	it.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
+		VALUES (1, $1, $2, $3, NULLIF($4, 0), 1, NOW())`, showTMDB, season, episode, episodeTMDB)
 	it.t.Cleanup(func() {
 		_, _ = it.db.Exec(`DELETE FROM trakt_watched_episodes WHERE show_tmdb_id = $1 AND season = $2 AND episode = $3`,
 			showTMDB, season, episode)
@@ -266,7 +266,7 @@ func TestIntegration_QueryBudgets(t *testing.T) {
 	it.season(other, 1, 3, "2020-01-03")
 	// Trakt's plays: E13 of the show, and the movie.
 	it.watched(showID, 1, 13, 0)
-	it.exec(`INSERT INTO trakt_watched_movies (tmdb_id, plays, last_watched_at) VALUES ($1, 1, NOW())`, movieID)
+	it.exec(`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at) VALUES (1, $1, 1, NOW())`, movieID)
 	t.Cleanup(func() { _, _ = it.db.Exec(`DELETE FROM trakt_watched_movies WHERE tmdb_id = $1`, movieID) })
 
 	arcsID := "arcs-" + it.tag

@@ -27,8 +27,8 @@ func TestDownloadsRepository_SmartReads(t *testing.T) {
 		VALUES ('episode', $1, 'hdrezka', '{"provider":"hdrezka"}', 'hdrezka/1/t1/s02e01/1080p.mp4', 0, TRUE)`, e21)
 	// S1E2 watched on Trakt (by TMDB id).
 	watched := time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)
-	f.exec(`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
-		VALUES ($1, 9, 9, 9012, 1, $2)`, f.show.TMDBID, watched)
+	f.exec(`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, episode_tmdb_id, plays, last_watched_at)
+		VALUES (1, $1, 9, 9, 9012, 1, $2)`, f.show.TMDBID, watched)
 
 	next := func(season, episode, k int) []int64 {
 		t.Helper()

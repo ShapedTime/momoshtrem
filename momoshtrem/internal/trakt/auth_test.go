@@ -58,7 +58,7 @@ type env struct {
 	clock     *fakeClock
 	db        *library.DB
 	store     *library.TraktAuthRepository
-	settings  *library.SettingsRepository
+	settings  library.MemberTraktSettings
 	box       *secret.Box
 	auth      *Auth
 	connected atomic.Int32 // OnConnected calls
@@ -69,7 +69,7 @@ func newEnv(t *testing.T) *env {
 	db := openSchemaDB(t)
 	e := &env{
 		t: t, ctx: context.Background(), srv: trakttest.New(t), clock: newFakeClock(), db: db,
-		store: library.NewTraktAuthRepository(db), settings: library.NewSettingsRepository(db), box: mustBox(t, testKey),
+		store: library.NewTraktAuthRepository(db).ForMember(1), settings: library.NewMemberRepository(db).TraktSettingsFor(1), box: mustBox(t, testKey),
 	}
 	e.srv.SetClock(e.clock.Now)
 	e.auth = e.restart(e.box)
@@ -492,9 +492,9 @@ func TestAuth_Disconnect(t *testing.T) {
 	e.connect(e.auth)
 	access, _ := e.storedTokens()
 	for _, q := range []string{
-		`INSERT INTO trakt_sync_state (key, value) VALUES ('last_sync_at', '"2026-10-16T08:00:00Z"')`,
-		`INSERT INTO trakt_history (id, media_type, tmdb_id, trakt_id, title, watched_at) VALUES (9001, 'movie', 603, 481, 'The Matrix', NOW())`,
-		`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, listed_at) VALUES ('movie', 481, 603, 'The Matrix', NOW())`,
+		`INSERT INTO trakt_sync_state (member_id, key, value) VALUES (1, 'last_sync_at', '"2026-10-16T08:00:00Z"')`,
+		`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, watched_at) VALUES (1, 9001, 'movie', 603, 481, 'The Matrix', NOW())`,
+		`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, listed_at) VALUES (1, 'movie', 481, 603, 'The Matrix', NOW())`,
 	} {
 		if _, err := e.db.Exec(q); err != nil {
 			t.Fatal(err)

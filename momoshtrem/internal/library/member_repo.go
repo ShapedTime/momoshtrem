@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -144,6 +145,107 @@ func (r *MemberRepository) lockMembers(ctx context.Context) (*sql.Tx, error) {
 		return nil, fmt.Errorf("failed to lock the members: %w", err)
 	}
 	return tx, nil
+}
+
+// TraktSettings are what momoshtrem takes from a member's Trakt
+// (members.trakt_settings, 012): one JSON document shaped like PUT
+// /integrations/trakt/settings answers (PLAN §6 "Trakt (B5)"). Fields it
+// doesn't hold take their defaults; a disconnect keeps it, and it goes
+// with the member.
+type TraktSettings struct {
+	// UseRatings lets recommendations (#9) weigh Trakt ratings.
+	UseRatings bool `json:"use_ratings"`
+	// ShowWatchlist shows the watchlist on For You, and Up next's
+	// watchlist starts.
+	ShowWatchlist bool `json:"show_watchlist"`
+	// IncludePaused keeps shows idle for over 180 days in Up next.
+	IncludePaused bool `json:"include_paused"`
+}
+
+// DefaultTraktSettings are the settings before anyone changes them.
+func DefaultTraktSettings() TraktSettings {
+	return TraktSettings{UseRatings: true, ShowWatchlist: true}
+}
+
+// TraktSettingsPatch is a partial update: a nil field keeps its value.
+type TraktSettingsPatch struct {
+	UseRatings    *bool `json:"use_ratings,omitempty"`
+	ShowWatchlist *bool `json:"show_watchlist,omitempty"`
+	IncludePaused *bool `json:"include_paused,omitempty"`
+}
+
+// TraktSettings reads member id's Trakt settings over their defaults: a
+// field the stored document doesn't have keeps its default. An unknown
+// member gives the defaults and member.ErrNotFound, a document that isn't
+// the settings the defaults and the error.
+func (r *MemberRepository) TraktSettings(ctx context.Context, id int64) (TraktSettings, error) {
+	var raw []byte
+	err := r.db.QueryRowContext(ctx, `SELECT trakt_settings FROM members WHERE id = $1`, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultTraktSettings(), member.ErrNotFound
+	}
+	if err != nil {
+		return DefaultTraktSettings(), fmt.Errorf("failed to read member %d's Trakt settings: %w", id, err)
+	}
+	return decodeTraktSettings(raw)
+}
+
+// UpdateTraktSettings stores the fields patch sets for member id and
+// answers the settings it leaves; member.ErrNotFound for an unknown
+// member. It's one statement (jsonb ||), so two updates of different
+// fields never lose each other's change.
+func (r *MemberRepository) UpdateTraktSettings(ctx context.Context, id int64, patch TraktSettingsPatch) (TraktSettings, error) {
+	set, err := json.Marshal(patch)
+	if err != nil {
+		return DefaultTraktSettings(), fmt.Errorf("failed to encode the Trakt settings: %w", err)
+	}
+	var raw []byte
+	err = r.db.QueryRowContext(ctx, `
+		UPDATE members SET
+			trakt_settings = CASE WHEN jsonb_typeof(trakt_settings) = 'object' THEN trakt_settings ELSE '{}'::jsonb END || $2::jsonb,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING trakt_settings
+	`, id, string(set)).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultTraktSettings(), member.ErrNotFound
+	}
+	if err != nil {
+		return DefaultTraktSettings(), fmt.Errorf("failed to update member %d's Trakt settings: %w", id, err)
+	}
+	return decodeTraktSettings(raw)
+}
+
+// TraktSettingsFor is member id's Trakt settings, for what's built for one
+// member: their trakt.Auth and taste profile.
+func (r *MemberRepository) TraktSettingsFor(id int64) MemberTraktSettings {
+	return MemberTraktSettings{repo: r, member: id}
+}
+
+// MemberTraktSettings are one member's Trakt settings (TraktSettingsFor).
+type MemberTraktSettings struct {
+	repo   *MemberRepository
+	member int64
+}
+
+// TraktSettings reads the member's (MemberRepository.TraktSettings).
+func (s MemberTraktSettings) TraktSettings(ctx context.Context) (TraktSettings, error) {
+	return s.repo.TraktSettings(ctx, s.member)
+}
+
+// UpdateTraktSettings stores the member's
+// (MemberRepository.UpdateTraktSettings).
+func (s MemberTraktSettings) UpdateTraktSettings(ctx context.Context, patch TraktSettingsPatch) (TraktSettings, error) {
+	return s.repo.UpdateTraktSettings(ctx, s.member, patch)
+}
+
+func decodeTraktSettings(raw []byte) (TraktSettings, error) {
+	settings := DefaultTraktSettings()
+	// Unmarshal only overwrites the fields present in raw.
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return DefaultTraktSettings(), fmt.Errorf("failed to decode the Trakt settings: %w", err)
+	}
+	return settings, nil
 }
 
 // memberColors is every member's colour, one per member.

@@ -88,12 +88,12 @@ func wireRecs(d aiDeps, core *aiCore, opts *api.Options) *recsWiring {
 // anything (recommend-run). trakt says whether Trakt is connected; nil:
 // never.
 func newRecsWiring(d aiDeps, core *aiCore, trakt profile.Connection) *recsWiring {
-	taste := library.NewTasteRepository(d.db)
+	taste := library.NewTasteRepository(d.db).ForMember(d.member)
 	w := &recsWiring{
 		profiles: profile.New(profile.Deps{
 			Store:    taste,
 			Profiles: library.NewTasteProfileRepository(d.db),
-			Settings: d.settings, // Trakt's use_ratings
+			Settings: library.NewMemberRepository(d.db).TraktSettingsFor(d.member), // Trakt's use_ratings
 			TMDB:     d.tmdb,
 			Trakt:    trakt,
 		}),

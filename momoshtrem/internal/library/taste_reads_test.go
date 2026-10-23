@@ -21,34 +21,34 @@ import (
 func seedTaste(t *testing.T, db *DB) {
 	t.Helper()
 	for _, q := range []string{
-		`INSERT INTO trakt_history (id, media_type, tmdb_id, trakt_id, title, year, season, episode, watched_at) VALUES
-			(1, 'movie', 693134, 367444, 'Dune: Part Two', 2024, NULL, NULL, '2026-09-01T20:00:00Z'),
-			(2, 'movie', 693134, 367444, 'Dune: Part Two', 2024, NULL, NULL, '2026-10-01T20:00:00Z'),
-			(3, 'episode', 209867, 184317, 'Frieren', 2023, 1, 26, '2026-10-10T20:00:00Z'),
-			(4, 'episode', 95396, 154997, 'Severance', 2022, 1, 1, '2026-08-01T20:00:00Z'),
-			(5, 'episode', 95396, 154997, 'Severance', 2022, 1, 2, '2026-08-02T20:00:00Z'),
-			(6, 'episode', 95396, 154997, 'Severance', 2022, 0, 1, '2026-08-03T20:00:00Z')`,
-		`INSERT INTO trakt_watched_movies (tmdb_id, plays, last_watched_at) VALUES (693134, 2, '2026-10-01T20:00:00Z')`,
-		`INSERT INTO trakt_watched_episodes (show_tmdb_id, season, episode, plays, last_watched_at) VALUES
-			(209867, 1, 26, 1, '2026-10-10T20:00:00Z'),
-			(95396, 1, 1, 2, '2026-08-01T20:00:00Z'),
-			(95396, 1, 2, 1, '2026-08-02T20:00:00Z'),
-			(95396, 0, 1, 1, '2026-08-03T20:00:00Z')`,
-		`INSERT INTO trakt_show_progress (show_trakt_id, show_tmdb_id, title, year, aired, completed, last_watched_at) VALUES
-			(184317, 209867, 'Frieren: Beyond Journey''s End', 2023, 38, 26, '2026-10-10T20:00:00Z'),
-			(1390, 1399, 'Game of Thrones', 2011, 73, 5, '2025-01-05T20:00:00Z')`,
-		`INSERT INTO trakt_hidden (section, trakt_id, tmdb_id) VALUES ('dropped', 1390, 1399), ('progress_watched', 1390, 1399)`,
-		`INSERT INTO trakt_ratings (media_type, trakt_id, tmdb_id, show_tmdb_id, season, episode, rating, rated_at) VALUES
-			('movie', 367444, 693134, NULL, NULL, NULL, 9, '2026-10-01T22:00:00Z'),
-			('movie', 1, 666277, NULL, NULL, NULL, 3, '2026-06-01T22:00:00Z'),
-			('movie', 2, 17473, NULL, NULL, NULL, 2, '2026-05-01T22:00:00Z'),
-			('show', 184317, 209867, NULL, NULL, NULL, 10, '2026-10-11T22:00:00Z'),
-			('episode', 11, 4001, 95396, 1, 1, 8, '2026-08-01T22:00:00Z'),
-			('episode', 12, 4002, 95396, 1, 2, 9, '2026-08-02T22:00:00Z'),
-			('episode', 13, 4003, 209867, 1, 26, 2, '2026-10-10T22:00:00Z')`,
-		`INSERT INTO trakt_watchlist (media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES
-			('movie', 761234, 666277, 'Past Lives', 2023, '2026-03-01T00:00:00Z'),
-			('tv', 9, 95396, 'Severance', 2022, '2026-02-01T00:00:00Z')`,
+		`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, season, episode, watched_at) VALUES
+			(1, 1, 'movie', 693134, 367444, 'Dune: Part Two', 2024, NULL, NULL, '2026-09-01T20:00:00Z'),
+			(1, 2, 'movie', 693134, 367444, 'Dune: Part Two', 2024, NULL, NULL, '2026-10-01T20:00:00Z'),
+			(1, 3, 'episode', 209867, 184317, 'Frieren', 2023, 1, 26, '2026-10-10T20:00:00Z'),
+			(1, 4, 'episode', 95396, 154997, 'Severance', 2022, 1, 1, '2026-08-01T20:00:00Z'),
+			(1, 5, 'episode', 95396, 154997, 'Severance', 2022, 1, 2, '2026-08-02T20:00:00Z'),
+			(1, 6, 'episode', 95396, 154997, 'Severance', 2022, 0, 1, '2026-08-03T20:00:00Z')`,
+		`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at) VALUES (1, 693134, 2, '2026-10-01T20:00:00Z')`,
+		`INSERT INTO trakt_watched_episodes (member_id, show_tmdb_id, season, episode, plays, last_watched_at) VALUES
+			(1, 209867, 1, 26, 1, '2026-10-10T20:00:00Z'),
+			(1, 95396, 1, 1, 2, '2026-08-01T20:00:00Z'),
+			(1, 95396, 1, 2, 1, '2026-08-02T20:00:00Z'),
+			(1, 95396, 0, 1, 1, '2026-08-03T20:00:00Z')`,
+		`INSERT INTO trakt_show_progress (member_id, show_trakt_id, show_tmdb_id, title, year, aired, completed, last_watched_at) VALUES
+			(1, 184317, 209867, 'Frieren: Beyond Journey''s End', 2023, 38, 26, '2026-10-10T20:00:00Z'),
+			(1, 1390, 1399, 'Game of Thrones', 2011, 73, 5, '2025-01-05T20:00:00Z')`,
+		`INSERT INTO trakt_hidden (member_id, section, trakt_id, tmdb_id) VALUES (1, 'dropped', 1390, 1399), (1, 'progress_watched', 1390, 1399)`,
+		`INSERT INTO trakt_ratings (member_id, media_type, trakt_id, tmdb_id, show_tmdb_id, season, episode, rating, rated_at) VALUES
+			(1, 'movie', 367444, 693134, NULL, NULL, NULL, 9, '2026-10-01T22:00:00Z'),
+			(1, 'movie', 1, 666277, NULL, NULL, NULL, 3, '2026-06-01T22:00:00Z'),
+			(1, 'movie', 2, 17473, NULL, NULL, NULL, 2, '2026-05-01T22:00:00Z'),
+			(1, 'show', 184317, 209867, NULL, NULL, NULL, 10, '2026-10-11T22:00:00Z'),
+			(1, 'episode', 11, 4001, 95396, 1, 1, 8, '2026-08-01T22:00:00Z'),
+			(1, 'episode', 12, 4002, 95396, 1, 2, 9, '2026-08-02T22:00:00Z'),
+			(1, 'episode', 13, 4003, 209867, 1, 26, 2, '2026-10-10T22:00:00Z')`,
+		`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES
+			(1, 'movie', 761234, 666277, 'Past Lives', 2023, '2026-03-01T00:00:00Z'),
+			(1, 'tv', 9, 95396, 'Severance', 2022, '2026-02-01T00:00:00Z')`,
 		`INSERT INTO shows (id, tmdb_id, title, year, original_language, origin_country, is_anime, genres) VALUES
 			(1, 209867, 'Frieren', 2023, 'ja', '{JP}', TRUE, '["Animation", "Fantasy"]'),
 			(2, 136315, 'The Bear', 2022, 'en', '{US}', FALSE, '["Comedy", "Drama"]')`,
@@ -74,7 +74,7 @@ func atPtr(s string) *time.Time {
 func TestTasteRepository(t *testing.T) {
 	db := openSchemaDB(t)
 	seedTaste(t, db)
-	repo := NewTasteRepository(db)
+	repo := NewTasteRepository(db).ForMember(1)
 	ctx := context.Background()
 
 	t.Run("watched movies", func(t *testing.T) {
@@ -212,7 +212,7 @@ func TestTasteRepository(t *testing.T) {
 // Without Trakt or a library every reader finds nothing.
 func TestTasteRepository_Empty(t *testing.T) {
 	db := openSchemaDB(t)
-	repo := NewTasteRepository(db)
+	repo := NewTasteRepository(db).ForMember(1)
 	ctx := context.Background()
 	movies, err1 := repo.WatchedMovies(ctx)
 	shows, err2 := repo.WatchedShows(ctx)

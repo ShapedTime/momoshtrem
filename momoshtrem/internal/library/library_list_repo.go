@@ -73,10 +73,10 @@ type LibraryItem struct {
 	EpisodesReady   *int
 	EpisodesWatched *int
 	// LastWatchedAt is the movie's last play, or the show's last watched
-	// episode, on Trakt; nil without one.
+	// episode, on Trakt, by any member; nil without one.
 	LastWatchedAt *time.Time
-	// Watching: a show with 0 < watched < total that isn't dropped or
-	// hidden on Trakt (status=watching).
+	// Watching: a show with 0 < watched < total that some member with a
+	// play of it hasn't dropped or hidden on Trakt (status=watching).
 	Watching  bool
 	SizeBytes int64
 	// NeedsReview counts the files of the title's open mapping jobs that
@@ -163,11 +163,13 @@ type LibraryListing struct {
 // the first aired regular episode after the last one with a file or a play
 // (last_covered), up to the next one in that season that hasn't aired.
 //
-// The watch state is Trakt's (PLAN §6 "Watch state rules"): an episode is
-// watched by the matching rule (episodeWatchedSQL), episodes_watched counts
-// the regular ones, and last_watched_at is the movie's last play or the
-// show's last watched episode. watching is a show with 0 < episodes_watched
-// < episodes_total that Trakt doesn't list as dropped or hidden.
+// The watch state is Trakt's, every household member's (PLAN §6 "Watch
+// state rules"): an episode is watched by the matching rule
+// (episodeWatchedSQL), episodes_watched counts the regular ones, and
+// last_watched_at is the movie's last play or the show's last watched
+// episode, by anyone. watching is a show with 0 < episodes_watched <
+// episodes_total that some member with a play of it hasn't dropped or
+// hidden on Trakt.
 //
 // Episode positions are encoded as season·10⁶ + episode so MAX can compare
 // them.
@@ -204,7 +206,9 @@ movie_items AS (
 	       NULL::int AS missing_absolute_from, NULL::int AS missing_absolute_to, NULL::bigint AS missing_count,
 	       NULL::bigint AS episodes_watched, wm.last_watched_at, FALSE AS watching
 	FROM movies m
-	LEFT JOIN trakt_watched_movies wm ON wm.tmdb_id = m.tmdb_id
+	LEFT JOIN LATERAL (
+		SELECT max(w.last_watched_at) AS last_watched_at FROM trakt_watched_movies w WHERE w.tmdb_id = m.tmdb_id
+	) wm ON TRUE
 	LEFT JOIN LATERAL (
 		SELECT t.id, t.kind, t.info_hash, t.file_path, t.file_size, t.resolution
 		FROM torrent_assignments t
@@ -306,7 +310,9 @@ show_items AS (
 	       COALESCE(st.episodes_watched, 0),
 	       (SELECT max(w.last_watched_at) FROM trakt_watched_episodes w WHERE w.show_tmdb_id = s.tmdb_id),
 	       COALESCE(st.episodes_watched, 0) > 0 AND st.episodes_watched < st.episodes_total
-	           AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.tmdb_id = s.tmdb_id)
+	           AND EXISTS (SELECT 1 FROM trakt_watched_episodes w
+	                       WHERE w.show_tmdb_id = s.tmdb_id
+	                         AND NOT EXISTS (SELECT 1 FROM trakt_hidden h WHERE h.member_id = w.member_id AND h.tmdb_id = s.tmdb_id))
 	FROM shows s
 	LEFT JOIN show_stats st ON st.show_id = s.id
 	LEFT JOIN show_sizes sz ON sz.show_id = s.id

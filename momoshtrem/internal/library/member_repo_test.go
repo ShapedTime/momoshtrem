@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -161,4 +162,145 @@ func TestMemberRepository_Concurrent(t *testing.T) {
 	if removed != len(list)-1 || last != 1 || count() != 1 {
 		t.Errorf("%d removed, %d refused as the last, %d members, want 1", removed, last, count())
 	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// The settings' JSON is the contract's TraktSettings, and a patch sends
+// only the fields it sets.
+func TestTraktSettings_JSON(t *testing.T) {
+	raw, err := json.Marshal(DefaultTraktSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONEqual(t, raw, `{"use_ratings": true, "show_watchlist": true, "include_paused": false}`)
+
+	raw, err = json.Marshal(TraktSettingsPatch{ShowWatchlist: boolPtr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONEqual(t, raw, `{"show_watchlist": false}`)
+}
+
+// Each member's Trakt settings, read over the defaults and patched one
+// field at a time.
+func TestMemberRepository_TraktSettings(t *testing.T) {
+	db := openSchemaDB(t)
+	repo := NewMemberRepository(db)
+	ctx := context.Background()
+	sam, err := repo.Create(ctx, "Sam", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	me := repo.TraktSettingsFor(1)
+	store := func(t *testing.T, doc string) {
+		t.Helper()
+		if _, err := db.Exec(`UPDATE members SET trakt_settings = $1::jsonb WHERE id = 1`, doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(t *testing.T) TraktSettings {
+		t.Helper()
+		got, err := me.TraktSettings(ctx)
+		if err != nil {
+			t.Fatalf("TraktSettings: %v", err)
+		}
+		return got
+	}
+
+	t.Run("defaults when unset", func(t *testing.T) {
+		store(t, `{}`)
+		if got := read(t); got != DefaultTraktSettings() {
+			t.Errorf("TraktSettings = %+v, want the defaults", got)
+		}
+	})
+
+	t.Run("a patch changes only its fields, and only its member's", func(t *testing.T) {
+		store(t, `{}`)
+		got, err := me.UpdateTraktSettings(ctx, TraktSettingsPatch{IncludePaused: boolPtr(true)})
+		if err != nil {
+			t.Fatalf("UpdateTraktSettings: %v", err)
+		}
+		want := TraktSettings{UseRatings: true, ShowWatchlist: true, IncludePaused: true}
+		if got != want {
+			t.Errorf("answer = %+v, want %+v", got, want)
+		}
+		if _, err := me.UpdateTraktSettings(ctx, TraktSettingsPatch{UseRatings: boolPtr(false), ShowWatchlist: boolPtr(false)}); err != nil {
+			t.Fatal(err)
+		}
+		want = TraktSettings{IncludePaused: true}
+		if got := read(t); got != want {
+			t.Errorf("read back = %+v, want %+v", got, want)
+		}
+		if got, err := repo.TraktSettings(ctx, sam.ID); err != nil || got != DefaultTraktSettings() {
+			t.Errorf("Sam's = %+v, %v; want the defaults", got, err)
+		}
+	})
+
+	t.Run("an empty patch answers the settings", func(t *testing.T) {
+		store(t, `{}`)
+		got, err := me.UpdateTraktSettings(ctx, TraktSettingsPatch{})
+		if err != nil || got != DefaultTraktSettings() {
+			t.Errorf("UpdateTraktSettings({}) = %+v, %v; want the defaults", got, err)
+		}
+	})
+
+	t.Run("missing fields take their defaults", func(t *testing.T) {
+		store(t, `{"show_watchlist": false}`)
+		if got, want := read(t), (TraktSettings{UseRatings: true}); got != want {
+			t.Errorf("TraktSettings = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a stored document that isn't an object is replaced by a patch", func(t *testing.T) {
+		store(t, `[1, 2]`)
+		if got, err := me.TraktSettings(ctx); err == nil || got != DefaultTraktSettings() {
+			t.Errorf("TraktSettings = %+v, %v; want the defaults and a decode error", got, err)
+		}
+		got, err := me.UpdateTraktSettings(ctx, TraktSettingsPatch{UseRatings: boolPtr(false)})
+		if want := (TraktSettings{ShowWatchlist: true}); err != nil || got != want {
+			t.Errorf("UpdateTraktSettings = %+v, %v; want %+v", got, err, want)
+		}
+	})
+
+	t.Run("concurrent patches of different fields both land", func(t *testing.T) {
+		store(t, `{}`)
+		var wg sync.WaitGroup
+		for _, patch := range []TraktSettingsPatch{
+			{UseRatings: boolPtr(false)}, {ShowWatchlist: boolPtr(false)}, {IncludePaused: boolPtr(true)},
+		} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := me.UpdateTraktSettings(ctx, patch); err != nil {
+					t.Errorf("UpdateTraktSettings: %v", err)
+				}
+			}()
+		}
+		wg.Wait()
+		if got, want := read(t), (TraktSettings{IncludePaused: true}); got != want {
+			t.Errorf("TraktSettings = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("an unknown member", func(t *testing.T) {
+		if got, err := repo.TraktSettings(ctx, 99); !errors.Is(err, member.ErrNotFound) || got != DefaultTraktSettings() {
+			t.Errorf("TraktSettings(99) = %+v, %v; want the defaults and ErrNotFound", got, err)
+		}
+		if _, err := repo.UpdateTraktSettings(ctx, 99, TraktSettingsPatch{UseRatings: boolPtr(false)}); !errors.Is(err, member.ErrNotFound) {
+			t.Errorf("UpdateTraktSettings(99) = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("they go with the member", func(t *testing.T) {
+		if _, err := repo.UpdateTraktSettings(ctx, sam.ID, TraktSettingsPatch{IncludePaused: boolPtr(true)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Delete(ctx, sam.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.TraktSettings(ctx, sam.ID); !errors.Is(err, member.ErrNotFound) {
+			t.Errorf("a removed member's settings = %v, want ErrNotFound", err)
+		}
+	})
 }

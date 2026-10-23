@@ -4,14 +4,18 @@ import (
 	"context"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // Watch state (B5): what the Trakt sync imported, read for the title pages
-// (PLAN §6 "Watch state rules"). Without Trakt it's always null.
+// (PLAN §6 "Watch state rules"). Without Trakt it's always null. The plays
+// are the household's, the rating the viewer's: the context's member, and
+// none without one.
 
 // movieWatchState reads a movie's watch state: one query.
 func (s *Service) movieWatchState(ctx context.Context, tmdbID int) (*WatchState, error) {
-	ws, err := s.store.WatchState(ctx, string(library.JobMovie), tmdbID)
+	viewer, _ := member.IDFrom(ctx)
+	ws, err := s.store.WatchState(ctx, viewer, string(library.JobMovie), tmdbID)
 	if err != nil || ws == nil {
 		return nil, err
 	}
@@ -21,7 +25,8 @@ func (s *Service) movieWatchState(ctx context.Context, tmdbID int) (*WatchState,
 
 // showWatchState reads a show's watch state: one query.
 func (s *Service) showWatchState(ctx context.Context, tmdbID int) (*ShowWatchState, error) {
-	ws, err := s.store.WatchState(ctx, string(library.JobTV), tmdbID)
+	viewer, _ := member.IDFrom(ctx)
+	ws, err := s.store.WatchState(ctx, viewer, string(library.JobTV), tmdbID)
 	if err != nil || ws == nil {
 		return nil, err
 	}

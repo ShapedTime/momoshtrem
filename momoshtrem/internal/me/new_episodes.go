@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // New episodes' window and limit (PLAN §6 "Trakt (B5)").
@@ -25,19 +26,24 @@ type NewEpisodeItem struct {
 	EpisodeCard
 }
 
-// NewEpisodes lists GET /me/new-episodes: regular episodes that aired in
-// the last days days (1–30) and haven't been watched, of the library's
-// shows and the shows on the Trakt calendar, each once, newest first.
-// Queries: the candidates and their episodes in the library.
+// NewEpisodes lists GET /me/new-episodes, the context's member's: regular
+// episodes that aired in the last days days (1–30) and they haven't
+// watched, of the library's shows and the shows on their Trakt calendar,
+// each once, newest first. Queries: the candidates and their episodes in
+// the library.
 func (s *Service) NewEpisodes(ctx context.Context, days int) ([]NewEpisodeItem, error) {
 	if days < 1 || days > MaxNewEpisodeDays {
 		return nil, fmt.Errorf("days must be from 1 to %d, not %d", MaxNewEpisodeDays, days)
+	}
+	memberID, err := member.Require(ctx)
+	if err != nil {
+		return nil, err
 	}
 	now := s.now()
 	today := s.today()
 	fromDate := now.AddDate(0, 0, -days).Format(time.DateOnly)
 	from, _ := time.Parse(time.DateOnly, fromDate) // midnight UTC
-	candidates, err := s.store.NewEpisodeCandidates(ctx, from, now, fromDate, today)
+	candidates, err := s.store.NewEpisodeCandidates(ctx, memberID, from, now, fromDate, today)
 	if err != nil {
 		return nil, err
 	}

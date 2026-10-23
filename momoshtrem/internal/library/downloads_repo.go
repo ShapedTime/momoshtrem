@@ -557,7 +557,7 @@ func items(ctx context.Context, q queryer, byID map[int64]*ResolvedDownload, tar
 		items AS (
 			SELECT t.id AS download_id, 'movie' AS item_type, m.id AS item_id, 0 AS season_number, 0 AS episode_number,
 			       NULL::text AS air_date, NULL::text AS episode_type,
-			       GREATEST((SELECT w.last_watched_at FROM trakt_watched_movies w WHERE w.tmdb_id = m.tmdb_id),
+			       GREATEST((SELECT max(w.last_watched_at) FROM trakt_watched_movies w WHERE w.tmdb_id = m.tmdb_id),
 			                (SELECT lw.watched_at FROM local_watches lw WHERE lw.movie_id = m.id)) AS watched_at
 			FROM t JOIN movies m ON m.id = t.movie_id
 			WHERE t.scope = 'movie'
@@ -756,9 +756,13 @@ func (r *DownloadsRepository) EpisodeIDByNumber(ctx context.Context, showID int6
 	return id, nil
 }
 
-func isUniqueViolation(err error) bool {
+func isUniqueViolation(err error) bool { return isUniqueViolationOn(err, "") }
+
+// isUniqueViolationOn reports a unique violation of constraint (or unique
+// index); any one's when constraint is "".
+func isUniqueViolationOn(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && (constraint == "" || pgErr.ConstraintName == constraint)
 }
 
 func isForeignKeyViolation(err error) bool {
