@@ -7,13 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/shapedtime/momoshtrem/internal/member"
 )
 
 // The picks' runs (R2, #157; PLAN §5 "006_recommendations.sql"): rec_runs
-// with their shelves, items and hero picks. At most one run is queued or
-// running (the partial unique index rec_runs_one_active); a run's shelves
-// and hero picks are written with it when it succeeds, in one transaction,
-// so /home switches from one run's picks to the next at once.
+// with their shelves, items and hero picks. Each run is one household
+// member's (013, #245), and a member has at most one queued or running
+// (the partial unique index rec_runs_one_active); a run's shelves and hero
+// picks are written with it when it succeeds, in one transaction, so /home
+// switches from one run's picks to the next at once.
 
 // Run statuses (rec_runs.status).
 const (
@@ -29,10 +32,11 @@ const (
 // finished it, or startup marked it failed.
 var ErrRecRunNotActive = errors.New("the run isn't active")
 
-// RecRun is a rec_runs row. Progress is its JSON document; the usage
-// columns sum its ai_usage rows.
+// RecRun is a rec_runs row: one member's run. Progress is its JSON
+// document; the usage columns sum its ai_usage rows.
 type RecRun struct {
 	ID              int64
+	MemberID        int64
 	Kind            string
 	Status          string
 	Model           string
@@ -88,7 +92,7 @@ func NewRecRunRepository(db *DB) *RecRunRepository {
 	return &RecRunRepository{db: db}
 }
 
-const recRunColumns = `id, kind, status, model, profile_id, progress, skip_reason, error, api_calls, input_tokens,
+const recRunColumns = `id, member_id, kind, status, model, profile_id, progress, skip_reason, error, api_calls, input_tokens,
 	output_tokens, cache_read_tokens, web_searches, cost_usd::float8, created_at, started_at, finished_at`
 
 func scanRecRun(row interface{ Scan(...any) error }) (*RecRun, error) {
@@ -99,7 +103,7 @@ func scanRecRun(row interface{ Scan(...any) error }) (*RecRun, error) {
 		skip, msg         sql.NullString
 		started, finished sql.NullTime
 	)
-	if err := row.Scan(&r.ID, &r.Kind, &r.Status, &r.Model, &profileID, &progress, &skip, &msg, &r.APICalls,
+	if err := row.Scan(&r.ID, &r.MemberID, &r.Kind, &r.Status, &r.Model, &profileID, &progress, &skip, &msg, &r.APICalls,
 		&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.WebSearches, &r.CostUSD, &r.CreatedAt,
 		&started, &finished); err != nil {
 		return nil, err
@@ -127,24 +131,28 @@ func (r *RecRunRepository) one(ctx context.Context, query string, args ...any) (
 	return run, nil
 }
 
-// QueueRecRun queues a run of kind on model, unless one is already queued
-// or running: then it answers that one's id and queued false (a refresh
-// joins it). The partial unique index makes this single-flight across
-// processes too.
-func (r *RecRunRepository) QueueRecRun(ctx context.Context, kind, model string) (id int64, queued bool, err error) {
+// QueueRecRun queues the member's run of kind on model, unless one of
+// theirs is already queued or running: then it answers that one's id and
+// queued false (a refresh joins it). The partial unique index makes this
+// single-flight across processes too. member.ErrUnknown when the member is
+// gone (removed while the request ran).
+func (r *RecRunRepository) QueueRecRun(ctx context.Context, memberID int64, kind, model string) (id int64, queued bool, err error) {
 	for range 3 {
 		err = r.db.QueryRowContext(ctx, `
-			INSERT INTO rec_runs (kind, status, model) VALUES ($1, 'queued', $2)
+			INSERT INTO rec_runs (member_id, kind, status, model) VALUES ($1, $2, 'queued', $3)
 			ON CONFLICT DO NOTHING RETURNING id
-		`, kind, model).Scan(&id)
+		`, memberID, kind, model).Scan(&id)
 		if err == nil {
 			return id, true, nil
+		}
+		if isForeignKeyViolation(err) {
+			return 0, false, fmt.Errorf("member %d: %w", memberID, member.ErrUnknown)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return 0, false, fmt.Errorf("failed to queue a %s run: %w", kind, err)
 		}
 		// One is active: join it, unless it finished in between.
-		active, err := r.ActiveRecRun(ctx)
+		active, err := r.ActiveRecRun(ctx, memberID)
 		if err != nil {
 			return 0, false, err
 		}
@@ -274,49 +282,70 @@ func (r *RecRunRepository) FailActiveRecRuns(ctx context.Context, message string
 	return res.RowsAffected()
 }
 
-// PruneRecRuns deletes runs beyond the newest keep (by id), with their
-// shelves and hero picks. It never deletes an active run or the newest
-// succeeded one, whose picks /home serves.
-func (r *RecRunRepository) PruneRecRuns(ctx context.Context, keep int) (int64, error) {
+// PruneRecRuns deletes each member's runs beyond their newest keep (by
+// id), with their shelves and hero picks. It never deletes an active run,
+// a member's newest succeeded one (whose picks /home serves), or a run
+// that finished since monthStart, the budget month's start (the usage
+// page finds whose the month's spend is through its runs).
+func (r *RecRunRepository) PruneRecRuns(ctx context.Context, keep int, monthStart time.Time) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
-		DELETE FROM rec_runs
-		WHERE id < (SELECT COALESCE(MIN(id), 0) FROM (SELECT id FROM rec_runs ORDER BY id DESC LIMIT $1) newest)
-		  AND status NOT IN ('queued', 'running')
-		  AND id IS DISTINCT FROM (SELECT id FROM rec_runs WHERE status = 'succeeded'
-		                           ORDER BY finished_at DESC, id DESC LIMIT 1)
-	`, keep)
+		DELETE FROM rec_runs r
+		WHERE r.status NOT IN ('queued', 'running')
+		  AND r.finished_at < $2
+		  AND r.id NOT IN (SELECT id FROM (
+		          SELECT id, ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY id DESC) AS n FROM rec_runs
+		      ) newest WHERE n <= $1)
+		  AND r.id NOT IN (SELECT DISTINCT ON (member_id) id FROM rec_runs WHERE status = 'succeeded'
+		                   ORDER BY member_id, finished_at DESC, id DESC)
+	`, keep, monthStart)
 	if err != nil {
 		return 0, fmt.Errorf("failed to prune runs: %w", err)
 	}
 	return res.RowsAffected()
 }
 
-// ActiveRecRun is the queued or running run, nil when there's none.
-func (r *RecRunRepository) ActiveRecRun(ctx context.Context) (*RecRun, error) {
-	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE status IN ('queued', 'running') ORDER BY id DESC LIMIT 1`)
+// ActiveRecRun is the member's queued or running run, nil when there's
+// none.
+func (r *RecRunRepository) ActiveRecRun(ctx context.Context, memberID int64) (*RecRun, error) {
+	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE member_id = $1 AND status IN ('queued', 'running')
+		ORDER BY id DESC LIMIT 1`, memberID)
 }
 
-// GetRecRun is one run, nil when it doesn't exist.
+// ActiveRecRuns are every member's queued and running runs (one a member
+// at most), oldest queued first.
+func (r *RecRunRepository) ActiveRecRuns(ctx context.Context) ([]RecRun, error) {
+	return r.list(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE status IN ('queued', 'running')
+		ORDER BY created_at, id`)
+}
+
+// NextQueuedRecRun is the oldest queued run, whoever's it is: the worker's
+// next. Nil when none is queued.
+func (r *RecRunRepository) NextQueuedRecRun(ctx context.Context) (*RecRun, error) {
+	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE status = 'queued' ORDER BY created_at, id LIMIT 1`)
+}
+
+// GetRecRun is one run, whoever's it is; nil when it doesn't exist.
 func (r *RecRunRepository) GetRecRun(ctx context.Context, id int64) (*RecRun, error) {
 	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE id = $1`, id)
 }
 
-// LatestSucceededRecRun is the newest succeeded run (by when it
-// finished), nil before the first.
-func (r *RecRunRepository) LatestSucceededRecRun(ctx context.Context) (*RecRun, error) {
-	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE status = 'succeeded'
-		ORDER BY finished_at DESC, id DESC LIMIT 1`)
+// LatestSucceededRecRun is the member's newest succeeded run (by when it
+// finished), nil before their first.
+func (r *RecRunRepository) LatestSucceededRecRun(ctx context.Context, memberID int64) (*RecRun, error) {
+	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE member_id = $1 AND status = 'succeeded'
+		ORDER BY finished_at DESC, id DESC LIMIT 1`, memberID)
 }
 
-// LatestFinishedRecRun is the newest run that succeeded, failed or was
-// skipped, nil before the first.
-func (r *RecRunRepository) LatestFinishedRecRun(ctx context.Context) (*RecRun, error) {
-	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE status IN ('succeeded', 'failed', 'skipped')
-		ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`)
+// LatestFinishedRecRun is the member's newest run that succeeded, failed
+// or was skipped, nil before their first.
+func (r *RecRunRepository) LatestFinishedRecRun(ctx context.Context, memberID int64) (*RecRun, error) {
+	return r.one(ctx, `SELECT `+recRunColumns+` FROM rec_runs
+		WHERE member_id = $1 AND status IN ('succeeded', 'failed', 'skipped')
+		ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`, memberID)
 }
 
-// LatestRecRunCreatedAt is when the newest run of any kind was queued;
-// ok is false before the first (the schedule's catch-up).
+// LatestRecRunCreatedAt is when the newest run of any kind, anyone's, was
+// queued; ok is false before the first (the schedule's catch-up).
 func (r *RecRunRepository) LatestRecRunCreatedAt(ctx context.Context) (at time.Time, ok bool, err error) {
 	var t sql.NullTime
 	if err := r.db.QueryRowContext(ctx, `SELECT MAX(created_at) FROM rec_runs`).Scan(&t); err != nil {
@@ -325,9 +354,13 @@ func (r *RecRunRepository) LatestRecRunCreatedAt(ctx context.Context) (at time.T
 	return t.Time, t.Valid, nil
 }
 
-// ListRecRuns lists the newest runs first (id DESC).
-func (r *RecRunRepository) ListRecRuns(ctx context.Context, limit int) ([]RecRun, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+recRunColumns+` FROM rec_runs ORDER BY id DESC LIMIT $1`, limit)
+// ListRecRuns lists the member's newest runs first (id DESC).
+func (r *RecRunRepository) ListRecRuns(ctx context.Context, memberID int64, limit int) ([]RecRun, error) {
+	return r.list(ctx, `SELECT `+recRunColumns+` FROM rec_runs WHERE member_id = $1 ORDER BY id DESC LIMIT $2`, memberID, limit)
+}
+
+func (r *RecRunRepository) list(ctx context.Context, query string, args ...any) ([]RecRun, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list runs: %w", err)
 	}
@@ -422,14 +455,16 @@ func (r *RecRunRepository) RecRunHeroPicks(ctx context.Context, runID int64) ([]
 	return out, nil
 }
 
-// RecommendationReason is the newest succeeded run's reason for a title:
-// a shelf item's (its first shelf's), else a hero pick's. Nil without one,
-// and after negative feedback (dislike, not_interested, seen). One query.
-func (r *RecRunRepository) RecommendationReason(ctx context.Context, ref TitleRef) (*string, error) {
+// RecommendationReason is the member's newest succeeded run's reason for
+// a title: a shelf item's (its first shelf's), else a hero pick's. Nil
+// without one, and after the member's negative feedback (dislike,
+// not_interested, seen). One query.
+func (r *RecRunRepository) RecommendationReason(ctx context.Context, memberID int64, ref TitleRef) (*string, error) {
 	var reason sql.NullString
 	err := r.db.QueryRowContext(ctx, `
 		WITH run AS (
-			SELECT id FROM rec_runs WHERE status = 'succeeded' ORDER BY finished_at DESC, id DESC LIMIT 1
+			SELECT id FROM rec_runs WHERE member_id = $3 AND status = 'succeeded'
+			ORDER BY finished_at DESC, id DESC LIMIT 1
 		)
 		SELECT COALESCE(
 			(SELECT i.reason FROM rec_items i JOIN rec_shelves s ON s.id = i.shelf_id
@@ -440,8 +475,9 @@ func (r *RecRunRepository) RecommendationReason(ctx context.Context, ref TitleRe
 			 ORDER BY h.position LIMIT 1))
 		WHERE NOT EXISTS (
 			SELECT 1 FROM rec_feedback f
-			WHERE f.media_type = $1 AND f.tmdb_id = $2 AND f.signal IN ('dislike', 'not_interested', 'seen'))
-	`, ref.MediaType, ref.TMDBID).Scan(&reason)
+			WHERE f.member_id = $3 AND f.media_type = $1 AND f.tmdb_id = $2
+			  AND f.signal IN ('dislike', 'not_interested', 'seen'))
+	`, ref.MediaType, ref.TMDBID, memberID).Scan(&reason)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !reason.Valid) {
 		return nil, nil
 	}
@@ -452,7 +488,7 @@ func (r *RecRunRepository) RecommendationReason(ctx context.Context, ref TitleRe
 }
 
 // RecRunCostMeans is, per model, the mean cost of its newest n succeeded
-// runs; a model without any has no entry.
+// runs, anyone's; a model without any has no entry.
 func (r *RecRunRepository) RecRunCostMeans(ctx context.Context, n int) (map[string]float64, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT model, AVG(cost_usd)::float8 FROM (

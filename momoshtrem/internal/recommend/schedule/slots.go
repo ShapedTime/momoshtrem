@@ -54,3 +54,30 @@ func LastSlot(schedule string, now time.Time) (time.Time, bool) {
 	}
 	return time.Time{}, false
 }
+
+// slotIndex numbers a slot so that each next slot counts one up: the days
+// from the Unix epoch to the slot's server-local date, nightly, or the
+// weeks, weekly. Calendar days, not 24-hour spans: a DST change doesn't
+// skip or repeat a number.
+func slotIndex(schedule string, slot time.Time) int {
+	y, m, d := slot.Date()
+	days := int(time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / (24 * 60 * 60))
+	if schedule == recommend.ScheduleWeekly {
+		return days / 7
+	}
+	return days
+}
+
+// rotate is ids from the k-th on, then the ones before it, k being index
+// mod len(ids): the order a slot queues the members in, so each next slot
+// starts one member further on.
+func rotate(ids []int64, index int) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	k := index % len(ids)
+	if k < 0 {
+		k += len(ids)
+	}
+	return append(append(make([]int64, 0, len(ids)), ids[k:]...), ids[:k]...)
+}

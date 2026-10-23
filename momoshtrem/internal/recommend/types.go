@@ -390,11 +390,11 @@ type FeatureUsage struct {
 	Requests int     `json:"requests"` // API calls
 }
 
-// RecsUsage is the picks' part of the usage page.
+// RecsUsage is the picks' part of the usage page, the viewer's.
 type RecsUsage struct {
 	LastRun   *RunSummary  `json:"last_run"` // the newest finished run: succeeded, failed or skipped
 	ActiveRun *RunProgress `json:"active_run"`
-	NextRunAt *time.Time   `json:"next_run_at"` // null when manual, off or not configured
+	NextRunAt *time.Time   `json:"next_run_at"` // null when manual, off, not configured, or without the viewer's Trakt
 }
 
 // Estimates are what a run and an ask cost lately.

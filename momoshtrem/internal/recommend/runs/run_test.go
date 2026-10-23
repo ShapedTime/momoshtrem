@@ -63,6 +63,13 @@ func TestExecute_FullRun(t *testing.T) {
 	if h.store.syncs != 5 {
 		t.Errorf("usage synced %d times, want after each of the 4 calls and once at the end", h.store.syncs)
 	}
+	// The run's member's history; the prune keeps the budget month's runs.
+	if !reflect.DeepEqual(h.members, []int64{2}) {
+		t.Errorf("ran on members %v, want the run's, 2", h.members)
+	}
+	if h.store.pruned != 1 || !h.store.prunedSince.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("pruned %d times since %v, want once since 1 October", h.store.pruned, h.store.prunedSince)
+	}
 
 	// The first shelf without the three dropped titles; meta snapshotted;
 	// signals from the pool.
@@ -509,16 +516,17 @@ func TestExecute_WebCapNudge(t *testing.T) {
 	})
 }
 
-// The dry run builds the same first request, storing nothing.
+// The dry run builds the same first request for the member, storing
+// nothing.
 func TestPrepare(t *testing.T) {
 	h := newHarness(t)
-	prep, err := h.runner.Prepare(t.Context(), "claude-sonnet-5-5")
+	prep, err := h.runner.Prepare(t.Context(), 3, "claude-sonnet-5-5")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if prep.Request.Model != "claude-sonnet-5-5" || len(prep.Request.Tools) != 7 || prep.Pool == nil || h.profiles.saved != 0 ||
-		h.store.started || !strings.Contains(prep.FirstTurn, "<taste_profile>") {
-		t.Errorf("prepared = %+v", prep)
+		h.store.started || !strings.Contains(prep.FirstTurn, "<taste_profile>") || !reflect.DeepEqual(h.members, []int64{3}) {
+		t.Errorf("prepared = %+v for members %v", prep, h.members)
 	}
 	body, err := aicore.RequestBody(prep.Request)
 	if err != nil || !bytes.Contains(body, []byte(`"web_search_20260209"`)) || !bytes.Contains(body, []byte(NameSubmitHeroPicks)) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 )
@@ -830,27 +832,28 @@ func TestReleaseName(t *testing.T) {
 	}
 }
 
-// fakeReasons answers the picks' reason for one title; err fails every
-// lookup.
+// fakeReasons answers member 2's picks' reason for one title; err fails
+// every lookup.
 type fakeReasons struct {
 	err   error
 	asked []string
 }
 
-func (f *fakeReasons) RecommendationReason(_ context.Context, mediaType string, tmdbID int) (*string, error) {
-	f.asked = append(f.asked, mediaType)
-	if f.err != nil || tmdbID != duneTMDB {
+func (f *fakeReasons) RecommendationReason(_ context.Context, memberID int64, mediaType string, tmdbID int) (*string, error) {
+	f.asked = append(f.asked, fmt.Sprintf("%d %s", memberID, mediaType))
+	if f.err != nil || memberID != 2 || tmdbID != duneTMDB {
 		return nil, f.err
 	}
 	reason := "Big, quiet science fiction like Arrival."
 	return &reason, nil
 }
 
-// recommendation_reason comes from the picks once they set it (#157);
-// null before, for a title they didn't pick, and when the lookup fails.
+// recommendation_reason comes from the viewer's picks once they set it
+// (#157, #245); null before, without a viewer, for a title they didn't
+// pick, and when the lookup fails.
 func TestRecommendationReason(t *testing.T) {
 	f := newFixture()
-	ctx := context.Background()
+	ctx := member.WithID(context.Background(), 2)
 	if movie, _ := f.svc.MovieTitle(ctx, duneTMDB); movie.RecommendationReason != nil {
 		t.Errorf("before SetReasons = %v", *movie.RecommendationReason)
 	}
@@ -864,7 +867,13 @@ func TestRecommendationReason(t *testing.T) {
 	if err != nil || show.RecommendationReason != nil {
 		t.Errorf("show reason = %v, %v", show.RecommendationReason, err)
 	}
-	if !reflect.DeepEqual(reasons.asked, []string{"movie", "tv"}) {
+	if movie, err := f.svc.MovieTitle(member.WithID(context.Background(), 1), duneTMDB); err != nil || movie.RecommendationReason != nil {
+		t.Errorf("another member's reason = %v, %v; want null", movie.RecommendationReason, err)
+	}
+	if movie, err := f.svc.MovieTitle(context.Background(), duneTMDB); err != nil || movie.RecommendationReason != nil {
+		t.Errorf("no viewer's reason = %v, %v; want null", movie.RecommendationReason, err)
+	}
+	if !reflect.DeepEqual(reasons.asked, []string{"2 movie", "2 tv", "1 movie"}) {
 		t.Errorf("asked = %v", reasons.asked)
 	}
 	reasons.err = errors.New("db down")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/recommend"
 	"github.com/shapedtime/momoshtrem/internal/recommend/runs"
 	"github.com/shapedtime/momoshtrem/internal/recommend/schedule"
@@ -17,18 +18,26 @@ import (
 // /recommendations/home, /runs and /runs/{id} end to end over Postgres
 // (#157): the newest succeeded run's shelves and the day's hero picks,
 // with feedback, the watchlist and library state joined at read time, and
-// the active run.
+// the active run. They're the header's member's (#245): another member
+// has none of it, and gets 404 for the run.
 func TestRecommendations_Integration(t *testing.T) {
 	db := openRerunDB(t)
 	ctx := context.Background()
 	repo := library.NewRecRunRepository(db)
 	settings := library.NewSettingsRepository(db)
 	reader := runs.NewReader(runs.ReaderDeps{
-		Store: repo, Settings: settings, Titles: library.NewTasteRepository(db).ForMember(1),
+		Store: repo, Settings: settings,
+		Titles:     func(memberID int64) runs.Titles { return library.NewTasteRepository(db).ForMember(memberID) },
 		Library:    catalog.New(catalog.Deps{Store: library.NewCatalogRepository(db)}),
 		Configured: true,
 	})
-	s := newTestServer(Options{Recommendations: schedule.New(schedule.Deps{Store: repo, Reader: reader, Settings: settings, Configured: true})})
+	s := newTestServer(Options{
+		Recommendations: schedule.New(schedule.Deps{Store: repo, Reader: reader, Settings: settings, Configured: true}),
+		Members:         member.NewService(library.NewMemberRepository(db)),
+	})
+	if _, err := library.NewMemberRepository(db).Create(ctx, "Sam", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	// Before the first run: no picks, and every list is [].
 	rec := doBody(t, s, "GET", "/api/recommendations/home", "")
@@ -39,14 +48,14 @@ func TestRecommendations_Integration(t *testing.T) {
 	for _, q := range []string{
 		`INSERT INTO movies (tmdb_id, title, year) VALUES (1003, 'Movie 1003', 2024)`,
 		`INSERT INTO trakt_watchlist (member_id, media_type, trakt_id, tmdb_id, title, year, listed_at) VALUES (1, 'tv', 77, 2001, 'Show 2001', 2022, NOW())`,
-		`INSERT INTO rec_feedback (media_type, tmdb_id, signal, source) VALUES ('movie', 1002, 'dislike', 'shelf'), ('movie', 1004, 'like', 'hero'),
-			('movie', 1006, 'seen', 'title')`,
+		`INSERT INTO rec_feedback (member_id, media_type, tmdb_id, signal, source) VALUES (1, 'movie', 1002, 'dislike', 'shelf'),
+			(1, 'movie', 1004, 'like', 'hero'), (1, 'movie', 1006, 'seen', 'title')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%.50s…: %v", q, err)
 		}
 	}
-	id, _, err := repo.QueueRecRun(ctx, recommend.KindFirstSync, "claude-opus-5-5")
+	id, _, err := repo.QueueRecRun(ctx, 1, recommend.KindFirstSync, "claude-opus-5-5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,9 +96,22 @@ func TestRecommendations_Integration(t *testing.T) {
 	if err := repo.PublishRecRun(ctx, id, progress, shelves, picks); err != nil {
 		t.Fatal(err)
 	}
-	active, _, err := repo.QueueRecRun(ctx, recommend.KindManual, "claude-sonnet-5-5")
+	active, _, err := repo.QueueRecRun(ctx, 1, recommend.KindManual, "claude-sonnet-5-5")
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Member 2 has no picks yet, and can't read member 1's run.
+	sam := map[string]string{MemberHeader: "2"}
+	if rec := do(t, s, "GET", "/api/recommendations/home", sam); rec.Code != 200 ||
+		rec.Body.String() != `{"configured":true,"enabled":true,"run":null,"active_run":null,"hero_picks":[],"shelves":[]}` {
+		t.Errorf("member 2's home = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(t, s, "GET", "/api/recommendations/runs", sam); rec.Code != 200 || rec.Body.String() != `{"items":[]}` {
+		t.Errorf("member 2's runs = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(t, s, "GET", "/api/recommendations/runs/"+itoa(id), sam); rec.Code != 404 {
+		t.Errorf("member 2 reading member 1's run = %d %s", rec.Code, rec.Body)
 	}
 
 	rec = doBody(t, s, "GET", "/api/recommendations/home", "")

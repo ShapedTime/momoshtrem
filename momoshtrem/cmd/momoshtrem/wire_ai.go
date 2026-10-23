@@ -10,6 +10,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/catalog"
 	"github.com/shapedtime/momoshtrem/internal/config"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
 	"github.com/shapedtime/momoshtrem/internal/trakt"
 )
@@ -24,16 +25,20 @@ type aiDeps struct {
 	settings *library.SettingsRepository // app_settings: "ai"
 	aiStore  *library.AIStore            // ai_usage and ai_cache, shared with the classifier
 	tmdb     *tmdb.Cached
-	// member is whose taste the picks and Ask read (their Trakt rows and
-	// use_ratings): the lowest member at startup, until #245 and #246
-	// build them per member.
+	// member is whose taste Ask reads (their Trakt rows and use_ratings):
+	// the lowest member at startup, until #246 builds it per member. The
+	// picks are every member's (#245).
 	member int64
+	// members are the household's: the schedule queues a run for each
+	// with Trakt connected, and a removed member's run is stopped (an
+	// OnRemoving listener). Nil in recommend-run, which runs one member.
+	members *member.Service
 	// catalog joins the library state onto rec cards (LibraryStates) and
 	// takes the title pages' reasons (a SetReasons setter, #157).
 	catalog *catalog.Service
-	// trakt says whether member's Trakt is connected (Connection); the
-	// first_sync run hooks onto the end of their initial import (a
-	// SetOnImported setter, #157).
+	// trakt says whether a member's Trakt is connected (Connection,
+	// Connected); the first_sync run hooks onto the end of each member's
+	// initial import (a SetOnImported setter, #157).
 	trakt *trakt.Registry
 }
 

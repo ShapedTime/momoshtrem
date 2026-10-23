@@ -36,6 +36,8 @@ type fakeStore struct {
 	failed    string
 	skipped   string
 	pruned    int
+	// prunedSince is the last prune's month start.
+	prunedSince time.Time
 	// failWrites fails that many final writes; writes counts them.
 	failWrites, writes int
 }
@@ -104,8 +106,9 @@ func (s *fakeStore) SkipRecRun(_ context.Context, _ int64, reason string) error 
 	return nil
 }
 
-func (s *fakeStore) PruneRecRuns(context.Context, int) (int64, error) {
+func (s *fakeStore) PruneRecRuns(_ context.Context, _ int, monthStart time.Time) (int64, error) {
 	s.pruned++
+	s.prunedSince = monthStart
 	return 0, nil
 }
 
@@ -204,13 +207,15 @@ func (fakeTMDB) Search(context.Context, string, string, int) (*tmdb.ResultsPage,
 
 func (fakeTMDB) GenreList(context.Context, string) ([]tmdb.Genre, error) { return nil, nil }
 
-// harness is a Runner over fakes and the fake Anthropic API.
+// harness is a Runner over fakes and the fake Anthropic API. Its member's
+// parts are the fakes; members records whose parts were asked for.
 type harness struct {
 	srv      *fake.Server
 	store    *fakeStore
 	titles   *fakeTitles
 	profiles *fakeProfiles
 	runner   *Runner
+	members  []int64
 }
 
 func newHarness(t *testing.T, script ...fake.Response) *harness {
@@ -226,22 +231,31 @@ func newHarness(t *testing.T, script ...fake.Response) *harness {
 		AI:       aicore.New(aicore.Config{APIKey: "test-key", Options: h.srv.Options()}),
 		Budget:   fakeBudget{},
 		Settings: fakeSettings{settings},
-		Profiles: h.profiles,
-		Pools:    fakePools{n: 60},
-		Tools: func(in tools.Inputs) []agent.Tool {
-			return tools.All(tools.Deps{Inputs: in, TMDB: fakeTMDB{}, Titles: h.titles})
-		},
-		TMDB:   fakeTMDB{},
-		Titles: h.titles,
-		Store:  h.store,
-		Now:    func() time.Time { return now },
+		Members:  h.member,
+		TMDB:     fakeTMDB{},
+		Store:    h.store,
+		Now:      func() time.Time { return now },
 	})
 	return h
 }
 
+func (h *harness) member(id int64) Member {
+	h.members = append(h.members, id)
+	return Member{
+		Profiles: h.profiles,
+		Pools:    fakePools{n: 60},
+		Titles:   h.titles,
+		Tools: func(in tools.Inputs) []agent.Tool {
+			return tools.All(tools.Deps{Inputs: in, TMDB: fakeTMDB{}, Titles: h.titles})
+		},
+	}
+}
+
+// execute runs member 2's run 42.
 func (h *harness) execute(t *testing.T) Outcome {
 	t.Helper()
-	out, err := h.runner.Execute(context.Background(), library.RecRun{ID: 42, Kind: "manual", Status: "queued", Model: "claude-opus-5-5"})
+	out, err := h.runner.Execute(context.Background(),
+		library.RecRun{ID: 42, MemberID: 2, Kind: "manual", Status: "queued", Model: "claude-opus-5-5"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

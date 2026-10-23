@@ -27,9 +27,10 @@ type TitleRef struct {
 }
 
 // TasteRepository reads one household member's taste inputs: their Trakt
-// rows only (PLAN §6 "Household members": a title another member watched
-// can still be picked), and the library's titles. Bind it to the member
-// with ForMember: unbound, the Trakt reads fail.
+// rows and feedback only (PLAN §6 "Household members": a title another
+// member watched can still be picked), and the library's titles. Bind it
+// to the member with ForMember: unbound, every read but LibraryTitles
+// fails.
 type TasteRepository struct {
 	db     *DB
 	member boundMember
@@ -382,14 +383,20 @@ type TasteFeedback struct {
 	UpdatedAt time.Time
 }
 
-// TasteFeedback lists every title's feedback, newest first. One query.
+// TasteFeedback lists the member's feedback on every title, newest first.
+// One query.
 func (r *TasteRepository) TasteFeedback(ctx context.Context) ([]TasteFeedback, error) {
+	memberID, err := r.member.id()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT f.media_type, f.tmdb_id, f.signal, COALESCE(kt.title, ''), COALESCE(kt.year, 0), f.updated_at
 		FROM rec_feedback f
 		`+knownTitleLateral("f.media_type", "f.tmdb_id")+`
+		WHERE f.member_id = $1
 		ORDER BY f.updated_at DESC, f.media_type, f.tmdb_id
-	`)
+	`, memberID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list feedback: %w", err)
 	}
@@ -480,7 +487,7 @@ func (r *TasteRepository) TitleStates(ctx context.Context, refs []TitleRef) ([]T
 			WHERE k.media_type = 'tv' AND pr.member_id = $3 AND pr.show_tmdb_id = k.tmdb_id
 			ORDER BY pr.last_watched_at DESC NULLS LAST, pr.show_trakt_id LIMIT 1
 		) p ON TRUE
-		LEFT JOIN rec_feedback f ON f.media_type = k.media_type AND f.tmdb_id = k.tmdb_id
+		LEFT JOIN rec_feedback f ON f.member_id = $3 AND f.media_type = k.media_type AND f.tmdb_id = k.tmdb_id
 		ORDER BY k.n
 	`, types, ids, memberID)
 	if err != nil {

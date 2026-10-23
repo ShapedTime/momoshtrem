@@ -1,7 +1,9 @@
 package schedule
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -82,13 +84,105 @@ func (pool) Build(context.Context, *profile.Profile) (*candidates.Pool, error) {
 	return p, nil
 }
 
-func shelfInput(slug string, from int) map[string]any {
+func shelfInput(slug, reason string, from int) map[string]any {
 	items := []map[string]any{}
 	for id := from; id < from+7; id++ {
 		items = append(items, map[string]any{"media_type": "movie", "tmdb_id": id, "title": fmt.Sprintf("Movie %d", id),
-			"reason": fmt.Sprintf("Like the five films you finished: %d", id)})
+			"reason": fmt.Sprintf("%s: %d", reason, id)})
 	}
 	return map[string]any{"slug": slug, "kind": "other", "title": "Shelf " + slug, "subtitle": "", "items": items}
+}
+
+// runScript is one run on the fake API: four shelves of movies 1001–1028
+// with reason's reasons, three hero picks, then the end.
+func runScript(reason string) []fake.Response {
+	var blocks []fake.Block
+	for i, slug := range []string{"a", "b", "c", "d"} {
+		blocks = append(blocks, fake.ToolUse("toolu_"+slug, runs.NameSubmitShelf, shelfInput(slug, reason, 1001+7*i)))
+	}
+	return []fake.Response{
+		{Blocks: blocks, Usage: fake.Usage{InputTokens: 8000, CacheCreationInputTokens: 6000, OutputTokens: 1500}},
+		{Blocks: []fake.Block{fake.ToolUse("toolu_h", runs.NameSubmitHeroPicks, map[string]any{"picks": []map[string]any{
+			{"media_type": "movie", "tmdb_id": 1002, "title": "Movie 1002", "kicker": "Tonight", "reason": "r"},
+			{"media_type": "movie", "tmdb_id": 1009, "title": "Movie 1009", "kicker": "Tonight", "reason": "r"},
+			{"media_type": "movie", "tmdb_id": 1016, "title": "Movie 1016", "kicker": "Tonight", "reason": "r"},
+		}})}, Usage: fake.Usage{CacheReadInputTokens: 14000, InputTokens: 900, OutputTokens: 300}},
+		{Blocks: []fake.Block{fake.Text("Saved.")}, Usage: fake.Usage{CacheReadInputTokens: 15000, OutputTokens: 10}},
+	}
+}
+
+// seedLoved gives the member five loved movies, named prefix One…Five,
+// and a play of each of extra.
+func seedLoved(t *testing.T, db *library.DB, memberID int64, prefix string, extra ...int) {
+	t.Helper()
+	for i, name := range []string{"One", "Two", "Three", "Four", "Five"} {
+		id := 500 + int(memberID)*10 + i
+		if _, err := db.Exec(`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, watched_at)
+			VALUES ($1, $2, 'movie', $3, $4, $5, 2020, NOW() - make_interval(days => $6))`,
+			memberID, memberID*100+int64(i), id, id, prefix+" "+name, 10*(i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, id := range extra {
+		if _, err := db.Exec(`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, watched_at)
+			VALUES ($1, $2, 'movie', $3, $4, $5, 2024, NOW() - INTERVAL '1 day')`,
+			memberID, memberID*100+50+int64(i), id, id, fmt.Sprintf("Movie %d", id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at)
+		SELECT member_id, tmdb_id, 1, watched_at FROM trakt_history WHERE member_id = $1`, memberID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newIntegration is the scheduler over Postgres and the fake API, every
+// member's parts bound to them as wire_recs builds them, and every member
+// connected.
+func newIntegration(t *testing.T, db *library.DB, srv *fake.Server, members Members) (*Scheduler, *library.RecRunRepository) {
+	t.Helper()
+	settings := library.NewSettingsRepository(db)
+	ledger := aicore.NewLedger(library.NewAIStore(db), settings)
+	repo := library.NewRecRunRepository(db)
+	builder := func(memberID int64) (*profile.Builder, *library.TasteRepository) {
+		taste := library.NewTasteRepository(db).ForMember(memberID)
+		return profile.New(profile.Deps{Store: taste, Profiles: library.NewTasteProfileRepository(db).ForMember(memberID),
+			Settings: library.NewMemberRepository(db).TraktSettingsFor(memberID), Trakt: connected{}}), taste
+	}
+	runner := runs.NewRunner(runs.Deps{
+		AI:     aicore.New(aicore.Config{APIKey: "test-key", Recorder: ledger, Options: srv.Options()}),
+		Budget: ledger, Settings: settings,
+		Members: func(memberID int64) runs.Member {
+			profiles, taste := builder(memberID)
+			return runs.Member{Profiles: profiles, Pools: pool{}, Titles: taste, Tools: func(in tools.Inputs) []agent.Tool {
+				return tools.All(tools.Deps{Inputs: in, TMDB: movieDetails{}, Titles: taste})
+			}}
+		},
+		TMDB: movieDetails{}, Store: repo,
+	})
+	s := New(Deps{
+		Store: repo, Runner: runner, Settings: settings, Budget: ledger, Configured: true, Members: members,
+		History: func(memberID int64) History {
+			profiles, _ := builder(memberID)
+			return profiles
+		},
+		Reader: runs.NewReader(runs.ReaderDeps{Store: repo, Settings: settings, Configured: true,
+			Titles: func(memberID int64) runs.Titles { return library.NewTasteRepository(db).ForMember(memberID) }}),
+	})
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	return s, repo
+}
+
+// waitDone waits for a run to finish.
+func waitDone(t *testing.T, repo *library.RecRunRepository, id int64) {
+	t.Helper()
+	waitUntil(t, fmt.Sprintf("run %d", id), func() bool {
+		run, _ := repo.GetRecRun(context.Background(), id)
+		return run != nil && run.Status != recommend.StatusQueued && run.Status != recommend.StatusRunning
+	})
 }
 
 // A refresh end to end over Postgres and the fake API: the run is queued,
@@ -97,71 +191,16 @@ func shelfInput(slug string, from int) map[string]any {
 // shelves. A title watched since the pool was built is dropped.
 func TestRefresh_EndToEnd(t *testing.T) {
 	db := openDB(t)
-	ctx := context.Background()
-	for _, q := range []string{
-		`INSERT INTO trakt_history (member_id, id, media_type, tmdb_id, trakt_id, title, year, watched_at) VALUES
-			(1, 1, 'movie', 501, 1, 'Loved One', 2020, NOW() - INTERVAL '10 days'),
-			(1, 2, 'movie', 502, 2, 'Loved Two', 2021, NOW() - INTERVAL '20 days'),
-			(1, 3, 'movie', 503, 3, 'Loved Three', 2019, NOW() - INTERVAL '30 days'),
-			(1, 4, 'movie', 504, 4, 'Loved Four', 2018, NOW() - INTERVAL '40 days'),
-			(1, 5, 'movie', 505, 5, 'Loved Five', 2022, NOW() - INTERVAL '50 days'),
-			(1, 6, 'movie', 1001, 6, 'Movie 1001', 2024, NOW() - INTERVAL '1 day')`,
-		`INSERT INTO trakt_watched_movies (member_id, tmdb_id, plays, last_watched_at)
-			SELECT member_id, tmdb_id, 1, watched_at FROM trakt_history`,
-	} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatalf("%.50s…: %v", q, err)
-		}
-	}
-
-	var script []fake.Response
-	var blocks []fake.Block
-	for i, slug := range []string{"a", "b", "c", "d"} {
-		blocks = append(blocks, fake.ToolUse("toolu_"+slug, runs.NameSubmitShelf, shelfInput(slug, 1001+7*i)))
-	}
-	script = append(script,
-		fake.Response{Blocks: blocks, Usage: fake.Usage{InputTokens: 8000, CacheCreationInputTokens: 6000, OutputTokens: 1500}},
-		fake.Response{Blocks: []fake.Block{fake.ToolUse("toolu_h", runs.NameSubmitHeroPicks, map[string]any{"picks": []map[string]any{
-			{"media_type": "movie", "tmdb_id": 1002, "title": "Movie 1002", "kicker": "Tonight", "reason": "r"},
-			{"media_type": "movie", "tmdb_id": 1009, "title": "Movie 1009", "kicker": "Tonight", "reason": "r"},
-			{"media_type": "movie", "tmdb_id": 1016, "title": "Movie 1016", "kicker": "Tonight", "reason": "r"},
-		}})}, Usage: fake.Usage{CacheReadInputTokens: 14000, InputTokens: 900, OutputTokens: 300}},
-		fake.Response{Blocks: []fake.Block{fake.Text("Saved.")}, Usage: fake.Usage{CacheReadInputTokens: 15000, OutputTokens: 10}},
-	)
-	srv := fake.New(t, script...)
-
-	settings := library.NewSettingsRepository(db)
-	aiStore := library.NewAIStore(db)
-	ledger := aicore.NewLedger(aiStore, settings)
-	taste := library.NewTasteRepository(db).ForMember(1)
-	repo := library.NewRecRunRepository(db)
-	profiles := profile.New(profile.Deps{Store: taste, Profiles: library.NewTasteProfileRepository(db),
-		Settings: library.NewMemberRepository(db).TraktSettingsFor(1), Trakt: connected{}})
-	runner := runs.NewRunner(runs.Deps{
-		AI:     aicore.New(aicore.Config{APIKey: "test-key", Recorder: ledger, Options: srv.Options()}),
-		Budget: ledger, Settings: settings, Profiles: profiles, Pools: pool{},
-		Tools: func(in tools.Inputs) []agent.Tool {
-			return tools.All(tools.Deps{Inputs: in, TMDB: movieDetails{}, Titles: taste})
-		},
-		TMDB: movieDetails{}, Titles: taste, Store: repo,
-	})
-	s := New(Deps{
-		Store: repo, Runner: runner, Settings: settings, Budget: ledger, History: profiles, Configured: true,
-		Reader: runs.NewReader(runs.ReaderDeps{Store: repo, Settings: settings, Titles: taste, Configured: true}),
-	})
-	if err := s.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(s.Close)
+	seedLoved(t, db, 1, "Loved", 1001)
+	srv := fake.New(t, runScript("Like the five films you finished")...)
+	s, repo := newIntegration(t, db, srv, &fakeMembers{ids: []int64{1}, eligible: map[int64]bool{1: true}})
+	ctx := as(1)
 
 	id, err := s.Refresh(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, "the run", func() bool {
-		run, _ := repo.GetRecRun(ctx, id)
-		return run != nil && run.Status != recommend.StatusQueued && run.Status != recommend.StatusRunning
-	})
+	waitDone(t, repo, id)
 	detail, err := s.Run(ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -172,8 +211,8 @@ func TestRefresh_EndToEnd(t *testing.T) {
 		t.Fatalf("run = %+v", detail)
 	}
 	run, _ := repo.GetRecRun(ctx, id)
-	if run.ProfileID == nil {
-		t.Error("the run doesn't reference its profile")
+	if run.ProfileID == nil || run.MemberID != 1 {
+		t.Errorf("run = %+v, want member 1's referencing its profile", run)
 	}
 
 	home, err := s.Home(ctx)
@@ -195,8 +234,89 @@ func TestRefresh_EndToEnd(t *testing.T) {
 	if err != nil || est["claude-opus-5-5"] == nil || *est["claude-opus-5-5"] != detail.CostUSD {
 		t.Errorf("estimates = %v, %v", est, err)
 	}
-	reason, err := s.RecommendationReason(ctx, "movie", 1002)
+	reason, err := s.RecommendationReason(ctx, 1, "movie", 1002)
 	if err != nil || reason == nil || *reason != "Like the five films you finished: 1002" {
 		t.Errorf("reason = %v, %v", reason, err)
+	}
+}
+
+// Two members end to end (#245): each refresh is that member's run, the
+// worker runs them one after the other, each on its own history (member 1
+// watched 1001, member 2 didn't), and each member's /home, runs, reason
+// and usage are their own; another member's run is not found.
+func TestTwoMembers_EndToEnd(t *testing.T) {
+	db := openDB(t)
+	if sam, err := library.NewMemberRepository(db).Create(context.Background(), "Sam", ""); err != nil || sam.ID != 2 {
+		t.Fatalf("Create(Sam) = %+v, %v", sam, err)
+	}
+	seedLoved(t, db, 1, "Loved", 1001)
+	seedLoved(t, db, 2, "Sam's")
+	srv := fake.New(t, append(runScript("For member one"), runScript("For Sam")...)...)
+	s, repo := newIntegration(t, db, srv, &fakeMembers{ids: []int64{1, 2}, eligible: map[int64]bool{1: true, 2: true}})
+	one, sam := as(1), as(2)
+
+	mine, err := s.Refresh(one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := s.Refresh(sam)
+	if err != nil || theirs == mine {
+		t.Fatalf("Sam's refresh = %d, %v; want their own run", theirs, err)
+	}
+	if again, err := s.Refresh(sam); err != nil || again != theirs {
+		t.Errorf("Sam's second refresh = %d, %v; want it to join %d", again, err, theirs)
+	}
+	waitDone(t, repo, mine)
+	waitDone(t, repo, theirs)
+
+	// Each run read its own member's history: Sam's first request has
+	// Sam's loved titles and none of member 1's.
+	requests := srv.Requests()
+	if len(requests) != 6 {
+		t.Fatalf("%d API calls, want 3 a run", len(requests))
+	}
+	if first := requests[0].Body; !bytes.Contains(first, []byte("Loved One")) || bytes.Contains(first, []byte("Sam's One")) {
+		t.Error("member 1's run didn't read member 1's history alone")
+	}
+	if first := requests[3].Body; !bytes.Contains(first, []byte("Sam's One")) || bytes.Contains(first, []byte("Loved One")) {
+		t.Error("Sam's run didn't read Sam's history alone")
+	}
+
+	for _, tt := range []struct {
+		ctx      context.Context
+		run      int64
+		reason   string
+		first    int // the first shelf's first title: 1001 is member 1's watched
+		other    int64
+		memberID int64
+	}{
+		{one, mine, "For member one", 1002, theirs, 1},
+		{sam, theirs, "For Sam", 1001, mine, 2},
+	} {
+		home, err := s.Home(tt.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if home.Run == nil || home.Run.ID != tt.run || home.ActiveRun != nil || len(home.Shelves) != 4 || len(home.HeroPicks) != 3 {
+			t.Fatalf("member %d's home = %+v", tt.memberID, home)
+		}
+		if item := home.Shelves[0].Items[0]; item.TMDBID != tt.first || item.Reason != fmt.Sprintf("%s: %d", tt.reason, tt.first) {
+			t.Errorf("member %d's first pick = %+v", tt.memberID, item)
+		}
+		list, err := s.Runs(tt.ctx, 10)
+		if err != nil || len(list) != 1 || list[0].ID != tt.run {
+			t.Errorf("member %d's runs = %+v, %v", tt.memberID, list, err)
+		}
+		if _, err := s.Run(tt.ctx, tt.other); !errors.Is(err, recommend.ErrNotFound) {
+			t.Errorf("member %d reading the other's run = %v, want recommend.ErrNotFound", tt.memberID, err)
+		}
+		reason, err := s.RecommendationReason(tt.ctx, tt.memberID, "movie", 1003)
+		if err != nil || reason == nil || *reason != tt.reason+": 1003" {
+			t.Errorf("member %d's reason = %v, %v", tt.memberID, reason, err)
+		}
+		usage, err := s.RecsUsage(tt.ctx)
+		if err != nil || usage.LastRun == nil || usage.LastRun.ID != tt.run {
+			t.Errorf("member %d's usage = %+v, %v", tt.memberID, usage, err)
+		}
 	}
 }

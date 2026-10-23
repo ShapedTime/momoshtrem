@@ -49,8 +49,8 @@ const (
 	// (Caps.WebSearches); the prompt asks for a few in all.
 	WebSearchMaxUses = 5
 	WebFetchMaxUses  = 4
-	// KeepRuns is how many runs are kept (the newest succeeded one always
-	// is).
+	// KeepRuns is how many of each member's runs are kept (their newest
+	// succeeded one, and the budget month's, always are).
 	KeepRuns = 30
 	// storeTimeout bounds a write made after the run's context ended.
 	storeTimeout = 10 * time.Second
@@ -80,14 +80,14 @@ type Settings interface {
 	AISettings(ctx context.Context) (library.AISettings, error)
 }
 
-// Profiles builds and stores taste profiles (profile.Builder).
+// Profiles builds and stores a member's taste profiles (profile.Builder).
 type Profiles interface {
 	CheckHistory(ctx context.Context) (profile.Readiness, error)
 	Build(ctx context.Context) (*profile.Profile, error)
 	Save(ctx context.Context, p *profile.Profile) (*profile.Stored, error)
 }
 
-// Pools builds candidate pools (candidates.Builder).
+// Pools builds a member's candidate pools (candidates.Builder).
 type Pools interface {
 	Build(ctx context.Context, p *profile.Profile) (*candidates.Pool, error)
 }
@@ -101,10 +101,20 @@ type Store interface {
 	PublishRecRun(ctx context.Context, id int64, progress json.RawMessage, shelves []library.RecShelfRow, picks []library.RecHeroPickRow) error
 	FailRecRun(ctx context.Context, id int64, message string, progress json.RawMessage) error
 	SkipRecRun(ctx context.Context, id int64, reason string) error
-	PruneRecRuns(ctx context.Context, keep int) (int64, error)
+	PruneRecRuns(ctx context.Context, keep int, monthStart time.Time) (int64, error)
 }
 
 var _ Store = (*library.RecRunRepository)(nil)
+
+// Member is one household member's parts of a run, each bound to them:
+// their profile, candidate pool and title lookups (their Trakt rows and
+// feedback), and R1's custom tools over a run's inputs.
+type Member struct {
+	Profiles Profiles
+	Pools    Pools
+	Titles   Titles
+	Tools    func(tools.Inputs) []agent.Tool
+}
 
 // Deps are what a Runner needs.
 type Deps struct {
@@ -112,14 +122,12 @@ type Deps struct {
 	AI       AI
 	Budget   aicore.Budget
 	Settings Settings
-	Profiles Profiles
-	Pools    Pools
-	// Tools are R1's custom tools over a run's inputs (recsWiring.tools).
-	Tools  func(tools.Inputs) []agent.Tool
-	TMDB   Details
-	Titles Titles
-	Store  Store
-	Now    func() time.Time // nil: time.Now; its location is server-local
+	// Members are a member's parts (recsWiring.member), built for each
+	// run.
+	Members func(memberID int64) Member
+	TMDB    Details
+	Store   Store
+	Now     func() time.Time // nil: time.Now; its location is server-local
 }
 
 // Runner executes runs.
@@ -149,14 +157,17 @@ type Outcome struct {
 // errTooFewShelves: the agent stopped, nudge and all, short of MinShelves.
 var errTooFewShelves = errors.New("too few shelves")
 
-// Execute runs a queued run to its end and stores how it ended: skipped
-// before it starts (the budget, the history), failed, or succeeded with
-// its shelves and hero picks published. Its error is only the store's,
-// when even that couldn't be written.
+// Execute runs a queued run to its end, on its member's history, and
+// stores how it ended: skipped before it starts (the budget, the
+// history), failed, or succeeded with its shelves and hero picks
+// published. Its error is only the store's, when even that couldn't be
+// written (library.ErrRecRunNotActive: the run is gone or finished
+// elsewhere).
 func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, error) {
 	ctx, cancel := context.WithTimeout(parent, Timeout)
 	defer cancel()
-	log := r.log.With("run", run.ID, "kind", run.Kind, "model", run.Model)
+	log := r.log.With("run", run.ID, "member", run.MemberID, "kind", run.Kind, "model", run.Model)
+	m := r.d.Members(run.MemberID)
 
 	// How a run ends is written past its own deadline, and retried: a run
 	// left active shows as refreshing until a restart.
@@ -194,7 +205,7 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 	if !settings.RecEnabled {
 		return fail("Picks were switched off before the run started.", recommend.ErrDisabled, nil)
 	}
-	skeleton := r.request(run.Model, aicore.UserText("."), nil, nil, 0)
+	skeleton := r.request(run.Model, aicore.UserText("."), skeletonTools(m), nil, 0)
 	if err := skeleton.Validate(); err != nil {
 		return fail("The run's request isn't valid.", err, nil)
 	}
@@ -204,7 +215,7 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 		}
 		return fail("Couldn't check the AI budget.", err, nil)
 	}
-	ready, err := r.d.Profiles.CheckHistory(ctx)
+	ready, err := m.Profiles.CheckHistory(ctx)
 	if err != nil {
 		return fail("Couldn't read the watch history.", err, nil)
 	}
@@ -229,11 +240,11 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 
 	// The inputs: the profile (stored, for the run to reference) and the
 	// pool.
-	p, err := r.d.Profiles.Build(ctx)
+	p, err := m.Profiles.Build(ctx)
 	if err != nil {
 		return fail(stoppedOr(ctx, parent, "Couldn't build the taste profile."), err, mustJSON(track.finish()))
 	}
-	stored, err := r.d.Profiles.Save(ctx, p)
+	stored, err := m.Profiles.Save(ctx, p)
 	if err != nil {
 		return fail(stoppedOr(ctx, parent, "Couldn't store the taste profile."), err, mustJSON(track.finish()))
 	}
@@ -242,7 +253,7 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 	}
 	track.detail(recommend.StepHistory, historyDetail(p.Counts))
 	track.reach(recommend.StepTMDB)
-	pool, err := r.d.Pools.Build(ctx, p)
+	pool, err := m.Pools.Build(ctx, p)
 	switch {
 	case err == nil:
 		track.detail(recommend.StepTMDB, fmt.Sprintf("%s · %s already seen",
@@ -255,12 +266,12 @@ func (r *Runner) Execute(parent context.Context, run library.RecRun) (Outcome, e
 	}
 
 	// The loop, and one nudge when it stops short.
-	b := newBoard(&validator{titles: r.d.Titles, details: r.d.TMDB, now: r.d.Now}, pool, track.shelves)
+	b := newBoard(&validator{titles: m.Titles, details: r.d.TMDB, now: r.d.Now}, pool, track.shelves)
 	first, err := firstTurn(r.d.Now(), p, pool)
 	if err != nil {
 		return fail("Couldn't write the run's first message.", err, mustJSON(track.finish()))
 	}
-	req := r.request(run.Model, aicore.UserText(first), append(r.d.Tools(tools.Fixed{P: p, C: pool}), b.tools()...), track, run.ID)
+	req := r.request(run.Model, aicore.UserText(first), append(m.Tools(tools.Fixed{P: p, C: pool}), b.tools()...), track, run.ID)
 	var prior aicore.Usage // the loop's usage before the nudge turn
 	req.Hooks.Call = func(info aicore.CallInfo) {
 		total := prior.Add(info.Total)
@@ -391,9 +402,6 @@ func (r *Runner) request(model string, first aicore.Message, list []agent.Tool, 
 		Feature:          library.AIFeatureRecs,
 		Ref:              runID,
 	}
-	if list == nil {
-		req.Tools = append(r.d.Tools(tools.Fixed{}), newBoard(nil, nil, nil).tools()...)
-	}
 	if track != nil {
 		req.Hooks = aicore.Hooks{
 			BlockStart: func(b aicore.Block) {
@@ -407,6 +415,12 @@ func (r *Runner) request(model string, first aicore.Message, list []agent.Tool, 
 	return req
 }
 
+// skeletonTools are a run's tools before its inputs exist: the same
+// definitions every run sends.
+func skeletonTools(m Member) []agent.Tool {
+	return append(m.Tools(tools.Fixed{}), newBoard(nil, nil, nil).tools()...)
+}
+
 // Prepared is a run's request as the dry run builds it, with what went in.
 type Prepared struct {
 	Request    aicore.Request
@@ -417,19 +431,20 @@ type Prepared struct {
 	SystemSize int
 }
 
-// Prepare builds the request a run on model would send first, storing
-// nothing (recommend-run -dry-run): the profile and pool are built, not
-// saved, and the submit tools validate against nothing.
-func (r *Runner) Prepare(ctx context.Context, model string) (*Prepared, error) {
-	ready, err := r.d.Profiles.CheckHistory(ctx)
+// Prepare builds the request the member's run on model would send first,
+// storing nothing (recommend-run -dry-run): the profile and pool are
+// built, not saved, and the submit tools validate against nothing.
+func (r *Runner) Prepare(ctx context.Context, memberID int64, model string) (*Prepared, error) {
+	m := r.d.Members(memberID)
+	ready, err := m.Profiles.CheckHistory(ctx)
 	if err != nil {
 		return nil, err
 	}
-	p, err := r.d.Profiles.Build(ctx)
+	p, err := m.Profiles.Build(ctx)
 	if err != nil {
 		return nil, err
 	}
-	pool, err := r.d.Pools.Build(ctx, p)
+	pool, err := m.Pools.Build(ctx, p)
 	if err != nil {
 		if !errors.Is(err, candidates.ErrNoSources) || ctx.Err() != nil {
 			return nil, err
@@ -440,19 +455,21 @@ func (r *Runner) Prepare(ctx context.Context, model string) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := newBoard(&validator{titles: r.d.Titles, details: r.d.TMDB, now: r.d.Now}, pool, nil)
-	req := r.request(model, aicore.UserText(first), append(r.d.Tools(tools.Fixed{P: p, C: pool}), b.tools()...), nil, 0)
+	b := newBoard(&validator{titles: m.Titles, details: r.d.TMDB, now: r.d.Now}, pool, nil)
+	req := r.request(model, aicore.UserText(first), append(m.Tools(tools.Fixed{P: p, C: pool}), b.tools()...), nil, 0)
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 	return &Prepared{Request: req, Readiness: ready, Profile: p, Pool: pool, FirstTurn: first, SystemSize: len(systemPrompt)}, nil
 }
 
-// prune keeps the newest runs, past the run's deadline.
+// prune keeps each member's newest runs and the budget month's, past the
+// run's deadline.
 func (r *Runner) prune(parent context.Context) {
 	ctx, done := context.WithTimeout(context.WithoutCancel(parent), storeTimeout)
 	defer done()
-	if n, err := r.d.Store.PruneRecRuns(ctx, KeepRuns); err != nil {
+	monthStart, _ := aicore.MonthBounds(r.d.Now())
+	if n, err := r.d.Store.PruneRecRuns(ctx, KeepRuns, monthStart); err != nil {
 		r.log.Warn("Failed to prune old runs", "error", err)
 	} else if n > 0 {
 		r.log.Info("Pruned old picks runs", "runs", n)

@@ -16,6 +16,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/downloads"
 	"github.com/shapedtime/momoshtrem/internal/hdrezka"
 	"github.com/shapedtime/momoshtrem/internal/library"
+	"github.com/shapedtime/momoshtrem/internal/member"
 	"github.com/shapedtime/momoshtrem/internal/metadata"
 	"github.com/shapedtime/momoshtrem/internal/sessions"
 	"github.com/shapedtime/momoshtrem/internal/tmdb"
@@ -108,11 +109,12 @@ type Sessions interface {
 
 var _ Sessions = (*sessions.Registry)(nil)
 
-// Reasons answers a title page's recommendation_reason: the newest
-// succeeded picks run's reason for the title, nil without one (#157). The
-// picks install it with SetReasons; catalog can't import them.
+// Reasons answers a title page's recommendation_reason: the viewer's
+// newest succeeded picks run's reason for the title, nil without one
+// (#157, per member since #245). The picks install it with SetReasons;
+// catalog can't import them.
 type Reasons interface {
-	RecommendationReason(ctx context.Context, mediaType string, tmdbID int) (*string, error)
+	RecommendationReason(ctx context.Context, memberID int64, mediaType string, tmdbID int) (*string, error)
 }
 
 // Deps are the Service's dependencies. Torrents, Downloads, Sessions,
@@ -183,14 +185,16 @@ func (s *Service) SetReasons(r Reasons) {
 	s.reasons.Store(&r)
 }
 
-// recommendationReason is a title's recommendation_reason; a failure
-// leaves it null (logged), never failing the page.
+// recommendationReason is a title's recommendation_reason for the
+// context's member, null without one; a failure leaves it null (logged),
+// never failing the page.
 func (s *Service) recommendationReason(ctx context.Context, mediaType string, tmdbID int) *string {
 	r := s.reasons.Load()
-	if r == nil || *r == nil {
+	viewer, ok := member.IDFrom(ctx)
+	if r == nil || *r == nil || !ok {
 		return nil
 	}
-	reason, err := (*r).RecommendationReason(ctx, mediaType, tmdbID)
+	reason, err := (*r).RecommendationReason(ctx, viewer, mediaType, tmdbID)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("Couldn't read the recommendation reason", "media_type", mediaType, "tmdb_id", tmdbID, "error", err)

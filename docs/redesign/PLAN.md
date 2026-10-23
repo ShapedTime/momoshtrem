@@ -329,7 +329,7 @@ One migration per slice, each landing with the code that writes its columns, so 
   - `rec_runs_one_active` becomes one active run per member, and `rec_feedback`'s PK `(member_id, media_type, tmdb_id)`.
   - Indexes for a member's newest runs and for the oldest queued run.
   - Shelves, items and hero picks don't change: they belong to their run.
-  - The prune (`PruneRecRuns`) keeps each member's 30 newest runs and their newest succeeded one, and it never deletes a run created in the current budget month (`MonthBounds` in `TZ`), so `by_member` still finds the month's spend.
+  - The prune (`PruneRecRuns`) keeps each member's 30 newest runs and their newest succeeded one, and it never deletes a run that finished in the current budget month (`MonthBounds` in `TZ`), so `by_member` still finds the month's spend; that covers a run queued late on the month's last day that spends into the new one. An active run is never pruned.
 - `014_member_ask.sql` (B3b, #246): `member_id` on `ask_threads` and `ask_turns`.
   - A composite FK, `ask_turns (thread_id, member_id)` → `ask_threads (id, member_id)` `ON DELETE CASCADE`, keeps a turn's member its thread's.
   - `ask_turns_one_streaming` becomes one streaming turn per member, and the daily limit's index becomes `(member_id, created_at)`.
