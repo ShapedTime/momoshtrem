@@ -269,13 +269,31 @@ func TestRecRunRepository_FailActiveAndPrune(t *testing.T) {
 		t.Errorf("shelves = %d, %v", shelves, err)
 	}
 
-	failed, err := repo.FailActiveRecRuns(ctx, "momoshtrem restarted during the run.")
+	// Startup with a key fails the running run only: another member's
+	// queued one waits for the worker. Without a key, it's failed too.
+	if _, err := NewMemberRepository(db).Create(ctx, "Sam", ""); err != nil {
+		t.Fatal(err)
+	}
+	waiting, _, err := repo.QueueRecRun(ctx, 2, "scheduled", "claude-opus-5-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := repo.FailRunningRecRuns(ctx, "momoshtrem restarted during the run.")
 	if err != nil || failed != 1 {
-		t.Fatalf("failed active = %d, %v", failed, err)
+		t.Fatalf("failed running = %d, %v", failed, err)
 	}
 	run, _ := repo.GetRecRun(ctx, running)
 	if run.Status != RecRunFailed || *run.Error != "momoshtrem restarted during the run." || run.FinishedAt == nil {
 		t.Errorf("run left running = %+v", run)
+	}
+	if run, _ := repo.GetRecRun(ctx, waiting); run.Status != RecRunQueued {
+		t.Errorf("the queued run after FailRunningRecRuns = %+v, want it queued", run)
+	}
+	if failed, err := repo.FailActiveRecRuns(ctx, "momoshtrem restarted during the run."); err != nil || failed != 1 {
+		t.Fatalf("failed active = %d, %v", failed, err)
+	}
+	if run, _ := repo.GetRecRun(ctx, waiting); run.Status != RecRunFailed {
+		t.Errorf("the queued run after FailActiveRecRuns = %+v, want it failed", run)
 	}
 	if id, queued, err := repo.QueueRecRun(ctx, 1, "manual", "claude-opus-5-5"); err != nil || !queued {
 		t.Errorf("queue after = %d, %v, %v", id, queued, err)

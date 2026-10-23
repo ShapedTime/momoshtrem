@@ -49,6 +49,9 @@ const (
 	// forgetTimeout is how long ForgetMember waits for the removed
 	// member's run to stop.
 	forgetTimeout = 10 * time.Second
+	// retryDelay is how long after a store error the worker looks at the
+	// queued runs again.
+	retryDelay = time.Minute
 	// restartedMessage is a run's error when startup finds it active.
 	restartedMessage = "momoshtrem restarted during the run."
 	// staleMargin is how long past runs.Timeout a run another process (or a
@@ -79,6 +82,7 @@ type Store interface {
 	LatestSucceededRecRun(ctx context.Context, memberID int64) (*library.RecRun, error)
 	LatestRecRunCreatedAt(ctx context.Context) (at time.Time, ok bool, err error)
 	FailActiveRecRuns(ctx context.Context, message string) (int64, error)
+	FailRunningRecRuns(ctx context.Context, message string) (int64, error)
 	FailRecRun(ctx context.Context, id int64, message string, progress json.RawMessage) error
 }
 
@@ -128,12 +132,13 @@ type Scheduler struct {
 	wake chan struct{} // the settings changed: plan again
 	work chan struct{} // a run was queued
 
-	mu      sync.Mutex
-	started bool
-	catchUp time.Time  // a missed slot's runs, pending
-	current *execution // the run the worker executes, nil when idle
-	cancel  context.CancelFunc
-	done    chan struct{}
+	mu       sync.Mutex
+	started  bool
+	catchUp  time.Time  // a missed slot's runs, pending
+	current  *execution // the run the worker executes, nil when idle
+	retrying bool       // a retry after a store error is pending
+	cancel   context.CancelFunc
+	done     chan struct{}
 }
 
 // execution is the run the worker executes: ForgetMember cancels it.
@@ -154,10 +159,16 @@ func New(d Deps) *Scheduler {
 	}
 }
 
-// Start marks the runs a crash left active failed, then, with a key, runs
-// the schedule and the worker.
+// Start marks the runs a crash left running failed, then, with a key, runs
+// the schedule and the worker, which goes on with the runs left queued
+// (another member's, behind the one that was running). Without a key none
+// can run, so the queued ones are failed too.
 func (s *Scheduler) Start(ctx context.Context) error {
-	if n, err := s.d.Store.FailActiveRecRuns(ctx, restartedMessage); err != nil {
+	sweep := s.d.Store.FailRunningRecRuns
+	if !s.d.Configured {
+		sweep = s.d.Store.FailActiveRecRuns
+	}
+	if n, err := sweep(ctx, restartedMessage); err != nil {
 		return err
 	} else if n > 0 {
 		s.log.Warn("Marked picks runs left active by a restart failed", "runs", n)
@@ -182,6 +193,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	go func() { defer wg.Done(); s.loop(runCtx) }()
 	go func() { defer wg.Done(); s.worker(runCtx) }()
 	go func() { wg.Wait(); close(s.done) }()
+	s.kick() // the runs left queued
 	return nil
 }
 
@@ -363,8 +375,9 @@ func (s *Scheduler) NextRunAt(ctx context.Context) (*time.Time, error) {
 }
 
 // missedSlot reports whether the schedule's last slot went by with no run
-// queued since, anyone's, the server down: a catch-up is due. Never before
-// the first run (a fresh install has missed nothing).
+// queued since, anyone's, the server down: a catch-up is due, when some
+// member has Trakt connected (no slot queues a run for anyone else).
+// Never before the first run (a fresh install has missed nothing).
 func (s *Scheduler) missedSlot(ctx context.Context) bool {
 	settings, err := s.d.Settings.AISettings(ctx)
 	if err != nil || !settings.RecEnabled {
@@ -379,7 +392,31 @@ func (s *Scheduler) missedSlot(ctx context.Context) bool {
 		s.log.Warn("Couldn't check for a missed picks run", "error", err)
 		return false
 	}
-	return any && created.Before(last)
+	if !any || !created.Before(last) {
+		return false
+	}
+	eligible, err := s.eligible(ctx)
+	if err != nil {
+		s.log.Warn("Couldn't check for a missed picks run: couldn't read the household's members", "error", err)
+		return false
+	}
+	return len(eligible) > 0
+}
+
+// eligible are the members with Trakt connected, by id: the ones a slot
+// queues a run for.
+func (s *Scheduler) eligible(ctx context.Context) ([]int64, error) {
+	ids, err := s.d.Members.IDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, id := range ids {
+		if s.d.Members.Eligible(id) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // loop queues the scheduled runs at each slot, and the catch-up.
@@ -462,18 +499,12 @@ func (s *Scheduler) queueScheduled(ctx context.Context, slot time.Time) {
 	if _, ok := NextSlot(settings.RecSchedule, s.d.Clock.Now()); !ok || !settings.RecEnabled {
 		return
 	}
-	ids, err := s.d.Members.IDs(ctx)
+	eligible, err := s.eligible(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Error("Scheduled picks runs not queued: couldn't read the household's members", "error", err)
 		}
 		return
-	}
-	var eligible []int64
-	for _, id := range ids {
-		if s.d.Members.Eligible(id) {
-			eligible = append(eligible, id)
-		}
 	}
 	if _, err := s.reap(ctx); err != nil {
 		s.log.Warn("Couldn't check the active picks runs", "error", err)
@@ -496,6 +527,7 @@ func (s *Scheduler) queueScheduled(ctx context.Context, slot time.Time) {
 
 // worker executes queued runs one at a time, every member's, oldest
 // first. A run another process is running (recommend-run) is left to it.
+// After a store error it pauses, and looks again a while later (retry).
 func (s *Scheduler) worker(ctx context.Context) {
 	for {
 		select {
@@ -508,6 +540,7 @@ func (s *Scheduler) worker(ctx context.Context) {
 			if err != nil {
 				if ctx.Err() == nil {
 					s.log.Error("Couldn't read the queued picks runs", "error", err)
+					s.retry(ctx)
 				}
 				break
 			}
@@ -520,12 +553,36 @@ func (s *Scheduler) worker(ctx context.Context) {
 					// finished by another process: on to the next.
 					continue
 				}
-				// Left active: reap fails it once it's stale.
+				// Left active: reap fails it once it's stale. The runs
+				// queued behind it go on after retryDelay.
 				s.log.Error("Failed to record the picks run", "run", run.ID, "member", run.MemberID, "error", err)
+				s.retry(ctx)
 				break
 			}
 		}
 	}
+}
+
+// retry wakes the worker retryDelay from now, once however many errors
+// ask for it meanwhile.
+func (s *Scheduler) retry(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retrying {
+		return
+	}
+	s.retrying = true
+	after := s.d.Clock.After(retryDelay)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-after:
+			s.kick()
+		}
+		s.mu.Lock()
+		s.retrying = false
+		s.mu.Unlock()
+	}()
 }
 
 // execute runs one run to its end, as the current execution:

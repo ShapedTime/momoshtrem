@@ -39,7 +39,8 @@ import (
 // scheduler queues and executes them and serves the picks.
 type recsWiring struct {
 	d aiDeps
-	// trakt is a member's Trakt connection; nil: never connected.
+	// trakt is a member's Trakt connection, for their profile builder: nil
+	// (never connected) without Trakt's registry.
 	trakt     func(memberID int64) profile.Connection
 	runs      *library.RecRunRepository
 	runner    *runs.Runner
@@ -152,10 +153,6 @@ func newRecsWiring(d aiDeps, core *aiCore, connection func(memberID int64) profi
 
 // member is the member's R1 parts, bound to them.
 func (w *recsWiring) member(id int64) recsMember {
-	var connection profile.Connection
-	if w.trakt != nil {
-		connection = w.trakt(id)
-	}
 	taste := library.NewTasteRepository(w.d.db).ForMember(id)
 	return recsMember{
 		profiles: profile.New(profile.Deps{
@@ -163,7 +160,7 @@ func (w *recsWiring) member(id int64) recsMember {
 			Profiles: library.NewTasteProfileRepository(w.d.db).ForMember(id),
 			Settings: library.NewMemberRepository(w.d.db).TraktSettingsFor(id), // Trakt's use_ratings
 			TMDB:     w.d.tmdb,
-			Trakt:    connection,
+			Trakt:    w.trakt(id),
 		}),
 		pools: candidates.New(candidates.Deps{TMDB: w.d.tmdb, Store: taste}),
 		taste: taste,

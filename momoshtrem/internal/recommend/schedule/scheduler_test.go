@@ -177,6 +177,19 @@ func (s *fakeStore) FailActiveRecRuns(_ context.Context, msg string) (int64, err
 	return n, nil
 }
 
+func (s *fakeStore) FailRunningRecRuns(_ context.Context, msg string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := int64(0)
+	for i := range s.runs {
+		if s.runs[i].Status == recommend.StatusRunning {
+			s.runs[i].Status, s.runs[i].Error = recommend.StatusFailed, &msg
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) FailRecRun(_ context.Context, id int64, msg string, _ json.RawMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -251,19 +264,21 @@ func (s *fakeStore) RecRunCostMeans(context.Context, int) (map[string]float64, e
 }
 
 // fakeExecutor runs a run by marking it succeeded; hold blocks it until
-// released (or its context ends: failed), and a run in gone finds its row
-// deleted under it (its member removed).
+// released (or its context ends: failed), a run in gone finds its row
+// deleted under it (its member removed), and a run in broken can't record
+// how it ended (the database is down: it's left running).
 type fakeExecutor struct {
-	store *fakeStore
-	hold  chan struct{}
-	mu    sync.Mutex
-	ran   []library.RecRun
-	gone  map[int64]bool
+	store  *fakeStore
+	hold   chan struct{}
+	mu     sync.Mutex
+	ran    []library.RecRun
+	gone   map[int64]bool
+	broken map[int64]bool
 }
 
 func (e *fakeExecutor) Execute(ctx context.Context, run library.RecRun) (runs.Outcome, error) {
 	e.mu.Lock()
-	gone := e.gone[run.ID]
+	gone, broken := e.gone[run.ID], e.broken[run.ID]
 	e.mu.Unlock()
 	if gone {
 		e.store.remove(func(r library.RecRun) bool { return r.ID == run.ID })
@@ -273,6 +288,9 @@ func (e *fakeExecutor) Execute(ctx context.Context, run library.RecRun) (runs.Ou
 	e.mu.Lock()
 	e.ran = append(e.ran, run)
 	e.mu.Unlock()
+	if broken {
+		return runs.Outcome{Status: recommend.StatusFailed}, errors.New("db down")
+	}
 	if e.hold != nil {
 		select {
 		case <-e.hold:
@@ -406,7 +424,7 @@ func newEnv(t *testing.T, start time.Time, configured bool, prior ...library.Rec
 		}
 	}
 	e.store = &fakeStore{runs: prior, nextID: int64(len(prior)), at: e.clock.Now}
-	e.exec = &fakeExecutor{store: e.store, gone: map[int64]bool{}}
+	e.exec = &fakeExecutor{store: e.store, gone: map[int64]bool{}, broken: map[int64]bool{}}
 	e.s = New(Deps{
 		Store: e.store, Runner: e.exec, Settings: e.settings, Budget: budget{},
 		History:    e.history.of,
@@ -615,6 +633,18 @@ func TestSchedule_CatchUp(t *testing.T) {
 	off.start(t)
 	if off.s.catchUp != (time.Time{}) {
 		t.Error("a catch-up with picks off")
+	}
+
+	// Nobody has Trakt connected: no slot would queue anything, so there's
+	// nothing to catch up.
+	nobody := newEnv(t, friday1000, true, before)
+	nobody.members.set([]int64{1, 2})
+	nobody.start(t)
+	nobody.s.mu.Lock()
+	pending := nobody.s.catchUp
+	nobody.s.mu.Unlock()
+	if !pending.IsZero() {
+		t.Errorf("a catch-up at %v with nobody's Trakt connected", pending)
 	}
 }
 
@@ -894,23 +924,57 @@ func TestWorker_MovesOnPastAGoneRun(t *testing.T) {
 	}
 }
 
-// Startup fails what a crash left active, with or without a key; without
-// one nothing runs.
+// Startup fails the run a crash left running, and the worker goes on with
+// the runs queued behind it (another member's 03:00 run); without a key
+// both are failed, and nothing runs.
 func TestStart_FailsActiveRuns(t *testing.T) {
 	for _, configured := range []bool{true, false} {
-		left := library.RecRun{ID: 1, Status: "running", CreatedAt: friday0200}
-		e := newEnv(t, friday0200, configured, left)
+		running := library.RecRun{ID: 1, MemberID: 1, Kind: "scheduled", Status: "running", CreatedAt: friday0200}
+		queued := library.RecRun{ID: 2, MemberID: 2, Kind: "scheduled", Status: "queued", CreatedAt: friday0200}
+		e := newEnv(t, friday0200, configured, running, queued)
 		e.start(t)
-		run := e.store.all()[0]
-		if run.Status != recommend.StatusFailed || *run.Error != restartedMessage {
-			t.Errorf("configured %v: run = %+v", configured, run)
+		if run := e.store.get(1); run.Status != recommend.StatusFailed || *run.Error != restartedMessage {
+			t.Errorf("configured %v: the run left running = %+v", configured, run)
 		}
 		if !configured {
+			if run := e.store.get(2); run.Status != recommend.StatusFailed || *run.Error != restartedMessage {
+				t.Errorf("without a key: the run left queued = %+v", run)
+			}
 			time.Sleep(10 * time.Millisecond)
-			if e.clock.afterCalls() != 0 {
+			if e.clock.afterCalls() != 0 || e.exec.count() != 0 {
 				t.Error("the schedule runs without a key")
 			}
+			continue
 		}
+		waitUntil(t, "the run left queued", func() bool { return e.store.get(2).Status == recommend.StatusSucceeded })
+		if got := e.exec.members(); !reflect.DeepEqual(got, []int64{2}) {
+			t.Errorf("executed members %v, want member 2's queued run only", got)
+		}
+	}
+}
+
+// A run whose end can't be recorded (the database is down) stops the
+// worker for retryDelay, not until the next kick: then the run queued
+// behind it goes on.
+func TestWorker_RetriesAfterAStoreError(t *testing.T) {
+	e := newEnv(t, friday0200, true)
+	e.start(t)
+	e.waitWaiting(t, 1)
+	broken := e.store.add(library.RecRun{MemberID: 1, Kind: "manual", Status: "queued", Model: "x", CreatedAt: friday0200})
+	next := e.store.add(library.RecRun{MemberID: 2, Kind: "manual", Status: "queued", Model: "x", CreatedAt: friday0200})
+	e.exec.mu.Lock()
+	e.exec.broken[broken] = true
+	e.exec.mu.Unlock()
+	e.s.kick()
+	e.waitWaiting(t, 2) // the retry's wait, beside the loop's
+	time.Sleep(20 * time.Millisecond)
+	if run := e.store.get(next); run.Status != recommend.StatusQueued {
+		t.Fatalf("the next run before the retry = %+v, want it still queued", run)
+	}
+	e.clock.Advance(retryDelay)
+	waitUntil(t, "the next member's run", func() bool { return e.store.get(next).Status == recommend.StatusSucceeded })
+	if got := e.exec.members(); !reflect.DeepEqual(got, []int64{1, 2}) {
+		t.Errorf("executed members %v, want 1 then 2", got)
 	}
 }
 

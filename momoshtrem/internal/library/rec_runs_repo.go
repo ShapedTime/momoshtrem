@@ -14,9 +14,9 @@ import (
 // The picks' runs (R2, #157; PLAN §5 "006_recommendations.sql"): rec_runs
 // with their shelves, items and hero picks. Each run is one household
 // member's (013, #245), and a member has at most one queued or running
-// (the partial unique index rec_runs_one_active); a run's shelves and hero
-// picks are written with it when it succeeds, in one transaction, so /home
-// switches from one run's picks to the next at once.
+// run (the partial unique index rec_runs_one_active); a run's shelves and
+// hero picks are written with it when it succeeds, in one transaction, so
+// /home switches from one run's picks to the next at once.
 
 // Run statuses (rec_runs.status).
 const (
@@ -269,8 +269,8 @@ func (r *RecRunRepository) SkipRecRun(ctx context.Context, id int64, reason stri
 	`, id, reason)
 }
 
-// FailActiveRecRuns marks every queued or running run failed (startup: a
-// crash left it), answering how many.
+// FailActiveRecRuns marks every queued or running run failed (startup
+// without a key: none of them can run), answering how many.
 func (r *RecRunRepository) FailActiveRecRuns(ctx context.Context, message string) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE rec_runs SET status = 'failed', finished_at = NOW(), error = $1
@@ -278,6 +278,19 @@ func (r *RecRunRepository) FailActiveRecRuns(ctx context.Context, message string
 	`, message)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fail the runs left active: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// FailRunningRecRuns marks every running run failed (startup: a crash
+// stopped it), answering how many. Queued ones stay, for the worker.
+func (r *RecRunRepository) FailRunningRecRuns(ctx context.Context, message string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE rec_runs SET status = 'failed', finished_at = NOW(), error = $1
+		WHERE status = 'running'
+	`, message)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fail the runs left running: %w", err)
 	}
 	return res.RowsAffected()
 }
