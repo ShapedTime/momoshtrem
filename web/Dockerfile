@@ -1,7 +1,7 @@
 # ===============
 # Stage 1: Dependencies
 # ===============
-FROM node:20-alpine AS deps
+FROM node:25-alpine AS deps
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ RUN npm ci
 # ===============
 # Stage 2: Build
 # ===============
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ RUN npm run build
 # ===============
 # Stage 3: Production
 # ===============
-FROM node:20-alpine AS runner
+FROM node:25-alpine AS runner
 
 # Install curl for Docker health checks
 RUN apk add --no-cache curl
