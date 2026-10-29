@@ -7,7 +7,7 @@ name: momoshtrem
 
 services:
   jackett:
-    image: lscr.io/linuxserver/jackett:0.24.2800
+    image: lscr.io/linuxserver/jackett:0.24.2961
     container_name: jackett
     # Loopback only: reach it over an SSH tunnel (ops PLAN D8)
     ports:
@@ -52,7 +52,7 @@ services:
       start_interval: 5s
 
   postgres:
-    image: postgres:16.15-alpine
+    image: postgres:18.4-alpine
     container_name: momoshtrem-postgres
     environment:
       POSTGRES_DB: momoshtrem
