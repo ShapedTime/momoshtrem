@@ -2,6 +2,8 @@
 
 > Spec · 2026-10-15 · #42 · Epic #32 · Plan: [`PLAN.md`](PLAN.md)
 > The VM that replaces `momoshtrem-vm` ([`AS-IS.md`](AS-IS.md)). It is created by hand in Proxmox from this page: PLAN §1 rules out IaC for the VM. Ansible (#34) takes over from the state in §5.
+>
+> **Since 2026-10-31 it runs on hs2** as VM 210, at 192.168.0.171 (#261). That VM was built from this spec by OpenTofu, in a separate private Proxmox repo, with less storage and RAM to fit hs2 (§1). The data moved from the first VM on hs1 (192.168.0.99), which is retired. §2–§4 remain the way to build one by hand.
 
 This page fixes three of the old VM's problems from the start:
 - its root LV took only half the volume group and filled up;
@@ -21,10 +23,10 @@ If the VM changes (RAM or a disk size), update this page in the same commit.
 | Name | `momoshtrem` | It's also the hostname. Any free VM ID will do. |
 | Machine | q35, BIOS OVMF (UEFI), with an EFI disk and pre-enrolled keys | Ubuntu boots with Secure Boot. No TPM is needed. |
 | CPU | 1 socket, 4 cores, type `host` | The same as today. With one host and no migration, `host` exposes every CPU feature. |
-| RAM | 8 GiB; leave the ballooning device at its default | The same as today. Use less during the overlap if the host is short (§2). |
+| RAM | 8 GiB; leave the ballooning device at its default | The same as today. Use less during the overlap if the host is short (§2). **On hs2: 6 GiB.** The host has 11.5 GiB, shared with another VM, and the stack uses about 2 GiB. |
 | SCSI controller | VirtIO SCSI single | Gives each disk its own IO thread. |
 | Root disk | `scsi0`, 32 GiB, `discard=on`, `iothread=1`, `ssd=1` | See the sizing notes below. |
-| Data disk | `scsi1`, 200 GiB, `discard=on`, `iothread=1`, `ssd=1` | Holds `/mnt/data`. See the sizing notes below. |
+| Data disk | `scsi1`, 200 GiB, `discard=on`, `iothread=1`, `ssd=1` | Holds `/mnt/data`. See the sizing notes below. **On hs2: 50 GiB.** |
 | NIC | VirtIO (virtio-net) on `vmbr0`, no VLAN | |
 | QEMU guest agent | on, with guest-trim after a disk move | #34 installs the package. Until then Proxmox shows the agent as not running. |
 | Start at boot | on | A Proxmox host reboot brings the stack back. |
@@ -40,8 +42,8 @@ Set `ssd=1` only if the storage is an SSD.
 | OS | Ubuntu 24.04 LTS server, the latest 24.04.x live-server ISO, not minimized | |
 | Encryption | none | The VM has to boot unattended. |
 | Root disk layout | LVM; `ubuntu-lv` fills `ubuntu-vg` | The installer takes only half by default (§4). |
-| Data disk layout | one GPT partition, ext4, mounted at `/mnt/data` by UUID | The installer writes a UUID entry in fstab. |
-| Network | DHCP | The IP comes from a router reservation for the VM's MAC. It keeps the address it first got, 192.168.0.99, for good; at cutover the router forwards move to it (§6). |
+| Data disk layout | one GPT partition, ext4, mounted at `/mnt/data` by UUID | The installer writes a UUID entry in fstab. **On hs2** the partition is an LVM PV: `data-vg/data-lv`, ext4, still mounted by UUID. |
+| Network | DHCP | The IP comes from a router reservation for the VM's MAC. **On hs2: 192.168.0.171**, and the router forwards point at it (§6). On hs1 it was 192.168.0.99. |
 | User | `agha`, in `sudo`, with a password | Ansible asks for this sudo password at run time (PLAN §7). Keep it in the password manager. |
 | SSH | OpenSSH, key-only, with the Mac's key; root login off | |
 | Snaps | none | Docker comes from Docker's apt repository (#34), and the Docker snap would clash with it. |
@@ -53,12 +55,12 @@ Set `ssd=1` only if the storage is an SSD.
 
 **Data disk sizing.**
 - The torrent cache is the only thing on `/mnt/data` that grows to fill the space. Its limit is set in the web UI under **Settings › Storage** (`GET|PUT /api/settings/storage`, #200).
-- **The default is auto: 75% of the data disk**, about 148 GiB of today's 200 GiB. It follows the disk: grow the disk and the limit grows with it, within a minute (§6).
+- **The default is auto: 75% of the data disk**, about 37 GiB of hs2's 50 GiB (it was 148 GiB of hs1's 200 GiB). It follows the disk: grow the disk and the limit grows with it, within a minute (§6).
 - The other 25% covers ext4 overhead and reserved blocks, the database and subtitles as they grow, and any local dumps #35 keeps.
 - Everything else on the disk is small today: Postgres 67 MB, subtitles 208 KB and Jackett 396 KB (AS-IS §9).
 - A custom limit can go from 4 GiB up to 90% of the disk. Whatever the limit, the cache always leaves 5 GiB of the disk free: it's held smaller while the disk is short.
 - `config.yaml` doesn't set `torrent.global_cache_size`. A value there replaces auto until a limit is saved in Settings, so leave it out.
-- **Built at 70 GiB.** The VM was created with a 70 GiB data disk, and grown to 200 GiB after cutover (§6).
+- **Built at 70 GiB.** The VM on hs1 was created with a 70 GiB data disk, and grown to 200 GiB after cutover (§6). The VM on hs2 was built at 50 GiB.
 
 ## 2. Before you create it: can the host run both VMs?
 
@@ -206,14 +208,15 @@ Nothing else is installed or configured by hand. The rest belongs to:
 
 These happen at or after the cutover (#42 §3–4). They're listed here because they change the VM or its neighbours.
 
-- **The IP.** The VM keeps 192.168.0.99. On the router, make it a DHCP reservation for this VM's MAC. Once the old VM is shut down, point the port forwards at .99: 36911 for WebDAV and 443 for the web UI. Since #19 nothing forwards 3000. The old VM keeps its .81 reservation, so a rollback only moves the forwards back (PLAN §6).
-- **The SSH alias.** `momoshtrem-v2` doesn't change. Drop `momoshtrem-vm` once the old VM is deleted.
-- **RAM.** Raise it to 8 GiB once the old VM is off: shut the VM down, set 8192 MiB and start it again. It was built with about 6 GiB for the overlap (§2).
-- **The old VM.** Turn its **Start at boot** off once it's stopped. Otherwise a host reboot brings it back, with its own stack, until it's deleted.
-- **The data disk.** It was grown from 70 to 200 GiB after the cutover. To grow it again:
-  1. In Proxmox, **Hardware → Hard Disk (scsi1) → Disk Action → Resize**, and add the space.
-  2. On the VM, check with `lsblk` that the data disk is still `sdb`, then grow the partition and the filesystem while mounted:
+- **The IP.** On hs2 the VM is at 192.168.0.171, a DHCP reservation for its MAC. The router forwards 36911 (WebDAV) and 443 (the web UI) to it. Since #19 nothing forwards 3000. The hs1 VM keeps its .99 reservation, so a rollback moves the forwards back (PLAN §6).
+- **The SSH alias.** `momoshtrem-v2` now points at 192.168.0.171. Drop `momoshtrem-vm` once the old VM is deleted.
+- **RAM.** On hs1 it was raised to 8 GiB once the old VM was off. On hs2 it stays 6 GiB: the host has no more room.
+- **The old VM.** Turn its **Start at boot** off once it's stopped. Otherwise a host reboot brings it back, with its own stack, until it's deleted. The hs1 VM is stopped, with Start at boot off and `momoshtrem-stack.service` disabled: a second copy of the stack would use the same Trakt tokens.
+- **The data disk.** On hs1 it was grown from 70 to 200 GiB after the cutover. On hs2 it's an LVM volume. To grow it:
+  1. Grow the disk. On hs2, raise its size in the Proxmox repo and apply. By hand, use **Hardware → Hard Disk (scsi1) → Disk Action → Resize**.
+  2. On the VM, check with `lsblk` that the data disk is still `sdb`, then grow the partition, the PV and the LV with its filesystem, while mounted:
      ```bash
-     sudo growpart /dev/sdb 1 && sudo resize2fs /dev/sdb1
+     sudo growpart /dev/sdb 1 && sudo pvresize /dev/sdb1 && sudo lvextend -r -l +100%FREE data-vg/data-lv
      ```
+     On a plain partition (the hs1 VM): `sudo growpart /dev/sdb 1 && sudo resize2fs /dev/sdb1`.
   3. Nothing else changes. On auto, the cache's limit stays 75% of the disk, and momoshtrem picks up the new size within a minute. A custom limit in Settings › Storage stays as it was set. Update §1 with the new size.
