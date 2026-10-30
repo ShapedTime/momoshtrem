@@ -60,6 +60,7 @@ func fakeChild(mode string, args []string) int {
 			{ID: "http", Status: report.Pass},
 			{ID: "play-ok", Status: report.Pass},
 			{ID: "quiescence", Status: report.Pass},
+			{ID: "watchdog", Status: report.Pass},
 			{ID: "etag-stable", Status: report.Fail, Known: "F2", Evidence: "three ETags"},
 		},
 	}

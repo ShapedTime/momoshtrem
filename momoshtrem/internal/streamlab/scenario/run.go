@@ -15,6 +15,7 @@ import (
 	"github.com/shapedtime/momoshtrem/internal/streamlab/checks"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/client"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/media"
+	"github.com/shapedtime/momoshtrem/internal/streamlab/observe"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/stack"
 )
@@ -32,6 +33,14 @@ type RunOptions struct {
 	// Dir is the repetition's folder: artifacts (both clients' status at
 	// a timed-out read) go there. Empty keeps none.
 	Dir string
+	// Logs is the process's log capture, installed as slog's default
+	// before the run (the runner's child does); nil: no log proof (F11's
+	// forward-play signature) and no log counts.
+	Logs *observe.Capture
+	// Diagnose observes in depth: DEBUG logs of the streaming components
+	// (when Logs captures them), full-rate profiles and the flight
+	// recorder all along. Timings aren't faithful then.
+	Diagnose bool
 }
 
 // ToolError is an error of the tool or the environment, not of the
@@ -71,7 +80,8 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 			checks:     map[string]report.RepCheck{},
 			artifacts:  map[string]string{},
 		},
-		dir: opts.Dir,
+		dir:  opts.Dir,
+		logs: opts.Logs,
 	}
 
 	m := MovieMedia(p)
@@ -129,12 +139,15 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 		ss.discover(s, d, stopDiscovery)
 	}
 
+	e.startObserver(opts)
+	defer e.obs.Stop()
 	samples := startSampler(s)
 	e.watchCompletions()
 	defer e.completions.stopWatching()
 	scriptStart := time.Now()
 	scriptErr := runScript(sc, e)
 	wall := time.Since(scriptStart)
+	e.endFaults() // a fault the script left running fails the watchdog check
 
 	// End every playback (an open request is an abort to the server) and
 	// drop every connection: the last close.
@@ -148,6 +161,7 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	time.Sleep(residualWindow)
 	downloadedAfter := e.Downloaded()
 	res := samples.stop()
+	e.obs.Stop()
 
 	rep := &report.Rep{
 		Rep:     opts.Rep,
@@ -163,6 +177,7 @@ func Run(ctx context.Context, sc *Scenario, opts RunOptions) (*report.Rep, error
 	c.metrics(wall, downloadedAtClose, downloadedAfter, residualWindow)
 	c.sessions()
 	c.checks()
+	c.observation()
 	res.Leaked, res.Inherited = leaks(q), q.Inherited
 	rep.Resources = res
 	rep.Notes = append(rep.Notes, e.rec.notes...)

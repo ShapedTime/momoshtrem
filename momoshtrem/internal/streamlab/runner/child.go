@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/shapedtime/momoshtrem/internal/streamlab/observe"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/report"
 	"github.com/shapedtime/momoshtrem/internal/streamlab/scenario"
 )
@@ -53,12 +54,16 @@ func RunChild(args []string, stderr io.Writer) int {
 	rep := fs.Int("rep", 1, "the repetition's number (0 and below: warm-up)")
 	out := fs.String("out", "", "the repetition's folder")
 	configPath := fs.String("config", "", "a YAML config laid over the defaults")
+	diagnose := fs.Bool("diagnose", false, "observe in depth: DEBUG logs of the streaming components, full-rate profiles, the flight recorder")
 	sets := Sets{}
 	fs.Var(sets, "set", "a param override, k=v (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return ChildToolError
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: logLevel()})))
+	// The capture records log records as lab events (observe); it must be
+	// the default before the stack builds its loggers.
+	logs := observe.NewCapture(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: logLevel()}), *diagnose)
+	slog.SetDefault(slog.New(logs))
 	if os.Getenv(ParentPipeEnv) == "1" {
 		go watchParent()
 	}
@@ -70,7 +75,8 @@ func RunChild(args []string, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	r, err := scenario.Run(ctx, sc, scenario.RunOptions{Rep: *rep, Sets: sets, ConfigPath: *configPath, Dir: *out})
+	r, err := scenario.Run(ctx, sc, scenario.RunOptions{Rep: *rep, Sets: sets, ConfigPath: *configPath, Dir: *out,
+		Logs: logs, Diagnose: *diagnose})
 	code := ChildOK
 	if err != nil {
 		var te *scenario.ToolError

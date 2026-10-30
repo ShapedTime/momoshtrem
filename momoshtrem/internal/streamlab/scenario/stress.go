@@ -437,13 +437,14 @@ func (s *stressRun) rounds(t *Title, rounds int64, release time.Duration, fn fun
 		if err := s.Ctx.Err(); err != nil {
 			return err
 		}
-		t.Seeder.HoldUploads()
+		// A declared fault (faultlog.go): the watchdog doesn't trip on it.
+		releaseSeeder := s.HoldSeeder(t, "hold-uploads")
 		at := time.Duration(intn(s.rng, int64(release)+1))
 		pause := time.Duration(100+intn(s.rng, 400)) * time.Millisecond
-		timer := time.AfterFunc(at, func() { t.Seeder.ReleaseUploads() })
+		timer := time.AfterFunc(at, releaseSeeder)
 		err := s.inRound(round+1, func(w int, r *rand.Rand) error { return fn(round, w, r) })
 		timer.Stop()
-		t.Seeder.ReleaseUploads()
+		releaseSeeder()
 		s.event("round")
 		if err != nil {
 			return err

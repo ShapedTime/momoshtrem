@@ -186,7 +186,13 @@ Each strand of a script's choices draws from its own generator, derived from the
 - `client.WriteStatus`
 - the piece runs
 
+A trip fails the `watchdog` check (`--set watchdog=<d>`, half the read timeout by default). #195 explains it only with #195's signature measured at the trip: every stuck piece wanted and incomplete, a seeder connected that the lab didn't pause, downloads on, nothing progressing for half the read timeout or more (whatever the `watchdog` param), and at most two pieces.
+
+A fault a scenario injects on purpose declares itself, for its torrent or for all (`Env.Fault(name, title)`). The watchdog doesn't trip for a torrent while it has one. A fault still open when the script ends fails the check: a forgotten fault would hide a hang.
+
 **Findings.** Rules that turn data into hints, each pointing at evidence. For example, "stall while the playhead's piece was below Now" points to the prioritizer, and "handler lived N s after the client aborted" is F12.
+
+**What observation can see.** anacrolix v1.60.0 publishes a piece state change only when a piece's completion, progress or pending state changes, not when its priority moves between wanted levels (Readahead to Now). So the piece timeline is exact for arrival, and the priority under each reader is read from anacrolix (`PieceState`) by the readers sampler. Measure mode stays at INFO and samples lightly: each sampler reports its cost, the budget is 2% of the process's CPU, and `--set observe=false` runs a repetition unobserved for comparison. `--diagnose` adds the prioritizer's, priority readers' and activity manager's DEBUG records, full-rate profiles, and the flight recorder all along.
 
 ## 6. Reports and verdicts
 

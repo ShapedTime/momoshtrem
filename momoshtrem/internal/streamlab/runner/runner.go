@@ -79,6 +79,9 @@ type Options struct {
 	Command []string
 	// Progress gets a line per repetition; nil for none.
 	Progress io.Writer
+	// Diagnose observes the repetitions in depth (observe, --diagnose):
+	// timings aren't faithful then.
+	Diagnose bool
 }
 
 // Result is a run's outcome.
@@ -342,6 +345,9 @@ func runRep(ctx context.Context, exe string, sc *scenario.Scenario, i int, warmu
 	if opts.ConfigPath != "" {
 		args = append(args, "--config", opts.ConfigPath)
 	}
+	if opts.Diagnose {
+		args = append(args, "--diagnose")
+	}
 	keys := make([]string, 0, len(sets))
 	for k := range sets {
 		keys = append(keys, k)
@@ -562,6 +568,7 @@ func build(sr scenarioRun, tool report.Tool, env report.Env, kenv known.Env, con
 		}
 	}
 	slices.Sort(r.Artifacts)
+	r.Findings = report.FindingLines(measured)
 
 	// Metrics over the measured repetitions that ran.
 	values := map[string][]float64{}
