@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -197,8 +198,7 @@ func TestStorage_CorruptHold(t *testing.T) {
 	}
 }
 
-// Paced reads take at least their bytes' worth of time past the burst,
-// and Stop fails the ones waiting.
+// Paced reads take at least their bytes' worth of time past the burst.
 func TestStorage_Paced(t *testing.T) {
 	l, mi, info := buildPack(t)
 	const bps = 256 << 10
@@ -225,14 +225,74 @@ func TestStorage_Paced(t *testing.T) {
 	if elapsed := time.Since(start); elapsed < floor {
 		t.Errorf("read %d bytes in %v at %d B/s: the pace isn't applied", read, elapsed, bps)
 	}
+}
+
+// Stop serves the read waiting on the pace, the read held, and every read
+// after, at once and right: anacrolix can't take a failed read at close
+// (#237).
+func TestStorage_StopServesAtOnce(t *testing.T) {
+	l, mi, info := buildPack(t)
+	// 16 KiB/s with a 16 KiB burst: past the first chunk, a piece's read
+	// waits about 4 s.
+	st := NewStorageWith(l, StorageOptions{Rate: 16 << 10, Corrupt: []int{2}, CorruptHold: time.Hour})
+	ts, err := storage.NewClient(st).OpenTorrent(context.Background(), &info, mi.HashInfoBytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(i int) error {
+		mp := info.Piece(i)
+		got, want := make([]byte, mp.Length()), make([]byte, mp.Length())
+		if _, err := ts.Piece(mp).ReadAt(got, 0); err != nil && err != io.EOF {
+			return fmt.Errorf("piece %d: %w", i, err)
+		}
+		if _, err := l.ReadAt(want, mp.Offset()); err != nil {
+			return err
+		}
+		if i == 2 { // the corrupt piece: every chunk's first byte flipped
+			for c := int64(0); c < mp.Length(); c += ChunkSize {
+				want[c] ^= 0xff
+			}
+		}
+		if !bytes.Equal(got, want) {
+			return fmt.Errorf("piece %d differs from the layout", i)
+		}
+		return nil
+	}
+	if _, err := ts.Piece(info.Piece(0)).ReadAt(make([]byte, ChunkSize), 0); err != nil {
+		t.Fatal(err) // the burst
+	}
+	paced, held := make(chan error, 1), make(chan error, 1)
+	go func() { paced <- read(1) }()
+	go func() { held <- read(2) }() // the whole piece in one read: it holds an hour
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case err := <-paced:
+		t.Fatalf("a paced read finished before Stop: %v", err)
+	case err := <-held:
+		t.Fatalf("a held read finished before Stop: %v", err)
+	default:
+	}
+	start := time.Now()
 	st.Stop()
-	p := ts.Piece(info.Piece(5))
-	for range 100 { // past the burst, a read must wait: it fails at once
-		if _, err := p.ReadAt(buf, 0); err != nil {
-			return
+	for _, done := range []chan error{paced, held} {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("a read waiting at Stop: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Stop didn't release a waiting read")
 		}
 	}
-	t.Error("reads still succeed after Stop")
+	for i := range info.NumPieces() {
+		if err := read(i); err != nil {
+			t.Errorf("after Stop: %v", err)
+		}
+	}
+	// Paced, these reads would take over 30 s.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("the reads after Stop took %v: still paced", elapsed)
+	}
 }
 
 // The magnet is how a leecher finds the seeder: service.add parses it with

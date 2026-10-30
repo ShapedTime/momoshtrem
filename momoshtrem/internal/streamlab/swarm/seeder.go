@@ -135,10 +135,16 @@ func (s *Seeder) Stats() atorrent.TorrentStats { return s.t.Stats() }
 // connections, their requests and what it has sent.
 func (s *Seeder) WriteStatus(w io.Writer) { s.client.WriteStatus(w) }
 
-// Close stops the seeder, dropping its connections.
+// Close stops the seeder, dropping its connections. The client closes
+// first: it marks the torrent and its connections closed, and their
+// writers send nothing more. Then the storage stops: the peer-request
+// reads still waiting on its pace are served at once, into closed
+// connections, rather than failed (Storage.Stop, #237). The other order
+// would let a read released before the close reach a leecher unpaced.
 func (s *Seeder) Close() error {
+	err := errors.Join(s.client.Close()...)
 	s.storage.Stop()
-	return errors.Join(s.client.Close()...)
+	return err
 }
 
 // aliasHost is the lab's second loopback identity: connecting to 0.0.0.0
