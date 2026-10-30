@@ -105,11 +105,15 @@ func TestFaults_CorruptPiece(t *testing.T) {
 	if n := corrupt.BadServes(); n != chunks {
 		t.Errorf("the corrupt seeder served %d bad chunks, want the piece's %d once", n, chunks)
 	}
-	st := c.torrent.Stats()
+	// The read can end before the leecher has hashed the piece: the
+	// responsive reader reads chunks unverified. The failed hash, the ban
+	// once the piece passes, and the banned connection's removal can all
+	// lag behind it on a loaded machine (#255), so wait for them.
+	st, banned := waitCorruptBan(c.torrent, r.l.client, 10*time.Second)
 	if st.PiecesDirtiedBad.Int64() < 1 {
 		t.Errorf("the leecher saw no piece fail its hash: %+v", st.ConnStats)
 	}
-	if banned := r.l.client.BadPeerIPs(); len(banned) != 1 || banned[0] != "0.0.0.0" {
+	if !aliasBanned(banned) {
 		t.Errorf("banned IPs %v, want the corrupt seeder's alias alone", banned)
 	}
 	if st.ActivePeers != 1 {
@@ -117,6 +121,25 @@ func TestFaults_CorruptPiece(t *testing.T) {
 	}
 	t.Logf("%d flipped bytes read before the hash check failed them", c.bad)
 }
+
+// waitCorruptBan polls the leecher until a piece has failed its hash, the
+// corrupt seeder's alias alone is banned and one peer is left, or timeout
+// passes, and returns the last stats and banned IPs.
+func waitCorruptBan(tor *atorrent.Torrent, cl *atorrent.Client, timeout time.Duration) (atorrent.TorrentStats, []string) {
+	deadline := time.Now().Add(timeout)
+	for {
+		st, banned := tor.Stats(), cl.BadPeerIPs()
+		if st.PiecesDirtiedBad.Int64() >= 1 && aliasBanned(banned) && st.ActivePeers == 1 ||
+			!time.Now().Before(deadline) {
+			return st, banned
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// aliasBanned reports whether banned is the lab's alias (swarm.Alias)
+// alone.
+func aliasBanned(banned []string) bool { return len(banned) == 1 && banned[0] == "0.0.0.0" }
 
 // The same corruption from a seeder dialled by its IP: once the piece
 // passes, smart ban bans 127.0.0.1, which is every lab peer. It documents
