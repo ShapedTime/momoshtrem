@@ -10,8 +10,16 @@
 //	                [--out dir] [--timeout d] [--exe race-binary] [--tests=false]
 //	streamlab list
 //	streamlab explain <scenario|metric|check|known issue>
+//	streamlab compare [--force] [--json] [--out dir] <base> <head>
+//	streamlab ab --base rev [--head rev] [--reps N] [--scenario a,b | --tier t]
+//	             [--race] [--confirm=false] [--set k=v]... [--keep]
+//	streamlab calibrate [--rev main] [--reps N] [--scenario a,b]
+//	streamlab gate [--scenario a,b] [--reps N] [--baseline path]
+//	streamlab baseline update --reason "why" [--from run]
+//	streamlab affected [--base main] [--json] [--strict] [files...]
 //
-// Exit codes: 0 pass, 1 fail, 3 tool or environment error.
+// Exit codes: 0 pass, 1 fail, 3 tool or environment error; compare and ab
+// also 2 for inconclusive (S8, compare.ExitCode).
 package main
 
 import (
@@ -63,9 +71,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return checkCmd(args[1:], stdout, stderr)
 	case runner.ChildCommand:
 		return runner.RunChild(args[1:], stderr)
-	case "compare", "ab", "gate", "calibrate", "baseline", "affected":
-		fmt.Fprintf(stderr, "streamlab %s comes later (S8 #179)\n", args[0])
-		return exitTool
+	case "compare":
+		return compareCmd(args[1:], stdout, stderr)
+	case "ab":
+		return abCmd(args[1:], stdout, stderr)
+	case "calibrate":
+		return calibrateCmd(args[1:], stdout, stderr)
+	case "gate":
+		return gateCmd(args[1:], stdout, stderr)
+	case "baseline":
+		return baselineCmd(args[1:], stdout, stderr)
+	case "affected":
+		return affectedCmd(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		usage(stdout)
 		return exitPass
@@ -83,10 +100,18 @@ Commands:
   check    build with -race, run the stress tier, report races, hangs and go test -race
   list     list the scenarios
   explain  explain a scenario, a metric, a check or a known issue
+  compare  judge two runs: pass, regression, improvement, inconclusive or fail
+  ab       did this change make streaming worse? an interleaved A/B against a base
+  calibrate  measure this machine's noise for compare (.streamlab/noise.json)
+  gate     run the gate tier and hold it to testdata/baseline.json
+  baseline update --reason "why": the only way to change the baseline
+  affected which scenarios cover this diff
 
 Run from momoshtrem/: go run -tags disable_libutp ./cmd/streamlab run --tier gate
                       go run -tags disable_libutp ./cmd/streamlab check
-Exit codes: 0 pass, 1 fail, 3 tool or environment error.
+                      go run -tags disable_libutp ./cmd/streamlab ab --base main
+Exit codes: 0 pass, 1 fail, 3 tool or environment error; compare and ab:
+0 pass or improvement, 1 fail or regression, 2 inconclusive, 3 tool error.
 `)
 }
 
