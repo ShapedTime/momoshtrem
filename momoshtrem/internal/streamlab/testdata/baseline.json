@@ -1,0 +1,505 @@
+{
+  "schema": "streamlab.baseline/v1",
+  "doc": "The gate's expectations: each gate scenario's check statuses and exact metrics, never timings (docs/streamlab/PLAN.md §6). Change it only with `streamlab baseline update --reason \"…\"`: the gate refuses a file edited by hand (digest).",
+  "updates": [
+    {
+      "date": "2026-10-31T20:22:13.614864Z",
+      "commit": "d6b5d7058a9347c454e7678940637e8ada9948ca",
+      "reason": "First baseline (S8, #179): the gate tier on main (b54b02d) with S8's lab, 5 reps, macOS (MIME resolves .mkv)",
+      "reps": 5
+    }
+  ],
+  "env": {
+    "os": "darwin",
+    "mime_resolves_mkv": true
+  },
+  "scenarios": {
+    "cold-start": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "propfind-no-load": "xfail:F3",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "torrents_loaded_by_propfind": 1
+      }
+    },
+    "corrupt-piece": {
+      "checks": {
+        "corrupt-caught": "pass",
+        "http": "pass",
+        "integrity": "xfail:#231",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 32,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "dual-reader-close": {
+      "checks": {
+        "close-keeps-windows": "xfail:F6",
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "dual-reader-open": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "open-keeps-windows": "xfail:F13",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "etag-stability": {
+      "checks": {
+        "etag-stable": "xfail:F2",
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "etag_changes": 3,
+        "if_range_honoured": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "hdrezka-503": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "retry-503": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "cdn_bodies_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "link_invalidations": 0,
+        "link_resolves": 1,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "streamer_slots_held": 0
+      }
+    },
+    "hdrezka-expiry": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "link-refresh": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "cdn_bodies_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "link_invalidations": 3,
+        "link_resolves": 4,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "streamer_slots_held": 0
+      }
+    },
+    "hdrezka-play": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "remote-browse-no-open": "pass",
+        "remote-one-open-per-get": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "cdn_bodies_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "link_invalidations": 0,
+        "link_resolves": 1,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "streamer_slots_held": 0
+      }
+    },
+    "hdrezka-seek": {
+      "checks": {
+        "abort-lag": "pass",
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "remote-one-open-per-get": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "cdn_bodies_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "link_invalidations": 0,
+        "link_resolves": 1,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "streamer_slots_held": 0
+      }
+    },
+    "hdrezka-stall": {
+      "checks": {
+        "abort-lag": "xfail:#232",
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "remote-watchdog": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "cdn_bodies_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "link_invalidations": 0,
+        "link_resolves": 1,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "streamer_slots_held": 0
+      }
+    },
+    "next-episode": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "next-prefetch": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "parallel-ranges": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "pause-resume": {
+      "checks": {
+        "http": "pass",
+        "idle-resume": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "probe-burst": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "no-sniff-reads": "pass",
+        "play-ok": "pass",
+        "propfind-no-load": "xfail:F3",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0,
+        "sniff_readers": 0,
+        "torrents_loaded_by_propfind": 1
+      }
+    },
+    "reconnect": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "scrub": {
+      "checks": {
+        "abort-lag": "xfail:F12",
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "seeder-loss": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "swarm-recovers": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "seek-back": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "seek-fwd": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "slow-swarm": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "swarm-shaped": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "small-cache": {
+      "checks": {
+        "cache-holds-complete": "xfail:F11",
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "xfail:F11",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    },
+    "steady-play": {
+      "checks": {
+        "http": "pass",
+        "integrity": "pass",
+        "play-ok": "pass",
+        "quiescence": "pass",
+        "script": "pass",
+        "watchdog": "pass"
+      },
+      "exact": {
+        "blocked_reads_left": 0,
+        "integrity_errors": 0,
+        "leaked_goroutines": 0,
+        "open_files_left": 0,
+        "panics": 0,
+        "readers_left": 0,
+        "requests_left": 0,
+        "sessions_left": 0
+      }
+    }
+  },
+  "digest": "81fece0bda903796867af5ed5731935b5ee749391afa72926abcb10b2bcc57f3"
+}
