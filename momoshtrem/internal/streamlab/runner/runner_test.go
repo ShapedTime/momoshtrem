@@ -49,10 +49,11 @@ func fakeChild(mode string, args []string) int {
 		report.WriteJSON(filepath.Join(*out, "rep.json"), report.Rep{Rep: *rep, Status: report.RepError, Error: "no seeder"})
 		return runner.ChildToolError
 	}
+	cwd, _ := os.Getwd()
 	r := report.Rep{
 		Rep: *rep, Status: report.RepOK, Config: report.Config{Fingerprint: "fp"},
 		Env:     &report.Env{GOMAXPROCS: runtime.GOMAXPROCS(0)},
-		Notes:   []string{"tmpdir=" + os.Getenv("TMPDIR"), "pipe=" + os.Getenv(runner.ParentPipeEnv), "hook=" + os.Getenv("STREAMLAB_TEST_HOOK")},
+		Notes:   []string{"tmpdir=" + os.Getenv("TMPDIR"), "pipe=" + os.Getenv(runner.ParentPipeEnv), "hook=" + os.Getenv("STREAMLAB_TEST_HOOK"), "cwd=" + cwd},
 		Metrics: map[string]float64{"etag_changes": float64(*rep)},
 		Checks: []report.RepCheck{
 			{ID: "script", Status: report.Pass},
