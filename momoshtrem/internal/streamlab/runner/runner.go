@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +69,10 @@ type Options struct {
 	// Exe is the streamlab binary to run repetitions with;
 	// os.Executable() when empty.
 	Exe string
+	// Dir is the repetitions' working directory; this process's when
+	// empty. An A/B runs each side's in its own tree (RunAB), so each
+	// child records its own commit (report.ToolInfo).
+	Dir string
 	// RepEnv adds to each repetition's environment, given its folder:
 	// streamlab check's GORACE log_path (S7). Optional.
 	RepEnv func(repDir string) []string
@@ -142,6 +147,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	runID := fmt.Sprintf("%s-%d", started.Format("20060102-150405"), os.Getpid())
 	dir := opts.Out
 	if dir == "" {
+		if err := EnsureDir(Dir()); err != nil {
+			return nil, err
+		}
 		dir = filepath.Join(Dir(), "runs", runID)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -220,12 +228,22 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		done = append(done, sr)
 	}
 
+	run.WallS = time.Since(started).Seconds()
+	if err := res.finish(done, tool, env, resolvesMKV, opts.ConfigPath, run); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// finish judges the run's scenarios again with the run's tally of each
+// intermittent issue, and writes their reports and the run's index.
+func (res *Result) finish(done []scenarioRun, tool report.Tool, env report.Env, resolvesMKV bool, configPath string, run report.Run) error {
 	tally := known.TallyRun(outcomes(done))
 	for _, sr := range done {
 		kenv := known.Env{MIMEResolvesMKV: resolvesMKV, Guards: sr.sc.Guards, Run: tally}
-		r := build(sr, tool, env, kenv, opts.ConfigPath)
+		r := build(sr, tool, env, kenv, configPath)
 		if err := r.Write(sr.dir); err != nil {
-			return nil, fmt.Errorf("writing %s's report: %w", sr.sc.Name, err)
+			return fmt.Errorf("writing %s's report: %w", sr.sc.Name, err)
 		}
 		res.Reports = append(res.Reports, r)
 		entry := report.NewIndexEntry(r, sr.run.WallS, sr.sc.Key, filepath.Join(sr.sc.Name, "report.json"))
@@ -242,12 +260,11 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if len(res.Reports) > 0 {
 		res.Index.Tool, res.Index.Env = res.Reports[0].Tool, res.Reports[0].Env
 	}
-	run.WallS = time.Since(started).Seconds()
 	res.Index.Run = run
-	if err := res.Index.Write(dir); err != nil {
-		return nil, fmt.Errorf("writing the run's index: %w", err)
+	if err := res.Index.Write(res.Dir); err != nil {
+		return fmt.Errorf("writing the run's index: %w", err)
 	}
-	return res, nil
+	return nil
 }
 
 // needsConfirmation reports whether an intermittent issue fired in a
@@ -372,6 +389,7 @@ func runRep(ctx context.Context, exe string, sc *scenario.Scenario, i int, warmu
 	defer removeAll(tmp)
 
 	cmd := exec.Command(exe, args...)
+	cmd.Dir = opts.Dir
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	cmd.Env = append(os.Environ(), "GOTRACEBACK=all", "TMPDIR="+tmp, ParentPipeEnv+"=1")
 	if opts.GOMAXPROCS > 0 {
@@ -618,6 +636,20 @@ func build(sr scenarioRun, tool report.Tool, env report.Env, kenv known.Env, con
 		}
 	}
 	return r
+}
+
+// EnsureDir creates streamlab's folder lab when it's missing, with a
+// .gitignore of its own ("*"): a checkout on a branch whose .gitignore
+// predates streamlab doesn't list it as untracked.
+func EnsureDir(lab string) error {
+	if err := os.MkdirAll(lab, 0o755); err != nil {
+		return err
+	}
+	ignore := filepath.Join(lab, ".gitignore")
+	if _, err := os.Stat(ignore); errors.Is(err, fs.ErrNotExist) {
+		return os.WriteFile(ignore, []byte("*\n"), 0o644)
+	}
+	return nil
 }
 
 // Dir is streamlab's folder: .streamlab at the root of the repository
