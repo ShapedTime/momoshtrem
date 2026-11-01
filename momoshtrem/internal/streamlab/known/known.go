@@ -428,3 +428,5 @@ func Judge(check string, reps []Outcome, env Env) Verdict {
 	}
 	return Verdict{Status: report.XFail, Known: order[0], Note: strings.Join(notes, "; ")}
 }
+
+// Probe for #181 (affected --strict in CI); never merged.

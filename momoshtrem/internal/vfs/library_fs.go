@@ -1051,3 +1051,5 @@ func entryToFile(e Entry) File {
 		return nil
 	}
 }
+
+// Probe for #181 (affected --strict in CI); never merged.
