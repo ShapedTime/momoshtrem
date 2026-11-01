@@ -244,7 +244,9 @@ jobs:
           "$RUNNER_TEMP/streamlab-bin" affected --strict --base "$BASE" > "$out/affected.txt" 2> "$out/affected-warnings.txt"
           code=$?
           set -e
-          cat "$out/affected.txt" "$out/affected-warnings.txt"
+          # The scenario list stays out of the log: setup-go's problem matcher
+          # reads its "<file>.go: <why>" lines as errors. The summary has it
+          head -n 1 "$out/affected.txt"
           {
             echo "### streamlab affected, against $BASE"
             case "$code" in
@@ -258,7 +260,11 @@ jobs:
             cat "$out/affected.txt"
             printf '```\n</details>\n\n'
           } >> "$GITHUB_STEP_SUMMARY"
-          grep '^WARNING: ' "$out/affected-warnings.txt" | sed 's/^WARNING: /::warning title=streamlab affected::/' || true
+          if [ "$code" -eq 1 ]; then
+            sed -n 's/^WARNING: /::warning title=streamlab affected::/p' "$out/affected-warnings.txt"
+          elif [ "$code" -ne 0 ]; then
+            cat "$out/affected-warnings.txt"
+          fi
           exit "$code"
       # -race needs cgo; disable_libutp keeps it on the pure-Go uTP production
       # runs (PLAN D3). -count=1: a race is caught only by running the tests
