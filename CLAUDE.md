@@ -83,7 +83,7 @@ cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-modes rules,au
 # streamlab, the streaming path's lab (the streamlab skill says when; docs/streamlab/README.md has every flag).
 # One heavy run at a time; long ones on power under caffeinate -i. Use --base origin/main after git fetch
 cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab list                          # scenarios and what each guards (explain <name> for one)
-cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab affected --base origin/main   # the scenarios a diff touches, and the ab/check lines to run
+cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab affected --base origin/main --strict   # the scenarios a diff touches, and the ab/check lines to run
 cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab gate                          # the gate tier held to testdata/baseline.json (~20 min)
 cd momoshtrem && caffeinate -i go run -tags disable_libutp ./cmd/streamlab ab --base origin/main --reps 5 --scenario a,b   # A/B against main, confirmed on fresh reps (5–11 min a scenario)
 cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab check                         # -race build, stress tier, go test -race

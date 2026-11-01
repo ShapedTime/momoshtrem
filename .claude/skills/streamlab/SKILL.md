@@ -1,6 +1,6 @@
 ---
 name: streamlab
-description: Guards momoshtrem's fragile streaming path with the streamlab lab. Use it before you change, review or merge anything under momoshtrem/internal/vfs, internal/webdav, internal/streaming, internal/torrent, internal/sessions or internal/hdrezka, internal/service/hdrezka_source.go, or the streaming wiring in cmd/momoshtrem/main.go (torrent client, activity manager, VFS, WebDAV server). Also use it whenever someone reports buffering, a slow start, a slow seek, a stall or a stuck read in Infuse or on the Apple TV. It covers the workflow (affected, gate, ab, check), how to read verdicts and exit codes, which scenario guards each fragile point, and debugging playbooks.
+description: Guards momoshtrem's fragile streaming path with the streamlab lab. Use it before you change, review or merge anything under momoshtrem/internal/vfs, internal/webdav, internal/streaming, internal/torrent, internal/sessions or internal/hdrezka, internal/service/hdrezka_source.go, or the streaming wiring in cmd/momoshtrem/main.go (torrent client, activity manager, VFS, WebDAV server), the torrent and streaming settings in internal/config (readahead, urgent buffer, read timeout), a bump of anacrolix/torrent or golang.org/x/net in go.mod. Also use it whenever someone reports buffering, a slow start, a slow seek, a stall or a stuck read in Infuse or on the Apple TV. It covers the workflow (affected, gate, ab, check), how to read verdicts and exit codes, which scenario guards each fragile point, and debugging playbooks.
 ---
 
 # streamlab
@@ -60,6 +60,7 @@ The lab runs the real streaming stack in-process against synthetic seeders and a
 - `ab --base origin/main` (<sha>) `--reps 5 --scenario <list>`: **<VERDICT>** (exit <n>)
   > <compare.md's first line>
   - <scenario>: <metric> <base> → <head> (Δ, screen p, fresh p) …
+  - changed, with no better direction: <scenario>: <metric> <base> → <head> (p) …, or "none"
   - load per CPU, base / head: <from compare.md>; count noise: <defaults or calibrated>
 - `check --scenario <list>`: **PASS**, 0 races
 - What the lab can't see here, and how it was tested on the device: <…>
@@ -74,22 +75,33 @@ Verdicts, worst first: `fail` > `regression` > `inconclusive` > `improvement` > 
   - Six unchanged-tree runs of the gate tier all came out inconclusive, with 13 to 18 of 22 scenarios passing, and never a regression.
   - Only large effects reach `regression`. 356e74d's old behaviour moved `activation_wait` from 33 ms to 3334 ms.
 - **`inconclusive` with p > 0.2 on every flagged metric means "no detectable change at 5 reps".** Write exactly that. It's not a pass, and it's not a regression.
+  - This applies only when every inconclusive row is a metric whose note says "past the threshold but not significant" or "didn't hold up on fresh reps". p is the p column of `compare.md`.
+  - These are never "no detectable change":
+    - a check that failed on some head reps ("a flake or a regression? add reps");
+    - an intermittent issue over its rate ("over its known rate, but not significantly more than base");
+    - a metric head didn't reach, or reached on fewer reps ("head never got there?", "the rest never got there");
+    - a metric with too few reps on a side ("needs 5 reps a side");
+    - a correctness check that was n/a in head ("couldn't tell in head");
+    - skewed load ("the sides ran under very different load").
+
+    Report them as they are, with their evidence.
 - **A single compare is only a screen.**
   - `compare base head`, `ab --confirm=false` and an ab folder without `confirm/` turn every timing and count regression into `inconclusive` ("a single compare is a screen: confirm with ab").
   - Only the confirmation in `ab` makes a timing or count change a verdict. It needs:
     - the screen at one-sided p ≤ 2/252;
     - the fresh reps at p ≤ 1/252;
     - both runs together past the threshold.
-- **A `fail` is never noise.**
+- **What makes a `fail`, and none of it is noise:**
   - A correctness check that fails in head fails the compare, whatever base did. The correctness checks are `integrity`, `http`, `race`, `watchdog` and `quiescence`.
   - A rep that hung or crashed fails it too.
   - Any other check fails when it fails on every head rep, or on significantly more reps than in base (Fisher's test).
-- **A check that failed on 1 of 10 head reps and none of base's** is `inconclusive` ("a flake or a regression? add reps"). That's usually #266.
+  - **The exception** is a check that failed only because an intermittent known issue fired over its rate: #195 on `watchdog` or `play-ok`, #225 on `quiescence`. That issue's firings are judged against base's. They're a `fail` when the issue fired on every head rep, or over its rate and significantly more often than base. Otherwise they're `inconclusive` ("over its known rate, but not significantly more than base (load?): add reps"). Skewed load never excuses a firing on a correctness check.
+- **A check that failed on 1 of 10 head reps and none of base's** is `inconclusive` ("a flake or a regression? add reps"). If it has #266's exact shape ("Known flakes" below), say so. Any other shape may be a regression: add reps, and treat a second firing as yours.
 - **Known issues.** `xfail → xpass` is an improvement ("known issue X appears fixed"). `pass → xfail` of a deterministic issue is a regression ("known issue X is back").
 - **Thresholds.** Both kinds need 5 reps a side and Mann-Whitney p < 0.05.
   - Timings count past max(15%, a floor): 100 ms for TTFB, 200 ms for time to playable, 1 stall, and so on.
   - Counts count past max(10%, 3×CV, a floor). A machine without `calibrate` uses a CV of 0.10, and `compare.md` says which.
-  - Metrics with no better direction (`pieces_downgraded`, `reads`, `wall_time` …) are only reported as `changed`.
+  - Metrics with no better direction (`pieces_downgraded`, `reads`, `wall_time` …) are only reported as `changed`, even under a `pass` or an `inconclusive`. Report every `changed` row in the PR: a 9de9c67-style revert shows only as `pieces_downgraded` changed.
   - All of them: README, "Metrics".
 
 **Exit codes of `compare` and `ab`:**
@@ -98,15 +110,28 @@ Verdicts, worst first: `fail` > `regression` > `inconclusive` > `improvement` > 
 |---|---|---|
 | 0 | pass or improvement | Paste it. For an xpass, see "Known flakes and known issues" below. |
 | 1 | fail or regression | Read the scenario's section in `compare.md`. A fail names the check, its reps and its evidence. A regression names the metric, Δ and both runs' p. Debug with the playbooks below. A confirmed regression has already replicated on fresh reps: don't rerun it away. |
-| 2 | inconclusive | If p > 0.2 everywhere, report "no detectable change at 5 reps". If something flagged and didn't hold up, add reps (below). |
-| 3 | tool or environment error | Read stderr. "base predates streamlab hooks": the base is older than #173, so use a newer one. "isn't empty": give `--out` a new folder. A build error: your head doesn't build. "head couldn't run it" on a scenario base ran: open that rep's `child.log`. Your change may stop the stack from starting (#268), so don't just retry. |
+| 2 | inconclusive | If every inconclusive row is a metric with p > 0.2 (the rule above), report "no detectable change at 5 reps". If something flagged and didn't hold up, add reps (below). Report anything else as it is. |
+| 3 | tool or environment error | `ab`'s own errors are on stderr. "base predates streamlab hooks": the base is older than #173, so use a newer one. "isn't empty": give `--out` a new folder. A build error: your head doesn't build. A side that couldn't run a scenario shows in `compare.md`, not on stderr, as an "**Error:** head couldn't run it: …" line in the scenario's section. Open that rep's `child.log` (`head/<scenario>/rep-N/child.log` in the ab folder). Your change may stop the stack from starting (#268), so don't just retry. |
 
-`run`, `gate` and `check` exit 0 on a pass (xfails included), 1 on a fail and 3 on a tool error.
+`run`, `gate` and `check` exit 0 on a pass (xfails included), 1 on a fail and 3 on a tool error. A 3 from `gate` or `run` on a scenario main runs can be #268: your change may stop the stack from starting. Read the rep's `child.log` (`.streamlab/runs/<id>/<scenario>/rep-N/child.log`), and don't just retry.
+
+**The PR's verdict comes from default flags only.** Use the `--scenario` list from `affected`, and `--reps 10` when you add reps. Runs with `--set`, `--config`, `--timeout`, `--force` or `--confirm=false` are for debugging, never the PR's verdict. Reviewers run `affected --strict` themselves.
 
 **Add reps** means one more `ab`:
 - over the inconclusive scenarios only, with `--reps 10`, the same base and an idle machine. It takes twice as long per scenario.
 - Stop after that run. If it's still inconclusive, report the flagged metrics with their Δ and p values, and leave the call to the reviewer and the device.
 - Don't loop until it says pass, don't pick the run you like, and don't touch thresholds.
+
+## Anti-gaming rule
+
+- **Not in the same PR as a streaming change**, unless the PR gives a written reason a reviewer can check: edits to the baseline, the thresholds or floors, the registry or its signatures, the scenarios, the checks, or any other judgement code. All of `internal/streamlab/` and `cmd/streamlab/` counts. `ab` runs one lab on both sides, so a looser lab hides a regression from it.
+- **`streamlab affected --strict` exits 1 on such a diff.** Paste its warning and your reason. By default, lab changes land in their own PR first.
+- **`baseline.json` changes only through `streamlab baseline update --reason "…"`.** It records the reason, the commit and the date, and the gate refuses a file edited by hand (a digest).
+
+## Safety first (D1) and bugs the lab finds (§3)
+
+- **D1.** Lab and hook PRs change no production behaviour. A streamtrace hook PR passes PLAN §7 R5's A/B at off, summary and detailed, with exact metrics identical.
+- **§3.** A bug the lab finds gets its own issue, labelled `streaming` and linked from #171, with the evidence and the command that reproduces it. Don't fix it inside a lab PR, and don't widen a signature to make it pass.
 
 ## Fragile points and what guards them
 
@@ -226,21 +251,13 @@ Its timings aren't faithful: diagnose with it, measure without it. The artifacts
   1. Run `ab` first, so it shows `xfail → xpass`.
   2. Delete the issue's entry from `internal/streamlab/known`. The scenario keeps its Guard: it now guards the fix.
   3. Run `streamlab baseline update --scenario <its scenarios> --reason "F12 fixed (#217): abort-lag xfail:F12 → pass"`.
-  4. Run `streamlab gate`: it passes again. Explain all of this in the PR body. It's the one registry and baseline edit allowed beside a streaming change, and it needs that reason.
+  4. Run `streamlab gate`: it passes again. Explain all of this in the PR body. It's the usual exception to the anti-gaming rule, and it needs that reason.
 
-## Anti-gaming rule
-
-- **Not in the same PR as a streaming change**, unless the PR gives a written reason a reviewer can check: edits to the baseline, the thresholds or floors, the registry or its signatures, the scenarios, the checks, or any other judgement code. All of `internal/streamlab/` and `cmd/streamlab/` counts. `ab` runs one lab on both sides, so a looser lab hides a regression from it.
-- **`streamlab affected --strict` exits 1 on such a diff.** Paste its warning and your reason. Lab changes land in their own PR first.
-- **`baseline.json` changes only through `streamlab baseline update --reason "…"`.** It records the reason, the commit and the date, and the gate refuses a file edited by hand (a digest).
-
-## Bugs the lab finds (D1)
-
-Each one gets its own issue, labelled `streaming` and linked from #171, with the evidence and the command that reproduces it. Don't fix it inside a lab PR, and don't widen a signature to make it pass.
 
 ## Production, read-only (placeholder for S19, #190)
 
 The production tools (`capture`, `timeline`, `watch`, `replay`) aren't built yet; #190 fills this section in. The rules hold already (PLAN D9 and §8):
 - Only GETs, only to `127.0.0.1`, only through the SSH tunnel the user opens to the loopback metrics port.
 - No `/api` mutations, restarts, config changes or deploys. Turning metrics or tracing on in the VM's `.env` is the user's job.
+- Never send a request to production's WebDAV: a GET there loads and downloads a torrent (§8: `run --target` is for local compose only).
 - The repo is public: no hostnames, addresses or secrets in issues, PRs or files.

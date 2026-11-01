@@ -561,7 +561,7 @@ A new scenario is a lab change. It lands in its own PR, not beside a streaming c
 
 ## Adding a known issue
 
-Only a bug the lab has shown gets an entry. It first gets its own issue, labelled `streaming` and linked from #171 (D1).
+Only a bug the lab has shown gets an entry. It first gets its own issue, labelled `streaming` and linked from #171 (PLAN §3).
 
 1. **Find the signature.** It's what, measured at the failure, proves this bug and nothing else. Examples:
    - #195: a silence of half the read timeout or more, at most two wanted and incomplete pieces, a seeder connected that the lab didn't hold, downloads on.
@@ -650,6 +650,7 @@ The gate tier hasn't been calibrated on any machine yet: at 10 reps it takes abo
   - F1 can't show on macOS.
   - A 9de9c67 revert, and 356e74d as reverted (#265).
   - The wiring in `cmd/momoshtrem/main.go`: the lab has its own copy.
+  - Downloads beside a stream. `internal/downloads` and other linked packages map to the gate tier in `affected`, but the stack never runs the downloads manager. So Normal-priority downloads running beside a stream aren't covered.
 - **Known rough edges:** #266 (a flake with no signature) and #268 (a head that can't start reads as exit 3).
 
 The lab's own tests:
