@@ -157,9 +157,11 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
 
   # Whether the streaming path changed, for streamlab: a PR's merge commit
-  # against its first parent, the base it merges into. main always runs it,
-  # so its record on main shows how often it fails. The paths are the lab's
-  # (streamlab affected's Streaming), less the library.
+  # against its first parent, the base it merges into. The paths are #181's
+  # list plus config, common and metrics, less cmd/momoshtrem/main.go: the
+  # lab doesn't link it (internal/streamlab/stack mirrors its wiring). main
+  # always runs streamlab, the backstop for what the filter leaves out, and
+  # its record there shows how often the job fails.
   streaming-paths:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -182,7 +184,6 @@ jobs:
           files=$(git diff --name-only HEAD^1 HEAD -- \
             .github/workflows/ci.yml \
             momoshtrem/go.mod momoshtrem/go.sum \
-            momoshtrem/cmd/momoshtrem/main.go \
             momoshtrem/cmd/streamlab/ \
             momoshtrem/internal/vfs/ momoshtrem/internal/webdav/ momoshtrem/internal/streaming/ \
             momoshtrem/internal/torrent/ momoshtrem/internal/sessions/ momoshtrem/internal/hdrezka/ \
@@ -203,7 +204,9 @@ jobs:
   # Non-blocking until it has been green on main for a week (docs/ops/CI.md §7)
   streamlab:
     needs: streaming-paths
-    if: needs.streaming-paths.outputs.changed == 'true'
+    # Skips only on an explicit false: if streaming-paths fails, streamlab
+    # runs, since a skipped required check would count as passed
+    if: ${{ !cancelled() && needs.streaming-paths.outputs.changed != 'false' }}
     continue-on-error: true
     runs-on: ubuntu-24.04
     # ~22 min: the tests 2, the gate 18 (22 scenarios, a warm-up and a rep
@@ -232,7 +235,9 @@ jobs:
       # streaming path and the lab together gets a warning, for a reviewer and
       # a written reason. It runs first, on the checkout as it came (affected
       # diffs the working tree), and never fails the job: a fix that retires a
-      # known issue changes the registry and the baseline with the code
+      # known issue changes the registry and the baseline with the code. A
+      # warning is an annotation and exit 0; only a tool error fails the step.
+      # affected and this workflow come from the PR itself: a prompt, not a guard
       - name: streamlab affected --strict
         if: github.event_name == 'pull_request'
         continue-on-error: true
@@ -247,6 +252,7 @@ jobs:
           # The scenario list stays out of the log: setup-go's problem matcher
           # reads its "<file>.go: <why>" lines as errors. The summary has it
           head -n 1 "$out/affected.txt"
+          echo "The scenarios and commands: the job summary, or affected.txt in the streamlab artifact"
           {
             echo "### streamlab affected, against $BASE"
             case "$code" in
@@ -260,12 +266,12 @@ jobs:
             cat "$out/affected.txt"
             printf '```\n</details>\n\n'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$code" -eq 1 ]; then
-            sed -n 's/^WARNING: /::warning title=streamlab affected::/p' "$out/affected-warnings.txt"
-          elif [ "$code" -ne 0 ]; then
-            cat "$out/affected-warnings.txt"
-          fi
-          exit "$code"
+          case "$code" in
+            0) ;;
+            1) sed -n 's/^WARNING: /::warning title=streamlab affected::/p' "$out/affected-warnings.txt" ;;
+            *) cat "$out/affected-warnings.txt"
+               exit "$code" ;;
+          esac
       # -race needs cgo; disable_libutp keeps it on the pure-Go uTP production
       # runs (PLAN D3). -count=1: a race is caught only by running the tests
       - name: go test -race
@@ -273,6 +279,7 @@ jobs:
           go test -race -tags disable_libutp -count=1 -timeout 15m \
             ./internal/streamlab/... ./cmd/streamlab/... ./internal/vfs/... \
             ./internal/streaming/... ./internal/torrent/... ./internal/sessions/... \
+            ./internal/streamtrace/... ./internal/hdrezka/... \
             2>&1 | tee "$RUNNER_TEMP/streamlab/go-test-race.txt"
       # Runs even when the tests failed
       - name: streamlab gate

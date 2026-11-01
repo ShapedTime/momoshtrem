@@ -12,7 +12,7 @@
 | `image (momoshtrem)`, `image (momoshtrem-web)` | PRs | Build each image for `linux/amd64` without pushing. They run alongside the checks |
 | `publish (momoshtrem)`, `publish (momoshtrem-web)` | `main` | Wait for `go` and `web`, then build and push the image (§2) |
 | `streaming-paths` | PRs and `main` | Says whether a PR changes the streaming path, for `streamlab` (§7). On `main` the answer is always yes |
-| `streamlab` | PRs that change the streaming path, and `main` | Does three things (§7):<ul><li>`streamlab affected --strict` (PRs)</li><li>`go test -race` over the lab and the streaming packages</li><li>`streamlab gate --reps 1` against the committed baseline</li></ul>**Non-blocking** for now |
+| `streamlab` | PRs that change the streaming path, and every push to `main` | Does three things (§7):<ul><li>`streamlab affected --strict` (PRs)</li><li>`go test -race` over the lab and the streaming packages</li><li>`streamlab gate --reps 1` against the committed baseline</li></ul>**Non-blocking** for now |
 
 The commands are the ones in `CLAUDE.md` "Commands". A new push to a PR cancels that PR's older run. `main` runs are never cancelled, so every commit gets its images.
 
@@ -79,24 +79,32 @@ The user does these steps in GitHub. Agents can't.
 `streaming-paths` diffs a PR's merge commit against its first parent, the base it merges into. `streamlab` runs when one of these changed, all under `momoshtrem/`:
 - `internal/{vfs,webdav,streaming,torrent,sessions,hdrezka,streamlab,streamtrace}/`
 - `internal/service/hdrezka_source.go`
-- `cmd/momoshtrem/main.go`
 - `cmd/streamlab/`
 - `go.mod`, `go.sum`
 - `internal/{config,common,metrics}/`: `streamlab affected` maps them to every scenario. The config holds the streaming defaults (readahead, `read_timeout`).
 
 It also runs when `.github/workflows/ci.yml` changes.
 
-`internal/library/` is left out: v2 changes it all the time. On other PRs the check shows as skipped. On `main` it runs after every push, so its record there shows how often it fails.
+On other PRs the check shows as skipped. Two kinds of change are left out:
+- **`internal/library/`** and the other packages the lab links: v2 changes them all the time.
+- **`cmd/momoshtrem/main.go`.** The lab doesn't link it: `internal/streamlab/stack` mirrors its wiring. A change to main.go's streaming wiring isn't seen by the lab until the stack is updated to match.
+
+On `main`, `streamlab` runs after every push. That run is the backstop for what the PR filter leaves out, and its record shows how often the job fails. `streaming-paths` sets `changed` to true before any diff on a push, so docs-only and web-only merges run it too.
+
+`streamlab` skips only when `streaming-paths` answers an explicit `false`. If `streaming-paths` fails, `streamlab` runs anyway.
 
 ### What it does
 It works in `momoshtrem/`, on a checkout with full history:
 1. **Build** `cmd/streamlab` with `-tags disable_libutp`.
 2. **`streamlab affected --strict --base origin/<the PR's base>`** (PRs only). It warns when one diff changes the code the lab runs and the lab itself, which includes the baseline and the known-issue registry (PLAN §6 "affected", §11).
-   - The warning goes to the job summary and as an annotation.
+   - The warning goes to the job summary and as an annotation, and the step still exits 0.
+   - Only a tool error (exit 3) fails the step, and even that doesn't fail the job.
    - It never fails the job: a fix that retires a known issue rightly changes the code, the registry and the baseline in one PR.
    - What it asks for: a reviewer checks that the lab change doesn't loosen what would catch the streaming change, and the PR says why the two land together.
+   - **It's a prompt for review, not a guard.** `affected` and this workflow both come from the PR itself, so the PR could change either.
    - It runs before anything else touches the working tree, because affected diffs the working tree. The base is the PR's real base, fetched with the history. A stale local `main` doesn't come into it.
-3. **`go test -race -tags disable_libutp -count=1`** over `./internal/streamlab/... ./cmd/streamlab/... ./internal/vfs/... ./internal/streaming/... ./internal/torrent/... ./internal/sessions/...`. `-count=1` because a cached pass catches no race.
+   - The log gets only affected's first line, because setup-go's problem matcher reads its `<file>.go: <why>` lines as errors. The full list is in the job summary and in `affected.txt` in the artifact.
+3. **`go test -race -tags disable_libutp -count=1`** over `./internal/streamlab/... ./cmd/streamlab/... ./internal/vfs/... ./internal/streaming/... ./internal/torrent/... ./internal/sessions/... ./internal/streamtrace/... ./internal/hdrezka/...`. `-count=1` because a cached pass catches no race.
 4. **`streamlab gate --reps 1`**, even when the tests failed.
    - It runs the gate tier, one warm-up and one rep per scenario, and holds it to `internal/streamlab/testdata/baseline.json`.
    - It judges counts and correctness, never timings (PLAN D5).
@@ -135,16 +143,16 @@ A failure is a finding about the streaming path or the lab. It's never a reason 
 - To reproduce on the Mac: `go run -tags disable_libutp ./cmd/streamlab gate --scenario <name> --reps 3`.
 
 ### Non-blocking for now
-The job has `continue-on-error: true`, since existing races may surface.
+The job has `continue-on-error: true`. #181 started it that way in case races surfaced. None did in #269's runs; the gate's flakes are the reason now.
 - A failure shows as a red `streamlab` check, but the workflow still passes.
 - `publish` waits only for `go` and `web`.
 - `streamlab` isn't a required check.
 
-**It's flaky today.** Of #269's first six gate runs, three failed on flakes that no known issue explains yet:
+**It's flaky today.** Of #269's seven gate runs, four failed on single-rep flakes that no known issue explains yet:
 - `play-ok` breaks: #266 and #276
 - `swarm-shaped` after a #195 stall: #275
 - hdrezka-stall's `remote-watchdog`: #277
-- F6's signature missing a reset: #278
+- F6's signature missing a reset: #278, which failed twice in a row
 
 A green week on `main` waits on them.
 
@@ -159,4 +167,6 @@ gh run list --workflow ci.yml --branch main --event push --limit 40 --json datab
 ```
 Then, in one PR:
 1. Remove the job's `continue-on-error: true`. The affected step keeps its own: it stays a warning for the reviewer.
-2. Add `streamlab` to the required checks (§5.2). A PR that doesn't touch the streaming path skips the job, and GitHub counts a skipped job as passed. So it holds only the PRs it runs on.
+2. Add `streamlab` to the required checks (§5.2).
+   - A PR that doesn't touch the streaming path skips the job, and GitHub counts a skipped job as passed. So it holds only the PRs it runs on.
+   - A skip needs `streaming-paths` to answer `false`. If `streaming-paths` fails, `streamlab` still runs, so a broken filter can't pass for a skip.
