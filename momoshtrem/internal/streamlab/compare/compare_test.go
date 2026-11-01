@@ -21,6 +21,10 @@ type fixture struct {
 	metrics map[string]report.Metric
 	checks  []report.Check
 	broken  report.RepStatus
+	// guards are the scenario's; mkv is what the host's MIME table says
+	// of .mkv ("" as in production's image).
+	guards []string
+	mkv    string
 }
 
 func newFixture(n int) *fixture {
@@ -56,10 +60,11 @@ func (f *fixture) check(id string, s report.Status, known string, reps ...string
 }
 
 func (f *fixture) report() *report.Report {
-	env := report.Env{Host: f.host, OS: "darwin", Arch: "arm64", CPU: "M1", NumCPU: 10, Race: f.race, Load: []float64{f.load * 10, 1, 1}}
+	env := report.Env{Host: f.host, OS: "darwin", Arch: "arm64", CPU: "M1", NumCPU: 10, Race: f.race, Load: []float64{f.load * 10, 1, 1},
+		MIME: map[string]string{".mkv": f.mkv}}
 	r := &report.Report{Schema: report.Schema, Env: env, Verdict: report.VerdictPass, Metrics: f.metrics, Checks: f.checks,
 		Tool:     report.Tool{Git: report.Git{Commit: "abc"}},
-		Scenario: report.Scenario{Name: f.name, Params: map[string]string{"seed": "1"}}}
+		Scenario: report.Scenario{Name: f.name, Guards: f.guards, Params: map[string]string{"seed": "1"}}}
 	for i := range f.n {
 		e := env
 		r.Reps = append(r.Reps, report.Rep{Rep: i + 1, Status: report.RepOK, Env: &e})
