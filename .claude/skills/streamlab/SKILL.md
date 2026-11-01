@@ -72,7 +72,7 @@ Verdicts, worst first: `fail` > `regression` > `inconclusive` > `improvement` > 
 
 - **`inconclusive` is the normal result for an unchanged tree.**
   - Lab timings are bimodal: a cold start connects at once or about a second later (#233). Five reps a side rarely settle a timing.
-  - Six unchanged-tree runs of the gate tier all came out inconclusive, with 13 to 18 of 22 scenarios passing, and never a regression.
+  - Seven unchanged-tree runs of the gate tier all came out inconclusive, with 12 to 18 of 22 scenarios passing, and never a regression. (The seventh first read FAIL, from a judging bug fixed in #279.)
   - Only large effects reach `regression`. 356e74d's old behaviour moved `activation_wait` from 33 ms to 3334 ms.
 - **`inconclusive` with p > 0.2 on every flagged metric means "no detectable change at 5 reps".** Write exactly that. It's not a pass, and it's not a regression.
   - This applies only when every inconclusive row is a metric whose note says "past the threshold but not significant" or "didn't hold up on fresh reps". p is the p column of `compare.md`.
@@ -95,8 +95,11 @@ Verdicts, worst first: `fail` > `regression` > `inconclusive` > `improvement` > 
   - A correctness check that fails in head fails the compare, whatever base did. The correctness checks are `integrity`, `http`, `race`, `watchdog` and `quiescence`.
   - A rep that hung or crashed fails it too.
   - Any other check fails when it fails on every head rep, or on significantly more reps than in base (Fisher's test).
-  - **The exception** is a check that failed only because an intermittent known issue fired over its rate: #195 on `watchdog` or `play-ok`, #225 on `quiescence`. That issue's firings are judged against base's. They're a `fail` when the issue fired on every head rep, or over its rate and significantly more often than base. Otherwise they're `inconclusive` ("over its known rate, but not significantly more than base (load?): add reps"). Skewed load never excuses a firing on a correctness check.
-- **A check that failed on 1 of 10 head reps and none of base's** is `inconclusive` ("a flake or a regression? add reps"). If it has #266's exact shape ("Known flakes" below), say so. Any other shape may be a regression: add reps, and treat a second firing as yours.
+  - **The exception** is a check that failed only because an intermittent known issue fired: #195 on `watchdog` or `play-ok`, #225 on `quiescence`. That issue's firings are judged against base's:
+    - `fail` when it fired on every head rep (unless it fired on every base rep too, outside a correctness check), or over its rate and significantly more often than base;
+    - `regression` when it stayed within its rate but fired significantly more often than base;
+    - `inconclusive` when it went over its rate but not significantly more than base ("over its known rate, but not significantly more than base (load?): add reps"), or more than base under skewed load. Skewed load never excuses a firing on a correctness check.
+- **A check that failed on 1 of 10 head reps and none of base's** is `inconclusive` ("a flake or a regression? add reps"). If it has the exact shape of a known flake ("Known flakes" below), say so and link its issue. Any other shape may be a regression: add reps, and treat a second firing as yours.
 - **Known issues.** `xfail → xpass` is an improvement ("known issue X appears fixed"). `pass → xfail` of a deterministic issue is a regression ("known issue X is back").
 - **Thresholds.** Both kinds need 5 reps a side and Mann-Whitney p < 0.05.
   - Timings count past max(15%, a floor): 100 ms for TTFB, 200 ms for time to playable, 1 stall, and so on.
@@ -111,7 +114,7 @@ Verdicts, worst first: `fail` > `regression` > `inconclusive` > `improvement` > 
 | 0 | pass or improvement | Paste it. For an xpass, see "Known flakes and known issues" below. |
 | 1 | fail or regression | Read the scenario's section in `compare.md`. A fail names the check, its reps and its evidence. A regression names the metric, Δ and both runs' p. Debug with the playbooks below. A confirmed regression has already replicated on fresh reps: don't rerun it away. |
 | 2 | inconclusive | If every inconclusive row is a metric with p > 0.2 (the rule above), report "no detectable change at 5 reps". If something flagged and didn't hold up, add reps (below). Report anything else as it is. |
-| 3 | tool or environment error | `ab`'s own errors are on stderr. "base predates streamlab hooks": the base is older than #173, so use a newer one. "isn't empty": give `--out` a new folder. A build error: your head doesn't build. A side that couldn't run a scenario shows in `compare.md`, not on stderr, as an "**Error:** head couldn't run it: …" line in the scenario's section. Open that rep's `child.log` (`head/<scenario>/rep-N/child.log` in the ab folder). Your change may stop the stack from starting (#268), so don't just retry. |
+| 3 | tool or environment error | `ab`'s own errors are on stderr. "base predates streamlab hooks": the base is older than #173, so use a newer one. "isn't empty": give `--out` a new folder. A build error: your head doesn't build. A side that couldn't run a scenario shows in `compare.md`, not on stderr, as an "**Error:** head couldn't run it: …" line in the scenario's section. Open that rep's `child.log` in the ab folder: `head/<scenario>/rep-N/child.log`, `head/<scenario>/warmup-1/child.log` for the warm-up, or `confirm/head/<scenario>/rep-N/child.log` for the confirmation. Your change may stop the stack from starting (#268), so don't just retry. |
 
 `run`, `gate` and `check` exit 0 on a pass (xfails included), 1 on a fail and 3 on a tool error. A 3 from `gate` or `run` on a scenario main runs can be #268: your change may stop the stack from starting. Read the rep's `child.log` (`.streamlab/runs/<id>/<scenario>/rep-N/child.log`), and don't just retry.
 
@@ -229,12 +232,27 @@ Its timings aren't faithful: diagnose with it, measure without it. The artifacts
 4. Did main have it too? Run `streamlab ab --race --base origin/main --scenario <name> --reps 2 --warmup 0` (about 5 min for two scenarios).
 5. No race is registered as known (`known.Races` is empty), so any race fails.
 
+## The CI job
+
+CI's `streamlab` job (`.github/workflows/ci.yml`; `docs/ops/CI.md` §7) runs on every PR that touches the streaming path and after every push to `main`. It runs `affected --strict`, `go test -race` over the streaming packages, and `gate --reps 1`.
+- **It's non-blocking** until #181 makes it required, and it doesn't replace your own runs. One rep a scenario holds the baseline's checks and exact metrics; it judges no timings and compares nothing with main. The PR's verdict still comes from your `ab`.
+- **A red `streamlab` check:** open the job summary (`gate.md`, and `affected`'s warning on a PR) and the `streamlab` artifact (the reports and `child.log`s). Match the failure to "Known flakes" below. A one-rep failure with a known flake's exact shape: link its issue in the PR. Anything else, or a `race`, `integrity` or `http` failure: reproduce it locally (`streamlab gate --scenario <name> --reps 3`) and treat it as yours.
+- **Don't re-run CI until it's green.** That's the "pick the run you like" the anti-gaming rule forbids.
+
 ## Known flakes and known issues
 
 - **#266 has no signature yet.**
   - What it looks like: `play-ok` fails on one rep with `<N> bytes, then: unexpected EOF (no known signature: silent 0s, piece K (piece incomplete, seeder connected, downloads on, piece not in the cache))`. Most often it's parallel-ranges' `infuse-ranges` request, at piece 182, after 16384 bytes.
   - In `ab` it reads as inconclusive. In `gate` or `run`, the scenario fails.
   - What to do: rerun that scenario alone (`streamlab gate --scenario <name> --reps 3`). If it happened once and has that shape, it's #266: add the evidence to #266 and say so in the PR. If it happens again, treat it as yours.
+- **Other one-rep failures with no signature yet.** They were seen on main, mostly on CI's runner. Each has its own issue with its exact evidence. Compare yours to it before you call it one of them:
+  - #275: slow-swarm, `swarm-shaped` fails when #195 stalls the rep from the start;
+  - #276: seeder-loss, a body breaks mid-stream at a *complete* piece;
+  - #277: hdrezka-stall, a dropped CDN body isn't reopened (`remote-watchdog`);
+  - #278: dual-reader-close, `close-keeps-windows` fails because F6's signature misses a reset while reader A's window moves;
+  - #209 (a comment there): dual-reader-open, `open-keeps-windows` fails with a window piece lowered to `none` outside reader B's ranges.
+
+  The same rule as #266 applies: once with the same shape, add your evidence to its issue and say so in the PR. Twice is yours.
 - **#195** marks each broken body with "(known stall (#195): …)". It's an xfail only when:
   - every broken body of the rep carries the signature, on at most 2 pieces;
   - it fires on at most 25% of the reps, and never all of them.
@@ -252,7 +270,6 @@ Its timings aren't faithful: diagnose with it, measure without it. The artifacts
   2. Delete the issue's entry from `internal/streamlab/known`. The scenario keeps its Guard: it now guards the fix.
   3. Run `streamlab baseline update --scenario <its scenarios> --reason "F12 fixed (#217): abort-lag xfail:F12 → pass"`.
   4. Run `streamlab gate`: it passes again. Explain all of this in the PR body. It's the usual exception to the anti-gaming rule, and it needs that reason.
-
 
 ## Production, read-only (placeholder for S19, #190)
 
