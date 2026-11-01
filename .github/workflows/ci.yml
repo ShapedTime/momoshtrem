@@ -155,3 +155,145 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+  # Whether the streaming path changed, for streamlab: a PR's merge commit
+  # against its first parent, the base it merges into. The paths are #181's
+  # list plus config, common and metrics, less cmd/momoshtrem/main.go: the
+  # lab doesn't link it (internal/streamlab/stack mirrors its wiring). main
+  # always runs streamlab, the backstop for what the filter leaves out, and
+  # its record there shows how often the job fails.
+  streaming-paths:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only HEAD^1 HEAD -- \
+            .github/workflows/ci.yml \
+            momoshtrem/go.mod momoshtrem/go.sum \
+            momoshtrem/cmd/streamlab/ \
+            momoshtrem/internal/vfs/ momoshtrem/internal/webdav/ momoshtrem/internal/streaming/ \
+            momoshtrem/internal/torrent/ momoshtrem/internal/sessions/ momoshtrem/internal/hdrezka/ \
+            momoshtrem/internal/service/hdrezka_source.go \
+            momoshtrem/internal/streamlab/ momoshtrem/internal/streamtrace/ \
+            momoshtrem/internal/config/ momoshtrem/internal/common/ momoshtrem/internal/metrics/)
+          if [ -n "$files" ]; then
+            printf 'The streaming path changed:\n%s\n' "$files"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No streaming path changed: streamlab skips"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The streaming path's safety net (docs/streamlab/PLAN.md, S10): the lab's
+  # and the streaming packages' tests under -race, then the gate tier held to
+  # testdata/baseline.json (counts and correctness, never timings: D5).
+  # Non-blocking until it has been green on main for a week (docs/ops/CI.md §7)
+  streamlab:
+    needs: streaming-paths
+    # Skips only on an explicit false: if streaming-paths fails, streamlab
+    # runs, since a skipped required check would count as passed
+    if: ${{ !cancelled() && needs.streaming-paths.outputs.changed != 'false' }}
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    # ~22 min: the tests 2, the gate 18 (22 scenarios, a warm-up and a rep
+    # each). The rest is room for confirmation reps and hard timeouts
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash # -eo pipefail, for tee
+        working-directory: momoshtrem
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Every branch's history: affected needs the PR's base and the
+          # commits the scenarios guard
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: momoshtrem/go.mod
+          cache-dependency-path: momoshtrem/go.sum
+      - name: Build streamlab
+        run: |
+          mkdir -p "$RUNNER_TEMP/streamlab"
+          go build -tags disable_libutp -o "$RUNNER_TEMP/streamlab-bin" ./cmd/streamlab
+      # The anti-gaming rule (PLAN §6 affected, §11): a diff that changes the
+      # streaming path and the lab together gets a warning, for a reviewer and
+      # a written reason. It runs first, on the checkout as it came (affected
+      # diffs the working tree), and never fails the job: a fix that retires a
+      # known issue changes the registry and the baseline with the code. A
+      # warning is an annotation and exit 0; only a tool error fails the step.
+      # affected and this workflow come from the PR itself: a prompt, not a guard
+      - name: streamlab affected --strict
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          out="$RUNNER_TEMP/streamlab"
+          set +e
+          "$RUNNER_TEMP/streamlab-bin" affected --strict --base "$BASE" > "$out/affected.txt" 2> "$out/affected-warnings.txt"
+          code=$?
+          set -e
+          # The scenario list stays out of the log: setup-go's problem matcher
+          # reads its "<file>.go: <why>" lines as errors. The summary has it
+          head -n 1 "$out/affected.txt"
+          echo "The scenarios and commands: the job summary, or affected.txt in the streamlab artifact"
+          {
+            echo "### streamlab affected, against $BASE"
+            case "$code" in
+              0) echo "No warning." ;;
+              1) echo "A reviewer checks the lab change doesn't loosen what would catch the streaming change, and the PR says why they land together:"
+                 sed -n 's/^WARNING: /- /p' "$out/affected-warnings.txt" ;;
+              *) echo "affected couldn't run (exit $code):"
+                 sed 's/^/    /' "$out/affected-warnings.txt" ;;
+            esac
+            printf '\n<details><summary>Scenarios and commands</summary>\n\n```\n'
+            cat "$out/affected.txt"
+            printf '```\n</details>\n\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          case "$code" in
+            0) ;;
+            1) sed -n 's/^WARNING: /::warning title=streamlab affected::/p' "$out/affected-warnings.txt" ;;
+            *) cat "$out/affected-warnings.txt"
+               exit "$code" ;;
+          esac
+      # -race needs cgo; disable_libutp keeps it on the pure-Go uTP production
+      # runs (PLAN D3). -count=1: a race is caught only by running the tests
+      - name: go test -race
+        run: |
+          go test -race -tags disable_libutp -count=1 -timeout 15m \
+            ./internal/streamlab/... ./cmd/streamlab/... ./internal/vfs/... \
+            ./internal/streaming/... ./internal/torrent/... ./internal/sessions/... \
+            ./internal/streamtrace/... ./internal/hdrezka/... \
+            2>&1 | tee "$RUNNER_TEMP/streamlab/go-test-race.txt"
+      # Runs even when the tests failed
+      - name: streamlab gate
+        if: ${{ !cancelled() }}
+        run: '"$RUNNER_TEMP/streamlab-bin" gate --reps 1 --out "$RUNNER_TEMP/streamlab/gate"'
+      - name: Gate summary
+        if: ${{ !cancelled() }}
+        run: cat "$RUNNER_TEMP/streamlab/gate/gate.md" >> "$GITHUB_STEP_SUMMARY" || true
+      # On failure and timeout too: the reports, child logs and goroutine dumps
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: streamlab
+          path: ${{ runner.temp }}/streamlab/
+          retention-days: 14
+          overwrite: true
