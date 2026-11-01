@@ -45,14 +45,14 @@ Server setup, CI/CD and backups are a separate track from v2: issues labelled `o
 
 The streaming path (WebDAV → VFS → anacrolix, and HDRezka remote streams: `internal/{webdav,vfs,streaming,torrent,sessions,hdrezka}`) is fragile, and it was tuned by hand against Infuse. It has its own track: issues labelled `streaming`, epic #171. Read `docs/streamlab/PLAN.md` before any streaming work:
 - decisions (§2)
-- suspected live bugs F1–F12 (§3)
+- suspected live bugs F1–F13 (§3)
 - production hooks (§4)
 - the lab (§5)
 - verdict rules (§6)
 - streamtrace's no-behaviour-change rules (§7)
 - read-only production (§8)
 
-Until streamlab's gate exists, keep changes to this path minimal, and test them on the device.
+Before you change this path, and whenever someone reports buffering, a slow start or seek, or a stuck read, follow the `streamlab` skill (`.claude/skills/streamlab/SKILL.md`). It runs the lab (`affected` → `gate` → `ab` → `check`) and says how to read the verdicts. Every command and catalog is in `docs/streamlab/README.md`. The lab doesn't replace the device: keep changes to this path minimal, and test them on the device.
 
 ## Commands
 
@@ -80,6 +80,14 @@ docker compose run --rm momoshtrem recommend-run [-member <id>] [-dry-run]   # o
 # Episode-mapping eval on the corpus's golden torrents: accuracy, cost and latency per mode.
 # The AI modes (auto, ai_always) call Claude and cost cents; -modes rules and -dry-run (request sizes only) are free
 cd momoshtrem && go run ./cmd/classifier-eval -env-file ../.env [-modes rules,auto,ai_always] [-cases id,…] [-dry-run] [-v]
+# streamlab, the streaming path's lab (the streamlab skill says when; docs/streamlab/README.md has every flag).
+# One heavy run at a time; long ones on power under caffeinate -i. Use --base origin/main after git fetch
+cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab list                          # scenarios and what each guards (explain <name> for one)
+cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab affected --base origin/main --strict   # the scenarios a diff touches, and the ab/check lines to run
+cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab gate                          # the gate tier held to testdata/baseline.json (~20 min)
+cd momoshtrem && caffeinate -i go run -tags disable_libutp ./cmd/streamlab ab --base origin/main --reps 5 --scenario a,b   # A/B against main, confirmed on fresh reps (5–11 min a scenario)
+cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab check                         # -race build, stress tier, go test -race
+cd momoshtrem && go run -tags disable_libutp ./cmd/streamlab run --scenario steady-play --reps 3 [--diagnose]   # one scenario's reports, to debug
 
 # Deploy (from the Mac): the newest green main commit, or a given one, to a VM over SSH
 ops/deploy/deploy.sh -n momoshtrem-v2            # dry run: print the plan, change nothing
