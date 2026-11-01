@@ -108,7 +108,7 @@ It takes **~22 minutes** on the 4-vCPU runner (#269): the tests 2, the gate 18 f
 
 ### The gate on a CI runner
 The baseline was recorded on macOS. The gate tells hosts apart only by their MIME table (F1): when `.mkv` resolves differently from the baseline's host, it only notes F1's expectations.
-- **ubuntu-24.04** resolves `.mkv` and `.mp4`, as macOS does. So every expectation holds there, F1's included (#269: PASS, 22 of 22, no notes).
+- **ubuntu-24.04** resolves `.mkv` and `.mp4`, as macOS does. So every expectation holds there, F1's included, and the gate makes no host notes (#269).
 - **The other differences** are the host, the CPU and Linux. The baseline holds no timings, so they don't matter.
 - **Production's `alpine:3`** has no MIME table. The gate fails there on F1's knock-on effects that the lab doesn't know yet (#271). A job for it waits on that (#272).
 
@@ -139,6 +139,13 @@ The job has `continue-on-error: true`, since existing races may surface.
 - A failure shows as a red `streamlab` check, but the workflow still passes.
 - `publish` waits only for `go` and `web`.
 - `streamlab` isn't a required check.
+
+**It's flaky today.** In #269, 2 of 5 gate runs failed on flakes that no known issue explains yet:
+- `play-ok` breaks: #266 and #276
+- `swarm-shaped` after a #195 stall: #275
+- hdrezka-stall's `remote-watchdog`: #277
+
+A green week on `main` waits on them.
 
 ### Making it required
 Make it required once `streamlab` has been green on `main` for a week. Check each `main` run's `streamlab` job, since a run passes whatever that job did:
