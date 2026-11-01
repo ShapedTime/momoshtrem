@@ -140,10 +140,11 @@ The job has `continue-on-error: true`, since existing races may surface.
 - `publish` waits only for `go` and `web`.
 - `streamlab` isn't a required check.
 
-**It's flaky today.** In #269, 2 of 5 gate runs failed on flakes that no known issue explains yet:
+**It's flaky today.** Of #269's first six gate runs, three failed on flakes that no known issue explains yet:
 - `play-ok` breaks: #266 and #276
 - `swarm-shaped` after a #195 stall: #275
 - hdrezka-stall's `remote-watchdog`: #277
+- F6's signature missing a reset: #278
 
 A green week on `main` waits on them.
 
