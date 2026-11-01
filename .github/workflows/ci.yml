@@ -156,10 +156,10 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
 
-  # Whether the streaming path changed, for the streamlab jobs: a PR's merge
-  # commit against its first parent, the base it merges into. main always
-  # runs them, so the job's record on main shows how often it fails.
-  # The paths are the lab's (streamlab affected's Streaming), less the library.
+  # Whether the streaming path changed, for streamlab: a PR's merge commit
+  # against its first parent, the base it merges into. main always runs it,
+  # so its record on main shows how often it fails. The paths are the lab's
+  # (streamlab affected's Streaming), less the library.
   streaming-paths:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -193,20 +193,22 @@ jobs:
             printf 'The streaming path changed:\n%s\n' "$files"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No streaming path changed: the streamlab jobs skip"
+            echo "No streaming path changed: streamlab skips"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
   # The streaming path's safety net (docs/streamlab/PLAN.md, S10): the lab's
   # and the streaming packages' tests under -race, then the gate tier held to
   # testdata/baseline.json (counts and correctness, never timings: D5).
-  # Non-blocking until it has been green on main for a week (docs/ops/CI.md §5)
+  # Non-blocking until it has been green on main for a week (docs/ops/CI.md §7)
   streamlab:
     needs: streaming-paths
     if: needs.streaming-paths.outputs.changed == 'true'
     continue-on-error: true
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # ~22 min: the tests 2, the gate 18 (22 scenarios, a warm-up and a rep
+    # each). The rest is room for confirmation reps and hard timeouts
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash # -eo pipefail, for tee
@@ -215,15 +217,53 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Every branch's history: affected needs the PR's base and the
+          # commits the scenarios guard
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: momoshtrem/go.mod
           cache-dependency-path: momoshtrem/go.sum
+      - name: Build streamlab
+        run: |
+          mkdir -p "$RUNNER_TEMP/streamlab"
+          go build -tags disable_libutp -o "$RUNNER_TEMP/streamlab-bin" ./cmd/streamlab
+      # The anti-gaming rule (PLAN §6 affected, §11): a diff that changes the
+      # streaming path and the lab together gets a warning, for a reviewer and
+      # a written reason. It runs first, on the checkout as it came (affected
+      # diffs the working tree), and never fails the job: a fix that retires a
+      # known issue changes the registry and the baseline with the code
+      - name: streamlab affected --strict
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          out="$RUNNER_TEMP/streamlab"
+          set +e
+          "$RUNNER_TEMP/streamlab-bin" affected --strict --base "$BASE" > "$out/affected.txt" 2> "$out/affected-warnings.txt"
+          code=$?
+          set -e
+          cat "$out/affected.txt" "$out/affected-warnings.txt"
+          {
+            echo "### streamlab affected, against $BASE"
+            case "$code" in
+              0) echo "No warning." ;;
+              1) echo "A reviewer checks the lab change doesn't loosen what would catch the streaming change, and the PR says why they land together:"
+                 sed -n 's/^WARNING: /- /p' "$out/affected-warnings.txt" ;;
+              *) echo "affected couldn't run (exit $code):"
+                 sed 's/^/    /' "$out/affected-warnings.txt" ;;
+            esac
+            printf '\n<details><summary>Scenarios and commands</summary>\n\n```\n'
+            cat "$out/affected.txt"
+            printf '```\n</details>\n\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep '^WARNING: ' "$out/affected-warnings.txt" | sed 's/^WARNING: /::warning title=streamlab affected::/' || true
+          exit "$code"
       # -race needs cgo; disable_libutp keeps it on the pure-Go uTP production
       # runs (PLAN D3). -count=1: a race is caught only by running the tests
       - name: go test -race
         run: |
-          mkdir -p "$RUNNER_TEMP/streamlab"
           go test -race -tags disable_libutp -count=1 -timeout 15m \
             ./internal/streamlab/... ./cmd/streamlab/... ./internal/vfs/... \
             ./internal/streaming/... ./internal/torrent/... ./internal/sessions/... \
@@ -231,58 +271,16 @@ jobs:
       # Runs even when the tests failed
       - name: streamlab gate
         if: ${{ !cancelled() }}
-        run: |
-          go build -tags disable_libutp -o "$RUNNER_TEMP/streamlab-bin" ./cmd/streamlab
-          "$RUNNER_TEMP/streamlab-bin" gate --reps 1 --out "$RUNNER_TEMP/streamlab/gate"
-      - if: ${{ !cancelled() }}
+        run: '"$RUNNER_TEMP/streamlab-bin" gate --reps 1 --out "$RUNNER_TEMP/streamlab/gate"'
+      - name: Gate summary
+        if: ${{ !cancelled() }}
         run: cat "$RUNNER_TEMP/streamlab/gate/gate.md" >> "$GITHUB_STEP_SUMMARY" || true
       # On failure and timeout too: the reports, child logs and goroutine dumps
-      - if: always()
+      - name: Upload the reports
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: streamlab
-          path: ${{ runner.temp }}/streamlab/
-          retention-days: 14
-          overwrite: true
-
-  # The gate as production runs: a CGO_ENABLED=0 build, as momoshtrem/Dockerfile
-  # builds, on alpine:3, which has no MIME table. F1 shows there as production
-  # sees it; the baseline's F1 expectations (recorded on macOS) are only noted
-  streamlab-alpine:
-    needs: streaming-paths
-    if: needs.streaming-paths.outputs.changed == 'true'
-    name: streamlab (alpine)
-    continue-on-error: true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: momoshtrem
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: momoshtrem/go.mod
-          cache-dependency-path: momoshtrem/go.sum
-      - run: CGO_ENABLED=0 GOOS=linux go build -tags disable_libutp -o "$RUNNER_TEMP/streamlab-bin" ./cmd/streamlab
-      # As the runner's user, so the reports aren't root's; HOME holds the
-      # lab's metainfo cache
-      - name: streamlab gate in alpine:3
-        run: |
-          mkdir -p "$RUNNER_TEMP/streamlab"
-          docker run --rm --init --user "$(id -u):$(id -g)" -e HOME=/tmp \
-            -v "$GITHUB_WORKSPACE:/src" -w /src/momoshtrem \
-            -v "$RUNNER_TEMP/streamlab-bin:/usr/local/bin/streamlab:ro" \
-            -v "$RUNNER_TEMP/streamlab:/out" \
-            alpine:3 streamlab gate --reps 1 --out /out/gate
-      - if: ${{ !cancelled() }}
-        run: cat "$RUNNER_TEMP/streamlab/gate/gate.md" >> "$GITHUB_STEP_SUMMARY" || true
-      - if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: streamlab-alpine
           path: ${{ runner.temp }}/streamlab/
           retention-days: 14
           overwrite: true
