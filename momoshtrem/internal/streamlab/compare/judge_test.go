@@ -119,9 +119,11 @@ func TestCorrectnessNA(t *testing.T) {
 	}
 }
 
-// A check the runner failed with no known issue counts every failing
-// rep, whatever signature it carries: one rep of five is a flake or a
-// regression (inconclusive), as a plain fail is.
+// A failing rep counts unless its own signature explains the check (a
+// signature outside the scenario's guards doesn't): one rep of five is a
+// flake or a regression (inconclusive), as a plain fail is. #195's rep
+// beside a plain fail is judgeIssue's to count, not judgeFlake's too
+// (#279).
 func TestUnexplainedReps(t *testing.T) {
 	base := newFixture(5).check("play-ok", report.Pass, "", firing("", 0, 5)...)
 	for name, tc := range map[string]struct {
@@ -130,7 +132,7 @@ func TestUnexplainedReps(t *testing.T) {
 	}{
 		"no signature":           {[]string{"fail", "pass", "pass", "pass", "pass"}, "1 of 5 head reps"},
 		"F11 outside its guards": {[]string{"fail:F11", "pass", "pass", "pass", "pass"}, "1 of 5 head reps"},
-		"#195 beside a fail":     {[]string{"fail:#195", "fail", "pass", "pass", "pass"}, "2 of 5 head reps"},
+		"#195 beside a fail":     {[]string{"fail:#195", "fail", "pass", "pass", "pass"}, "1 of 5 head reps"},
 	} {
 		r := judge(t, base, newFixture(5).check("play-ok", report.Fail, "", tc.reps...), Options{})
 		if r.Verdict != Inconclusive || !strings.Contains(r.Why, tc.why) {
@@ -153,6 +155,97 @@ func TestUnexplainedReps(t *testing.T) {
 	broken := newFixture(5).check("play-ok", report.Fail, "", "fail", "fail", "fail", "fail", "fail")
 	if r := judge(t, broken, base, Options{}); r.Verdict != Improvement {
 		t.Errorf("base failed on every rep: %s: %s", r.Verdict, r.Why)
+	}
+}
+
+// Each rep is judged by its own signature, whatever its sibling reps did
+// (#279). One unsigned rep of a deterministic xfail check fails the
+// runner's verdict on the whole check (Known ""), but the reps F13 signed
+// stay F13's: an unchanged tree's ab once read 4 F13 reps and one unsigned
+// as 5 of 5 head reps unexplained, a fail.
+func TestOwnSignature(t *testing.T) {
+	open := func(s report.Status, known string, reps ...string) *fixture {
+		f := newFixture(len(reps))
+		f.name, f.guards = "dual-reader-open", []string{"F13"}
+		return f.check("open-keeps-windows", s, known, reps...)
+	}
+	f13 := func(reps ...string) *fixture { return open(report.XFail, "F13", reps...) }
+	all := f13("fail:F13", "fail:F13", "fail:F13", "fail:F13", "fail:F13")
+	someNA := f13("fail:F13", "fail:F13", "fail:F13", "n/a", "fail:F13")
+	oneUnsigned := open(report.Fail, "", "fail:F13", "fail:F13", "fail:F13", "fail:F13", "fail")
+	plain := open(report.Fail, "", "fail", "fail", "fail", "fail", "fail")
+	counts := func(r *Result, headFailed, headReps, baseFailed, baseReps int) bool {
+		ch := check(r, "open-keeps-windows")
+		return ch.HeadFailed == headFailed && ch.HeadReps == headReps && ch.BaseFailed == baseFailed && ch.BaseReps == baseReps
+	}
+
+	// One unsigned head rep against none of base's: a flake or a
+	// regression, whatever base's n/a.
+	for name, tc := range map[string]struct {
+		base     *fixture
+		baseReps int
+		why      string
+	}{
+		"base F13 on every rep": {all, 5, "1 of 5 head reps and 0 of 5 base (Fisher p 0.500)"},
+		"base F13 and an n/a":   {someNA, 4, "1 of 5 head reps and 0 of 4 base (Fisher p 0.556)"},
+	} {
+		r := judge(t, tc.base, oneUnsigned, Options{})
+		if r.Verdict != Inconclusive || !counts(r, 1, 5, 0, tc.baseReps) || !strings.Contains(r.Why, tc.why) {
+			t.Errorf("%s: %s %+v: %s", name, r.Verdict, check(r, "open-keeps-windows"), r.Why)
+		}
+	}
+	// The ab that showed it: the screen xfail on both sides, the
+	// confirmation's head with one unsigned rep.
+	screen := judge(t, all, f13("fail:F13", "fail:F13", "fail:F13", "fail:F13", "n/a"), Options{})
+	if screen.Verdict != Pass {
+		t.Fatalf("the screen: %s: %s", screen.Verdict, screen.Why)
+	}
+	r := Confirm(screen, judge(t, someNA, oneUnsigned, Options{}), Options{})
+	if r.Verdict != Inconclusive || !strings.Contains(r.Why, "confirmation: check open-keeps-windows: xfail (F13) → fail: "+
+		"fails with no known signature on 1 of 5 head reps and 0 of 4 base (Fisher p 0.556)") {
+		t.Errorf("the ab: %s: %s", r.Verdict, r.Why)
+	}
+
+	// The mirror: base's one unsigned rep is 1 of 5, not 5 of 5, so a head
+	// that fails every rep unsigned isn't "both sides about as often".
+	if r := judge(t, oneUnsigned, plain, Options{}); r.Verdict != Fail || !counts(r, 5, 5, 1, 5) ||
+		!strings.Contains(r.Why, "5 of 5 head reps and 1 of 5 base (Fisher p 0.024)") {
+		t.Errorf("the mirror: %s %+v: %s", r.Verdict, check(r, "open-keeps-windows"), r.Why)
+	}
+	// Unsigned on every head rep against an xfail base: a fail, the
+	// every-rep rule.
+	if r := judge(t, all, plain, Options{}); r.Verdict != Fail || !counts(r, 5, 5, 0, 5) {
+		t.Errorf("unsigned on every head rep: %s %+v: %s", r.Verdict, check(r, "open-keeps-windows"), r.Why)
+	}
+
+	// A signature the registry doesn't tie to the check explains nothing,
+	// in a scenario that guards it too: F11 explains play-ok, not
+	// open-keeps-windows.
+	for _, sig := range []string{"F11", "F13+F11", "F99"} {
+		head := open(report.Fail, "", "fail:F13", "fail:F13", "fail:F13", "fail:F13", "fail:"+sig)
+		head.guards = append(head.guards, "F11")
+		if r := judge(t, all, head, Options{}); r.Verdict != Inconclusive || !counts(r, 1, 5, 0, 5) {
+			t.Errorf("one rep fail:%s: %s %+v", sig, r.Verdict, check(r, "open-keeps-windows"))
+		}
+	}
+	f11 := open(report.Fail, "", firing("F11", 5, 5)...)
+	f11.guards = append(f11.guards, "F11")
+	if r := judge(t, all, f11, Options{}); r.Verdict != Fail || !counts(r, 5, 5, 0, 5) {
+		t.Errorf("fail:F11 on every rep: %s %+v", r.Verdict, check(r, "open-keeps-windows"))
+	}
+
+	// Nor does one that can't happen on the host: F1 where the MIME table
+	// resolves .mkv.
+	for mkv, want := range map[string]int{"": 1, "video/x-matroska": 5} {
+		sniff := func(s report.Status, reps ...string) *fixture {
+			f := newFixture(5)
+			f.guards, f.mkv = []string{"F1"}, mkv
+			return f.check("no-sniff-reads", s, "", reps...)
+		}
+		r := judge(t, sniff(report.Pass, firing("", 0, 5)...), sniff(report.Fail, "fail:F1", "fail:F1", "fail:F1", "fail:F1", "fail"), Options{})
+		if ch := check(r, "no-sniff-reads"); ch.HeadFailed != want {
+			t.Errorf(".mkv %q: %d unexplained head reps, want %d: %+v", mkv, ch.HeadFailed, want, ch)
+		}
 	}
 }
 

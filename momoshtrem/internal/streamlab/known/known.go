@@ -320,6 +320,31 @@ func ForCheck(check string) []Issue {
 	return out
 }
 
+// Explains reports whether a failure of check that carries the signature
+// sig (an Outcome's Known) is explained by it on its own, whatever the
+// other repetitions did: every issue it names explains check, can happen
+// in env, and, when deterministic, is one the scenario guards. Else why
+// says which issue can't, and why. Judge holds each failing repetition to
+// it; an intermittent issue's rate is counted over the repetitions.
+func Explains(check, sig string, env Env) (ok bool, why string) {
+	if sig == "" {
+		return false, "no known issue's signature"
+	}
+	for _, id := range IDs(sig) {
+		is, found := Lookup(id)
+		if !found || !slices.Contains(is.Checks, check) {
+			return false, fmt.Sprintf("%s doesn't explain %s", id, check)
+		}
+		if applies, reason := is.Applies(env); !applies {
+			return false, fmt.Sprintf("%s can't explain it here (%s)", id, reason)
+		}
+		if !is.Intermittent() && !slices.Contains(env.Guards, is.ID) {
+			return false, id + " explains failures only in the scenarios that guard it"
+		}
+	}
+	return true, ""
+}
+
 // Outcome is a check's result in one repetition: pass, fail or n/a, with
 // the known issues whose signatures a failure carries: one ID, or several
 // joined by Sep when the repetition's failures carry different ones, each
@@ -367,18 +392,10 @@ func Judge(check string, reps []Outcome, env Env) Verdict {
 		if r.Known == "" {
 			return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s", i+1, r.Evidence)}
 		}
+		if ok, why := Explains(check, r.Known, env); !ok {
+			return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s: %s", i+1, why, r.Evidence)}
+		}
 		for _, id := range IDs(r.Known) {
-			is, ok := Lookup(id)
-			if !ok || !slices.Contains(is.Checks, check) {
-				return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s doesn't explain %s: %s", i+1, id, check, r.Evidence)}
-			}
-			if applies, why := is.Applies(env); !applies {
-				return Verdict{Status: report.Fail, Note: fmt.Sprintf("rep %d: %s can't explain it here (%s): %s", i+1, id, why, r.Evidence)}
-			}
-			if !is.Intermittent() && !slices.Contains(env.Guards, is.ID) {
-				return Verdict{Status: report.Fail, Note: fmt.Sprintf(
-					"rep %d: %s explains failures only in the scenarios that guard it: %s", i+1, id, r.Evidence)}
-			}
 			if fired[id] == 0 {
 				order = append(order, id)
 			}

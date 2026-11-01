@@ -235,44 +235,48 @@ type Check struct {
 	Verdict   Verdict       `json:"verdict"`
 	Note      string        `json:"note,omitempty"`
 	// HeadFailed of HeadReps, and BaseFailed of BaseReps, are the reps
-	// whose failure carries no known signature (Check.Reps "fail"), of
-	// those that ran it.
+	// whose failure no known signature explains (unexplained), of those
+	// that ran it.
 	HeadFailed int `json:"head_failed,omitempty"`
 	HeadReps   int `json:"head_reps,omitempty"`
 	BaseFailed int `json:"base_failed,omitempty"`
 	BaseReps   int `json:"base_reps,omitempty"`
 }
 
-// unexplained counts the reps whose failure the runner's verdict on the
-// check doesn't explain, of those that ran it: a plain "fail", or
-// "fail:<issues>" when the check's Known doesn't name every one of them.
-// A check the runner failed with no known issue (Known "") counts every
-// failing rep, whatever signature it carries: the runner found it doesn't
-// explain the check there (a deterministic issue outside the scenario's
-// guards, one that doesn't apply on this host). An intermittent issue's
+// unexplained counts the reps whose failure no known issue explains, of
+// those that ran it: a plain "fail", or "fail:<issues>" when its own
+// signature doesn't explain the check, as the runner holds each rep
+// (known.Explains): an issue the registry doesn't tie to the check, one
+// that can't happen on this host, or a deterministic one outside the
+// scenario's guards ("fail:F11" outside F11's guards counts). A rep is
+// judged by its own signature, whatever its sibling reps did: one
+// unsigned rep fails the runner's verdict on the whole check (Known ""),
+// but the reps F13 signed stay F13's (#279). An intermittent issue's
 // firings are judgeIssue's to count.
-func unexplained(c report.Check) (failed, ran int) {
-	named := known.IDs(c.Known)
+func unexplained(c report.Check, env known.Env) (failed, ran int) {
 	for _, s := range c.Reps {
 		if s == string(report.NA) {
 			continue
 		}
 		ran++
-		ids, signed := strings.CutPrefix(s, string(report.Fail)+":")
-		if s == string(report.Fail) || (signed && !allNamed(known.IDs(ids), named)) {
+		if s == string(report.Fail) {
 			failed++
+			continue
+		}
+		if ids, signed := strings.CutPrefix(s, string(report.Fail)+":"); signed {
+			if ok, _ := known.Explains(c.ID, ids, env); !ok {
+				failed++
+			}
 		}
 	}
 	return failed, ran
 }
 
-func allNamed(ids, named []string) bool {
-	for _, id := range ids {
-		if !slices.Contains(named, id) {
-			return false
-		}
-	}
-	return len(ids) > 0
+// knownEnv is what the runner judged r's checks in (known.Judge): its
+// scenario's guards and its host's MIME table. An intermittent issue's
+// rate isn't unexplained's to count, so it leaves the run's tally out.
+func knownEnv(r *report.Report) known.Env {
+	return known.Env{MIMEResolvesMKV: r.Env.MIME[".mkv"] != "", Guards: r.Scenario.Guards}
 }
 
 // MetricStatus is what compare made of a metric.
@@ -563,10 +567,10 @@ func compareScenario(base, head *report.Report, c conditions) Scenario {
 	for _, hc := range head.Checks {
 		bc, inBase := findCheck(base.Checks, hc.ID)
 		ch := Check{ID: hc.ID, Head: hc.Status, HeadKnown: hc.Known}
-		ch.HeadFailed, ch.HeadReps = unexplained(hc)
+		ch.HeadFailed, ch.HeadReps = unexplained(hc, knownEnv(head))
 		if inBase {
 			ch.Base, ch.BaseKnown = bc.Status, bc.Known
-			ch.BaseFailed, ch.BaseReps = unexplained(bc)
+			ch.BaseFailed, ch.BaseReps = unexplained(bc, knownEnv(base))
 		}
 		ch.Verdict, ch.Note = judgeCheck(ch, inBase, headIssues, baseIssues)
 		sc.Checks = append(sc.Checks, ch)
